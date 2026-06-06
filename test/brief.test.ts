@@ -37,9 +37,20 @@ describe("chamber-brief lens (Phase 0)", () => {
     expect(typeof node?.prompt).toBe("string");
     expect((node?.prompt as string).length).toBeGreaterThan(0);
     expect(node?.bash).toBeUndefined();
-    // structured-output trigger + fail-closed node guard
-    expect(node?.output_format).toBeDefined();
-    expect(node?.output_schema).toEqual({ type: "object", required: ["view", "sections"] });
+    // structured-output trigger + fail-closed node guard. The guard validates
+    // top-level field *types* (not just key presence) so a malformed agent reply
+    // — e.g. `sections` as a string — fails the run instead of being silently
+    // dropped by the canvas validate on publish.
+    expect(node?.output_format).toEqual({
+      type: "object",
+      required: ["view", "sections"],
+      properties: {
+        view: { type: "string" },
+        title: { type: "string" },
+        sections: { type: "array" },
+      },
+    });
+    expect(node?.output_schema).toEqual(node?.output_format);
   });
 
   test("validate accepts a board payload and returns the parsed view", () => {

@@ -15,12 +15,16 @@ function expectView(key: string, kind: CanvasView["view"]) {
   };
 }
 
-// Appended to the prompt as the structured-output directive (the prompt handler
-// adds "respond with ONLY single-line JSON matching this schema"), which also
-// flips the node to a structured producer so the bound-key publish bridge sees a
-// value, not raw text. The authoritative contract is the prompt body + the
+// The brief's JSON-Schema shape, used twice. As `output_format` it's the
+// structured-output directive appended to the prompt (and flips the node to a
+// structured producer so the bound-key publish bridge sees a value, not text).
+// As `output_schema` it's the executor's fail-closed node guard: listing
+// `properties` (not just `required`) makes a top-level type mismatch — e.g.
+// `sections` returned as a string — fail the run loudly, instead of passing a
+// keys-only check and then being silently dropped by the canvas `validate` on
+// publish (a stale panel with no refresh error). The deep board check stays the
 // canvas `validate` on the bound key below.
-const BRIEF_OUTPUT_FORMAT = {
+const BRIEF_SHAPE = {
   type: "object",
   required: ["view", "sections"],
   properties: {
@@ -99,8 +103,8 @@ const rib: Rib = {
           {
             id: "compose",
             prompt: BRIEF_PROMPT,
-            output_format: BRIEF_OUTPUT_FORMAT,
-            output_schema: { type: "object", required: ["view", "sections"] },
+            output_format: BRIEF_SHAPE,
+            output_schema: BRIEF_SHAPE,
             allowed_tools: [],
           },
         ],
