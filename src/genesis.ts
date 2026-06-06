@@ -8,8 +8,6 @@ export interface GenesisBrief {
   name: string;
   role: string;
   voice: string;
-  model?: string;
-  tools?: readonly string[];
 }
 
 export interface GenesisDocs {
@@ -27,13 +25,26 @@ const TAGLINE_MAX = 120;
 const SAFE_SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
 export function slugify(name: string): string {
-  return name
+  const ascii = name
+    // NFKD splits an accented letter into base + combining mark; the base stays
+    // ASCII ("Café" -> "cafe") and the mark is dropped by the [^a-z0-9] filter
+    // below (instead of the whole letter, which would mangle it to "caf").
+    .normalize("NFKD")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+/, "")
     .slice(0, SLUG_MAX)
     .replace(/-+$/, "");
+  // A name in a non-Latin script (CJK, Arabic…) reduces to empty; fall back to a
+  // deterministic slug so it can still be created rather than rejected outright.
+  return ascii || `mind-${stableHash(name)}`;
+}
+
+function stableHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(36);
 }
 
 // Guard against path traversal: a slug becomes a directory name under the data
@@ -87,15 +98,30 @@ export function parseGenesisOutput(raw: string): GenesisDocs {
   return { soul: soul.trim(), tagline: truncate(tagline.trim(), TAGLINE_MAX) };
 }
 
-// Pull the first balanced {...} so a stray code fence or leading preamble from
-// the CLI wrapper doesn't break JSON.parse.
+// Scan from the first "{" to its matching "}", ignoring braces inside strings,
+// so a trailing code fence, a sign-off ("Hope that helps! {wink}"), or braces in
+// the authored Markdown don't over-grab (lastIndexOf would) and break JSON.parse.
 function extractJsonObject(raw: string): string {
   const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error("genesis output contains no JSON object");
+  if (start === -1) throw new Error("genesis output contains no JSON object");
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') {
+      inStr = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}" && --depth === 0) {
+      return raw.slice(start, i + 1);
+    }
   }
-  return raw.slice(start, end + 1);
+  throw new Error("genesis output contains no balanced JSON object");
 }
 
 function truncate(text: string, max: number): string {

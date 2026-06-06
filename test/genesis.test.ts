@@ -10,8 +10,18 @@ describe("slugify", () => {
     expect(slugify("  Ada, Lovelace!! ")).toBe("ada-lovelace");
   });
 
-  test("a name with no letters or digits yields an empty slug", () => {
-    expect(slugify("!!!")).toBe("");
+  test("preserves accented letters instead of dropping them", () => {
+    expect(slugify("Café")).toBe("cafe");
+  });
+
+  test("falls back to a deterministic safe slug for a non-sluggable name", () => {
+    // all-punctuation and non-Latin scripts reduce to empty -> deterministic fallback
+    for (const name of ["!!!", "研究员", "مرحبا"]) {
+      const slug = slugify(name);
+      expect(slug).toMatch(/^mind-[a-z0-9]+$/);
+      expect(() => assertSafeSlug(slug)).not.toThrow();
+    }
+    expect(slugify("研究员")).toBe(slugify("研究员")); // deterministic
   });
 
   test("the produced slug is always path-safe", () => {
@@ -53,6 +63,13 @@ describe("parseGenesisOutput", () => {
     const docs = parseGenesisOutput(raw);
     expect(docs.soul).toBe("# Bo");
     expect(docs.tagline).toBe("Pressure-tests.");
+  });
+
+  test("ignores trailing prose with braces after the object (balanced scan)", () => {
+    const raw = '```json\n{ "soul": "# X {ok}", "tagline": "y" }\n```\nHope that helps! {wink}';
+    const docs = parseGenesisOutput(raw);
+    expect(docs.soul).toBe("# X {ok}");
+    expect(docs.tagline).toBe("y");
   });
 
   test("truncates an over-long tagline to <=120 chars", () => {

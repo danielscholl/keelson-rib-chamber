@@ -1,15 +1,18 @@
+import { fileURLToPath } from "node:url";
 import type { CanvasView, Rib, RibAction, RibActionResult, RibContext } from "@keelson/shared";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildGenesisPrompt, type GenesisAuthor, parseGenesisOutput, slugify } from "./genesis.ts";
-import { type MindRecord, retireMind, scaffoldMind } from "./minds-store.ts";
+import { type MindRecord, mindExists, retireMind, scaffoldMind } from "./minds-store.ts";
 import { mindsDir } from "./paths.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 
-// Absolute path to the roster collector, resolved at module load so the
-// workflow node runs the right file regardless of the run's (nominal) cwd.
-const ROSTER_COLLECTOR = new URL("../bin/collect-roster.ts", import.meta.url).pathname;
+// Absolute path to the roster collector, resolved at module load so the workflow
+// node runs the right file regardless of the run's (nominal) cwd. fileURLToPath
+// (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
+// it is shell-quoted where interpolated into the bash node below.
+const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
 
 // The coding-agent CLI genesis shells to author a soul. MVP only: it uses the
 // CLI's ambient auth, so it ignores KEELSON_WORKFLOW_PROVIDER until C1's
@@ -135,7 +138,7 @@ const rib: Rib = {
         nodes: [
           {
             id: "collect",
-            bash: `bun ${ROSTER_COLLECTOR}`,
+            bash: `bun ${JSON.stringify(ROSTER_COLLECTOR)}`,
             output_schema: { type: "object", required: ["view", "sections"] },
           },
         ],
@@ -202,13 +205,15 @@ async function genesisAction(action: RibAction, ctx: RibContext): Promise<RibAct
   if (!name || !role || !voice) {
     return { ok: false, error: "genesis requires payload { name, role, voice }" };
   }
-  const slug = slugify(name);
-  if (!slug) return { ok: false, error: "name must contain letters or digits" };
-
+  const slug = slugify(name); // always non-empty (falls back for non-Latin names)
   const model = asNonEmptyString(payload.model);
   const tools = asStringArray(payload.tools);
   try {
-    const raw = await makeAuthor(ctx)(buildGenesisPrompt({ name, role, voice, model, tools }));
+    // Fail a known collision before the ~120s (paid) authoring turn, not after.
+    if (await mindExists(mindsDir(), slug)) {
+      return { ok: false, error: `mind '${slug}' already exists` };
+    }
+    const raw = await makeAuthor(ctx)(buildGenesisPrompt({ name, role, voice }));
     const docs = parseGenesisOutput(raw);
     const record: MindRecord = {
       slug,

@@ -83,6 +83,31 @@ describe("readMinds", () => {
     expect(minds.map((m) => m.slug)).toEqual(["scout"]);
   });
 
+  test("a shape-drifted mind.json (valid JSON, bad shape) can't blank the roster", async () => {
+    await scaffoldMind(root, record(), "# Scout");
+    // valid JSON, but not a Mind record: would crash the sort/map if not guarded
+    await Bun.write(join(root, "broken", "mind.json"), "null");
+    await Bun.write(join(root, "nostrings", "mind.json"), JSON.stringify({ name: 42 }));
+    const minds = await readMinds(root);
+    expect(minds.map((m) => m.slug)).toEqual(["scout"]);
+  });
+
+  test("a record missing createdAt is kept (sorted last), not crashed on", async () => {
+    await scaffoldMind(root, record({ createdAt: "2026-03-01T00:00:00.000Z" }), "# Scout");
+    await Bun.write(
+      join(root, "ada", "mind.json"),
+      JSON.stringify({ name: "Ada", persona: "Computes." }), // no createdAt
+    );
+    const minds = await readMinds(root);
+    expect(minds.map((m) => m.slug)).toEqual(["scout", "ada"]);
+  });
+
+  test("the directory name is the authoritative slug (ignores a drifted json slug)", async () => {
+    await Bun.write(join(root, "realdir", "mind.json"), JSON.stringify(record({ slug: "ghost" })));
+    const [mind] = await readMinds(root);
+    expect(mind?.slug).toBe("realdir"); // not "ghost" — retire keys off the dir name
+  });
+
   test("the read-back minds build a valid roster board", async () => {
     await scaffoldMind(root, record(), "# Scout");
     const board = buildRosterBoard(await readMinds(root));

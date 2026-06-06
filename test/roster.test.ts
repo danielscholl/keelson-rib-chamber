@@ -119,6 +119,23 @@ describe("genesis / retire actions (Phase 1)", () => {
     expect(minds[0]?.persona).toBe("Digs up facts.");
   });
 
+  test("a colliding genesis fails fast — before running the (paid) turn", async () => {
+    await rib.onAction?.(
+      { type: "genesis", payload: { name: "Scout", role: "r", voice: "v" } },
+      fakeCtx(() => authored("# Scout", "facts")),
+    );
+    let ran = false;
+    const res = await rib.onAction?.(
+      { type: "genesis", payload: { name: "Scout", role: "r", voice: "v" } },
+      fakeCtx(() => {
+        ran = true;
+        return authored("# Scout 2", "more");
+      }),
+    );
+    expect(res?.ok).toBe(false);
+    expect(ran).toBe(false);
+  });
+
   test("genesis fails closed when the brief is incomplete (no turn run)", async () => {
     let ran = false;
     const ctx = fakeCtx(() => {

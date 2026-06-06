@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
 import type { Mind } from "./types.ts";
@@ -63,11 +63,27 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
     return []; // no minds/ yet — nothing has been genesis-ed
   }
 
-  const records: MindRecord[] = [];
+  const records: (Mind & { createdAt: string })[] = [];
   for (const slug of entries) {
     try {
       const raw = await readFile(join(mindsRoot, slug, "mind.json"), "utf8");
-      records.push(JSON.parse(raw) as MindRecord);
+      const rec = JSON.parse(raw) as Partial<MindRecord>;
+      // A cast is compile-time only: validate the shape and take the *directory*
+      // name as the authoritative slug. So a drifted/partial mind.json (missing
+      // fields, non-string createdAt, slug diverging from the dir) is skipped or
+      // corrected here rather than crashing the sort/map and blanking the roster.
+      if (typeof rec !== "object" || rec === null) continue;
+      if (typeof rec.name !== "string" || typeof rec.persona !== "string") continue;
+      records.push({
+        slug,
+        name: rec.name,
+        persona: rec.persona,
+        createdAt: typeof rec.createdAt === "string" ? rec.createdAt : "",
+        ...(typeof rec.model === "string" && rec.model ? { model: rec.model } : {}),
+        ...(Array.isArray(rec.tools) && rec.tools.length > 0
+          ? { tools: rec.tools.filter((t): t is string => typeof t === "string") }
+          : {}),
+      });
     } catch {
       // skip non-Mind dirs / unreadable records
     }
@@ -90,9 +106,19 @@ export async function retireMind(mindsRoot: string, slug: string): Promise<void>
   await rm(dir, { recursive: true, force: true });
 }
 
+// True if anything occupies minds/<slug> (so genesis can fail a collision before
+// running the expensive authoring turn). Used by the genesis action pre-check.
+export async function mindExists(mindsRoot: string, slug: string): Promise<boolean> {
+  assertSafeSlug(slug);
+  return exists(join(mindsRoot, slug));
+}
+
+// stat, not readdir: readdir only succeeds on a directory, so a non-directory
+// entry at the path would read as absent and silently bypass the collision /
+// not-found guards.
 async function exists(path: string): Promise<boolean> {
   try {
-    await readdir(path);
+    await stat(path);
     return true;
   } catch {
     return false;
