@@ -43,7 +43,7 @@ describe("chamber-brief lens (Phase 0)", () => {
     // dropped by the canvas validate on publish.
     expect(node?.output_format).toEqual({
       type: "object",
-      required: ["view", "sections"],
+      required: ["view", "title", "sections"],
       properties: {
         view: { type: "string" },
         title: { type: "string" },

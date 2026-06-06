@@ -1,9 +1,10 @@
 # Architecture — `@keelson/rib-chamber`
 
 > How the rib produces the surfaces in [PRD.md](./PRD.md), and — most
-> importantly — the **Keelson base gaps** it depends on. Status: **draft /
-> design-first.** Concepts ported from `ianphil/chamber` (the originating
-> multi-agent app) and `pi-chamber` (a prior tested port onto another harness).
+> importantly — the **Keelson base gaps** it depends on. Status: **Phase 0
+> wired; later phases design-first** (see §10). Concepts ported from
+> `ianphil/chamber` (the originating multi-agent app) and `pi-chamber` (a prior
+> tested port onto another harness).
 
 ## 1. The pipeline (one sentence)
 

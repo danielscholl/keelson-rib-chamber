@@ -10,7 +10,7 @@ const BRIEF_KEY = "rib:chamber:brief";
 function expectView(key: string, kind: CanvasView["view"]) {
   return (data: unknown): CanvasView => {
     const view = canvasViewSchema.parse(data);
-    if (view.view !== kind) throw new Error(`${key} expects a ${kind} view`);
+    if (view.view !== kind) throw new Error(`${key} expects a ${kind} view, got "${view.view}"`);
     return view;
   };
 }
@@ -26,7 +26,12 @@ function expectView(key: string, kind: CanvasView["view"]) {
 // canvas `validate` on the bound key below.
 const BRIEF_SHAPE = {
   type: "object",
-  required: ["view", "sections"],
+  // `title` is required here (the prompt contract asks for one and a titled
+  // briefing reads better) even though the canvas board treats it as optional —
+  // a stricter-than-canvas node guard, not a looser one. `view` stays a plain
+  // string because the output_schema subset has no const/enum; the exact
+  // "board" kind is enforced fail-closed by `validate` (expectView) on publish.
+  required: ["view", "title", "sections"],
   properties: {
     view: { type: "string" },
     title: { type: "string" },
