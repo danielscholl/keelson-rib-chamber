@@ -40,7 +40,9 @@ workflow runs, one board is published. Chamber needs that *plus* a new one.
   rib-initiated agent execution — publishing transcript frames as each turn
   completes, and accepting director inputs between turns. This is new for
   Keelson and is the reason Chamber exercises a different corner of the contract
-  than a dashboard rib does.
+  than a dashboard rib does. How Minds talk *inside* a room is the
+  **driver-as-router** model — A2A is room-internal, not a relay/bus subsystem;
+  see [design/A2A-communication.md](./design/A2A-communication.md).
 
 ## 2a. Note: determinism vs. generativity
 
@@ -58,7 +60,7 @@ adds the exploratory half. Keep the two framed as complementary modes.
 | `surfaces` | The **Chamber** nav tab — regions bound to roster / room / brief keys. |
 | `views` | Static view descriptors for `rib:chamber:roster`, `:room`, `:brief`. |
 | `contributeWorkflows` | The **genesis-authoring** workflow and the **newspaper/brief** lens workflow (a `bash`/`prompt` node + `output_schema` + `bindSnapshotKey` + fail-closed `validate`). |
-| `onAction` | Genesis a Mind, retire a Mind, and **room control**: `start` / `next` / `inject` / `leave`. |
+| `onAction` | Genesis a Mind, retire a Mind, and **room control** (canonical `action.type` literals): `room-start` / `room-next` / `room-inject` / `room-stop` — see [design/A2A-communication.md](./design/A2A-communication.md). |
 | `authStatus` | Probe that an agent provider/CLI is reachable. |
 | `registerTools` | Not used at MVP (label-only stub in the base). |
 
@@ -155,17 +157,23 @@ The same virtuous cycle the OSDU rib ran with `G0`–`G4`: each gap below is
 working the Keelson base, since these touch the shared `Rib` contract /
 `RibContext`.
 
-### C1 — Agent invocation from a rib *(load-bearing)*
+### C1 — Agent invocation from a rib *(load-bearing — **designed**, see [design/C1-agent-invocation.md](./design/C1-agent-invocation.md))*
 `RibContext` exposes `getExec`, `getSnapshotManager`, `getCredential` — but no
 way to **run an agent turn**. The entire room loop is "run a turn," so this
 gates Phase 2.
-- **MVP workaround:** `getExec().runText("copilot" | "claude" | …)` shelling a
-  coding-agent CLI — exactly how `pi-chamber` spawns child `pi`. Ships zero base
-  change but bypasses Keelson's provider registry.
-- **Real fix:** a `ctx.runAgentTurn({ provider?, system, prompt, tools? })` seam
-  that routes through the provider registry, so rooms inherit provider pinning
-  (`KEELSON_WORKFLOW_PROVIDER`), redaction, and credentials. **Decide before
-  Phase 2.**
+- **Decision:** add one **provider-shaped `ctx.runAgentTurn` seam** to
+  `RibContext` (optional field, like `getSnapshotManager?`), with the contract
+  committed up front and **two impls behind one signature**: a CLI-backed MVP,
+  then a registry-routed real fix that inherits provider pinning
+  (`KEELSON_WORKFLOW_PROVIDER`), redaction, and credentials with **zero
+  room-loop change**. The MVP-shell vs real-seam framing below was *not* an
+  either/or — they are the two impls of the same seam, in order.
+- **Load-bearing constraint surfaced during design (verified):** the action
+  route awaits `onAction` synchronously (`ribs-handler.ts:100`) under a 60s
+  socket cap (`index.ts:90`), so the room loop must drive turns
+  **fire-and-return** (`void driver.step(ctx); return { ok: true }`) and publish
+  results as WS snapshot frames — never a blocking awaited turn.
+- See the design record for the full contract, base changes, and open risks.
 
 ### C2 — Dynamic / agent-authored view registration
 `views[]` is static at activation. An agent-authored lens appears at *runtime*.
@@ -198,7 +206,9 @@ A room has a variable participant count; the surface layout
 
 **Dependency order:** Phase 0 needs **nothing** (seam proof) → Phase 1 needs
 **C3** → Phase 2 needs **C1** (and verifies **C4**) → Phase 3 needs **C2** +
-**C5**. `C1` is the first *real* base gap and the one to design first.
+**C5**. `C1` was the first *real* base gap and is now **designed**
+([design/C1-agent-invocation.md](./design/C1-agent-invocation.md)); landing its
+contract in `@keelson/shared` is the first base PR Phase 2 depends on.
 
 ## 10. Current state
 
@@ -216,12 +226,17 @@ A room has a variable participant count; the surface layout
 
 ## 11. Next step
 
-Phase 0 is done. Two tracks open up:
+Phase 0 is done; `C1` (the turn seam,
+[design/C1-agent-invocation.md](./design/C1-agent-invocation.md)) and the
+**A2A communication model** (room-internal, driver-as-router,
+[design/A2A-communication.md](./design/A2A-communication.md)) are both now
+**designed and reviewed**. Two tracks open up:
 
-- **Design `C1` (agent invocation) before the room.** The brief uses the
-  existing prompt-node provider path; the room loop needs rib-initiated turns —
-  decide `getExec` CLI shell vs. a `ctx.runAgentTurn` seam (see §9 `C1`).
 - **Phase 1 — genesis + roster** (needs `C3`, the rib data home): scaffold a
   Mind and author its soul via one agent turn, then list Minds as cards on the
   Chamber surface (roster moves to the header, the brief settles into the
-  footer).
+  footer). This is the next *rib-side* slice and is independent of `C1`.
+- **Land the `C1` contract in `@keelson/shared`** (the seam types + optional
+  `runAgentTurn?` field): a small additive base PR that unblocks Phase 2's room
+  loop; the CLI-backed MVP impl can follow once the contract is in. Coordinate
+  with whoever owns the base contract.
