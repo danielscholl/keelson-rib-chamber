@@ -264,3 +264,47 @@ describe("room driver — concurrency & model", () => {
     expect((await store.loadRoom("demo"))?.pending?.nextSpeaker).toBe("b");
   });
 });
+
+describe("room driver — lifecycle edge cases", () => {
+  test("start rejects an unimplemented strategy and activates nothing", async () => {
+    const h = harness();
+    await expect(h.driver.start({ ...START, strategy: "group-chat" })).rejects.toThrow();
+    expect(await h.store.loadRoom("demo")).toBeUndefined();
+    expect(h.pub.all()).toHaveLength(0);
+  });
+
+  test("a stop during the pre-turn gap cancels the turn (no reply is appended)", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn([{ text: "should not run" }]);
+    let resolveMinds: (m: Mind[]) => void = () => {};
+    const mindsReady = new Promise<Mind[]>((resolve) => {
+      resolveMinds = resolve;
+    });
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => mindsReady, // resolves only after we stop
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const stepP = driver.step("demo"); // suspends awaiting minds()
+    await driver.stop("demo"); // aborts the controller allocated at step start
+    resolveMinds(MINDS);
+    await stepP;
+    expect(turns.requests).toHaveLength(0); // the turn was never invoked
+    expect((await store.loadTranscript("demo")).some((e) => e.aborted)).toBe(true);
+    expect((await store.loadRoom("demo"))?.status).toBe("stopped");
+  });
+
+  test("a stale stop does not rewrite a done room", async () => {
+    const h = harness();
+    await h.driver.start({ ...START, turnBudget: 1 });
+    await h.driver.step("demo"); // turnIndex 1 >= 1 -> done
+    expect((await h.store.loadRoom("demo"))?.status).toBe("done");
+    await h.driver.stop("demo"); // stale stop -> no-op
+    expect((await h.store.loadRoom("demo"))?.status).toBe("done");
+  });
+});

@@ -50,15 +50,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   // here the driver tracks it directly.
   let activeSlug: MindSlug | undefined;
 
-  function controllerFor(slug: MindSlug): AbortController {
-    let controller = controllers.get(slug);
-    if (!controller) {
-      controller = new AbortController();
-      controllers.set(slug, controller);
-    }
-    return controller;
-  }
-
   function clearActive(slug: MindSlug): void {
     if (activeSlug === slug) activeSlug = undefined;
     controllers.delete(slug);
@@ -75,6 +66,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   }
 
   async function start(config: RoomStartConfig): Promise<Room> {
+    // Reject a strategy the registry cannot execute before activating — otherwise
+    // the room would occupy the single active slot with no way for step() to
+    // advance it (it would just throw on the first step).
+    getStrategy(config.strategy);
+
     if (activeSlug && activeSlug !== config.slug) {
       const other = await deps.store.loadRoom(activeSlug);
       if (other && other.status === "active") {
@@ -114,6 +110,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // than racing the first — preventing duplicate entries / a lost budget tick.
     if (inFlight.has(slug)) return;
     inFlight.add(slug);
+    // Allocate the turn's AbortController up front (before any await) so a stop /
+    // dispose during the pre-turn async gap aborts the same controller the turn
+    // will observe — not a throwaway that gets replaced after the gap.
+    const controller = new AbortController();
+    controllers.set(slug, controller);
     try {
       const loaded = await deps.store.loadRoom(slug);
       if (loaded?.status !== "active") return;
@@ -145,12 +146,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         return;
       }
       if (decision.kind === "speak") {
-        await runSpeakTurn(room, decision.mind, override.directionInjection);
+        await runSpeakTurn(room, decision.mind, override.directionInjection, controller);
         return;
       }
       // speak-parallel / moderate / synthesize — Phase 3 / deferred concurrent.
       throw new Error(`step kind "${decision.kind}" is not supported in Phase 2`);
     } finally {
+      controllers.delete(slug);
       inFlight.delete(slug);
     }
   }
@@ -159,6 +161,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     room: Room,
     mindSlug: MindSlug,
     directionInjection: string | undefined,
+    controller: AbortController,
   ): Promise<void> {
     const minds = await deps.minds();
     const mind = minds.find((m) => m.slug === mindSlug);
@@ -183,34 +186,44 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     }
 
     const transcript = await deps.store.loadTranscript(room.slug);
-    const context = renderTranscript(transcript);
-    const prompt = directionInjection ? `${context}\n\n[director]: ${directionInjection}` : context;
 
-    const controller = controllerFor(room.slug);
-    // tools omitted -> text-only (the room default). Mapping Mind.tools slugs to
-    // C1 tool descriptors is deferred. The Mind's model pin is honoured.
-    const turn = deps.runAgentTurn({
-      system: mind.persona,
-      prompt,
-      abortSignal: controller.signal,
-      ...(mind.model ? { model: mind.model } : {}),
-    });
+    let text: string;
+    let aborted: boolean;
+    if (controller.signal.aborted) {
+      // A stop / dispose landed during the async gap above — finalize without
+      // invoking a turn, so no normal reply is appended after a stop.
+      text = "";
+      aborted = true;
+    } else {
+      const context = renderTranscript(transcript);
+      const prompt = directionInjection
+        ? `${context}\n\n[director]: ${directionInjection}`
+        : context;
+      // tools omitted -> text-only (the room default). Mapping Mind.tools slugs to
+      // C1 tool descriptors is deferred. The Mind's model pin is honoured.
+      const turn = deps.runAgentTurn({
+        system: mind.persona,
+        prompt,
+        abortSignal: controller.signal,
+        ...(mind.model ? { model: mind.model } : {}),
+      });
 
-    try {
-      // Draining the stream could drive throttled partial publishes later; for now
-      // the result is the source of truth.
-      for await (const _chunk of turn.stream) {
-        // intentionally empty
+      try {
+        // Draining the stream could drive throttled partial publishes later; for
+        // now the result is the source of truth.
+        for await (const _chunk of turn.stream) {
+          // intentionally empty
+        }
+      } catch {
+        // a stream error surfaces via result.status below
       }
-    } catch {
-      // a stream error surfaces via result.status below
+      const result = await turn.result;
+      aborted = result.status === "aborted" || controller.signal.aborted;
+      text =
+        result.status === "error" || result.status === "timeout"
+          ? (result.error ?? result.text ?? `turn ${result.status}`)
+          : result.text;
     }
-    const result = await turn.result;
-    const aborted = result.status === "aborted" || controller.signal.aborted;
-    const text =
-      result.status === "error" || result.status === "timeout"
-        ? (result.error ?? result.text ?? `turn ${result.status}`)
-        : result.text;
 
     await deps.store.appendTranscript(
       room.slug,
@@ -274,8 +287,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
   async function stop(slug: MindSlug): Promise<void> {
     const room = await deps.store.loadRoom(slug);
-    if (!room) return;
-    controllerFor(slug).abort();
+    // Only an active room can be stopped — a stale stop must not rewrite a `done`
+    // (or already stopped) room to stopped.
+    if (room?.status !== "active") return;
+    controllers.get(slug)?.abort();
     clearActive(slug);
     await persistAndPublish({ ...room, status: "stopped", pending: undefined });
   }
