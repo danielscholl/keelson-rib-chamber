@@ -330,6 +330,27 @@ describe("room driver — lifecycle edge cases", () => {
     expect((await store.loadRoom("demo"))?.status).toBe("active"); // not clobbered to stopped
   });
 
+  test("resuming an active room does not drop an in-flight turn's commit", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const stepP = driver.step("demo"); // turn in flight
+    await turns.started;
+    await driver.start(START); // resume the same active room — must not supersede the turn
+    turns.release();
+    await stepP;
+    expect((await store.loadRoom("demo"))?.turnIndex).toBe(1); // commit not dropped
+  });
+
   test("an inject racing room closure does not reactivate the room", async () => {
     const { store } = makeFakeStore();
     const pub = makeFakePublisher();

@@ -111,15 +111,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
     const existing = await deps.store.loadRoom(config.slug);
     activeSlug = config.slug;
-    // Open a fresh generation — supersedes any stale step still draining on this
-    // slug so its completion cannot clobber this (re)start.
-    bumpGeneration(config.slug);
     if (existing && existing.status === "active") {
-      // Resume the same slug from its persisted state.
+      // Resume an already-active room — do NOT bump the generation, so an
+      // in-flight turn keeps its lifetime and still commits normally.
       await persistAndPublish(existing);
       return existing;
     }
 
+    // A fresh start or a restart of a closed (stopped/done) room opens a new
+    // generation, superseding any stale step still draining on this slug.
+    bumpGeneration(config.slug);
     const room: Room = {
       slug: config.slug,
       name: config.name,
@@ -146,9 +147,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // will observe — not a throwaway that gets replaced after the gap.
     const controller = new AbortController();
     controllers.set(slug, controller);
+    // Capture the generation before any await so a stop/restart during loadRoom
+    // can't make this step adopt the new lifetime — it abandons below instead.
+    const gen = generationOf(slug);
     try {
       const loaded = await deps.store.loadRoom(slug);
       if (loaded?.status !== "active") return;
+      if (generationOf(slug) !== gen) return; // superseded during load — abandon
 
       // (1) consume one-shot director overrides (read + clear). Persist the clear
       // before the turn so an inject arriving mid-turn writes fresh pending that
@@ -159,7 +164,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         directionInjection: pending.directionInjection,
       };
       const room: Room = { ...loaded, pending: undefined };
-      const gen = generationOf(slug);
       if (loaded.pending) await deps.store.saveRoom(room);
 
       // (2) decide: a valid nextSpeaker override wins; otherwise the strategy picks.
@@ -283,9 +287,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   }
 
   async function inject(slug: MindSlug, input: RoomInjectInput): Promise<void> {
+    // Capture before the load so a terminal step that bumps the generation during
+    // it makes this late inject drop its write rather than reactivate the room.
+    const gen = generationOf(slug);
     const room = await deps.store.loadRoom(slug);
     if (room?.status !== "active") return;
-    const gen = generationOf(slug);
+    if (generationOf(slug) !== gen) return; // superseded during load
 
     const pending = {
       ...(room.pending ?? {}),
