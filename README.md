@@ -7,9 +7,11 @@ agent on demand), **rooms** (orchestrate agent-to-agent turns), and
 canvas). The harness stays domain-free; all of the multi-agent machinery lives
 here, and the rib ships **zero React** into the trusted SPA.
 
-> Status: **planning / design-first.** No runtime hooks are wired yet — this
-> repo currently scaffolds the package and captures the design. Read
-> **[docs/PRD.md](docs/PRD.md)** for what the rib delivers and
+> Status: **Phase 0 wired.** The first hook is live — a `chamber-brief` workflow
+> whose agent turn authors a canvas `board` "briefing" lens, published
+> fail-closed to `rib:chamber:brief` and rendered on the **Chamber** surface with
+> zero hand-coded UI. Genesis, rooms, and on-demand lenses follow per the phase
+> plan. Read **[docs/PRD.md](docs/PRD.md)** for what the rib delivers and
 > **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for how it works, the phase
 > plan, and the Keelson base gaps it depends on.
 

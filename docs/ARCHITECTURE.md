@@ -1,9 +1,10 @@
 # Architecture — `@keelson/rib-chamber`
 
 > How the rib produces the surfaces in [PRD.md](./PRD.md), and — most
-> importantly — the **Keelson base gaps** it depends on. Status: **draft /
-> design-first.** Concepts ported from `ianphil/chamber` (the originating
-> multi-agent app) and `pi-chamber` (a prior tested port onto another harness).
+> importantly — the **Keelson base gaps** it depends on. Status: **Phase 0
+> wired; later phases design-first** (see §10). Concepts ported from
+> `ianphil/chamber` (the originating multi-agent app) and `pi-chamber` (a prior
+> tested port onto another harness).
 
 ## 1. The pipeline (one sentence)
 
@@ -201,17 +202,26 @@ A room has a variable participant count; the surface layout
 
 ## 10. Current state
 
-- Package scaffolded (`@keelson/rib-chamber`): config, a minimal `Rib`
-  (`id: "chamber"`), an identity test, and these docs. `typecheck` / `test` /
-  `check` are green.
-- No runtime hooks wired yet — Phase 0 is the next build step.
+- **Phase 0 wired.** A `chamber-brief` contributed workflow runs one agent turn
+  (a `prompt` node, no deterministic collector) that authors a canvas `board`
+  briefing; the executor promotes it to structured output and the rib binding
+  publishes it fail-closed (`validate` = `canvasViewSchema`, board kind) to
+  `rib:chamber:brief`. A `views[]` descriptor and a one-region **Chamber**
+  surface render it. Zero base change — proven end-to-end against Keelson's real
+  `workflowDefinitionSchema` + invariants.
+- Package + config + identity test from the scaffold remain; `typecheck` /
+  `test` / `check` are green.
 - Reusable substrate confirmed available in the Keelson base: `board` view,
   surface/region layout, action round-trip, cell tone (`G0`–`G4`).
 
 ## 11. Next step
 
-Build **Phase 0**: a `chamber-brief` workflow whose node has the provider emit a
-`board` "briefing" payload, bound to `rib:chamber:brief` and validated
-fail-closed through `canvasViewSchema`. It proves the agent-authored-lens idea
-with zero base change and produces the first real board to lay the Chamber
-surface around — then design **C1** (agent invocation) ahead of the room.
+Phase 0 is done. Two tracks open up:
+
+- **Design `C1` (agent invocation) before the room.** The brief uses the
+  existing prompt-node provider path; the room loop needs rib-initiated turns —
+  decide `getExec` CLI shell vs. a `ctx.runAgentTurn` seam (see §9 `C1`).
+- **Phase 1 — genesis + roster** (needs `C3`, the rib data home): scaffold a
+  Mind and author its soul via one agent turn, then list Minds as cards on the
+  Chamber surface (roster moves to the header, the brief settles into the
+  footer).
