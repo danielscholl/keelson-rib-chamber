@@ -4,6 +4,7 @@ import type { Mind } from "../../src/types.ts";
 import {
   abortableRunAgentTurn,
   fixedClock,
+  gatedRunAgentTurn,
   makeFakePublisher,
   makeFakeStore,
   scriptedRunAgentTurn,
@@ -199,5 +200,67 @@ describe("room driver — stop / abort", () => {
     await h.driver.dispose();
     await stepP;
     expect((await h.store.loadTranscript("demo")).some((e) => e.aborted)).toBe(true);
+  });
+});
+
+describe("room driver — concurrency & model", () => {
+  test("honours the Mind's model pin in the turn request", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn([{ text: "ok" }]);
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => [{ slug: "a", name: "Ada", persona: "You are Ada.", model: "claude-x" }],
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start({ ...START, participants: ["a"] });
+    await driver.step("demo");
+    expect(turns.requests[0]?.model).toBe("claude-x");
+  });
+
+  test("concurrent step() calls do not race (the second is a no-op)", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const first = driver.step("demo");
+    const second = driver.step("demo"); // dropped: a turn is already in flight
+    await turns.started;
+    turns.release();
+    await Promise.all([first, second]);
+    expect(await store.loadTranscript("demo")).toHaveLength(1);
+    expect((await store.loadRoom("demo"))?.turnIndex).toBe(1);
+  });
+
+  test("an inject during a turn is preserved, not clobbered by completion", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const stepP = driver.step("demo");
+    await turns.started;
+    await driver.inject("demo", { nextSpeaker: "b" }); // arrives mid-turn
+    turns.release();
+    await stepP;
+    expect((await store.loadRoom("demo"))?.pending?.nextSpeaker).toBe("b");
   });
 });

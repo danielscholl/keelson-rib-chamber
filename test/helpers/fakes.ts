@@ -117,6 +117,32 @@ export function abortableRunAgentTurn() {
   return { run, requests, started };
 }
 
+// A runAgentTurn whose result resolves only when `release()` is called — for
+// holding a turn in flight while another op (a second step, an inject) runs.
+// `started` resolves when the turn is invoked.
+export function gatedRunAgentTurn(text = "reply") {
+  const requests: RibAgentTurnRequest[] = [];
+  let markStarted: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  let releaseResult: () => void = () => {};
+  const run: RunAgentTurn = (req) => {
+    requests.push(req);
+    markStarted();
+    const result = new Promise<RibAgentTurnResult>((resolve) => {
+      releaseResult = () => resolve({ status: "ok", text });
+    });
+    return {
+      stream: (async function* (): AsyncGenerator<MessageChunk> {
+        yield { type: "done" };
+      })(),
+      result,
+    };
+  };
+  return { run, requests, started, release: () => releaseResult() };
+}
+
 export function fixedClock(iso = "2026-01-01T00:00:00.000Z") {
   return () => new Date(iso);
 }

@@ -40,6 +40,9 @@ export interface RoomDriver {
 
 export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   const controllers = new Map<MindSlug, AbortController>();
+  // Rooms with a turn in flight. The serial gate: one turn at a time per room, so
+  // two fire-and-return room-next calls cannot race the same turnIndex.
+  const inFlight = new Set<MindSlug>();
   const now = deps.now ?? (() => new Date());
   const newId = deps.newId ?? defaultNewId();
   // The single-active-room invariant (one fixed rib:chamber:room key, C1): in the
@@ -106,38 +109,50 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   }
 
   async function step(slug: MindSlug): Promise<void> {
-    const loaded = await deps.store.loadRoom(slug);
-    if (loaded?.status !== "active") return;
+    // Serial gate. The check-and-add is synchronous (no await between), so a
+    // second fire-and-return room-next while a turn is in flight is a no-op rather
+    // than racing the first — preventing duplicate entries / a lost budget tick.
+    if (inFlight.has(slug)) return;
+    inFlight.add(slug);
+    try {
+      const loaded = await deps.store.loadRoom(slug);
+      if (loaded?.status !== "active") return;
 
-    // (1) consume one-shot director overrides (read + clear).
-    const pending = loaded.pending ?? {};
-    const override = {
-      nextSpeaker: pending.nextSpeaker,
-      directionInjection: pending.directionInjection,
-    };
-    const room: Room = { ...loaded, pending: undefined };
+      // (1) consume one-shot director overrides (read + clear). Persist the clear
+      // before the turn so an inject arriving mid-turn writes fresh pending that
+      // the completion below preserves rather than clobbers.
+      const pending = loaded.pending ?? {};
+      const override = {
+        nextSpeaker: pending.nextSpeaker,
+        directionInjection: pending.directionInjection,
+      };
+      const room: Room = { ...loaded, pending: undefined };
+      if (loaded.pending) await deps.store.saveRoom(room);
 
-    // (2) decide: a valid nextSpeaker override wins; otherwise the strategy picks.
-    let decision: StrategyStep;
-    if (override.nextSpeaker !== undefined && isValidNominee(override.nextSpeaker, room)) {
-      decision = { kind: "speak", mind: override.nextSpeaker };
-    } else {
-      decision = getStrategy(room.strategy)(room);
-    }
+      // (2) decide: a valid nextSpeaker override wins; otherwise the strategy picks.
+      let decision: StrategyStep;
+      if (override.nextSpeaker !== undefined && isValidNominee(override.nextSpeaker, room)) {
+        decision = { kind: "speak", mind: override.nextSpeaker };
+      } else {
+        decision = getStrategy(room.strategy)(room);
+      }
 
-    // (3) execute.
-    if (decision.kind === "end") {
-      const ended: Room = { ...room, status: "done" };
-      clearActive(ended.slug);
-      await persistAndPublish(ended);
-      return;
+      // (3) execute.
+      if (decision.kind === "end") {
+        const ended: Room = { ...room, status: "done" };
+        clearActive(ended.slug);
+        await persistAndPublish(ended);
+        return;
+      }
+      if (decision.kind === "speak") {
+        await runSpeakTurn(room, decision.mind, override.directionInjection);
+        return;
+      }
+      // speak-parallel / moderate / synthesize — Phase 3 / deferred concurrent.
+      throw new Error(`step kind "${decision.kind}" is not supported in Phase 2`);
+    } finally {
+      inFlight.delete(slug);
     }
-    if (decision.kind === "speak") {
-      await runSpeakTurn(room, decision.mind, override.directionInjection);
-      return;
-    }
-    // speak-parallel / moderate / synthesize — Phase 3 / deferred concurrent.
-    throw new Error(`step kind "${decision.kind}" is not supported in Phase 2`);
   }
 
   async function runSpeakTurn(
@@ -173,11 +188,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
     const controller = controllerFor(room.slug);
     // tools omitted -> text-only (the room default). Mapping Mind.tools slugs to
-    // C1 tool descriptors is deferred.
+    // C1 tool descriptors is deferred. The Mind's model pin is honoured.
     const turn = deps.runAgentTurn({
       system: mind.persona,
       prompt,
       abortSignal: controller.signal,
+      ...(mind.model ? { model: mind.model } : {}),
     });
 
     try {
@@ -210,7 +226,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       }),
     );
 
-    let next: Room = { ...room, turnIndex: room.turnIndex + 1 };
+    // Merge onto the latest stored room, not the pre-turn snapshot, so a director
+    // inject that arrived during the turn (fresh pending, or a status change from
+    // stop) is preserved rather than clobbered.
+    const current = (await deps.store.loadRoom(room.slug)) ?? room;
+    let next: Room = { ...current, turnIndex: room.turnIndex + 1 };
     if (aborted) {
       next = { ...next, status: "stopped" };
       clearActive(next.slug);
