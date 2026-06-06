@@ -55,10 +55,38 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     controllers.delete(slug);
   }
 
+  // A room's active lifetime has a generation. start and stop open/close one; a
+  // step or inject captures it and skips its room-state write if a newer
+  // generation has superseded it (e.g. a stop+restart while a turn was draining),
+  // so a stale completion can't clobber or reactivate fresher state. Transcript
+  // appends are append-only and always happen; only the room write is gated.
+  const generations = new Map<MindSlug, number>();
+  const generationOf = (slug: MindSlug): number => generations.get(slug) ?? 0;
+  function bumpGeneration(slug: MindSlug): number {
+    const value = generationOf(slug) + 1;
+    generations.set(slug, value);
+    return value;
+  }
+
   async function persistAndPublish(room: Room): Promise<void> {
     await deps.store.saveRoom(room);
     const transcript = await deps.store.loadTranscript(room.slug);
     await deps.publisher.publish(buildRoomBoard(room, transcript));
+  }
+
+  // Commit a still-active room, unless a newer generation has superseded this op.
+  async function commitActive(slug: MindSlug, gen: number, room: Room): Promise<void> {
+    if (generationOf(slug) !== gen) return;
+    await persistAndPublish(room);
+  }
+
+  // Commit a room leaving the active state (done/stopped). Bumps the generation so
+  // any other in-flight op on this room becomes stale and skips its own write.
+  async function commitTerminal(slug: MindSlug, gen: number, room: Room): Promise<void> {
+    if (generationOf(slug) !== gen) return;
+    bumpGeneration(slug);
+    clearActive(slug);
+    await persistAndPublish(room);
   }
 
   function isValidNominee(slug: MindSlug, room: Room): boolean {
@@ -83,6 +111,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
     const existing = await deps.store.loadRoom(config.slug);
     activeSlug = config.slug;
+    // Open a fresh generation — supersedes any stale step still draining on this
+    // slug so its completion cannot clobber this (re)start.
+    bumpGeneration(config.slug);
     if (existing && existing.status === "active") {
       // Resume the same slug from its persisted state.
       await persistAndPublish(existing);
@@ -128,6 +159,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         directionInjection: pending.directionInjection,
       };
       const room: Room = { ...loaded, pending: undefined };
+      const gen = generationOf(slug);
       if (loaded.pending) await deps.store.saveRoom(room);
 
       // (2) decide: a valid nextSpeaker override wins; otherwise the strategy picks.
@@ -140,13 +172,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
       // (3) execute.
       if (decision.kind === "end") {
-        const ended: Room = { ...room, status: "done" };
-        clearActive(ended.slug);
-        await persistAndPublish(ended);
+        await commitTerminal(slug, gen, { ...room, status: "done" });
         return;
       }
       if (decision.kind === "speak") {
-        await runSpeakTurn(room, decision.mind, override.directionInjection, controller);
+        await runSpeakTurn(room, decision.mind, override.directionInjection, controller, gen);
         return;
       }
       // speak-parallel / moderate / synthesize — Phase 3 / deferred concurrent.
@@ -162,6 +192,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     mindSlug: MindSlug,
     directionInjection: string | undefined,
     controller: AbortController,
+    gen: number,
   ): Promise<void> {
     const minds = await deps.minds();
     const mind = minds.find((m) => m.slug === mindSlug);
@@ -179,9 +210,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           at: now().toISOString(),
         }),
       );
-      const ended: Room = { ...room, status: "done" };
-      clearActive(ended.slug);
-      await persistAndPublish(ended);
+      await commitTerminal(room.slug, gen, { ...room, status: "done" });
       return;
     }
 
@@ -240,23 +269,23 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     );
 
     // Merge onto the latest stored room, not the pre-turn snapshot, so a director
-    // inject that arrived during the turn (fresh pending, or a status change from
-    // stop) is preserved rather than clobbered.
+    // inject that arrived during the turn (fresh pending) is preserved. The commit
+    // helpers drop the write if a stop/restart has superseded this turn.
     const current = (await deps.store.loadRoom(room.slug)) ?? room;
-    let next: Room = { ...current, turnIndex: room.turnIndex + 1 };
+    const advanced: Room = { ...current, turnIndex: room.turnIndex + 1 };
     if (aborted) {
-      next = { ...next, status: "stopped" };
-      clearActive(next.slug);
-    } else if (next.turnIndex >= next.turnBudget) {
-      next = { ...next, status: "done" };
-      clearActive(next.slug);
+      await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
+    } else if (advanced.turnIndex >= advanced.turnBudget) {
+      await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
+    } else {
+      await commitActive(room.slug, gen, advanced);
     }
-    await persistAndPublish(next);
   }
 
   async function inject(slug: MindSlug, input: RoomInjectInput): Promise<void> {
     const room = await deps.store.loadRoom(slug);
     if (room?.status !== "active") return;
+    const gen = generationOf(slug);
 
     const pending = {
       ...(room.pending ?? {}),
@@ -282,7 +311,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       );
     }
 
-    await persistAndPublish({ ...room, pending });
+    // Skip if a stop/terminal completion closed the room while we were appending —
+    // an inject must never reactivate a stopped/done room.
+    await commitActive(slug, gen, { ...room, pending });
   }
 
   async function stop(slug: MindSlug): Promise<void> {
@@ -290,6 +321,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // Only an active room can be stopped — a stale stop must not rewrite a `done`
     // (or already stopped) room to stopped.
     if (room?.status !== "active") return;
+    // Close the generation so an in-flight step's completion is superseded and
+    // cannot re-publish stale state after this stop.
+    bumpGeneration(slug);
     controllers.get(slug)?.abort();
     clearActive(slug);
     await persistAndPublish({ ...room, status: "stopped", pending: undefined });

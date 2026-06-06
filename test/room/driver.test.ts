@@ -307,4 +307,47 @@ describe("room driver — lifecycle edge cases", () => {
     await h.driver.stop("demo"); // stale stop -> no-op
     expect((await h.store.loadRoom("demo"))?.status).toBe("done");
   });
+
+  test("a stop + same-slug restart is not clobbered by the stale step completion", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const stepP = driver.step("demo"); // turn in flight
+    await turns.started;
+    await driver.stop("demo"); // closes the generation
+    await driver.start(START); // restart same slug -> fresh active generation
+    turns.release(); // the superseded turn settles
+    await stepP;
+    expect((await store.loadRoom("demo"))?.status).toBe("active"); // not clobbered to stopped
+  });
+
+  test("an inject racing room closure does not reactivate the room", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start({ ...START, turnBudget: 1 }); // the one turn completes -> done
+    const stepP = driver.step("demo");
+    await turns.started;
+    const injectP = driver.inject("demo", { nextSpeaker: "b" }); // loads the still-active room
+    turns.release(); // step completes -> done (closes the generation)
+    await Promise.all([stepP, injectP]);
+    expect((await store.loadRoom("demo"))?.status).toBe("done"); // not reactivated
+  });
 });
