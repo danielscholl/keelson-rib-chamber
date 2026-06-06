@@ -1,7 +1,24 @@
-import type { CanvasView, Rib } from "@keelson/shared";
+import { fileURLToPath } from "node:url";
+import type { CanvasView, Rib, RibAction, RibActionResult, RibContext } from "@keelson/shared";
 import { canvasViewSchema } from "@keelson/shared";
+import { buildGenesisPrompt, type GenesisAuthor, parseGenesisOutput, slugify } from "./genesis.ts";
+import { type MindRecord, mindExists, retireMind, scaffoldMind } from "./minds-store.ts";
+import { mindsDir } from "./paths.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
+const ROSTER_KEY = "rib:chamber:roster";
+
+// Absolute path to the roster collector, resolved at module load so the workflow
+// node runs the right file regardless of the run's (nominal) cwd. fileURLToPath
+// (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
+// it is shell-quoted where interpolated into the bash node below.
+const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
+
+// The coding-agent CLI genesis shells to author a soul. MVP only: it uses the
+// CLI's ambient auth, so it ignores KEELSON_WORKFLOW_PROVIDER until C1's
+// provider-routed runAgentTurn lands. Override the bin for non-claude setups.
+const AGENT_BIN = process.env.CHAMBER_AGENT_BIN?.trim() || "claude";
+const GENESIS_TIMEOUT_MS = 120_000;
 
 // Validate through the canvas view union (not a bare member schema) so the
 // producer-side guard enforces the same node-id / column-key uniqueness checks
@@ -66,30 +83,41 @@ const rib: Rib = {
   id: "chamber",
   displayName: "Chamber",
 
-  // Binds the agent-authored briefing key to the canvas renderer; the button
-  // appears on the Ribs page and data arrives when chamber-brief runs.
-  views: [{ key: BRIEF_KEY, canvasKind: "view", title: "Briefing" }],
+  // Binds the agent-authored keys to the canvas renderer; the buttons appear on
+  // the Ribs page and data arrives when the producers run.
+  views: [
+    { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
+    { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
+  ],
 
-  // The Chamber nav tab. Phase 0 lays it out around the one board that exists;
-  // genesis/roster (header) and the room transcript (rows) fill in per the phase
-  // plan, with the brief settling into the footer.
+  // The "new agent" / "retire" affordances on the Chamber surface dispatch to
+  // onAction. The room controls (room-start/next/inject/stop) arrive in Phase 2.
+  actions: [
+    { type: "genesis", label: "New agent" },
+    { type: "retire", label: "Retire agent" },
+  ],
+
+  // The Chamber nav tab. Phase 1 lands the roster in the header (the Minds you
+  // genesis) and settles the brief into the footer; the room transcript fills
+  // the rows in Phase 2.
   surfaces: [
     {
       id: "chamber",
       title: "Chamber",
       layout: {
-        rows: [
-          {
-            columns: [
-              {
-                key: BRIEF_KEY,
-                workflow: "chamber-brief",
-                title: "Briefing",
-                glyph: { char: "❖", tone: "brand" },
-              },
-            ],
-          },
-        ],
+        header: {
+          key: ROSTER_KEY,
+          workflow: "chamber-roster",
+          title: "Roster",
+          glyph: { char: "◇", tone: "brand" },
+        },
+        rows: [],
+        footer: {
+          key: BRIEF_KEY,
+          workflow: "chamber-brief",
+          title: "Briefing",
+          glyph: { char: "❖", tone: "brand" },
+        },
       },
     },
   ],
@@ -99,6 +127,25 @@ const rib: Rib = {
   // publishes fail-closed via `validate`. This is the "an agent authors a lens"
   // proof — zero React, no hand-coded route.
   contributeWorkflows: () => [
+    {
+      // The roster producer: a deterministic collector that reads the
+      // genesis-authored Minds from the data home and emits a board of cards.
+      // Genesis mutates the data home via onAction; this refresh reflects it.
+      definition: {
+        name: "chamber-roster",
+        description:
+          'Use when: you want to see the agents (Minds) that have been created. Triggers: "show the roster", "list agents", "what minds exist". Does: reads the genesis-authored Minds from the Chamber data home and publishes a roster board (one card per Mind) to the Chamber Roster canvas. NOT for: creating or retiring agents (those are the New agent / Retire actions).',
+        nodes: [
+          {
+            id: "collect",
+            bash: `bun ${JSON.stringify(ROSTER_COLLECTOR)}`,
+            output_schema: { type: "object", required: ["view", "sections"] },
+          },
+        ],
+      },
+      bindSnapshotKey: ROSTER_KEY,
+      validate: expectView(ROSTER_KEY, "board"),
+    },
     {
       definition: {
         name: "chamber-brief",
@@ -118,6 +165,91 @@ const rib: Rib = {
       validate: expectView(BRIEF_KEY, "board"),
     },
   ],
+
+  // Genesis a Mind (one agent turn authors its soul, the rib persists it) and
+  // retire one. Both mutate the data home and return; the roster reflects the
+  // change on the next chamber-roster refresh (the OSDU mutate-then-refresh
+  // pattern). The room-* controls arrive with the Phase 2 room loop.
+  onAction: (action, ctx) => {
+    if (action.type === "genesis") return genesisAction(action, ctx);
+    if (action.type === "retire") return retireAction(action);
+    return { ok: false, error: `unknown action '${action.type}'` };
+  },
 };
+
+// Shell the coding-agent CLI for one authoring turn. Isolated behind the
+// GenesisAuthor seam so genesis.ts stays provider-free; collapses to
+// ctx.runAgentTurn once C1 lands. `--output-format json` wraps the reply as
+// `{ result }`; the inner text is the GenesisDocs JSON parseGenesisOutput reads.
+function makeAuthor(ctx: RibContext): GenesisAuthor {
+  return async (prompt) => {
+    const res = await ctx
+      .getExec()
+      .runJSON<{ result?: string }>(AGENT_BIN, ["-p", prompt, "--output-format", "json"], {
+        timeoutMs: GENESIS_TIMEOUT_MS,
+      });
+    if (!res.ok) throw new Error(res.error);
+    const text = res.data?.result;
+    if (typeof text !== "string" || text.trim().length === 0) {
+      throw new Error(`${AGENT_BIN} returned no text`);
+    }
+    return text;
+  };
+}
+
+async function genesisAction(action: RibAction, ctx: RibContext): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const name = asNonEmptyString(payload.name);
+  const role = asNonEmptyString(payload.role);
+  const voice = asNonEmptyString(payload.voice);
+  if (!name || !role || !voice) {
+    return { ok: false, error: "genesis requires payload { name, role, voice }" };
+  }
+  const slug = slugify(name); // always non-empty (falls back for non-Latin names)
+  const model = asNonEmptyString(payload.model);
+  const tools = asStringArray(payload.tools);
+  try {
+    // Fail a known collision before the ~120s (paid) authoring turn, not after.
+    if (await mindExists(mindsDir(), slug)) {
+      return { ok: false, error: `mind '${slug}' already exists` };
+    }
+    const raw = await makeAuthor(ctx)(buildGenesisPrompt({ name, role, voice }));
+    const docs = parseGenesisOutput(raw);
+    const record: MindRecord = {
+      slug,
+      name,
+      role,
+      voice,
+      persona: docs.tagline,
+      ...(model ? { model } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+      createdAt: new Date().toISOString(),
+    };
+    await scaffoldMind(mindsDir(), record, docs.soul);
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function retireAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const slug = asNonEmptyString(payload.slug);
+  if (!slug) return { ok: false, error: "retire requires payload { slug }" };
+  try {
+    await retireMind(mindsDir(), slug);
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function asNonEmptyString(v: unknown): string {
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : "";
+}
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
 
 export default rib;

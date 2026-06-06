@@ -81,7 +81,7 @@ does **not** today expose a provider — see `C1`.
 | Director controls (`/next`, `/inject`) | `onAction` round-trip | ✅ shipped (OSDU `G3`) |
 | `room/strategies/*` (pure) | ported behind a Keelson orchestration context | ↔ portable (host adapter swap) |
 | **Run an agent turn from rib code** | `getExec` CLI shell **or** a provider seam | ❌ **gap `C1`** |
-| Mind storage (`SOUL.md`, memory…) | a blessed rib data home | ❌ **gap `C3`** |
+| Mind storage (`SOUL.md`, memory…) | a blessed rib data home | ↔ MVP self-resolved (`C3` real fix deferred) |
 | Agent-authored lens at runtime | dynamic view registration | ❌ **gap `C2`** |
 | Streaming a turn into a board | partial/streamed snapshot frames | ⚠️ verify (`C4`) |
 | Room with N participants | dynamic surface regions | ❌ **gap `C5`** |
@@ -216,27 +216,39 @@ contract in `@keelson/shared` is the first base PR Phase 2 depends on.
   (a `prompt` node, no deterministic collector) that authors a canvas `board`
   briefing; the executor promotes it to structured output and the rib binding
   publishes it fail-closed (`validate` = `canvasViewSchema`, board kind) to
-  `rib:chamber:brief`. A `views[]` descriptor and a one-region **Chamber**
-  surface render it. Zero base change — proven end-to-end against Keelson's real
-  `workflowDefinitionSchema` + invariants.
+  `rib:chamber:brief`. A `views[]` descriptor renders it.
+- **Phase 1 wired.** Genesis authors a Mind: a `genesis` `onAction` builds a
+  founding-soul prompt from `{ name, role, voice }`, runs one agent turn (the
+  coding-agent CLI via `getExec`, isolated behind a `GenesisAuthor` seam that
+  collapses to `ctx.runAgentTurn` once `C1` lands), and persists `mind.json` +
+  `SOUL.md` + seeded working-memory docs under a self-resolved
+  `<workspace>/.keelson/chamber/minds/<slug>/` (the `C3` MVP). A `chamber-roster`
+  collector reads those Minds back into a `board` of cards on `rib:chamber:roster`;
+  `retire` removes one. The **Chamber** surface now lands the roster in the
+  header and settles the brief into the footer (the room fills the rows in
+  Phase 2). Mutate-then-refresh, mirroring the OSDU action pattern; zero base
+  change.
 - Package + config + identity test from the scaffold remain; `typecheck` /
-  `test` / `check` are green.
+  `test` (87) / `check` are green.
 - Reusable substrate confirmed available in the Keelson base: `board` view,
   surface/region layout, action round-trip, cell tone (`G0`–`G4`).
 
 ## 11. Next step
 
-Phase 0 is done; `C1` (the turn seam,
-[design/C1-agent-invocation.md](./design/C1-agent-invocation.md)) and the
-**A2A communication model** (room-internal, driver-as-router,
-[design/A2A-communication.md](./design/A2A-communication.md)) are both now
-**designed and reviewed**. Two tracks open up:
+Phases 0 and 1 are wired (genesis + roster on the Chamber surface, no base
+change); the room engine **core** is built and unit-tested against fakes
+(types, driver, `sequential`, board builders, ports). What remains to make rooms
+live is the **base track plus a thin adapter**:
 
-- **Phase 1 — genesis + roster** (needs `C3`, the rib data home): scaffold a
-  Mind and author its soul via one agent turn, then list Minds as cards on the
-  Chamber surface (roster moves to the header, the brief settles into the
-  footer). This is the next *rib-side* slice and is independent of `C1`.
 - **Land the `C1` contract in `@keelson/shared`** (the seam types + optional
   `runAgentTurn?` field): a small additive base PR that unblocks Phase 2's room
   loop; the CLI-backed MVP impl can follow once the contract is in. Coordinate
   with whoever owns the base contract.
+- **Phase 2 — wire the room core**: a thin adapter binds the three ports
+  (`RunAgentTurn`/`RoomStore`/`RoomPublisher`) to `ctx.runAgentTurn` + the FS
+  data home + `rib:chamber:room`, plus `onAction` dispatch (`room-start` /
+  `room-next` / `room-inject` / `room-stop`, **fire-and-return** per the 60s
+  socket cap). Genesis (Phase 1) supplies the Minds a room runs.
+- **`C3` real fix** (a blessed `ctx.getDataDir()`) and **`C2`/`C5`** (Phase 3)
+  follow; the Phase 1 self-resolved data home swaps to `getDataDir()` with no
+  rib-logic change when it lands.

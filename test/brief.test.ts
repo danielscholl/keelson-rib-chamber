@@ -86,11 +86,11 @@ describe("Chamber surface (Phase 0)", () => {
     expect(ribSurfaceDescriptorSchema.safeParse(surface).success).toBe(true);
   });
 
-  test("the Briefing is the surface's region, in the rib namespace", () => {
-    const column = rib.surfaces?.[0]?.layout.rows[0]?.columns[0];
-    expect(column?.key).toBe(BRIEF_KEY);
-    expect(column?.workflow).toBe("chamber-brief");
-    expect(column?.key.startsWith("rib:chamber:")).toBe(true);
+  test("the Briefing settles into the surface footer, in the rib namespace", () => {
+    const footer = rib.surfaces?.[0]?.layout.footer;
+    expect(footer?.key).toBe(BRIEF_KEY);
+    expect(footer?.workflow).toBe("chamber-brief");
+    expect(footer?.key.startsWith("rib:chamber:")).toBe(true);
   });
 
   test("every surface region's refresh workflow is one the rib contributes", () => {
