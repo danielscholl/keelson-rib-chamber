@@ -1,0 +1,27 @@
+{
+  "name": "@keelson/rib-chamber",
+  "version": "0.0.0",
+  "description": "Chamber as a Keelson rib — genesis agents, agent-to-agent rooms, and agent-authored lenses on the canvas substrate.",
+  "license": "Apache-2.0",
+  "author": "Daniel Scholl",
+  "type": "module",
+  "main": "./src/index.ts",
+  "files": [
+    "src",
+    "bin",
+    "workflows",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "link:keelson": "bun dev/link.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.16",
+    "@types/bun": "latest",
+    "typescript": "^6.0.3"
+  }
+}
