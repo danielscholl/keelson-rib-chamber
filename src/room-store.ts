@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { assertSafeSlug } from "./genesis.ts";
 import type { RoomStore } from "./ports.ts";
 import type { MindSlug, Room, TurnEntry } from "./types.ts";
 
@@ -9,14 +10,23 @@ import type { MindSlug, Room, TurnEntry } from "./types.ts";
 // testable against a temp dir and path resolution stays in paths.ts. Reads are
 // tolerant: a missing or corrupt file degrades to undefined / [] rather than
 // throwing, mirroring readMinds — a half-written file can't crash the driver.
+//
+// Every method runs `assertSafeSlug` first: a slug becomes a directory name, so
+// a traversal slug (`../minds/alice`) would otherwise read/write outside the
+// rooms tree. This is the FS boundary, mirroring the minds store's guard.
 
 export function createFileRoomStore(roomsRoot: string): RoomStore {
+  // Per-write temp suffix so two overlapping saves of the same room (e.g. a
+  // director inject racing a turn commit) never share a temp file and clobber
+  // each other's rename.
+  let writeSeq = 0;
   const roomDir = (slug: MindSlug) => join(roomsRoot, slug);
   const roomFile = (slug: MindSlug) => join(roomDir(slug), "room.json");
   const transcriptFile = (slug: MindSlug) => join(roomDir(slug), "transcript.jsonl");
 
   return {
     async loadRoom(slug) {
+      assertSafeSlug(slug);
       try {
         const raw = await readFile(roomFile(slug), "utf8");
         const parsed: unknown = JSON.parse(raw);
@@ -27,20 +37,24 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
     },
 
     async saveRoom(room) {
+      assertSafeSlug(room.slug);
       await mkdir(roomDir(room.slug), { recursive: true });
-      // room.json is rewritten every turn; write a temp then rename (atomic on
-      // the same filesystem) so a crash mid-write can't leave a torn state file.
-      const tmp = `${roomFile(room.slug)}.tmp`;
+      // room.json is rewritten every turn; write a unique temp then rename
+      // (atomic on the same filesystem) so a crash mid-write can't leave a torn
+      // state file and concurrent writers can't trample one shared temp.
+      const tmp = `${roomFile(room.slug)}.${++writeSeq}.tmp`;
       await writeFile(tmp, `${JSON.stringify(room, null, 2)}\n`);
       await rename(tmp, roomFile(room.slug));
     },
 
     async appendTranscript(slug, entry) {
+      assertSafeSlug(slug);
       await mkdir(roomDir(slug), { recursive: true });
       await appendFile(transcriptFile(slug), `${JSON.stringify(entry)}\n`);
     },
 
     async loadTranscript(slug) {
+      assertSafeSlug(slug);
       let raw: string;
       try {
         raw = await readFile(transcriptFile(slug), "utf8");

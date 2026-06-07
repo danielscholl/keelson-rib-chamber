@@ -1,7 +1,13 @@
 import { fileURLToPath } from "node:url";
 import type { CanvasView, Rib, RibAction, RibActionResult, RibContext } from "@keelson/shared";
 import { canvasViewSchema } from "@keelson/shared";
-import { buildGenesisPrompt, type GenesisAuthor, parseGenesisOutput, slugify } from "./genesis.ts";
+import {
+  assertSafeSlug,
+  buildGenesisPrompt,
+  type GenesisAuthor,
+  parseGenesisOutput,
+  slugify,
+} from "./genesis.ts";
 import { type MindRecord, mindExists, readMinds, retireMind, scaffoldMind } from "./minds-store.ts";
 import { mindsDir, roomsDir } from "./paths.ts";
 import type { RoomPublisher, RoomStore } from "./ports.ts";
@@ -21,6 +27,9 @@ let driver: RoomDriver | undefined;
 let store: RoomStore | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
+// Set by the rib's dispose() at shutdown so a running loop stops driving turns
+// (and never shells a new CLI turn) while the driver aborts the in-flight one.
+let disposed = false;
 
 // Absolute path to the roster collector, resolved at module load so the workflow
 // node runs the right file regardless of the run's (nominal) cwd. fileURLToPath
@@ -203,10 +212,30 @@ const rib: Rib = {
       // gets a well-formed view; every publish replaces it with the live board.
       let latest: CanvasView = { view: "board", title: "Room", sections: [] };
       sm.register(ROOM_KEY, () => latest, { validate: expectView(ROOM_KEY, "board") });
+      // Dirty-flag pump (mirrors the base's bound-workflow publish): recompose
+      // coalesces concurrent calls onto one in-flight compose, so a publish that
+      // lands while another is composing would otherwise never broadcast its
+      // board (e.g. a director inject racing a turn's terminal commit). Re-run
+      // once more whenever a publish arrived mid-compose, so the latest board
+      // always reaches the canvas.
+      let composing = false;
+      let dirty = false;
       const publisher: RoomPublisher = {
         async publish(view) {
           latest = view;
-          await sm.recompose(ROOM_KEY);
+          if (composing) {
+            dirty = true;
+            return;
+          }
+          composing = true;
+          try {
+            do {
+              dirty = false;
+              await sm.recompose(ROOM_KEY);
+            } while (dirty);
+          } finally {
+            composing = false;
+          }
         },
       };
       store = createFileRoomStore(roomsDir());
@@ -242,6 +271,15 @@ const rib: Rib = {
         return { ok: false, error: `unknown action '${action.type}'` };
     }
   },
+
+  // Shutdown: stop the auto-advance loops and abort any in-flight turn so a CLI
+  // child can't keep running (or publish) after teardown. The aborted turn
+  // finalizes the room to "stopped", so the loop's next check exits cleanly.
+  dispose: async () => {
+    disposed = true;
+    loops.clear();
+    await driver?.dispose();
+  },
 };
 
 const ROOM_DISABLED: RibActionResult = {
@@ -256,13 +294,13 @@ const ROOM_DISABLED: RibActionResult = {
 // the loop exits. Errors are logged, never thrown into the (already-returned)
 // action.
 function ensureLoop(slug: string): void {
-  if (!driver || !store || loops.has(slug)) return;
+  if (!driver || !store || disposed || loops.has(slug)) return;
   loops.add(slug);
   const activeDriver = driver;
   const activeStore = store;
   void (async () => {
     try {
-      while (true) {
+      while (!disposed) {
         const room = await activeStore.loadRoom(slug);
         if (room?.status !== "active") break;
         await activeDriver.step(slug);
@@ -287,6 +325,8 @@ async function roomStartAction(action: RibAction): Promise<RibActionResult> {
     return { ok: false, error: "room-start requires a positive integer turnBudget" };
   }
   const slug = asNonEmptyString(payload.slug) || "room";
+  const bad = badSlug(slug);
+  if (bad) return bad;
   const name = asNonEmptyString(payload.name) || "Room";
   const strategy = (asNonEmptyString(payload.strategy) || "sequential") as RoomStrategyName;
   try {
@@ -301,6 +341,8 @@ async function roomStartAction(action: RibAction): Promise<RibActionResult> {
 function roomNextAction(action: RibAction): RibActionResult {
   if (!driver) return ROOM_DISABLED;
   const slug = roomSlugOf(action);
+  const bad = badSlug(slug);
+  if (bad) return bad;
   // Fire-and-return: one turn can outlast the action's socket budget, and the
   // driver publishes the result itself when it lands. A step while the loop is
   // mid-turn is a no-op (the serial gate), so a manual nudge can't double-drive.
@@ -313,6 +355,8 @@ function roomNextAction(action: RibAction): RibActionResult {
 async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
   if (!driver) return ROOM_DISABLED;
   const slug = roomSlugOf(action);
+  const bad = badSlug(slug);
+  if (bad) return bad;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const directionInjection = asNonEmptyString(payload.directionInjection);
   const nextSpeaker = asNonEmptyString(payload.nextSpeaker);
@@ -332,6 +376,8 @@ async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
 async function roomStopAction(action: RibAction): Promise<RibActionResult> {
   if (!driver) return ROOM_DISABLED;
   const slug = roomSlugOf(action);
+  const bad = badSlug(slug);
+  if (bad) return bad;
   try {
     await driver.stop(slug);
     return { ok: true, data: { slug } };
@@ -343,6 +389,18 @@ async function roomStopAction(action: RibAction): Promise<RibActionResult> {
 function roomSlugOf(action: RibAction): string {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   return asNonEmptyString(payload.slug) || "room";
+}
+
+// Reject a traversal slug at the action boundary so the caller gets a clean
+// ok:false instead of a thrown error logged from a fire-and-return step. The
+// store guards the FS boundary too (defense in depth).
+function badSlug(slug: string): RibActionResult | undefined {
+  try {
+    assertSafeSlug(slug);
+    return undefined;
+  } catch {
+    return { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` };
+  }
 }
 
 function errText(e: unknown): string {

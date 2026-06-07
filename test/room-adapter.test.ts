@@ -189,4 +189,21 @@ describe("room adapter — live room", () => {
     const res = await onAction(startPayload({ participants: [] }), makeCtx({ sm: snap.sm }));
     expect(res.ok).toBe(false);
   });
+
+  it("rejects a path-traversal room slug at the action boundary", async () => {
+    const res = await onAction(startPayload({ slug: "../../etc" }), makeCtx({ sm: snap.sm }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("unsafe room slug");
+  });
+
+  // Must run last: dispose() flips module-global state so the loop stops driving.
+  it("dispose halts the loop so a later start does not advance", async () => {
+    await rib.dispose?.();
+    const store = createFileRoomStore(roomsDir());
+    const res = await onAction(startPayload({ slug: "afterdispose" }), makeCtx({ sm: snap.sm }));
+    expect(res.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 30));
+    // The room was opened but the disposed loop never stepped it.
+    expect((await store.loadRoom("afterdispose"))?.turnIndex).toBe(0);
+  });
 });
