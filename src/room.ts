@@ -68,6 +68,28 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return value;
   }
 
+  // Per-room serialization for the load-modify-save commit sections. A director
+  // inject runs concurrently with an in-flight turn (it must — the turn is
+  // awaiting the agent), so without this their commits can interleave: inject
+  // loads the pre-turn room and saves it after the turn advanced turnIndex,
+  // reverting the advance (the same turn repeats). The lock wraps only the brief
+  // commit sections, never the agent call, so mid-turn injection still works.
+  const writeChains = new Map<MindSlug, Promise<unknown>>();
+  function withLock<T>(slug: MindSlug, fn: () => Promise<T>): Promise<T> {
+    const prev = writeChains.get(slug) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
+    // Keep the chain going even if this section throws (one failure must not
+    // wedge the room's future commits).
+    writeChains.set(
+      slug,
+      next.then(
+        () => {},
+        () => {},
+      ),
+    );
+    return next;
+  }
+
   async function persistAndPublish(room: Room): Promise<void> {
     await deps.store.saveRoom(room);
     const transcript = await deps.store.loadTranscript(room.slug);
@@ -214,7 +236,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           at: now().toISOString(),
         }),
       );
-      await commitTerminal(room.slug, gen, { ...room, status: "done" });
+      await withLock(room.slug, () => commitTerminal(room.slug, gen, { ...room, status: "done" }));
       return;
     }
 
@@ -273,17 +295,20 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     );
 
     // Merge onto the latest stored room, not the pre-turn snapshot, so a director
-    // inject that arrived during the turn (fresh pending) is preserved. The commit
-    // helpers drop the write if a stop/restart has superseded this turn.
-    const current = (await deps.store.loadRoom(room.slug)) ?? room;
-    const advanced: Room = { ...current, turnIndex: room.turnIndex + 1 };
-    if (aborted) {
-      await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
-    } else if (advanced.turnIndex >= advanced.turnBudget) {
-      await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
-    } else {
-      await commitActive(room.slug, gen, advanced);
-    }
+    // inject that arrived during the turn (fresh pending) is preserved. Under the
+    // room lock so the load-advance-save can't interleave with an inject commit.
+    // The commit helpers drop the write if a stop/restart has superseded the turn.
+    await withLock(room.slug, async () => {
+      const current = (await deps.store.loadRoom(room.slug)) ?? room;
+      const advanced: Room = { ...current, turnIndex: room.turnIndex + 1 };
+      if (aborted) {
+        await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
+      } else if (advanced.turnIndex >= advanced.turnBudget) {
+        await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
+      } else {
+        await commitActive(room.slug, gen, advanced);
+      }
+    });
   }
 
   async function inject(slug: MindSlug, input: RoomInjectInput): Promise<void> {
@@ -293,14 +318,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const room = await deps.store.loadRoom(slug);
     if (room?.status !== "active") return;
     if (generationOf(slug) !== gen) return; // superseded during load
-
-    const pending = {
-      ...(room.pending ?? {}),
-      ...(input.directionInjection !== undefined
-        ? { directionInjection: input.directionInjection }
-        : {}),
-      ...(input.nextSpeaker !== undefined ? { nextSpeaker: input.nextSpeaker } : {}),
-    };
 
     if (input.text !== undefined) {
       // `from` is forced to "director" server-side regardless of any payload.
@@ -318,9 +335,24 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       );
     }
 
-    // Skip if a stop/terminal completion closed the room while we were appending —
-    // an inject must never reactivate a stopped/done room.
-    await commitActive(slug, gen, { ...room, pending });
+    // Merge pending onto the LATEST room under the lock: re-load inside the lock
+    // so a turn that advanced turnIndex while we were appending isn't reverted,
+    // and this commit can't interleave with the turn's own load-advance-save.
+    // Skip if a stop/terminal completion closed the room — an inject must never
+    // reactivate a stopped/done room.
+    await withLock(slug, async () => {
+      const current = await deps.store.loadRoom(slug);
+      if (current?.status !== "active") return;
+      if (generationOf(slug) !== gen) return;
+      const pending = {
+        ...(current.pending ?? {}),
+        ...(input.directionInjection !== undefined
+          ? { directionInjection: input.directionInjection }
+          : {}),
+        ...(input.nextSpeaker !== undefined ? { nextSpeaker: input.nextSpeaker } : {}),
+      };
+      await commitActive(slug, gen, { ...current, pending });
+    });
   }
 
   async function stop(slug: MindSlug): Promise<void> {

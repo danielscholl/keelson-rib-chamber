@@ -14,18 +14,13 @@ describe("rib-chamber", () => {
     expect(keys).toContain("rib:chamber:brief");
   });
 
-  it("exposes the genesis/retire and room-* controls", () => {
+  it("lists genesis/retire as static actions; room controls are board-baked", () => {
     const types = (rib.actions ?? []).map((a) => a.type);
-    expect(types).toEqual(
-      expect.arrayContaining([
-        "genesis",
-        "retire",
-        "room-start",
-        "room-next",
-        "room-inject",
-        "room-stop",
-      ]),
-    );
+    expect(types).toEqual(expect.arrayContaining(["genesis", "retire"]));
+    // Room controls need a payload, so they are baked into the boards, not the
+    // payload-less static actions[] (which would always fail from the panel).
+    expect(types).not.toContain("room-start");
+    expect(types).not.toContain("room-inject");
   });
 
   it("places the live room transcript in the surface row", () => {

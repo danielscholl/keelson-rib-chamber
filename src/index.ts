@@ -114,16 +114,14 @@ const rib: Rib = {
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
-  // The "new agent" / "retire" affordances plus the Phase 2 room controls; all
-  // dispatch to onAction. Room turns advance on their own once started (the
-  // auto-advance loop), so room-next is a manual single-step for paused control.
+  // Genesis / retire affordances. The room controls (room-start/next/inject/stop)
+  // are NOT listed here: a static actions[] button dispatches type-only, but the
+  // room controls need a payload (participants, the target slug, a nextSpeaker),
+  // so they are baked into the roster/room boards as payload-carrying actions
+  // (the OSDU pattern) and still reach onAction below.
   actions: [
     { type: "genesis", label: "New agent" },
     { type: "retire", label: "Retire agent" },
-    { type: "room-start", label: "Start room" },
-    { type: "room-next", label: "Next turn" },
-    { type: "room-inject", label: "Inject" },
-    { type: "room-stop", label: "Stop room" },
   ],
 
   // The Chamber nav tab. The roster sits in the header (the Minds you genesis),

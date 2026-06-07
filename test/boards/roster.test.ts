@@ -33,4 +33,21 @@ describe("buildRosterBoard", () => {
     const board = buildRosterBoard([mind({ model: "claude-x", tools: ["web", "bash"] })]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
+
+  test("bakes a Start-room action carrying all mind slugs once there are >= 2", () => {
+    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    expect(actions.items[0]?.type).toBe("room-start");
+    expect(actions.items[0]?.payload).toMatchObject({
+      slug: "room",
+      participants: ["a", "b"],
+    });
+  });
+
+  test("offers no start action with fewer than two minds (not a conversation)", () => {
+    expect(buildRosterBoard([]).sections.some((s) => s.kind === "actions")).toBe(false);
+    expect(buildRosterBoard([mind()]).sections.some((s) => s.kind === "actions")).toBe(false);
+  });
 });

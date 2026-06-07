@@ -263,6 +263,32 @@ describe("room driver — concurrency & model", () => {
     await stepP;
     expect((await store.loadRoom("demo"))?.pending?.nextSpeaker).toBe("b");
   });
+
+  test("an inject racing a turn's commit never reverts turnIndex", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START); // turnIndex 0, budget 4
+    const stepP = driver.step("demo");
+    await turns.started; // turn for "a" in flight at turnIndex 0
+    // The inject (loads the pre-turn room) and the turn's commit (advances
+    // turnIndex) race for the room write. The per-room lock serializes them, so
+    // the inject can't save the stale turnIndex 0 over the turn's advance.
+    const injectP = driver.inject("demo", { nextSpeaker: "b", text: "steer" });
+    turns.release();
+    await Promise.all([stepP, injectP]);
+    const room = await store.loadRoom("demo");
+    expect(room?.turnIndex).toBe(1); // advanced exactly once, never reverted
+    expect(room?.pending?.nextSpeaker).toBe("b"); // and the inject is preserved
+  });
 });
 
 describe("room driver — lifecycle edge cases", () => {
