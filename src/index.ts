@@ -310,7 +310,9 @@ function ensureLoop(slug: string): void {
     try {
       while (!disposed) {
         const room = await activeStore.loadRoom(slug);
-        if (room?.status !== "active") break;
+        // Re-check after the await: dispose() may have landed during loadRoom, and
+        // a turn started after teardown would outlive the rib.
+        if (disposed || room?.status !== "active") break;
         await activeDriver.step(slug);
       }
     } catch (e) {
