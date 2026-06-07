@@ -49,6 +49,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   // wired rib this is enforced by the snapshot key's register-once discipline;
   // here the driver tracks it directly.
   let activeSlug: MindSlug | undefined;
+  // Set by dispose(). The CLI MVP can't cancel an in-flight child, so a turn can
+  // settle after teardown; once disposed, a late turn drops its append/commit so
+  // nothing is written or published after the rib is gone.
+  let disposed = false;
 
   function clearActive(slug: MindSlug): void {
     if (activeSlug === slug) activeSlug = undefined;
@@ -280,6 +284,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           : result.text;
     }
 
+    // Shutdown landed during the (uncancellable) turn — drop the late result so
+    // nothing is appended or published after the rib is disposed.
+    if (disposed) return;
+
     await deps.store.appendTranscript(
       room.slug,
       buildTurnEntry({
@@ -375,6 +383,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   }
 
   async function dispose(): Promise<void> {
+    disposed = true;
     for (const controller of controllers.values()) controller.abort();
     controllers.clear();
     activeSlug = undefined;

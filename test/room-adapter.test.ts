@@ -244,6 +244,14 @@ describe("room adapter — live room", () => {
     if (!res.ok) expect(res.error).toContain("unsafe room slug");
   });
 
+  it("rejects a slug-less room control (fails closed under fresh slugs)", async () => {
+    for (const type of ["room-stop", "room-inject"]) {
+      const res = await onAction({ type, payload: {} }, makeCtx({ sm: snap.sm }));
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error).toContain("requires payload { slug }");
+    }
+  });
+
   // Must run last: dispose() flips module-global state so the loop stops driving.
   it("dispose halts the loop so a later start does not advance", async () => {
     await rib.dispose?.();

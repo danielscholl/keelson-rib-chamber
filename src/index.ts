@@ -373,9 +373,9 @@ async function roomStartAction(action: RibAction): Promise<RibActionResult> {
 
 async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
   if (!driver) return ROOM_DISABLED;
-  const slug = roomSlugOf(action);
-  const bad = badSlug(slug);
-  if (bad) return bad;
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  const { slug } = resolved;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const directionInjection = asNonEmptyString(payload.directionInjection);
   const nextSpeaker = asNonEmptyString(payload.nextSpeaker);
@@ -394,20 +394,27 @@ async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
 
 async function roomStopAction(action: RibAction): Promise<RibActionResult> {
   if (!driver) return ROOM_DISABLED;
-  const slug = roomSlugOf(action);
-  const bad = badSlug(slug);
-  if (bad) return bad;
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
   try {
-    await driver.stop(slug);
-    return { ok: true, data: { slug } };
+    await driver.stop(resolved.slug);
+    return { ok: true, data: { slug: resolved.slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
 }
 
-function roomSlugOf(action: RibAction): string {
+// Resolve the target room slug for a control. With server-assigned slugs there
+// is no default: a payload-less call (a stale/static button or an API client
+// that forgot the slug) must fail closed rather than hit a legacy `room` dir.
+function requireRoomSlug(action: RibAction): { slug: string } | { error: RibActionResult } {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
-  return asNonEmptyString(payload.slug) || "room";
+  const slug = asNonEmptyString(payload.slug);
+  if (!slug) return { error: { ok: false, error: "this room control requires payload { slug }" } };
+  if (!isSafeSlug(slug)) {
+    return { error: { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` } };
+  }
+  return { slug };
 }
 
 // A unique, path-safe room slug per start (timestamp + counter), so every room
@@ -426,15 +433,6 @@ function isSafeSlug(slug: string): boolean {
   } catch {
     return false;
   }
-}
-
-// Reject a traversal slug at the action boundary so the caller gets a clean
-// ok:false instead of a thrown error logged from a fire-and-return step. The
-// store guards the FS boundary too (defense in depth).
-function badSlug(slug: string): RibActionResult | undefined {
-  return isSafeSlug(slug)
-    ? undefined
-    : { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` };
 }
 
 function errText(e: unknown): string {
