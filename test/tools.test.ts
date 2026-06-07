@@ -230,6 +230,13 @@ describe("chamber room-control chat tools", () => {
     expect(room?.pending?.directionInjection).toBe("wrap up");
   });
 
+  it("rejects a say that calls on a non-participant", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_say").execute({ callOn: "ghost" }, t.ctx);
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("not a participant");
+  });
+
   it("rejects a say with no fields", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_say").execute({}, t.ctx);
@@ -248,5 +255,18 @@ describe("chamber room-control chat tools", () => {
     await tool("chamber_room_status").execute({}, s.ctx);
     expect(s.out()).toContain("stopped");
     expect(s.out()).toContain("alice");
+  });
+
+  it("does not start a room when the request is already aborted", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const chunks: MessageChunk[] = [];
+    const ctx: ToolContext = { cwd: ".", emit: (c) => chunks.push(c), abortSignal: ac.signal };
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], confirm: true },
+      ctx,
+    );
+    // Aborted before the state-changing start — nothing opened, nothing emitted.
+    expect(chunks.length).toBe(0);
   });
 });

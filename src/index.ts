@@ -752,6 +752,8 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           );
           return;
         }
+        // A user abort during the awaits above must not still open a paid room.
+        if (ctx.abortSignal.aborted) return;
         const res = await startRoom({ participants, turnBudget, name });
         if (res.ok) {
           const slug = (res.data as { slug?: string } | undefined)?.slug ?? "";
@@ -786,6 +788,21 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           return;
         }
         const { direction, callOn, text } = parsed.data;
+        // The driver only honors nextSpeaker when it exactly matches an active
+        // participant slug — otherwise step() silently drops it and falls back to
+        // the strategy. Reject up front so the tool can't report a dropped
+        // nomination ("Alice" vs "alice", a typo, a non-participant) as sent.
+        if (callOn) {
+          const room = await store.loadRoom(slug);
+          if (!room?.participants.includes(callOn)) {
+            emitResult(
+              ctx,
+              `chamber_room_say: "${callOn}" is not a participant — call on one of the room's Minds.`,
+              true,
+            );
+            return;
+          }
+        }
         // injectRoom does the truthiness filtering; pass the fields straight through.
         const res = await injectRoom(slug, {
           directionInjection: direction,
