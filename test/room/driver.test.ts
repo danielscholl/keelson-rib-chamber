@@ -491,9 +491,17 @@ describe("room driver — settle (I/O + reservation)", () => {
 describe("room driver — driver-API soundness", () => {
   // Flush pending microtasks until a turn has actually been invoked. The fresh
   // turn below reaches runAgentTurn through several awaits; a macrotask tick lets
-  // them settle so we can read its recorded request deterministically.
+  // them settle so we can read its recorded request deterministically. Bounded by
+  // a deadline so a regression that never invokes the turn fails loudly instead of
+  // hanging the suite forever.
   async function waitForTurns(turns: { requests: unknown[] }, n: number) {
-    while (turns.requests.length < n) await new Promise<void>((r) => setTimeout(r, 0));
+    const deadline = Date.now() + 2_000;
+    while (turns.requests.length < n) {
+      if (Date.now() > deadline) {
+        throw new Error(`timeout waiting for ${n} turns; got ${turns.requests.length}`);
+      }
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
   }
 
   test("step() distinguishes busy (serial-gate no-op) from ended (room closed)", async () => {
