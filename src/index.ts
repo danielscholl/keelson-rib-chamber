@@ -19,6 +19,10 @@ const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const ROOM_KEY = "rib:chamber:room";
 
+// Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
+// accidental or malicious huge budget would launch a runaway sequence; reject it.
+const MAX_ROOM_TURN_BUDGET = 50;
+
 // The room driver is a boot-time singleton: it holds in-flight turn state across
 // onAction calls, so it is built once in registerTools (the only hook that runs
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
@@ -328,11 +332,17 @@ async function roomStartAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const participants = asStringArray(payload.participants);
   const turnBudget = typeof payload.turnBudget === "number" ? payload.turnBudget : 0;
-  if (participants.length === 0) {
-    return { ok: false, error: "room-start requires payload { participants: string[] }" };
+  if (participants.length === 0 || !participants.every(isSafeSlug)) {
+    return {
+      ok: false,
+      error: "room-start requires payload { participants: non-empty safe slugs }",
+    };
   }
-  if (!Number.isInteger(turnBudget) || turnBudget <= 0) {
-    return { ok: false, error: "room-start requires a positive integer turnBudget" };
+  if (!Number.isInteger(turnBudget) || turnBudget <= 0 || turnBudget > MAX_ROOM_TURN_BUDGET) {
+    return {
+      ok: false,
+      error: `room-start turnBudget must be an integer in 1..${MAX_ROOM_TURN_BUDGET}`,
+    };
   }
   const name = asNonEmptyString(payload.name) || "Room";
   const strategy = (asNonEmptyString(payload.strategy) || "sequential") as RoomStrategyName;
@@ -407,16 +417,24 @@ function freshRoomSlug(): string {
   return `room-${Date.now().toString(36)}-${(roomSeq++).toString(36)}`;
 }
 
+// True if the slug is a bare kebab token (no traversal, non-empty). assertSafeSlug
+// throws on a bad slug; this is its non-throwing predicate form.
+function isSafeSlug(slug: string): boolean {
+  try {
+    assertSafeSlug(slug);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Reject a traversal slug at the action boundary so the caller gets a clean
 // ok:false instead of a thrown error logged from a fire-and-return step. The
 // store guards the FS boundary too (defense in depth).
 function badSlug(slug: string): RibActionResult | undefined {
-  try {
-    assertSafeSlug(slug);
-    return undefined;
-  } catch {
-    return { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` };
-  }
+  return isSafeSlug(slug)
+    ? undefined
+    : { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` };
 }
 
 function errText(e: unknown): string {

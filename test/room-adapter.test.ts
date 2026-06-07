@@ -215,6 +215,24 @@ describe("room adapter — live room", () => {
     expect(res.ok).toBe(false);
   });
 
+  it("rejects a room-start with a blank/unsafe participant slug", async () => {
+    expect(
+      (await onAction(startPayload({ participants: [""] }), makeCtx({ sm: snap.sm }))).ok,
+    ).toBe(false);
+    expect(
+      (await onAction(startPayload({ participants: ["../x"] }), makeCtx({ sm: snap.sm }))).ok,
+    ).toBe(false);
+  });
+
+  it("rejects a room-start with an out-of-range turnBudget", async () => {
+    expect(
+      (await onAction(startPayload({ turnBudget: 10_000 }), makeCtx({ sm: snap.sm }))).ok,
+    ).toBe(false);
+    expect((await onAction(startPayload({ turnBudget: 0 }), makeCtx({ sm: snap.sm }))).ok).toBe(
+      false,
+    );
+  });
+
   it("rejects a path-traversal slug on a room control", async () => {
     // room-start assigns its own slug; the slug-bearing controls are the ones to
     // guard at the action boundary.
