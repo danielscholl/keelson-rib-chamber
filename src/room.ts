@@ -464,11 +464,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // so a turn that advanced turnIndex while we were appending isn't reverted,
     // and this commit can't interleave with the turn's own load-advance-save.
     // Skip if a stop/terminal completion closed the room — an inject must never
-    // reactivate a stopped/done room.
-    await withLock(slug, async () => {
+    // reactivate a stopped/done room. Return the lock's result so a late inject
+    // (the room stopped/superseded between the load above and the lock) surfaces
+    // as false — a dropped steer — instead of a false "applied".
+    return await withLock(slug, async () => {
       const current = await deps.store.loadRoom(slug);
-      if (current?.status !== "active") return;
-      if (generationOf(slug) !== gen) return;
+      if (current?.status !== "active") return false;
+      if (generationOf(slug) !== gen) return false;
       const pending = {
         ...(current.pending ?? {}),
         ...(input.directionInjection !== undefined
@@ -477,8 +479,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         ...(input.nextSpeaker !== undefined ? { nextSpeaker: input.nextSpeaker } : {}),
       };
       await commitActive(slug, gen, { ...current, pending });
+      return true;
     });
-    return true;
   }
 
   async function stop(slug: MindSlug): Promise<void> {
