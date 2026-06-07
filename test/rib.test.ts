@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { RibContext } from "@keelson/shared";
 import rib from "../src/index.ts";
 
 describe("rib-chamber", () => {
@@ -26,5 +27,17 @@ describe("rib-chamber", () => {
   it("places the live room transcript in the surface row", () => {
     const row = rib.surfaces?.[0]?.layout.rows[0];
     expect(row?.columns[0]?.key).toBe("rib:chamber:room");
+  });
+
+  it("returns no chat tools without the agent-turn + snapshot seams", () => {
+    // A ctx missing getSnapshotManager + runAgentTurn must not build the driver,
+    // so registerTools fails closed with no tools (and no room wiring side effect).
+    const ctx = {
+      getExec: () => ({
+        runJSON: async () => ({ ok: true as const, data: undefined }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+    } as unknown as RibContext;
+    expect(rib.registerTools?.(ctx) ?? []).toEqual([]);
   });
 });
