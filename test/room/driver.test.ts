@@ -401,3 +401,86 @@ describe("room driver — lifecycle edge cases", () => {
     expect((await store.loadRoom("demo"))?.status).toBe("done"); // not reactivated
   });
 });
+
+describe("room driver — settle (I/O + reservation)", () => {
+  // Wrap a fake store to count full-transcript reads, proving the in-memory
+  // transcript replaces the per-turn re-parse.
+  function countingStore() {
+    const base = makeFakeStore();
+    let loadTranscriptCalls = 0;
+    const store = {
+      ...base.store,
+      async loadTranscript(slug: string) {
+        loadTranscriptCalls += 1;
+        return base.store.loadTranscript(slug);
+      },
+    };
+    return { ...base, store, loads: () => loadTranscriptCalls };
+  }
+
+  test("transcript is loaded once per room, not re-parsed each turn", async () => {
+    const c = countingStore();
+    const driver = createRoomDriver({
+      store: c.store,
+      publisher: makeFakePublisher().publisher,
+      runAgentTurn: scriptedRunAgentTurn([{ text: "x" }]).run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START); // one load to seed the in-memory transcript
+    await driver.step("demo");
+    await driver.step("demo");
+    await driver.step("demo");
+    expect((await c.store.loadRoom("demo"))?.turnIndex).toBe(3); // turns ran
+    expect(c.loads()).toBe(1); // never re-read despite 3 turns (was 2/turn)
+  });
+
+  test("a mid-turn director inject shows in the published board", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn("agent reply");
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const stepP = driver.step("demo");
+    await turns.started;
+    await driver.inject("demo", { text: "director note" }); // appends mid-turn
+    turns.release();
+    await stepP;
+    const last = pub.last();
+    if (last?.view !== "board") throw new Error("expected a board view");
+    const rows = last.sections.find((s) => s.kind === "rows");
+    const texts = rows?.kind === "rows" ? rows.items.map((i) => i.text) : [];
+    // Both the concurrently-injected director note and the turn's reply are on
+    // the board — the in-memory transcript stayed consistent with disk.
+    expect(texts).toContain("director note");
+    expect(texts).toContain("agent reply");
+  });
+
+  test("concurrent starts: synchronous reservation lets only one win", async () => {
+    const h = harness();
+    // Fire two starts without awaiting between them. The reservation in start()
+    // is synchronous, so the second sees the first's claim and rejects — no
+    // adapter-level start gate needed.
+    const settled = await Promise.allSettled([
+      h.driver.start({ ...START, slug: "a" }),
+      h.driver.start({ ...START, slug: "b" }),
+    ]);
+    expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(settled.filter((r) => r.status === "rejected")).toHaveLength(1);
+  });
+
+  test("isDisposed reflects dispose()", async () => {
+    const h = harness();
+    expect(h.driver.isDisposed()).toBe(false);
+    await h.driver.dispose();
+    expect(h.driver.isDisposed()).toBe(true);
+  });
+});
