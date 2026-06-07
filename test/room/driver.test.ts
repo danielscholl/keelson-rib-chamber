@@ -418,7 +418,7 @@ describe("room driver — settle (I/O + reservation)", () => {
     return { ...base, store, loads: () => loadTranscriptCalls };
   }
 
-  test("transcript is loaded once per room, not re-parsed each turn", async () => {
+  test("transcript is never re-parsed from disk during a room's turns", async () => {
     const c = countingStore();
     const driver = createRoomDriver({
       store: c.store,
@@ -428,12 +428,14 @@ describe("room driver — settle (I/O + reservation)", () => {
       now: fixedClock(),
       newId: seqIds(),
     });
-    await driver.start(START); // one load to seed the in-memory transcript
+    await driver.start(START); // a fresh room opens an empty cache — no disk read
     await driver.step("demo");
     await driver.step("demo");
     await driver.step("demo");
     expect((await c.store.loadRoom("demo"))?.turnIndex).toBe(3); // turns ran
-    expect(c.loads()).toBe(1); // never re-read despite 3 turns (was 2/turn)
+    // The in-memory transcript serves every prompt/board build, so the store's
+    // loadTranscript is never hit across the room's life (was 2 re-parses/turn).
+    expect(c.loads()).toBe(0);
   });
 
   test("a mid-turn director inject shows in the published board", async () => {
@@ -565,5 +567,38 @@ describe("room driver — driver-API soundness", () => {
     const rows = last.sections.find((s) => s.kind === "rows");
     const items = rows?.kind === "rows" ? rows.items : [];
     expect(items).toHaveLength(1); // only the fresh reply — the stale entry was gated out
+  });
+
+  test("a stale turn that drained to disk before a same-slug restart is not pulled into the new room", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn("STALE-BEFORE-RESTART");
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START); // generation 1
+    const stale = driver.step("demo"); // the gen-1 turn goes in flight
+    await turns.started;
+    await driver.stop("demo"); // closes gen 1
+    turns.release(); // the gen-1 turn drains and writes its reply to DISK *before* the restart
+    await stale;
+    expect((await store.loadTranscript("demo")).length).toBe(1); // disk kept it (append-only)
+
+    await driver.start(START); // restart the same slug -> a fresh generation
+    // The restarted room is a brand-new room: it must not inherit the stale
+    // stopped-turn reply that the shared on-disk transcript still holds. Opening a
+    // new generation seeds an empty cache (not from disk), so the board and the
+    // resumed turnIndex both start clean.
+    const last = pub.last();
+    if (last?.view !== "board") throw new Error("expected a board view");
+    const rows = last.sections.find((s) => s.kind === "rows");
+    const items = rows?.kind === "rows" ? rows.items : [];
+    expect(items).toHaveLength(0); // fresh room, no carried-over history
+    expect((await store.loadRoom("demo"))?.turnIndex).toBe(0);
   });
 });

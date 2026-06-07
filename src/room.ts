@@ -215,14 +215,21 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         return existing;
       }
 
-      // A fresh start or a restart of a closed (stopped/done) room opens a new
-      // generation, superseding any stale step still draining on this slug. The
-      // bump and the cache swap happen together (a closed room already deleted its
-      // cache), so a superseded turn's generation gate keeps its late append out of
-      // this fresh array. Loaded once per room lifetime; later prompt/board builds
-      // read this in-memory copy instead of re-parsing the file.
+      // A fresh start, or a restart of a closed (stopped/done) room, opens a NEW
+      // generation — a brand-new room that does NOT inherit the prior generation's
+      // persisted transcript or turnIndex. The driver requires a unique slug per
+      // generation (the rib mints freshRoomSlug() per start), so in the live rib a
+      // new slug has no transcript on disk and this seeds []. The empty seed also
+      // closes a slug-reuse hole: the append-only transcript.jsonl can hold a
+      // superseded generation's entry — a stopped in-flight turn that drained to
+      // disk before this start — and loading from it would pull that stale turn
+      // into the new room's board/prompt. The push-side generation gate only
+      // guards a stale append landing AFTER this seed; seeding empty (not from
+      // disk) guards one that landed BEFORE. (Full slug-reuse soundness across a
+      // process restart would need per-generation entry tagging; the unique-slug
+      // invariant makes that moot.)
       bumpGeneration(config.slug);
-      transcripts.set(config.slug, [...(await deps.store.loadTranscript(config.slug))]);
+      transcripts.set(config.slug, []);
       const room: Room = {
         slug: config.slug,
         name: config.name,
@@ -230,9 +237,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         participants: config.participants,
         status: "active",
         turnBudget: config.turnBudget,
-        turnIndex: existing?.turnIndex ?? 0,
+        turnIndex: 0,
         ...(config.config ? { config: config.config } : {}),
-        createdAt: existing?.createdAt ?? now().toISOString(),
+        createdAt: now().toISOString(),
       };
       await persistAndPublish(room);
       return room;
