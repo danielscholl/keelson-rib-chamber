@@ -29,6 +29,11 @@ let store: RoomStore | undefined;
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
 let roomSeq = 0;
+// Serializes starts process-wide: driver.start awaits a disk read before
+// reserving the single active slot, so two concurrent room-starts could both
+// pass the single-active check and launch two loops. The gate makes
+// check-and-reserve atomic; the second start then fails the active-room check.
+let startGate: Promise<unknown> = Promise.resolve();
 // Set by the rib's dispose() at shutdown so a running loop stops driving turns
 // (and never shells a new CLI turn) while the driver aborts the in-flight one.
 let disposed = false;
@@ -335,9 +340,19 @@ async function roomStartAction(action: RibAction): Promise<RibActionResult> {
   // sends that late append to its own old room dir, never the new one. Past rooms
   // remain under rooms/ as history (a retention sweep is a follow-up).
   const slug = freshRoomSlug();
-  try {
-    await driver.start({ slug, name, strategy, participants, turnBudget });
+  const activeDriver = driver;
+  // Chain onto the start gate so concurrent starts run their check-and-reserve
+  // one at a time (a second start then sees the first's active room and fails).
+  const run = startGate.then(async () => {
+    await activeDriver.start({ slug, name, strategy, participants, turnBudget });
     ensureLoop(slug);
+  });
+  startGate = run.then(
+    () => {},
+    () => {},
+  );
+  try {
+    await run;
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };

@@ -356,16 +356,22 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   }
 
   async function stop(slug: MindSlug): Promise<void> {
-    const room = await deps.store.loadRoom(slug);
-    // Only an active room can be stopped — a stale stop must not rewrite a `done`
-    // (or already stopped) room to stopped.
-    if (room?.status !== "active") return;
-    // Close the generation so an in-flight step's completion is superseded and
-    // cannot re-publish stale state after this stop.
-    bumpGeneration(slug);
-    controllers.get(slug)?.abort();
-    clearActive(slug);
-    await persistAndPublish({ ...room, status: "stopped", pending: undefined });
+    // Under the room lock so the stopped write can't interleave with a turn's
+    // commit: a commit that already passed its generation check could otherwise
+    // save the active room after this stopped save and reactivate it. When a turn
+    // is mid-agent-call the lock is free, so the abort below still lands promptly.
+    await withLock(slug, async () => {
+      const room = await deps.store.loadRoom(slug);
+      // Only an active room can be stopped — a stale stop must not rewrite a
+      // `done` (or already stopped) room to stopped.
+      if (room?.status !== "active") return;
+      // Close the generation so an in-flight step's completion is superseded and
+      // cannot re-publish stale state after this stop.
+      bumpGeneration(slug);
+      controllers.get(slug)?.abort();
+      clearActive(slug);
+      await persistAndPublish({ ...room, status: "stopped", pending: undefined });
+    });
   }
 
   async function dispose(): Promise<void> {
