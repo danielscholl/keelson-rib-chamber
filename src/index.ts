@@ -332,12 +332,15 @@ function ensureLoop(slug: string): void {
 async function roomStartAction(action: RibAction): Promise<RibActionResult> {
   if (!driver) return ROOM_DISABLED;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
-  const participants = asStringArray(payload.participants);
+  // De-dupe (a duplicate participant would over-weight a speaker in the rotation)
+  // while preserving order.
+  const participants = [...new Set(asStringArray(payload.participants))];
   const turnBudget = typeof payload.turnBudget === "number" ? payload.turnBudget : 0;
-  if (participants.length === 0 || !participants.every(isSafeSlug)) {
+  if (participants.length === 0 || !participants.every(isValidParticipant)) {
     return {
       ok: false,
-      error: "room-start requires payload { participants: non-empty safe slugs }",
+      error:
+        "room-start requires payload { participants: non-empty safe slugs, not director/system }",
     };
   }
   if (!Number.isInteger(turnBudget) || turnBudget <= 0 || turnBudget > MAX_ROOM_TURN_BUDGET) {
@@ -424,6 +427,13 @@ function requireRoomSlug(action: RibAction): { slug: string } | { error: RibActi
 // into a new one. Matches SAFE_SLUG (lowercase alnum + hyphens).
 function freshRoomSlug(): string {
   return `room-${Date.now().toString(36)}-${(roomSeq++).toString(36)}`;
+}
+
+// A room participant must be a safe slug and not a reserved authority: "director"
+// and "system" are driver-stamped roles, never speakers (a room with one would
+// just end on its turn — an unknown mind).
+function isValidParticipant(slug: string): boolean {
+  return slug !== "director" && slug !== "system" && isSafeSlug(slug);
 }
 
 // True if the slug is a bare kebab token (no traversal, non-empty). assertSafeSlug

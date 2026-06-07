@@ -215,13 +215,29 @@ describe("room adapter — live room", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("rejects a room-start with a blank/unsafe participant slug", async () => {
+  it("rejects a room-start with a blank/unsafe/reserved participant slug", async () => {
     expect(
       (await onAction(startPayload({ participants: [""] }), makeCtx({ sm: snap.sm }))).ok,
     ).toBe(false);
     expect(
       (await onAction(startPayload({ participants: ["../x"] }), makeCtx({ sm: snap.sm }))).ok,
     ).toBe(false);
+    // "director"/"system" are reserved driver roles, never speakers.
+    expect(
+      (await onAction(startPayload({ participants: ["director"] }), makeCtx({ sm: snap.sm }))).ok,
+    ).toBe(false);
+  });
+
+  it("de-dupes participants on start", async () => {
+    const store = createFileRoomStore(roomsDir());
+    const slug = slugOf(
+      await onAction(
+        startPayload({ participants: ["alice", "bob", "alice"] }),
+        makeCtx({ sm: snap.sm }),
+      ),
+    );
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    expect((await store.loadRoom(slug))?.participants).toEqual(["alice", "bob"]);
   });
 
   it("rejects a room-start with an out-of-range turnBudget", async () => {

@@ -67,6 +67,16 @@ describe("createFileRoomStore", () => {
     expect(await store.loadRoom("partial")).toBeUndefined();
   });
 
+  it("returns undefined for a room.json with non-string participants", async () => {
+    const store = createFileRoomStore(root);
+    await mkdir(join(root, "corrupt"), { recursive: true });
+    await writeFile(
+      join(root, "corrupt", "room.json"),
+      JSON.stringify({ ...makeRoom({ slug: "corrupt" }), participants: [1, "alice"] }),
+    );
+    expect(await store.loadRoom("corrupt")).toBeUndefined();
+  });
+
   it("appends and loads a transcript in order", async () => {
     const store = createFileRoomStore(root);
     await store.appendTranscript("room", makeEntry({ messageId: "m1", turnIndex: 0 }));

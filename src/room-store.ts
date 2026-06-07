@@ -84,6 +84,7 @@ function isRoom(value: unknown): value is Room {
     typeof r.name === "string" &&
     typeof r.strategy === "string" &&
     Array.isArray(r.participants) &&
+    r.participants.every((p) => typeof p === "string") &&
     (r.status === "active" || r.status === "stopped" || r.status === "done") &&
     typeof r.turnBudget === "number" &&
     typeof r.turnIndex === "number" &&

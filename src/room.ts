@@ -317,7 +317,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // The commit helpers drop the write if a stop/restart has superseded the turn.
     await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
-      const advanced: Room = { ...current, turnIndex: room.turnIndex + 1 };
+      // Advance from the re-loaded current, not the pre-turn snapshot, so the
+      // index stays consistent with the state this commit is merging onto.
+      const advanced: Room = { ...current, turnIndex: current.turnIndex + 1 };
       if (aborted) {
         await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
       } else if (advanced.turnIndex >= advanced.turnBudget) {
