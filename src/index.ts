@@ -384,11 +384,13 @@ function ensureLoop(slug: string): void {
 // chamber_room_start dry-run so the dry-run never advertises a start the real
 // path would reject. De-dupes participants and requires at least two DISTINCT
 // valid speakers — the tool schema's min(2) counts RAW entries, so ["a","a"]
-// would otherwise collapse to a one-Mind room.
-function validateStart(
+// would otherwise collapse to a one-Mind room — and that each names a real Mind,
+// since the chat tool takes free-form slugs (a typo would otherwise open a room
+// that dies on "unknown mind" mid-rotation after burning paid turns).
+async function validateStart(
   participants: readonly string[],
   turnBudget: number,
-): { ok: true; participants: string[] } | { ok: false; error: string } {
+): Promise<{ ok: true; participants: string[] } | { ok: false; error: string }> {
   const deduped = [...new Set(participants)];
   if (deduped.length < 2 || !deduped.every(isValidParticipant)) {
     return {
@@ -398,6 +400,14 @@ function validateStart(
   }
   if (!Number.isInteger(turnBudget) || turnBudget <= 0 || turnBudget > MAX_ROOM_TURN_BUDGET) {
     return { ok: false, error: `turnBudget must be an integer in 1..${MAX_ROOM_TURN_BUDGET}` };
+  }
+  const known = new Set((await resolveMinds()).map((m) => m.slug));
+  const missing = deduped.filter((s) => !known.has(s));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      error: `unknown Mind(s): ${missing.join(", ")} — genesis them first or check the roster`,
+    };
   }
   return { ok: true, participants: deduped };
 }
@@ -419,7 +429,7 @@ async function startRoom(input: {
   // after dispose() would write an "active" room whose loop never runs (ensureLoop
   // bails on isDisposed) — a phantom room nothing ever clears.
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
-  const valid = validateStart(input.participants, input.turnBudget);
+  const valid = await validateStart(input.participants, input.turnBudget);
   if (!valid.ok) return { ok: false, error: valid.error };
   const name = (input.name ?? "").trim() || "Room";
   const strategy = ((input.strategy ?? "").trim() || "sequential") as RoomStrategyName;
@@ -648,7 +658,6 @@ const roomStartSchema = z.object({
   participants: z.array(z.string()).min(2),
   turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).optional(),
   name: z.string().optional(),
-  strategy: z.string().optional(),
   confirm: z.boolean().optional(),
 });
 const roomSaySchema = z
@@ -715,14 +724,24 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           emitResult(ctx, `chamber_room_start: ${parsed.error.message}`, true);
           return;
         }
-        const { participants, name, strategy } = parsed.data;
+        const { participants, name } = parsed.data;
         const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
         const confirm = parsed.data.confirm ?? false;
-        // Validate up front so the dry-run never advertises a start the confirm
-        // path would reject (duplicate / reserved / unsafe participants, <2 distinct).
-        const valid = validateStart(participants, turnBudget);
+        // Validate up front (including roster membership) so the dry-run never
+        // advertises a start the confirm path would reject.
+        const valid = await validateStart(participants, turnBudget);
         if (!valid.ok) {
           emitResult(ctx, `chamber_room_start: ${valid.error}`, true);
+          return;
+        }
+        // A room is already active: both the dry-run and the confirmed start would
+        // fail driver.start's single-active reservation, so reject before prompting.
+        if (activeSlug) {
+          emitResult(
+            ctx,
+            "chamber_room_start: a room is already active — stop it first with chamber_room_stop.",
+            true,
+          );
           return;
         }
         const who = valid.participants.join(", ");
@@ -733,7 +752,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           );
           return;
         }
-        const res = await startRoom({ participants, turnBudget, name, strategy });
+        const res = await startRoom({ participants, turnBudget, name });
         if (res.ok) {
           const slug = (res.data as { slug?: string } | undefined)?.slug ?? "";
           emitResult(

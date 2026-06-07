@@ -180,6 +180,17 @@ describe("chamber room-control chat tools", () => {
     expect(t.out()).toContain("2 distinct");
   });
 
+  it("rejects a start naming a Mind that does not exist", async () => {
+    // The chat tool takes free-form slugs; a typo must fail before any paid turn.
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "ghost"], confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("unknown Mind");
+  });
+
   it("chamber_room_start with confirm opens a room the status tool then reports", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute(
@@ -197,6 +208,16 @@ describe("chamber room-control chat tools", () => {
     expect(s.out()).toContain("alice");
     expect(s.out()).toContain("bob");
     expect(s.out()).toContain("active");
+  });
+
+  it("refuses a second start while a room is active", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("already active");
   });
 
   it("chamber_room_say injects a director direction into the active room", async () => {
