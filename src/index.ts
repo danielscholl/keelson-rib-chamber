@@ -1,12 +1,46 @@
 import { fileURLToPath } from "node:url";
 import type { CanvasView, Rib, RibAction, RibActionResult, RibContext } from "@keelson/shared";
 import { canvasViewSchema } from "@keelson/shared";
-import { buildGenesisPrompt, type GenesisAuthor, parseGenesisOutput, slugify } from "./genesis.ts";
-import { type MindRecord, mindExists, retireMind, scaffoldMind } from "./minds-store.ts";
-import { mindsDir } from "./paths.ts";
+import {
+  assertSafeSlug,
+  buildGenesisPrompt,
+  type GenesisAuthor,
+  parseGenesisOutput,
+  slugify,
+} from "./genesis.ts";
+import { type MindRecord, mindExists, readMinds, retireMind, scaffoldMind } from "./minds-store.ts";
+import { mindsDir, roomsDir } from "./paths.ts";
+import type { RoomPublisher, RoomStore } from "./ports.ts";
+import { createRoomDriver, type RoomDriver } from "./room.ts";
+import { createFileRoomStore } from "./room-store.ts";
+import type { RoomStrategyName } from "./types.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
+const ROOM_KEY = "rib:chamber:room";
+
+// Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
+// accidental or malicious huge budget would launch a runaway sequence; reject it.
+const MAX_ROOM_TURN_BUDGET = 50;
+
+// The room driver is a boot-time singleton: it holds in-flight turn state across
+// onAction calls, so it is built once in registerTools (the only hook that runs
+// with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
+// stays undefined when either seam is absent, and room actions then fail closed.
+let driver: RoomDriver | undefined;
+let store: RoomStore | undefined;
+// Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
+const loops = new Set<string>();
+// Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
+let roomSeq = 0;
+// Serializes starts process-wide: driver.start awaits a disk read before
+// reserving the single active slot, so two concurrent room-starts could both
+// pass the single-active check and launch two loops. The gate makes
+// check-and-reserve atomic; the second start then fails the active-room check.
+let startGate: Promise<unknown> = Promise.resolve();
+// Set by the rib's dispose() at shutdown so a running loop stops driving turns
+// (and never shells a new CLI turn) while the driver aborts the in-flight one.
+let disposed = false;
 
 // Absolute path to the roster collector, resolved at module load so the workflow
 // node runs the right file regardless of the run's (nominal) cwd. fileURLToPath
@@ -87,19 +121,24 @@ const rib: Rib = {
   // the Ribs page and data arrives when the producers run.
   views: [
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
+    { key: ROOM_KEY, canvasKind: "view", title: "Room" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
-  // The "new agent" / "retire" affordances on the Chamber surface dispatch to
-  // onAction. The room controls (room-start/next/inject/stop) arrive in Phase 2.
+  // Genesis / retire affordances. The room controls (room-start/inject/stop) are
+  // NOT listed here: a static actions[] button dispatches type-only, but the room
+  // controls need a payload (participants, the target slug, a nextSpeaker), so
+  // they are baked into the roster/room boards as payload-carrying actions (the
+  // OSDU pattern) and still reach onAction below.
   actions: [
     { type: "genesis", label: "New agent" },
     { type: "retire", label: "Retire agent" },
   ],
 
-  // The Chamber nav tab. Phase 1 lands the roster in the header (the Minds you
-  // genesis) and settles the brief into the footer; the room transcript fills
-  // the rows in Phase 2.
+  // The Chamber nav tab. The roster sits in the header (the Minds you genesis),
+  // the live room transcript fills the row, and the brief settles into the
+  // footer. The room region carries no workflow: it is push-fed — the driver
+  // recomposes ROOM_KEY on every turn (no collector, no cadence poll).
   surfaces: [
     {
       id: "chamber",
@@ -111,7 +150,9 @@ const rib: Rib = {
           title: "Roster",
           glyph: { char: "◇", tone: "brand" },
         },
-        rows: [],
+        rows: [
+          { columns: [{ key: ROOM_KEY, title: "Room", glyph: { char: "▦", tone: "brand" } }] },
+        ],
         footer: {
           key: BRIEF_KEY,
           workflow: "chamber-brief",
@@ -166,16 +207,249 @@ const rib: Rib = {
     },
   ],
 
+  // Boot-time wiring of the room loop. Registers the push-fed room snapshot and
+  // builds the driver against the real seams: runAgentTurn (C1) for the turns,
+  // the snapshot manager as the publisher (publish caches the board and
+  // recomposes ROOM_KEY — a live WS push, no collector), the FS data home as the
+  // store, and the roster as the minds resolver. Both seams are optional, so the
+  // driver stays undefined on a host without them and room actions fail closed.
+  registerTools: (ctx: RibContext) => {
+    const sm = ctx.getSnapshotManager?.();
+    const run = ctx.runAgentTurn;
+    if (sm && run) {
+      // Seed a valid empty board so a client subscribing before the first turn
+      // gets a well-formed view; every publish replaces it with the live board.
+      let latest: CanvasView = { view: "board", title: "Room", sections: [] };
+      sm.register(ROOM_KEY, () => latest, { validate: expectView(ROOM_KEY, "board") });
+      // Dirty-flag pump (mirrors the base's bound-workflow publish): recompose
+      // coalesces concurrent calls onto one in-flight compose, so a publish that
+      // lands while another is composing would otherwise never broadcast its
+      // board (e.g. a director inject racing a turn's terminal commit). Re-run
+      // once more whenever a publish arrived mid-compose, so the latest board
+      // always reaches the canvas.
+      let composing = false;
+      let dirty = false;
+      const publisher: RoomPublisher = {
+        async publish(view) {
+          latest = view;
+          if (composing) {
+            dirty = true;
+            return;
+          }
+          composing = true;
+          try {
+            do {
+              dirty = false;
+              await sm.recompose(ROOM_KEY);
+            } while (dirty);
+          } finally {
+            composing = false;
+          }
+        },
+      };
+      store = createFileRoomStore(roomsDir());
+      driver = createRoomDriver({
+        store,
+        publisher,
+        runAgentTurn: run,
+        minds: () => readMinds(mindsDir()),
+      });
+      // Prime the cache so a client subscribing before the first turn gets the
+      // seeded board, not a 204 / loading skeleton (the GET path doesn't
+      // lazy-compose).
+      void sm.recompose(ROOM_KEY);
+    }
+    // No chat/workflow tools yet — the room wiring above is a side effect of this
+    // boot hook. (Exposing the room controls as chat tools is a #109 follow-up.)
+    return [];
+  },
+
   // Genesis a Mind (one agent turn authors its soul, the rib persists it) and
-  // retire one. Both mutate the data home and return; the roster reflects the
-  // change on the next chamber-roster refresh (the OSDU mutate-then-refresh
-  // pattern). The room-* controls arrive with the Phase 2 room loop.
+  // retire one — both mutate the data home and return (the OSDU
+  // mutate-then-refresh pattern). The room-* controls drive the room loop; the
+  // transcript pushes to the canvas as turns land (no refresh needed). Turns
+  // advance on their own (the auto-advance loop), so there is no manual step.
   onAction: (action, ctx) => {
-    if (action.type === "genesis") return genesisAction(action, ctx);
-    if (action.type === "retire") return retireAction(action);
-    return { ok: false, error: `unknown action '${action.type}'` };
+    switch (action.type) {
+      case "genesis":
+        return genesisAction(action, ctx);
+      case "retire":
+        return retireAction(action);
+      case "room-start":
+        return roomStartAction(action);
+      case "room-inject":
+        return roomInjectAction(action);
+      case "room-stop":
+        return roomStopAction(action);
+      default:
+        return { ok: false, error: `unknown action '${action.type}'` };
+    }
+  },
+
+  // Shutdown: stop the auto-advance loops and abort any in-flight turn so a CLI
+  // child can't keep running (or publish) after teardown. The aborted turn
+  // finalizes the room to "stopped", so the loop's next check exits cleanly.
+  dispose: async () => {
+    disposed = true;
+    loops.clear();
+    await driver?.dispose();
   },
 };
+
+const ROOM_DISABLED: RibActionResult = {
+  ok: false,
+  error: "room controls require the C1 agent-turn seam and a snapshot manager",
+};
+
+// Drive turns on their own until the room leaves "active" (budget reached, or a
+// stop/inject ended it). Detached and idempotent per slug: room-start kicks it,
+// the driver's serial gate + generation gating keep one turn at a time, and a
+// stop aborts the in-flight turn so the next loadRoom sees a non-active room and
+// the loop exits. Errors are logged, never thrown into the (already-returned)
+// action.
+function ensureLoop(slug: string): void {
+  if (!driver || !store || disposed || loops.has(slug)) return;
+  loops.add(slug);
+  const activeDriver = driver;
+  const activeStore = store;
+  void (async () => {
+    try {
+      while (!disposed) {
+        const room = await activeStore.loadRoom(slug);
+        // Re-check after the await: dispose() may have landed during loadRoom, and
+        // a turn started after teardown would outlive the rib.
+        if (disposed || room?.status !== "active") break;
+        await activeDriver.step(slug);
+      }
+    } catch (e) {
+      console.error(`[rib-chamber] room loop '${slug}' failed: ${errText(e)}`);
+    } finally {
+      loops.delete(slug);
+    }
+  })();
+}
+
+async function roomStartAction(action: RibAction): Promise<RibActionResult> {
+  if (!driver) return ROOM_DISABLED;
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  // De-dupe (a duplicate participant would over-weight a speaker in the rotation)
+  // while preserving order.
+  const participants = [...new Set(asStringArray(payload.participants))];
+  const turnBudget = typeof payload.turnBudget === "number" ? payload.turnBudget : 0;
+  if (participants.length === 0 || !participants.every(isValidParticipant)) {
+    return {
+      ok: false,
+      error:
+        "room-start requires payload { participants: non-empty safe slugs, not director/system }",
+    };
+  }
+  if (!Number.isInteger(turnBudget) || turnBudget <= 0 || turnBudget > MAX_ROOM_TURN_BUDGET) {
+    return {
+      ok: false,
+      error: `room-start turnBudget must be an integer in 1..${MAX_ROOM_TURN_BUDGET}`,
+    };
+  }
+  const name = asNonEmptyString(payload.name) || "Room";
+  const strategy = (asNonEmptyString(payload.strategy) || "sequential") as RoomStrategyName;
+  // Each start opens a brand-new room under a unique slug (not a reused "room").
+  // The CLI MVP can't cancel an in-flight turn, so a turn still draining from a
+  // stopped room would otherwise append into a reused transcript; a fresh slug
+  // sends that late append to its own old room dir, never the new one. Past rooms
+  // remain under rooms/ as history (a retention sweep is a follow-up).
+  const slug = freshRoomSlug();
+  const activeDriver = driver;
+  // Chain onto the start gate so concurrent starts run their check-and-reserve
+  // one at a time (a second start then sees the first's active room and fails).
+  const run = startGate.then(async () => {
+    await activeDriver.start({ slug, name, strategy, participants, turnBudget });
+    ensureLoop(slug);
+  });
+  startGate = run.then(
+    () => {},
+    () => {},
+  );
+  try {
+    await run;
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
+  if (!driver) return ROOM_DISABLED;
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  const { slug } = resolved;
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const directionInjection = asNonEmptyString(payload.directionInjection);
+  const nextSpeaker = asNonEmptyString(payload.nextSpeaker);
+  const text = asNonEmptyString(payload.text);
+  try {
+    await driver.inject(slug, {
+      ...(directionInjection ? { directionInjection } : {}),
+      ...(nextSpeaker ? { nextSpeaker } : {}),
+      ...(text ? { text } : {}),
+    });
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+async function roomStopAction(action: RibAction): Promise<RibActionResult> {
+  if (!driver) return ROOM_DISABLED;
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  try {
+    await driver.stop(resolved.slug);
+    return { ok: true, data: { slug: resolved.slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+// Resolve the target room slug for a control. With server-assigned slugs there
+// is no default: a payload-less call (a stale/static button or an API client
+// that forgot the slug) must fail closed rather than hit a legacy `room` dir.
+function requireRoomSlug(action: RibAction): { slug: string } | { error: RibActionResult } {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const slug = asNonEmptyString(payload.slug);
+  if (!slug) return { error: { ok: false, error: "this room control requires payload { slug }" } };
+  if (!isSafeSlug(slug)) {
+    return { error: { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` } };
+  }
+  return { slug };
+}
+
+// A unique, path-safe room slug per start (timestamp + counter), so every room
+// gets its own rooms/<slug>/ dir and a late turn from a prior room can't bleed
+// into a new one. Matches SAFE_SLUG (lowercase alnum + hyphens).
+function freshRoomSlug(): string {
+  return `room-${Date.now().toString(36)}-${(roomSeq++).toString(36)}`;
+}
+
+// A room participant must be a safe slug and not a reserved authority: "director"
+// and "system" are driver-stamped roles, never speakers (a room with one would
+// just end on its turn — an unknown mind).
+function isValidParticipant(slug: string): boolean {
+  return slug !== "director" && slug !== "system" && isSafeSlug(slug);
+}
+
+// True if the slug is a bare kebab token (no traversal, non-empty). assertSafeSlug
+// throws on a bad slug; this is its non-throwing predicate form.
+function isSafeSlug(slug: string): boolean {
+  try {
+    assertSafeSlug(slug);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 // Shell the coding-agent CLI for one authoring turn. Isolated behind the
 // GenesisAuthor seam so genesis.ts stays provider-free; collapses to

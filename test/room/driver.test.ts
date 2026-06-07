@@ -192,14 +192,17 @@ describe("room driver — stop / abort", () => {
     expect((await h.store.loadTranscript("demo")).length).toBe(before);
   });
 
-  test("dispose aborts in-flight turns", async () => {
+  test("dispose aborts an in-flight turn and drops its late write (clean teardown)", async () => {
     const h = abortHarness();
     await h.driver.start(START);
     const stepP = h.driver.step("demo");
     await h.turns.started;
     await h.driver.dispose();
     await stepP;
-    expect((await h.store.loadTranscript("demo")).some((e) => e.aborted)).toBe(true);
+    // The turn was aborted by dispose; its late result is dropped rather than
+    // appended/published, so nothing is written after the rib is gone. (A user
+    // stop, by contrast, still records the aborted marker — disposed is false.)
+    expect(await h.store.loadTranscript("demo")).toHaveLength(0);
   });
 });
 
@@ -262,6 +265,32 @@ describe("room driver — concurrency & model", () => {
     turns.release();
     await stepP;
     expect((await store.loadRoom("demo"))?.pending?.nextSpeaker).toBe("b");
+  });
+
+  test("an inject racing a turn's commit never reverts turnIndex", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START); // turnIndex 0, budget 4
+    const stepP = driver.step("demo");
+    await turns.started; // turn for "a" in flight at turnIndex 0
+    // The inject (loads the pre-turn room) and the turn's commit (advances
+    // turnIndex) race for the room write. The per-room lock serializes them, so
+    // the inject can't save the stale turnIndex 0 over the turn's advance.
+    const injectP = driver.inject("demo", { nextSpeaker: "b", text: "steer" });
+    turns.release();
+    await Promise.all([stepP, injectP]);
+    const room = await store.loadRoom("demo");
+    expect(room?.turnIndex).toBe(1); // advanced exactly once, never reverted
+    expect(room?.pending?.nextSpeaker).toBe("b"); // and the inject is preserved
   });
 });
 

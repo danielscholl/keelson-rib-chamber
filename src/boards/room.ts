@@ -26,7 +26,57 @@ export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): Ca
       chip: `${room.turnIndex}/${room.turnBudget}`,
       ...(segments.length > 0 ? { segments } : {}),
     },
-    sections: [{ kind: "rows", items }],
+    // The transcript feed, then board-baked controls. Each action carries the
+    // room slug as payload (a static actions[] button can't), so onAction routes
+    // to the right room. Payload-required controls have to live here, not in the
+    // rib's static actions list — those dispatch type-only.
+    sections: [{ kind: "rows", items }, roomControls(room)],
+  };
+}
+
+// The controls section: while a room is active, a per-participant "Call on
+// <slug>" (a one-shot nextSpeaker override) and Stop (turns advance on their
+// own); once it ends, a single "Start again" that re-runs the same config under
+// a fresh room. Each control carries the room slug so onAction targets it.
+function roomControls(room: Room): CanvasBoardView["sections"][number] {
+  if (room.status !== "active") {
+    return {
+      kind: "actions",
+      title: "Controls",
+      items: [
+        {
+          type: "room-start",
+          label: "Start again",
+          glyph: "▸",
+          payload: {
+            name: room.name,
+            strategy: room.strategy,
+            participants: room.participants,
+            turnBudget: room.turnBudget,
+          },
+        },
+      ],
+    };
+  }
+  return {
+    kind: "actions",
+    title: "Controls",
+    items: [
+      ...room.participants.map((p) => ({
+        type: "room-inject",
+        label: `Call on ${p}`,
+        glyph: "↳",
+        payload: { slug: room.slug, nextSpeaker: p },
+      })),
+      {
+        type: "room-stop",
+        label: "Stop",
+        glyph: "■",
+        tone: "warn" as CanvasTone,
+        destructive: true,
+        payload: { slug: room.slug },
+      },
+    ],
   };
 }
 

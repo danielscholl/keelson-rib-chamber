@@ -66,4 +66,33 @@ describe("buildRoomBoard", () => {
       expect(canvasViewSchema.safeParse(board).success).toBe(true);
     }
   });
+
+  test("an active room bakes Call-on-<participant> + Stop controls carrying the slug", () => {
+    const board = buildRoomBoard(room({ slug: "r", participants: ["a", "b"] }), []);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    expect(actions?.kind).toBe("actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    const byType = (t: string) => actions.items.filter((i) => i.type === t);
+    // No manual "Next": turns auto-advance, so a manual stepper would only race
+    // the loop.
+    expect(byType("room-next")).toHaveLength(0);
+    expect(byType("room-stop")[0]?.payload).toEqual({ slug: "r" });
+    const calls = byType("room-inject").map((i) => i.payload);
+    expect(calls).toEqual([
+      { slug: "r", nextSpeaker: "a" },
+      { slug: "r", nextSpeaker: "b" },
+    ]);
+  });
+
+  test("a closed room offers a single Start-again carrying the same config", () => {
+    for (const status of ["stopped", "done"] as const) {
+      const board = buildRoomBoard(room({ status, participants: ["a", "b"], turnBudget: 6 }), []);
+      const actions = board.sections.find((s) => s.kind === "actions");
+      if (actions?.kind !== "actions") throw new Error("no actions section");
+      expect(actions.items.map((i) => i.type)).toEqual(["room-start"]);
+      // No slug: the server assigns a fresh one per start.
+      expect(actions.items[0]?.payload).toMatchObject({ turnBudget: 6, participants: ["a", "b"] });
+    }
+  });
 });

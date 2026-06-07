@@ -15,3 +15,7 @@ export function chamberDataHome(): string {
 export function mindsDir(): string {
   return join(chamberDataHome(), "minds");
 }
+
+export function roomsDir(): string {
+  return join(chamberDataHome(), "rooms");
+}
