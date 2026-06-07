@@ -2,11 +2,25 @@ import { fileURLToPath } from "node:url";
 import type { CanvasView, Rib, RibAction, RibActionResult, RibContext } from "@keelson/shared";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildGenesisPrompt, type GenesisAuthor, parseGenesisOutput, slugify } from "./genesis.ts";
-import { type MindRecord, mindExists, retireMind, scaffoldMind } from "./minds-store.ts";
-import { mindsDir } from "./paths.ts";
+import { type MindRecord, mindExists, readMinds, retireMind, scaffoldMind } from "./minds-store.ts";
+import { mindsDir, roomsDir } from "./paths.ts";
+import type { RoomPublisher, RoomStore } from "./ports.ts";
+import { createRoomDriver, type RoomDriver } from "./room.ts";
+import { createFileRoomStore } from "./room-store.ts";
+import type { RoomStrategyName } from "./types.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
+const ROOM_KEY = "rib:chamber:room";
+
+// The room driver is a boot-time singleton: it holds in-flight turn state across
+// onAction calls, so it is built once in registerTools (the only hook that runs
+// with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
+// stays undefined when either seam is absent, and room actions then fail closed.
+let driver: RoomDriver | undefined;
+let store: RoomStore | undefined;
+// Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
+const loops = new Set<string>();
 
 // Absolute path to the roster collector, resolved at module load so the workflow
 // node runs the right file regardless of the run's (nominal) cwd. fileURLToPath
@@ -87,19 +101,26 @@ const rib: Rib = {
   // the Ribs page and data arrives when the producers run.
   views: [
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
+    { key: ROOM_KEY, canvasKind: "view", title: "Room" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
-  // The "new agent" / "retire" affordances on the Chamber surface dispatch to
-  // onAction. The room controls (room-start/next/inject/stop) arrive in Phase 2.
+  // The "new agent" / "retire" affordances plus the Phase 2 room controls; all
+  // dispatch to onAction. Room turns advance on their own once started (the
+  // auto-advance loop), so room-next is a manual single-step for paused control.
   actions: [
     { type: "genesis", label: "New agent" },
     { type: "retire", label: "Retire agent" },
+    { type: "room-start", label: "Start room" },
+    { type: "room-next", label: "Next turn" },
+    { type: "room-inject", label: "Inject" },
+    { type: "room-stop", label: "Stop room" },
   ],
 
-  // The Chamber nav tab. Phase 1 lands the roster in the header (the Minds you
-  // genesis) and settles the brief into the footer; the room transcript fills
-  // the rows in Phase 2.
+  // The Chamber nav tab. The roster sits in the header (the Minds you genesis),
+  // the live room transcript fills the row, and the brief settles into the
+  // footer. The room region carries no workflow: it is push-fed — the driver
+  // recomposes ROOM_KEY on every turn (no collector, no cadence poll).
   surfaces: [
     {
       id: "chamber",
@@ -111,7 +132,9 @@ const rib: Rib = {
           title: "Roster",
           glyph: { char: "◇", tone: "brand" },
         },
-        rows: [],
+        rows: [
+          { columns: [{ key: ROOM_KEY, title: "Room", glyph: { char: "▦", tone: "brand" } }] },
+        ],
         footer: {
           key: BRIEF_KEY,
           workflow: "chamber-brief",
@@ -166,16 +189,165 @@ const rib: Rib = {
     },
   ],
 
+  // Boot-time wiring of the room loop. Registers the push-fed room snapshot and
+  // builds the driver against the real seams: runAgentTurn (C1) for the turns,
+  // the snapshot manager as the publisher (publish caches the board and
+  // recomposes ROOM_KEY — a live WS push, no collector), the FS data home as the
+  // store, and the roster as the minds resolver. Both seams are optional, so the
+  // driver stays undefined on a host without them and room actions fail closed.
+  registerTools: (ctx: RibContext) => {
+    const sm = ctx.getSnapshotManager?.();
+    const run = ctx.runAgentTurn;
+    if (sm && run) {
+      // Seed a valid empty board so a client subscribing before the first turn
+      // gets a well-formed view; every publish replaces it with the live board.
+      let latest: CanvasView = { view: "board", title: "Room", sections: [] };
+      sm.register(ROOM_KEY, () => latest, { validate: expectView(ROOM_KEY, "board") });
+      const publisher: RoomPublisher = {
+        async publish(view) {
+          latest = view;
+          await sm.recompose(ROOM_KEY);
+        },
+      };
+      store = createFileRoomStore(roomsDir());
+      driver = createRoomDriver({
+        store,
+        publisher,
+        runAgentTurn: run,
+        minds: () => readMinds(mindsDir()),
+      });
+    }
+    return { registered: [] };
+  },
+
   // Genesis a Mind (one agent turn authors its soul, the rib persists it) and
-  // retire one. Both mutate the data home and return; the roster reflects the
-  // change on the next chamber-roster refresh (the OSDU mutate-then-refresh
-  // pattern). The room-* controls arrive with the Phase 2 room loop.
+  // retire one — both mutate the data home and return (the OSDU
+  // mutate-then-refresh pattern). The room-* controls drive the room loop; the
+  // transcript pushes to the canvas as turns land (no refresh needed).
   onAction: (action, ctx) => {
-    if (action.type === "genesis") return genesisAction(action, ctx);
-    if (action.type === "retire") return retireAction(action);
-    return { ok: false, error: `unknown action '${action.type}'` };
+    switch (action.type) {
+      case "genesis":
+        return genesisAction(action, ctx);
+      case "retire":
+        return retireAction(action);
+      case "room-start":
+        return roomStartAction(action);
+      case "room-next":
+        return roomNextAction(action);
+      case "room-inject":
+        return roomInjectAction(action);
+      case "room-stop":
+        return roomStopAction(action);
+      default:
+        return { ok: false, error: `unknown action '${action.type}'` };
+    }
   },
 };
+
+const ROOM_DISABLED: RibActionResult = {
+  ok: false,
+  error: "room controls require the C1 agent-turn seam and a snapshot manager",
+};
+
+// Drive turns on their own until the room leaves "active" (budget reached, or a
+// stop/inject ended it). Detached and idempotent per slug: room-start kicks it,
+// the driver's serial gate + generation gating keep one turn at a time, and a
+// stop aborts the in-flight turn so the next loadRoom sees a non-active room and
+// the loop exits. Errors are logged, never thrown into the (already-returned)
+// action.
+function ensureLoop(slug: string): void {
+  if (!driver || !store || loops.has(slug)) return;
+  loops.add(slug);
+  const activeDriver = driver;
+  const activeStore = store;
+  void (async () => {
+    try {
+      while (true) {
+        const room = await activeStore.loadRoom(slug);
+        if (room?.status !== "active") break;
+        await activeDriver.step(slug);
+      }
+    } catch (e) {
+      console.error(`[rib-chamber] room loop '${slug}' failed: ${errText(e)}`);
+    } finally {
+      loops.delete(slug);
+    }
+  })();
+}
+
+async function roomStartAction(action: RibAction): Promise<RibActionResult> {
+  if (!driver) return ROOM_DISABLED;
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const participants = asStringArray(payload.participants);
+  const turnBudget = typeof payload.turnBudget === "number" ? payload.turnBudget : 0;
+  if (participants.length === 0) {
+    return { ok: false, error: "room-start requires payload { participants: string[] }" };
+  }
+  if (!Number.isInteger(turnBudget) || turnBudget <= 0) {
+    return { ok: false, error: "room-start requires a positive integer turnBudget" };
+  }
+  const slug = asNonEmptyString(payload.slug) || "room";
+  const name = asNonEmptyString(payload.name) || "Room";
+  const strategy = (asNonEmptyString(payload.strategy) || "sequential") as RoomStrategyName;
+  try {
+    await driver.start({ slug, name, strategy, participants, turnBudget });
+    ensureLoop(slug);
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+function roomNextAction(action: RibAction): RibActionResult {
+  if (!driver) return ROOM_DISABLED;
+  const slug = roomSlugOf(action);
+  // Fire-and-return: one turn can outlast the action's socket budget, and the
+  // driver publishes the result itself when it lands. A step while the loop is
+  // mid-turn is a no-op (the serial gate), so a manual nudge can't double-drive.
+  void driver
+    .step(slug)
+    .catch((e) => console.error(`[rib-chamber] room-next '${slug}': ${errText(e)}`));
+  return { ok: true, data: { slug } };
+}
+
+async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
+  if (!driver) return ROOM_DISABLED;
+  const slug = roomSlugOf(action);
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const directionInjection = asNonEmptyString(payload.directionInjection);
+  const nextSpeaker = asNonEmptyString(payload.nextSpeaker);
+  const text = asNonEmptyString(payload.text);
+  try {
+    await driver.inject(slug, {
+      ...(directionInjection ? { directionInjection } : {}),
+      ...(nextSpeaker ? { nextSpeaker } : {}),
+      ...(text ? { text } : {}),
+    });
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+async function roomStopAction(action: RibAction): Promise<RibActionResult> {
+  if (!driver) return ROOM_DISABLED;
+  const slug = roomSlugOf(action);
+  try {
+    await driver.stop(slug);
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+function roomSlugOf(action: RibAction): string {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  return asNonEmptyString(payload.slug) || "room";
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 // Shell the coding-agent CLI for one authoring turn. Isolated behind the
 // GenesisAuthor seam so genesis.ts stays provider-free; collapses to

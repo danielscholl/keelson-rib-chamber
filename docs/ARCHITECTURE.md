@@ -62,12 +62,12 @@ adds the exploratory half. Keep the two framed as complementary modes.
 | `contributeWorkflows` | The **genesis-authoring** workflow and the **newspaper/brief** lens workflow (a `bash`/`prompt` node + `output_schema` + `bindSnapshotKey` + fail-closed `validate`). |
 | `onAction` | Genesis a Mind, retire a Mind, and **room control** (canonical `action.type` literals): `room-start` / `room-next` / `room-inject` / `room-stop` — see [design/A2A-communication.md](./design/A2A-communication.md). |
 | `authStatus` | Probe that an agent provider/CLI is reachable. |
-| `registerTools` | Not used at MVP (label-only stub in the base). |
+| `registerTools` | Boot-time wiring: builds the room driver singleton and registers the push-fed `rib:chamber:room` snapshot (needs `runAgentTurn` + `getSnapshotManager`; room actions fail closed without them). |
 
-`RibContext` surfaces the rib relies on: `getExec()` (shell a coding-agent CLI —
-the MVP path for running a turn), `getSnapshotManager()` (publish board frames,
-register keys imperatively), `getCredential()` (namespace-scoped secrets). It
-does **not** today expose a provider — see `C1`.
+`RibContext` surfaces the rib relies on: `runAgentTurn()` (run an agent turn —
+the room loop's turn seam, `C1`), `getExec()` (shell a coding-agent CLI — still
+the genesis path), `getSnapshotManager()` (publish board frames, register keys
+imperatively), `getCredential()` (namespace-scoped secrets).
 
 ## 4. Concept → Keelson seam map
 
@@ -79,11 +79,11 @@ does **not** today expose a provider — see `C1`.
 | Lens cell link / copy | board card `href` / `copyable` | ✅ shipped (OSDU `G2`) |
 | Room transcript / participant bar | a `board` on `rib:chamber:room` + a Chamber surface | ✅ board + surface shipped (`G1`/`G4`) |
 | Director controls (`/next`, `/inject`) | `onAction` round-trip | ✅ shipped (OSDU `G3`) |
-| `room/strategies/*` (pure) | ported behind a Keelson orchestration context | ↔ portable (host adapter swap) |
-| **Run an agent turn from rib code** | `getExec` CLI shell **or** a provider seam | ❌ **gap `C1`** |
+| `room/strategies/*` (pure) | ported behind a Keelson orchestration context | ✅ wired (driver + `sequential`) |
+| **Run an agent turn from rib code** | `ctx.runAgentTurn` (CLI MVP behind the seam) | ✅ wired (`C1`) |
 | Mind storage (`SOUL.md`, memory…) | a blessed rib data home | ↔ MVP self-resolved (`C3` real fix deferred) |
 | Agent-authored lens at runtime | dynamic view registration | ❌ **gap `C2`** |
-| Streaming a turn into a board | partial/streamed snapshot frames | ⚠️ verify (`C4`) |
+| Streaming a turn into a board | partial/streamed snapshot frames | ↔ whole-frame MVP (`C4` partial deferred) |
 | Room with N participants | dynamic surface regions | ❌ **gap `C5`** |
 
 ## 5. Data flow & snapshot-key map
@@ -157,10 +157,15 @@ The same virtuous cycle the OSDU rib ran with `G0`–`G4`: each gap below is
 working the Keelson base, since these touch the shared `Rib` contract /
 `RibContext`.
 
-### C1 — Agent invocation from a rib *(load-bearing — **designed**, see [design/C1-agent-invocation.md](./design/C1-agent-invocation.md))*
-`RibContext` exposes `getExec`, `getSnapshotManager`, `getCredential` — but no
+### C1 — Agent invocation from a rib *(load-bearing — **wired**, see [design/C1-agent-invocation.md](./design/C1-agent-invocation.md))*
+**Landed.** The seam types + optional `ctx.runAgentTurn?` field shipped in
+`@keelson/shared`, with a CLI-backed MVP impl (`makeRibAgentTurn`,
+`claude -p … --output-format json` adapted to the `{ stream, result }`
+dual-handle) bootstrapped in `apps/server`. The room driver consumes it through
+`registerTools`. Original problem statement, kept for the record:
+`RibContext` exposed `getExec`, `getSnapshotManager`, `getCredential` — but no
 way to **run an agent turn**. The entire room loop is "run a turn," so this
-gates Phase 2.
+gated Phase 2.
 - **Decision:** add one **provider-shaped `ctx.runAgentTurn` seam** to
   `RibContext` (optional field, like `getSnapshotManager?`), with the contract
   committed up front and **two impls behind one signature**: a CLI-backed MVP,
@@ -205,10 +210,9 @@ A room has a variable participant count; the surface layout
   fans out per participant.
 
 **Dependency order:** Phase 0 needs **nothing** (seam proof) → Phase 1 needs
-**C3** → Phase 2 needs **C1** (and verifies **C4**) → Phase 3 needs **C2** +
-**C5**. `C1` was the first *real* base gap and is now **designed**
-([design/C1-agent-invocation.md](./design/C1-agent-invocation.md)); landing its
-contract in `@keelson/shared` is the first base PR Phase 2 depends on.
+**C3** → Phase 2 needs **C1** (and settled **C4** as whole-frame) → Phase 3
+needs **C2** + **C5**. `C1` has **landed** in `@keelson/shared` (contract + CLI
+MVP), so Phase 2 is unblocked and wired.
 
 ## 10. Current state
 
@@ -225,30 +229,37 @@ contract in `@keelson/shared` is the first base PR Phase 2 depends on.
   `<workspace>/.keelson/chamber/minds/<slug>/` (the `C3` MVP). A `chamber-roster`
   collector reads those Minds back into a `board` of cards on `rib:chamber:roster`;
   `retire` removes one. The **Chamber** surface now lands the roster in the
-  header and settles the brief into the footer (the room fills the rows in
-  Phase 2). Mutate-then-refresh, mirroring the OSDU action pattern; zero base
-  change.
-- Package + config + identity test from the scaffold remain; `typecheck` /
-  `test` (87) / `check` are green.
+  header and settles the brief into the footer. Mutate-then-refresh, mirroring
+  the OSDU action pattern; zero base change.
+- **Phase 2 wired.** The room core is bound to the real seams in
+  `registerTools`: a file-based `RoomStore` (`rooms/<slug>/room.json` +
+  `transcript.jsonl` under the data home), a **push publisher** (cache the
+  driver's board, `recompose("rib:chamber:room")` — a live WS push, no collector
+  or cadence poll), `runAgentTurn` (`C1`) for the turns, and the roster as the
+  minds resolver. `room-start` opens a room and kicks a **detached auto-advance
+  loop** that drives `step()` to budget/stop, streaming each turn to the canvas;
+  `room-next` is a manual single-step, `room-inject` a director override,
+  `room-stop` ends it. `room-next` is fire-and-return (the 60s socket cap); the
+  driver's serial gate + generation gating keep one turn at a time and let a stop
+  abort an in-flight turn. Room actions fail closed without the seams.
 - Reusable substrate confirmed available in the Keelson base: `board` view,
   surface/region layout, action round-trip, cell tone (`G0`–`G4`).
 
 ## 11. Next step
 
-Phases 0 and 1 are wired (genesis + roster on the Chamber surface, no base
-change); the room engine **core** is built and unit-tested against fakes
-(types, driver, `sequential`, board builders, ports). What remains to make rooms
-live is the **base track plus a thin adapter**:
+Phases 0–2 are wired: genesis + roster, and a live two-agent room (auto-advance
+loop, `C1` turns, push-published transcript) on the Chamber surface. What remains
+is **Phase 3 + base hardening**:
 
-- **Land the `C1` contract in `@keelson/shared`** (the seam types + optional
-  `runAgentTurn?` field): a small additive base PR that unblocks Phase 2's room
-  loop; the CLI-backed MVP impl can follow once the contract is in. Coordinate
-  with whoever owns the base contract.
-- **Phase 2 — wire the room core**: a thin adapter binds the three ports
-  (`RunAgentTurn`/`RoomStore`/`RoomPublisher`) to `ctx.runAgentTurn` + the FS
-  data home + `rib:chamber:room`, plus `onAction` dispatch (`room-start` /
-  `room-next` / `room-inject` / `room-stop`, **fire-and-return** per the 60s
-  socket cap). Genesis (Phase 1) supplies the Minds a room runs.
-- **`C3` real fix** (a blessed `ctx.getDataDir()`) and **`C2`/`C5`** (Phase 3)
-  follow; the Phase 1 self-resolved data home swaps to `getDataDir()` with no
-  rib-logic change when it lands.
+- **Phase 3 — agent-authored lenses & richer rooms**, gated on **C2** (dynamic
+  view registration so a Mind-authored `rib:chamber:lens:*` becomes a live panel)
+  and **C5** (dynamic surface regions for N participants). The `group-chat` /
+  `open-floor` strategies port here.
+- **`C1` real fix** — swap the CLI MVP behind `ctx.runAgentTurn` for the
+  registry-routed provider (provider pinning, redaction, credentials) with **zero
+  room-loop change** (the seam is the boundary).
+- **`C3` real fix** (a blessed `ctx.getDataDir()`): the self-resolved data home
+  (`minds/` + `rooms/`) swaps to it with no rib-logic change.
+- **`C4`** — partial/streamed board frames if a turn should paint tokens as they
+  arrive; the room loop already drains the turn stream (today it publishes
+  whole-frame on completion).
