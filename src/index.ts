@@ -31,6 +31,10 @@ const ROOM_KEY = "rib:chamber:room";
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
 const MAX_ROOM_TURN_BUDGET = 50;
+// Default room length when a chat tool omits turnBudget. Applied after parse (not
+// z.default()) because z.toJSONSchema — which the Copilot provider feeds the model
+// — lists defaulted fields as `required`, forcing the model to supply them.
+const DEFAULT_ROOM_TURN_BUDGET = 8;
 
 // The room driver is a boot-time singleton: it holds in-flight turn state across
 // onAction calls, so it is built once in registerTools (the only hook that runs
@@ -636,12 +640,16 @@ function emitResult(ctx: ToolContext, content: string, isError = false): void {
   ctx.emit({ type: "tool_result", toolUseId: "", content, ...(isError ? { isError: true } : {}) });
 }
 
+// turnBudget/confirm are .optional() (not .default()) on purpose: z.toJSONSchema
+// — which the Copilot provider feeds the model — lists defaulted fields as
+// `required`, which would force the model to send `confirm` (defeating the
+// dry-run/omit path) and `turnBudget`. Defaults are applied after parse instead.
 const roomStartSchema = z.object({
   participants: z.array(z.string()).min(2),
-  turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).default(8),
+  turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).optional(),
   name: z.string().optional(),
   strategy: z.string().optional(),
-  confirm: z.boolean().default(false),
+  confirm: z.boolean().optional(),
 });
 const roomSaySchema = z
   .object({
@@ -707,7 +715,9 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           emitResult(ctx, `chamber_room_start: ${parsed.error.message}`, true);
           return;
         }
-        const { participants, turnBudget, name, strategy, confirm } = parsed.data;
+        const { participants, name, strategy } = parsed.data;
+        const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
+        const confirm = parsed.data.confirm ?? false;
         // Validate up front so the dry-run never advertises a start the confirm
         // path would reject (duplicate / reserved / unsafe participants, <2 distinct).
         const valid = validateStart(participants, turnBudget);
