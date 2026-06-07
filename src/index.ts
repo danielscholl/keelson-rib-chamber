@@ -10,7 +10,7 @@ import {
 } from "./genesis.ts";
 import { type MindRecord, mindExists, readMinds, retireMind, scaffoldMind } from "./minds-store.ts";
 import { mindsDir, roomsDir } from "./paths.ts";
-import type { RoomPublisher, RoomStore } from "./ports.ts";
+import type { RoomPublisher } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { createFileRoomStore } from "./room-store.ts";
 import type { Mind, RoomStrategyName } from "./types.ts";
@@ -28,7 +28,6 @@ const MAX_ROOM_TURN_BUDGET = 50;
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
 // stays undefined when either seam is absent, and room actions then fail closed.
 let driver: RoomDriver | undefined;
-let store: RoomStore | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -37,11 +36,18 @@ let roomSeq = 0;
 // The roster the driver resolves a speaker's persona from each turn. Cached
 // because it only changes via genesis/retire (both onAction, below); re-reading
 // every mind dir per turn is avoidable disk I/O. invalidateRoster() clears it on
-// any mutation so the next turn re-reads.
+// any mutation and dispose() resets it, so a fresh boot re-reads. Assumes a fixed
+// workspace per process — the cache is not keyed on KEELSON_WORKSPACE.
 let roster: readonly Mind[] | undefined;
 async function resolveMinds(): Promise<readonly Mind[]> {
-  if (!roster) roster = await readMinds(mindsDir());
-  return roster;
+  if (roster) return roster;
+  const minds = await readMinds(mindsDir());
+  // Only memoize a non-empty read: readMinds returns [] both for "no minds yet"
+  // and for a transient readdir error, so caching [] would stick an empty roster
+  // (every speaker -> "unknown mind", ending each room) until the next mutation.
+  // Re-reading an empty dir each turn is cheap and self-heals once minds appear.
+  if (minds.length > 0) roster = minds;
+  return minds;
 }
 function invalidateRoster(): void {
   roster = undefined;
@@ -252,9 +258,9 @@ const rib: Rib = {
           }
         },
       };
-      store = createFileRoomStore(roomsDir());
+      const roomStore = createFileRoomStore(roomsDir());
       driver = createRoomDriver({
-        store,
+        store: roomStore,
         publisher,
         runAgentTurn: run,
         minds: resolveMinds,
@@ -293,10 +299,14 @@ const rib: Rib = {
 
   // Shutdown: stop the auto-advance loops and abort any in-flight turn so a CLI
   // child can't keep running (or publish) after teardown. driver.dispose() sets
-  // the disposal flag the loop observes; the aborted turn finalizes the room to
-  // "stopped", so the loop's next check exits cleanly.
+  // the disposal flag the loop observes (so it stops between turns), and the
+  // in-flight turn drops its late append/commit instead of writing post-teardown
+  // — so a room caught mid-turn is left as-is on disk (status stays "active"; a
+  // fresh process re-reads it), not finalized to "stopped". Resets the roster
+  // cache too, so a re-boot re-reads minds.
   dispose: async () => {
     loops.clear();
+    invalidateRoster();
     await driver?.dispose();
   },
 };
@@ -314,7 +324,7 @@ const ROOM_DISABLED: RibActionResult = {
 // (it returns whether to keep going), so the loop no longer re-reads it. Errors
 // are logged, never thrown into the (already-returned) action.
 function ensureLoop(slug: string): void {
-  if (!driver || !store || driver.isDisposed() || loops.has(slug)) return;
+  if (!driver || driver.isDisposed() || loops.has(slug)) return;
   loops.add(slug);
   const activeDriver = driver;
   void (async () => {

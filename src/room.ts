@@ -123,9 +123,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     transcripts.get(slug)?.push(entry);
   }
 
+  // The room's transcript for prompt context / board: the in-memory copy while
+  // the room is live, falling back to disk (the source of truth) otherwise.
+  async function loadCachedTranscript(slug: MindSlug): Promise<readonly TurnEntry[]> {
+    return transcripts.get(slug) ?? (await deps.store.loadTranscript(slug));
+  }
+
   async function persistAndPublish(room: Room): Promise<void> {
     await deps.store.saveRoom(room);
-    const transcript = transcripts.get(room.slug) ?? (await deps.store.loadTranscript(room.slug));
+    const transcript = await loadCachedTranscript(room.slug);
     await deps.publisher.publish(buildRoomBoard(room, transcript));
   }
 
@@ -306,7 +312,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       );
     }
 
-    const transcript = transcripts.get(room.slug) ?? (await deps.store.loadTranscript(room.slug));
+    const transcript = await loadCachedTranscript(room.slug);
 
     let text: string;
     let aborted: boolean;
