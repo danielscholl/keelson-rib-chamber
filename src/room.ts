@@ -2,7 +2,15 @@ import { buildRoomBoard } from "./boards/room.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { buildTurnEntry, renderTranscript } from "./transcript.ts";
-import type { Mind, MindSlug, Room, RoomConfig, RoomStrategyName, StrategyStep } from "./types.ts";
+import type {
+  Mind,
+  MindSlug,
+  Room,
+  RoomConfig,
+  RoomStrategyName,
+  StrategyStep,
+  TurnEntry,
+} from "./types.ts";
 
 export interface RoomDriverDeps {
   store: RoomStore;
@@ -32,10 +40,15 @@ export interface RoomInjectInput {
 
 export interface RoomDriver {
   start(config: RoomStartConfig): Promise<Room>;
-  step(slug: MindSlug): Promise<void>;
+  // Drive one turn. Returns true if the room is still active and should be
+  // stepped again, false otherwise (not active, just closed, or superseded) —
+  // the auto-advance loop uses this as its sole stop condition, so it no longer
+  // re-reads room.json itself.
+  step(slug: MindSlug): Promise<boolean>;
   inject(slug: MindSlug, input: RoomInjectInput): Promise<void>;
   stop(slug: MindSlug): Promise<void>;
   dispose(): Promise<void>;
+  isDisposed(): boolean;
 }
 
 export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
@@ -47,12 +60,20 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   const newId = deps.newId ?? defaultNewId();
   // The single-active-room invariant (one fixed rib:chamber:room key, C1): in the
   // wired rib this is enforced by the snapshot key's register-once discipline;
-  // here the driver tracks it directly.
+  // here the driver tracks it directly and reserves it synchronously in start().
   let activeSlug: MindSlug | undefined;
   // Set by dispose(). The CLI MVP can't cancel an in-flight child, so a turn can
   // settle after teardown; once disposed, a late turn drops its append/commit so
-  // nothing is written or published after the rib is gone.
+  // nothing is written or published after the rib is gone. The adapter observes
+  // this via isDisposed() rather than tracking a parallel flag of its own.
   let disposed = false;
+
+  // The active room's transcript, held in memory. The driver is the sole writer
+  // of a room's transcript, so this stays authoritative: loaded once on start,
+  // appended in place as entries are written, and read for both prompt context
+  // and the board. Without it each turn re-parsed the whole file twice (prompt +
+  // board), which is quadratic over a room's life. Evicted when the room closes.
+  const transcripts = new Map<MindSlug, TurnEntry[]>();
 
   function clearActive(slug: MindSlug): void {
     if (activeSlug === slug) activeSlug = undefined;
@@ -94,25 +115,45 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return next;
   }
 
+  // Append to disk (the source of truth) and mirror into the in-memory transcript
+  // so the next prompt/board build needs no re-read. A no-op on the cache when
+  // the room is closed (a late drain from a stopped room still hits disk).
+  async function appendEntry(slug: MindSlug, entry: TurnEntry): Promise<void> {
+    await deps.store.appendTranscript(slug, entry);
+    transcripts.get(slug)?.push(entry);
+  }
+
+  // The room's transcript for prompt context / board: the in-memory copy while
+  // the room is live, falling back to disk (the source of truth) otherwise.
+  async function loadCachedTranscript(slug: MindSlug): Promise<readonly TurnEntry[]> {
+    return transcripts.get(slug) ?? (await deps.store.loadTranscript(slug));
+  }
+
   async function persistAndPublish(room: Room): Promise<void> {
     await deps.store.saveRoom(room);
-    const transcript = await deps.store.loadTranscript(room.slug);
+    const transcript = await loadCachedTranscript(room.slug);
     await deps.publisher.publish(buildRoomBoard(room, transcript));
   }
 
   // Commit a still-active room, unless a newer generation has superseded this op.
-  async function commitActive(slug: MindSlug, gen: number, room: Room): Promise<void> {
-    if (generationOf(slug) !== gen) return;
+  // Returns whether the room remains active (false when superseded — the caller
+  // should stop driving).
+  async function commitActive(slug: MindSlug, gen: number, room: Room): Promise<boolean> {
+    if (generationOf(slug) !== gen) return false;
     await persistAndPublish(room);
+    return true;
   }
 
   // Commit a room leaving the active state (done/stopped). Bumps the generation so
-  // any other in-flight op on this room becomes stale and skips its own write.
-  async function commitTerminal(slug: MindSlug, gen: number, room: Room): Promise<void> {
-    if (generationOf(slug) !== gen) return;
+  // any other in-flight op on this room becomes stale and skips its own write,
+  // then releases the in-memory transcript. Always returns false (not active).
+  async function commitTerminal(slug: MindSlug, gen: number, room: Room): Promise<boolean> {
+    if (generationOf(slug) !== gen) return false;
     bumpGeneration(slug);
     clearActive(slug);
     await persistAndPublish(room);
+    transcripts.delete(slug);
+    return false;
   }
 
   function isValidNominee(slug: MindSlug, room: Room): boolean {
@@ -120,53 +161,66 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   }
 
   async function start(config: RoomStartConfig): Promise<Room> {
-    // Reject a strategy the registry cannot execute before activating — otherwise
+    // Reject a strategy the registry cannot execute before reserving — otherwise
     // the room would occupy the single active slot with no way for step() to
-    // advance it (it would just throw on the first step).
+    // advance it. Runs before the reservation so a bad strategy leaks no slot.
     getStrategy(config.strategy);
 
-    if (activeSlug && activeSlug !== config.slug) {
-      const other = await deps.store.loadRoom(activeSlug);
-      if (other && other.status === "active") {
-        throw new Error(
-          `a room is already active (${activeSlug}); stop it before starting "${config.slug}"`,
-        );
-      }
-      activeSlug = undefined;
+    // Single-active reservation, synchronous: there is no await between reading
+    // and claiming activeSlug, so two concurrent starts cannot both pass — the
+    // second sees the first's reservation and rejects. This owns the invariant
+    // the adapter used to guard with a process-wide start gate.
+    if (activeSlug !== undefined && activeSlug !== config.slug) {
+      throw new Error(
+        `a room is already active (${activeSlug}); stop it before starting "${config.slug}"`,
+      );
     }
-
-    const existing = await deps.store.loadRoom(config.slug);
+    const claimed = activeSlug === undefined;
     activeSlug = config.slug;
-    if (existing && existing.status === "active") {
-      // Resume an already-active room — do NOT bump the generation, so an
-      // in-flight turn keeps its lifetime and still commits normally.
-      await persistAndPublish(existing);
-      return existing;
-    }
 
-    // A fresh start or a restart of a closed (stopped/done) room opens a new
-    // generation, superseding any stale step still draining on this slug.
-    bumpGeneration(config.slug);
-    const room: Room = {
-      slug: config.slug,
-      name: config.name,
-      strategy: config.strategy,
-      participants: config.participants,
-      status: "active",
-      turnBudget: config.turnBudget,
-      turnIndex: existing?.turnIndex ?? 0,
-      ...(config.config ? { config: config.config } : {}),
-      createdAt: existing?.createdAt ?? now().toISOString(),
-    };
-    await persistAndPublish(room);
-    return room;
+    try {
+      const existing = await deps.store.loadRoom(config.slug);
+      // Load the transcript once per room lifetime; every later prompt/board
+      // build reads this in-memory copy instead of re-parsing the file.
+      transcripts.set(config.slug, [...(await deps.store.loadTranscript(config.slug))]);
+
+      if (existing && existing.status === "active") {
+        // Resume an already-active room — do NOT bump the generation, so an
+        // in-flight turn keeps its lifetime and still commits normally.
+        await persistAndPublish(existing);
+        return existing;
+      }
+
+      // A fresh start or a restart of a closed (stopped/done) room opens a new
+      // generation, superseding any stale step still draining on this slug.
+      bumpGeneration(config.slug);
+      const room: Room = {
+        slug: config.slug,
+        name: config.name,
+        strategy: config.strategy,
+        participants: config.participants,
+        status: "active",
+        turnBudget: config.turnBudget,
+        turnIndex: existing?.turnIndex ?? 0,
+        ...(config.config ? { config: config.config } : {}),
+        createdAt: existing?.createdAt ?? now().toISOString(),
+      };
+      await persistAndPublish(room);
+      return room;
+    } catch (e) {
+      // Release the slot we just claimed so a failed start doesn't wedge the
+      // driver (only if we claimed it — a failed resume must not unreserve the
+      // still-active room).
+      if (claimed && activeSlug === config.slug) activeSlug = undefined;
+      throw e;
+    }
   }
 
-  async function step(slug: MindSlug): Promise<void> {
+  async function step(slug: MindSlug): Promise<boolean> {
     // Serial gate. The check-and-add is synchronous (no await between), so a
-    // second fire-and-return room-next while a turn is in flight is a no-op rather
-    // than racing the first — preventing duplicate entries / a lost budget tick.
-    if (inFlight.has(slug)) return;
+    // second concurrent step while a turn is in flight is a no-op rather than
+    // racing the first — preventing duplicate entries / a lost budget tick.
+    if (inFlight.has(slug)) return false;
     inFlight.add(slug);
     // Allocate the turn's AbortController up front (before any await) so a stop /
     // dispose during the pre-turn async gap aborts the same controller the turn
@@ -178,8 +232,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const gen = generationOf(slug);
     try {
       const loaded = await deps.store.loadRoom(slug);
-      if (loaded?.status !== "active") return;
-      if (generationOf(slug) !== gen) return; // superseded during load — abandon
+      if (loaded?.status !== "active") return false;
+      if (generationOf(slug) !== gen) return false; // superseded during load — abandon
 
       // (1) consume one-shot director overrides (read + clear). Persist the clear
       // before the turn so an inject arriving mid-turn writes fresh pending that
@@ -211,12 +265,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
       // (3) execute.
       if (decision.kind === "end") {
-        await commitTerminal(slug, gen, { ...room, status: "done" });
-        return;
+        return await commitTerminal(slug, gen, { ...room, status: "done" });
       }
       if (decision.kind === "speak") {
-        await runSpeakTurn(room, decision.mind, override.directionInjection, controller, gen);
-        return;
+        return await runSpeakTurn(
+          room,
+          decision.mind,
+          override.directionInjection,
+          controller,
+          gen,
+        );
       }
       // speak-parallel / moderate / synthesize — Phase 3 / deferred concurrent.
       throw new Error(`step kind "${decision.kind}" is not supported in Phase 2`);
@@ -232,12 +290,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     directionInjection: string | undefined,
     controller: AbortController,
     gen: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const minds = await deps.minds();
     const mind = minds.find((m) => m.slug === mindSlug);
     if (!mind) {
       // Speaker not in roster — fail closed: note it and end the room.
-      await deps.store.appendTranscript(
+      await appendEntry(
         room.slug,
         buildTurnEntry({
           roomSlug: room.slug,
@@ -249,11 +307,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           at: now().toISOString(),
         }),
       );
-      await withLock(room.slug, () => commitTerminal(room.slug, gen, { ...room, status: "done" }));
-      return;
+      return await withLock(room.slug, () =>
+        commitTerminal(room.slug, gen, { ...room, status: "done" }),
+      );
     }
 
-    const transcript = await deps.store.loadTranscript(room.slug);
+    const transcript = await loadCachedTranscript(room.slug);
 
     let text: string;
     let aborted: boolean;
@@ -295,9 +354,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
     // Shutdown landed during the (uncancellable) turn — drop the late result so
     // nothing is appended or published after the rib is disposed.
-    if (disposed) return;
+    if (disposed) return false;
 
-    await deps.store.appendTranscript(
+    await appendEntry(
       room.slug,
       buildTurnEntry({
         roomSlug: room.slug,
@@ -315,18 +374,18 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // inject that arrived during the turn (fresh pending) is preserved. Under the
     // room lock so the load-advance-save can't interleave with an inject commit.
     // The commit helpers drop the write if a stop/restart has superseded the turn.
-    await withLock(room.slug, async () => {
+    return await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
       // Advance from the re-loaded current, not the pre-turn snapshot, so the
       // index stays consistent with the state this commit is merging onto.
       const advanced: Room = { ...current, turnIndex: current.turnIndex + 1 };
       if (aborted) {
-        await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
-      } else if (advanced.turnIndex >= advanced.turnBudget) {
-        await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
-      } else {
-        await commitActive(room.slug, gen, advanced);
+        return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
       }
+      if (advanced.turnIndex >= advanced.turnBudget) {
+        return await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
+      }
+      return await commitActive(room.slug, gen, advanced);
     });
   }
 
@@ -340,7 +399,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
     if (input.text !== undefined) {
       // `from` is forced to "director" server-side regardless of any payload.
-      await deps.store.appendTranscript(
+      await appendEntry(
         slug,
         buildTurnEntry({
           roomSlug: slug,
@@ -390,6 +449,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       controllers.get(slug)?.abort();
       clearActive(slug);
       await persistAndPublish({ ...room, status: "stopped", pending: undefined });
+      transcripts.delete(slug);
     });
   }
 
@@ -400,7 +460,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     activeSlug = undefined;
   }
 
-  return { start, step, inject, stop, dispose };
+  function isDisposed(): boolean {
+    return disposed;
+  }
+
+  return { start, step, inject, stop, dispose, isDisposed };
 }
 
 function defaultNewId(): () => string {
