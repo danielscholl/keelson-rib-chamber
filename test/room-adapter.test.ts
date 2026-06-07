@@ -139,7 +139,7 @@ afterAll(async () => {
 describe("room adapter — fails closed without the seams", () => {
   it("does not register the room snapshot or build the driver when runAgentTurn is absent", async () => {
     const { sm, registered } = fakeSnapshotManager();
-    expect(registerTools(makeCtx({ sm }))).toEqual({ registered: [] });
+    expect(registerTools(makeCtx({ sm }))).toEqual([]); // no chat tools
     expect(registered).not.toContain("rib:chamber:room");
     const res = await onAction(startPayload(), makeCtx({ sm }));
     expect(res.ok).toBe(false);

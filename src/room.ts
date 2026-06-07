@@ -190,7 +190,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         directionInjection: pending.directionInjection,
       };
       const room: Room = { ...loaded, pending: undefined };
-      if (loaded.pending) await deps.store.saveRoom(room);
+      if (loaded.pending) {
+        // Clear the consumed override under the lock + a generation recheck so a
+        // stop racing this write can't be reverted: a stale active save landing
+        // after stop's stopped write would otherwise reactivate the room and let
+        // the auto loop keep issuing turns.
+        await withLock(slug, async () => {
+          if (generationOf(slug) !== gen) return; // stop/restart superseded — don't rewrite
+          await deps.store.saveRoom(room);
+        });
+      }
 
       // (2) decide: a valid nextSpeaker override wins; otherwise the strategy picks.
       let decision: StrategyStep;

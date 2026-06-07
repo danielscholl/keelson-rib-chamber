@@ -259,7 +259,9 @@ const rib: Rib = {
       // lazy-compose).
       void sm.recompose(ROOM_KEY);
     }
-    return { registered: [] };
+    // No chat/workflow tools yet — the room wiring above is a side effect of this
+    // boot hook. (Exposing the room controls as chat tools is a #109 follow-up.)
+    return [];
   },
 
   // Genesis a Mind (one agent turn authors its soul, the rib persists it) and
