@@ -108,9 +108,10 @@ beforeAll(async () => {
   // An abort-aware turn holds the first turn in flight (it resolves only on abort),
   // so a started room stays active for the status/say assertions until stop.
   abort = abortableRunAgentTurn();
+  // Reset module-global room state (activeSlug / lastSlug / the driver singleton)
+  // a prior test file may have left set, then build a fresh driver for this file.
+  await rib.dispose?.();
   tools = registerTools(makeCtx(abort.run, sm));
-  // Neutralize any active room a prior test file's module-global state left set.
-  await tool("chamber_room_stop").execute({}, makeToolCtx().ctx);
 });
 afterAll(async () => {
   await rib.dispose?.();
@@ -141,10 +142,10 @@ describe("chamber room-control chat tools", () => {
     expect(tool("chamber_room_stop").state_changing).toBe(true);
   });
 
-  it("chamber_room_status reports no active room before one is started", async () => {
+  it("chamber_room_status reports no room before one is started", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_status").execute({}, t.ctx);
-    expect(t.out()).toContain("No active Chamber room");
+    expect(t.out()).toContain("No Chamber room yet");
   });
 
   it("chamber_room_start dry-runs without confirm and opens nothing", async () => {
@@ -156,16 +157,27 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(false);
     expect(t.out()).toContain("Would open a room with alice, bob");
     expect(t.out()).toContain("confirm:true");
-    // The dry run touched nothing — still no active room.
+    // The dry run touched nothing — still no room.
     const s = makeToolCtx();
     await tool("chamber_room_status").execute({}, s.ctx);
-    expect(s.out()).toContain("No active Chamber room");
+    expect(s.out()).toContain("No Chamber room yet");
   });
 
   it("rejects a start with fewer than two participants", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute({ participants: ["alice"], confirm: true }, t.ctx);
     expect(t.errored()).toBe(true);
+  });
+
+  it("rejects a start whose participants dedupe to fewer than two", async () => {
+    // Schema .min(2) counts raw entries; validateStart de-dupes and re-checks.
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "alice"], confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("2 distinct");
   });
 
   it("chamber_room_start with confirm opens a room the status tool then reports", async () => {
@@ -203,15 +215,17 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(true);
   });
 
-  it("chamber_room_stop stops the active room, after which status is empty again", async () => {
+  it("chamber_room_stop stops the room; status still shows the finished room", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_stop").execute({}, t.ctx);
     expect(t.errored()).toBe(false);
     expect(t.out()).toContain("Stopped the room");
     expect((await createFileRoomStore(roomsDir()).loadRoom(openedSlug))?.status).toBe("stopped");
 
+    // activeSlug is cleared, but lastSlug keeps the finished room readable.
     const s = makeToolCtx();
     await tool("chamber_room_status").execute({}, s.ctx);
-    expect(s.out()).toContain("No active Chamber room");
+    expect(s.out()).toContain("stopped");
+    expect(s.out()).toContain("alice");
   });
 });

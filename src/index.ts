@@ -45,6 +45,10 @@ let roomSeq = 0;
 // invariant). Set when a room opens, cleared when it stops or its loop ends — so
 // the chat tools can target "the room" without the server-assigned slug.
 let activeSlug: string | undefined;
+// The most-recent room, active or finished. Unlike activeSlug it survives the
+// room ending, so chamber_room_status can still show a just-finished transcript.
+// Cleared only on dispose.
+let lastSlug: string | undefined;
 
 // The roster the driver resolves a speaker's persona from each turn. Cached
 // because it only changes via genesis/retire (both onAction, below); re-reading
@@ -323,6 +327,7 @@ const rib: Rib = {
   dispose: async () => {
     loops.clear();
     activeSlug = undefined;
+    lastSlug = undefined;
     invalidateRoster();
     await driver?.dispose();
   },
@@ -354,12 +359,43 @@ function ensureLoop(slug: string): void {
       }
     } catch (e) {
       console.error(`[rib-chamber] room loop '${slug}' failed: ${errText(e)}`);
+      // The loop died mid-room: the driver still holds this slug as its active
+      // room and room.json is still "active". Force-stop so the driver and disk
+      // agree with the cleared module activeSlug below — otherwise the room is
+      // invisible to the tools yet blocks every restart ("a room is already active").
+      try {
+        await activeDriver.stop(slug);
+      } catch (stopErr) {
+        console.error(`[rib-chamber] failed to stop wedged room '${slug}': ${errText(stopErr)}`);
+      }
     } finally {
       loops.delete(slug);
       // The room left "active" — drop it as the chat tools' target.
       if (activeSlug === slug) activeSlug = undefined;
     }
   })();
+}
+
+// Validate + canonicalize room-start inputs, shared by startRoom and the
+// chamber_room_start dry-run so the dry-run never advertises a start the real
+// path would reject. De-dupes participants and requires at least two DISTINCT
+// valid speakers — the tool schema's min(2) counts RAW entries, so ["a","a"]
+// would otherwise collapse to a one-Mind room.
+function validateStart(
+  participants: readonly string[],
+  turnBudget: number,
+): { ok: true; participants: string[] } | { ok: false; error: string } {
+  const deduped = [...new Set(participants)];
+  if (deduped.length < 2 || !deduped.every(isValidParticipant)) {
+    return {
+      ok: false,
+      error: "a room needs at least 2 distinct participants (safe Mind slugs, not director/system)",
+    };
+  }
+  if (!Number.isInteger(turnBudget) || turnBudget <= 0 || turnBudget > MAX_ROOM_TURN_BUDGET) {
+    return { ok: false, error: `turnBudget must be an integer in 1..${MAX_ROOM_TURN_BUDGET}` };
+  }
+  return { ok: true, participants: deduped };
 }
 
 // Open a fresh-slug room and kick its auto-advance loop. The shared core behind
@@ -375,22 +411,12 @@ async function startRoom(input: {
   name?: string;
   strategy?: string;
 }): Promise<RibActionResult> {
-  if (!driver) return ROOM_DISABLED;
-  // De-dupe (a duplicate participant would over-weight a speaker) preserving order.
-  const participants = [...new Set(input.participants)];
-  if (participants.length === 0 || !participants.every(isValidParticipant)) {
-    return {
-      ok: false,
-      error: "room-start requires participants: non-empty safe slugs, not director/system",
-    };
-  }
-  if (
-    !Number.isInteger(input.turnBudget) ||
-    input.turnBudget <= 0 ||
-    input.turnBudget > MAX_ROOM_TURN_BUDGET
-  ) {
-    return { ok: false, error: `turnBudget must be an integer in 1..${MAX_ROOM_TURN_BUDGET}` };
-  }
+  // Refuse once disposed: driver.start() doesn't check, so without this a start
+  // after dispose() would write an "active" room whose loop never runs (ensureLoop
+  // bails on isDisposed) — a phantom room nothing ever clears.
+  if (!driver || driver.isDisposed()) return ROOM_DISABLED;
+  const valid = validateStart(input.participants, input.turnBudget);
+  if (!valid.ok) return { ok: false, error: valid.error };
   const name = (input.name ?? "").trim() || "Room";
   const strategy = ((input.strategy ?? "").trim() || "sequential") as RoomStrategyName;
   const slug = freshRoomSlug();
@@ -398,8 +424,15 @@ async function startRoom(input: {
   try {
     // driver.start reserves the single active slot synchronously (before any
     // await), so concurrent starts can't both pass — the second rejects here.
-    await activeDriver.start({ slug, name, strategy, participants, turnBudget: input.turnBudget });
+    await activeDriver.start({
+      slug,
+      name,
+      strategy,
+      participants: valid.participants,
+      turnBudget: input.turnBudget,
+    });
     activeSlug = slug;
+    lastSlug = slug;
     ensureLoop(slug);
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -417,11 +450,14 @@ async function injectRoom(
   if (!driver) return ROOM_DISABLED;
   if (!isSafeSlug(slug)) return { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` };
   try {
-    await driver.inject(slug, {
+    const applied = await driver.inject(slug, {
       ...(input.directionInjection ? { directionInjection: input.directionInjection } : {}),
       ...(input.nextSpeaker ? { nextSpeaker: input.nextSpeaker } : {}),
       ...(input.text ? { text: input.text } : {}),
     });
+    // driver.inject silently no-ops on a room that is no longer active; surface
+    // that as a failure so a chat tool can't claim a dropped steer landed.
+    if (!applied) return { ok: false, error: "the room is no longer active" };
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -453,7 +489,6 @@ function roomStartAction(action: RibAction): Promise<RibActionResult> {
 }
 
 async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
-  if (!driver) return ROOM_DISABLED;
   const resolved = requireRoomSlug(action);
   if ("error" in resolved) return resolved.error;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
@@ -465,7 +500,6 @@ async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
 }
 
 async function roomStopAction(action: RibAction): Promise<RibActionResult> {
-  if (!driver) return ROOM_DISABLED;
   const resolved = requireRoomSlug(action);
   if ("error" in resolved) return resolved.error;
   return stopRoom(resolved.slug);
@@ -623,12 +657,16 @@ const emptyToolSchema = z.object({});
 // Render the active room + its transcript as chat-legible text. Reads through the
 // same store the driver writes, so it reflects the latest committed turn.
 async function renderRoomStatus(store: RoomStore): Promise<string> {
-  if (!activeSlug) return "No active Chamber room. Start one with chamber_room_start.";
-  const room = await store.loadRoom(activeSlug);
-  if (!room) return "No active Chamber room. Start one with chamber_room_start.";
-  const transcript = await store.loadTranscript(activeSlug);
+  // Capture once: the auto-advance loop can clear activeSlug between awaits. Fall
+  // back to lastSlug so a just-finished/stopped room is still readable (its
+  // room.json + transcript persist); the header reports the status either way.
+  const slug = activeSlug ?? lastSlug;
+  if (!slug) return "No Chamber room yet. Start one with chamber_room_start.";
+  const room = await store.loadRoom(slug);
+  if (!room) return "No Chamber room yet. Start one with chamber_room_start.";
+  const transcript = await store.loadTranscript(slug);
   const head =
-    `Room "${room.name}" (${activeSlug}) — ${room.status}, turn ${room.turnIndex}/${room.turnBudget}; ` +
+    `Room "${room.name}" (${slug}) — ${room.status}, turn ${room.turnIndex}/${room.turnBudget}; ` +
     `participants: ${room.participants.join(", ")}.`;
   const body = transcript.length > 0 ? renderTranscript(transcript) : "(no turns yet)";
   return boundedText(`${head}\n\n${body}`);
@@ -670,7 +708,14 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           return;
         }
         const { participants, turnBudget, name, strategy, confirm } = parsed.data;
-        const who = [...new Set(participants)].join(", ");
+        // Validate up front so the dry-run never advertises a start the confirm
+        // path would reject (duplicate / reserved / unsafe participants, <2 distinct).
+        const valid = validateStart(participants, turnBudget);
+        if (!valid.ok) {
+          emitResult(ctx, `chamber_room_start: ${valid.error}`, true);
+          return;
+        }
+        const who = valid.participants.join(", ");
         if (!confirm) {
           emitResult(
             ctx,
@@ -702,7 +747,8 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           emitResult(ctx, `chamber_room_say: ${parsed.error.message}`, true);
           return;
         }
-        if (!activeSlug) {
+        const slug = activeSlug;
+        if (!slug) {
           emitResult(
             ctx,
             "No active Chamber room to steer. Start one with chamber_room_start.",
@@ -711,10 +757,11 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           return;
         }
         const { direction, callOn, text } = parsed.data;
-        const res = await injectRoom(activeSlug, {
-          ...(direction ? { directionInjection: direction } : {}),
-          ...(callOn ? { nextSpeaker: callOn } : {}),
-          ...(text ? { text } : {}),
+        // injectRoom does the truthiness filtering; pass the fields straight through.
+        const res = await injectRoom(slug, {
+          directionInjection: direction,
+          nextSpeaker: callOn,
+          text,
         });
         emitResult(
           ctx,
@@ -730,11 +777,12 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
       inputSchema: emptyToolSchema,
       state_changing: true,
       async execute(_input, ctx) {
-        if (!activeSlug) {
+        const slug = activeSlug;
+        if (!slug) {
           emitResult(ctx, "No active Chamber room to stop.", true);
           return;
         }
-        const res = await stopRoom(activeSlug);
+        const res = await stopRoom(slug);
         emitResult(
           ctx,
           res.ok ? "Stopped the room." : `chamber_room_stop failed: ${res.error}`,
