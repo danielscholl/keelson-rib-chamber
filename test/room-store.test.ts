@@ -89,11 +89,21 @@ describe("createFileRoomStore", () => {
     expect(await store.loadTranscript("room")).toEqual([]);
   });
 
+  it("deleteRoom removes the room state and transcript", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(makeRoom());
+    await store.appendTranscript("room", makeEntry());
+    await store.deleteRoom("room");
+    expect(await store.loadRoom("room")).toBeUndefined();
+    expect(await store.loadTranscript("room")).toEqual([]);
+  });
+
   it("rejects a path-traversal slug on every method (FS boundary)", async () => {
     const store = createFileRoomStore(root);
     await expect(store.saveRoom(makeRoom({ slug: "../escape" }))).rejects.toThrow();
     await expect(store.loadRoom("../escape")).rejects.toThrow();
     await expect(store.loadTranscript("../escape")).rejects.toThrow();
     await expect(store.appendTranscript("../escape", makeEntry())).rejects.toThrow();
+    await expect(store.deleteRoom("../escape")).rejects.toThrow();
   });
 });

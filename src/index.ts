@@ -10,9 +10,9 @@ import {
 } from "./genesis.ts";
 import { type MindRecord, mindExists, readMinds, retireMind, scaffoldMind } from "./minds-store.ts";
 import { mindsDir, roomsDir } from "./paths.ts";
-import type { RoomPublisher, RoomStore } from "./ports.ts";
+import type { RoomPublisher } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
-import { createFileRoomStore } from "./room-store.ts";
+import { createFileRoomStore, type FileRoomStore } from "./room-store.ts";
 import type { RoomStrategyName } from "./types.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
@@ -24,7 +24,7 @@ const ROOM_KEY = "rib:chamber:room";
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
 // stays undefined when either seam is absent, and room actions then fail closed.
 let driver: RoomDriver | undefined;
-let store: RoomStore | undefined;
+let store: FileRoomStore | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Set by the rib's dispose() at shutdown so a running loop stops driving turns
@@ -243,6 +243,10 @@ const rib: Rib = {
         runAgentTurn: run,
         minds: () => readMinds(mindsDir()),
       });
+      // Prime the cache so a client subscribing before the first turn gets the
+      // seeded board, not a 204 / loading skeleton (the GET path doesn't
+      // lazy-compose).
+      void sm.recompose(ROOM_KEY);
     }
     return { registered: [] };
   },
@@ -328,6 +332,13 @@ async function roomStartAction(action: RibAction): Promise<RibActionResult> {
   const name = asNonEmptyString(payload.name) || "Room";
   const strategy = (asNonEmptyString(payload.strategy) || "sequential") as RoomStrategyName;
   try {
+    // Fresh start: wipe a prior closed room on this slug so the run begins at
+    // turnIndex 0 with an empty transcript (driver.start resumes the stored
+    // turnIndex, which for a done room would reopen at the budget and finish
+    // with no turns). An *active* room on this slug is a genuine resume — leave
+    // it so an interrupted room can re-attach.
+    const existing = await store?.loadRoom(slug);
+    if (existing && existing.status !== "active") await store?.deleteRoom(slug);
     await driver.start({ slug, name, strategy, participants, turnBudget });
     ensureLoop(slug);
     return { ok: true, data: { slug } };

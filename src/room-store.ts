@@ -1,8 +1,14 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
 import type { RoomStore } from "./ports.ts";
 import type { MindSlug, Room, TurnEntry } from "./types.ts";
+
+// The file store adds `deleteRoom` beyond the core RoomStore port: a fresh
+// `room-start` over a closed room must wipe the prior room.json + transcript so
+// the new run begins at turnIndex 0 with an empty log (driver.start otherwise
+// resumes the stored turnIndex).
+export type FileRoomStore = RoomStore & { deleteRoom(slug: MindSlug): Promise<void> };
 
 // File-based RoomStore (C3): one directory per room under the data home's rooms/
 // root — room.json holds the current state, transcript.jsonl is the append-only
@@ -15,7 +21,7 @@ import type { MindSlug, Room, TurnEntry } from "./types.ts";
 // a traversal slug (`../minds/alice`) would otherwise read/write outside the
 // rooms tree. This is the FS boundary, mirroring the minds store's guard.
 
-export function createFileRoomStore(roomsRoot: string): RoomStore {
+export function createFileRoomStore(roomsRoot: string): FileRoomStore {
   // Per-write temp suffix so two overlapping saves of the same room (e.g. a
   // director inject racing a turn commit) never share a temp file and clobber
   // each other's rename.
@@ -51,6 +57,11 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
       assertSafeSlug(slug);
       await mkdir(roomDir(slug), { recursive: true });
       await appendFile(transcriptFile(slug), `${JSON.stringify(entry)}\n`);
+    },
+
+    async deleteRoom(slug) {
+      assertSafeSlug(slug);
+      await rm(roomDir(slug), { recursive: true, force: true });
     },
 
     async loadTranscript(slug) {

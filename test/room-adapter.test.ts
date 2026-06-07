@@ -144,8 +144,10 @@ describe("room adapter — live room", () => {
     registerTools(makeCtx({ run, sm: snap.sm }));
   });
 
-  it("registers the push-fed room snapshot at boot", () => {
+  it("registers and primes the push-fed room snapshot at boot", () => {
     expect(snap.registered).toContain("rib:chamber:room");
+    // Primed once at registration so a subscriber gets the seed, not a skeleton.
+    expect(snap.recomposed).toContain("rib:chamber:room");
   });
 
   it("auto-advances the room to done, streaming each turn to the canvas", async () => {
@@ -163,6 +165,17 @@ describe("room adapter — live room", () => {
       3,
     );
     expect(snap.lastBoard()?.view).toBe("board");
+  });
+
+  it("restarting the now-closed room runs fresh (resets turnIndex + transcript)", async () => {
+    const store = createFileRoomStore(roomsDir());
+    // Precondition: the prior test left "room" done with a 2-turn transcript.
+    expect((await store.loadRoom("room"))?.status).toBe("done");
+    const res = await onAction(startPayload({ slug: "room" }), makeCtx({ sm: snap.sm }));
+    expect(res.ok).toBe(true);
+    await waitFor(async () => (await store.loadRoom("room"))?.status === "done");
+    // A fresh run: 2 turns total, not 4 (old transcript was wiped, not appended).
+    expect(await store.loadTranscript("room")).toHaveLength(2);
   });
 
   it("room-stop halts an active room", async () => {
