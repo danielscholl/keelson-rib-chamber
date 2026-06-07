@@ -321,8 +321,8 @@ const ROOM_DISABLED: RibActionResult = {
 // the driver's serial gate + generation gating keep one turn at a time, and a
 // stop aborts the in-flight turn so step() reports the room is no longer active
 // and the loop exits. step() is the sole room.json reader for the drive decision
-// (it returns whether to keep going), so the loop no longer re-reads it. Errors
-// are logged, never thrown into the (already-returned) action.
+// (it returns a StepOutcome), so the loop no longer re-reads it. Errors are
+// logged, never thrown into the (already-returned) action.
 function ensureLoop(slug: string): void {
   if (!driver || driver.isDisposed() || loops.has(slug)) return;
   loops.add(slug);
@@ -330,7 +330,10 @@ function ensureLoop(slug: string): void {
   void (async () => {
     try {
       while (!activeDriver.isDisposed()) {
-        if (!(await activeDriver.step(slug))) break;
+        // Stop only when the room left "active" (budget reached, stopped, or
+        // superseded). "busy" can't occur here — this loop is the sole stepper
+        // and awaits each step fully — so anything but "ended" means keep going.
+        if ((await activeDriver.step(slug)) === "ended") break;
       }
     } catch (e) {
       console.error(`[rib-chamber] room loop '${slug}' failed: ${errText(e)}`);
