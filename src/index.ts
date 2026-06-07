@@ -10,9 +10,9 @@ import {
 } from "./genesis.ts";
 import { type MindRecord, mindExists, readMinds, retireMind, scaffoldMind } from "./minds-store.ts";
 import { mindsDir, roomsDir } from "./paths.ts";
-import type { RoomPublisher } from "./ports.ts";
+import type { RoomPublisher, RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
-import { createFileRoomStore, type FileRoomStore } from "./room-store.ts";
+import { createFileRoomStore } from "./room-store.ts";
 import type { RoomStrategyName } from "./types.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
@@ -24,9 +24,11 @@ const ROOM_KEY = "rib:chamber:room";
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
 // stays undefined when either seam is absent, and room actions then fail closed.
 let driver: RoomDriver | undefined;
-let store: FileRoomStore | undefined;
+let store: RoomStore | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
+// Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
+let roomSeq = 0;
 // Set by the rib's dispose() at shutdown so a running loop stops driving turns
 // (and never shells a new CLI turn) while the driver aborts the in-flight one.
 let disposed = false;
@@ -114,11 +116,11 @@ const rib: Rib = {
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
-  // Genesis / retire affordances. The room controls (room-start/next/inject/stop)
-  // are NOT listed here: a static actions[] button dispatches type-only, but the
-  // room controls need a payload (participants, the target slug, a nextSpeaker),
-  // so they are baked into the roster/room boards as payload-carrying actions
-  // (the OSDU pattern) and still reach onAction below.
+  // Genesis / retire affordances. The room controls (room-start/inject/stop) are
+  // NOT listed here: a static actions[] button dispatches type-only, but the room
+  // controls need a payload (participants, the target slug, a nextSpeaker), so
+  // they are baked into the roster/room boards as payload-carrying actions (the
+  // OSDU pattern) and still reach onAction below.
   actions: [
     { type: "genesis", label: "New agent" },
     { type: "retire", label: "Retire agent" },
@@ -254,7 +256,8 @@ const rib: Rib = {
   // Genesis a Mind (one agent turn authors its soul, the rib persists it) and
   // retire one — both mutate the data home and return (the OSDU
   // mutate-then-refresh pattern). The room-* controls drive the room loop; the
-  // transcript pushes to the canvas as turns land (no refresh needed).
+  // transcript pushes to the canvas as turns land (no refresh needed). Turns
+  // advance on their own (the auto-advance loop), so there is no manual step.
   onAction: (action, ctx) => {
     switch (action.type) {
       case "genesis":
@@ -263,8 +266,6 @@ const rib: Rib = {
         return retireAction(action);
       case "room-start":
         return roomStartAction(action);
-      case "room-next":
-        return roomNextAction(action);
       case "room-inject":
         return roomInjectAction(action);
       case "room-stop":
@@ -326,39 +327,21 @@ async function roomStartAction(action: RibAction): Promise<RibActionResult> {
   if (!Number.isInteger(turnBudget) || turnBudget <= 0) {
     return { ok: false, error: "room-start requires a positive integer turnBudget" };
   }
-  const slug = asNonEmptyString(payload.slug) || "room";
-  const bad = badSlug(slug);
-  if (bad) return bad;
   const name = asNonEmptyString(payload.name) || "Room";
   const strategy = (asNonEmptyString(payload.strategy) || "sequential") as RoomStrategyName;
+  // Each start opens a brand-new room under a unique slug (not a reused "room").
+  // The CLI MVP can't cancel an in-flight turn, so a turn still draining from a
+  // stopped room would otherwise append into a reused transcript; a fresh slug
+  // sends that late append to its own old room dir, never the new one. Past rooms
+  // remain under rooms/ as history (a retention sweep is a follow-up).
+  const slug = freshRoomSlug();
   try {
-    // Fresh start: wipe a prior closed room on this slug so the run begins at
-    // turnIndex 0 with an empty transcript (driver.start resumes the stored
-    // turnIndex, which for a done room would reopen at the budget and finish
-    // with no turns). An *active* room on this slug is a genuine resume — leave
-    // it so an interrupted room can re-attach.
-    const existing = await store?.loadRoom(slug);
-    if (existing && existing.status !== "active") await store?.deleteRoom(slug);
     await driver.start({ slug, name, strategy, participants, turnBudget });
     ensureLoop(slug);
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
-}
-
-function roomNextAction(action: RibAction): RibActionResult {
-  if (!driver) return ROOM_DISABLED;
-  const slug = roomSlugOf(action);
-  const bad = badSlug(slug);
-  if (bad) return bad;
-  // Fire-and-return: one turn can outlast the action's socket budget, and the
-  // driver publishes the result itself when it lands. A step while the loop is
-  // mid-turn is a no-op (the serial gate), so a manual nudge can't double-drive.
-  void driver
-    .step(slug)
-    .catch((e) => console.error(`[rib-chamber] room-next '${slug}': ${errText(e)}`));
-  return { ok: true, data: { slug } };
 }
 
 async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
@@ -398,6 +381,13 @@ async function roomStopAction(action: RibAction): Promise<RibActionResult> {
 function roomSlugOf(action: RibAction): string {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   return asNonEmptyString(payload.slug) || "room";
+}
+
+// A unique, path-safe room slug per start (timestamp + counter), so every room
+// gets its own rooms/<slug>/ dir and a late turn from a prior room can't bleed
+// into a new one. Matches SAFE_SLUG (lowercase alnum + hyphens).
+function freshRoomSlug(): string {
+  return `room-${Date.now().toString(36)}-${(roomSeq++).toString(36)}`;
 }
 
 // Reject a traversal slug at the action boundary so the caller gets a clean

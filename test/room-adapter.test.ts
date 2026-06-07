@@ -2,7 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CanvasView, RibAction, RibContext, SnapshotManager } from "@keelson/shared";
+import type {
+  CanvasView,
+  RibAction,
+  RibActionResult,
+  RibContext,
+  SnapshotManager,
+} from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
@@ -86,6 +92,11 @@ const startPayload = (over: Record<string, unknown> = {}): RibAction => ({
   payload: { participants: ["alice", "bob"], turnBudget: 2, ...over },
 });
 
+// room-start assigns a fresh slug server-side; read it back from the result.
+function slugOf(res: RibActionResult): string {
+  return res.ok ? ((res.data as { slug?: string })?.slug ?? "") : "";
+}
+
 let workspace: string;
 let prevWorkspace: string | undefined;
 beforeAll(async () => {
@@ -152,12 +163,13 @@ describe("room adapter — live room", () => {
 
   it("auto-advances the room to done, streaming each turn to the canvas", async () => {
     const store = createFileRoomStore(roomsDir());
-    const res = await onAction(startPayload({ slug: "room" }), makeCtx({ sm: snap.sm }));
-    expect(res).toEqual({ ok: true, data: { slug: "room" } });
+    const res = await onAction(startPayload(), makeCtx({ sm: snap.sm }));
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/); // server-assigned fresh slug
 
-    await waitFor(async () => (await store.loadRoom("room"))?.status === "done");
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
 
-    const transcript = await store.loadTranscript("room");
+    const transcript = await store.loadTranscript(slug);
     expect(transcript).toHaveLength(2);
     expect(transcript.map((e) => e.from)).toEqual(["alice", "bob"]);
     // The loop published a valid board on start + each turn (live WS push).
@@ -167,15 +179,15 @@ describe("room adapter — live room", () => {
     expect(snap.lastBoard()?.view).toBe("board");
   });
 
-  it("restarting the now-closed room runs fresh (resets turnIndex + transcript)", async () => {
+  it("a second start opens a fresh room under a new slug", async () => {
     const store = createFileRoomStore(roomsDir());
-    // Precondition: the prior test left "room" done with a 2-turn transcript.
-    expect((await store.loadRoom("room"))?.status).toBe("done");
-    const res = await onAction(startPayload({ slug: "room" }), makeCtx({ sm: snap.sm }));
-    expect(res.ok).toBe(true);
-    await waitFor(async () => (await store.loadRoom("room"))?.status === "done");
-    // A fresh run: 2 turns total, not 4 (old transcript was wiped, not appended).
-    expect(await store.loadTranscript("room")).toHaveLength(2);
+    const first = slugOf(await onAction(startPayload(), makeCtx({ sm: snap.sm })));
+    await waitFor(async () => (await store.loadRoom(first))?.status === "done");
+    const second = slugOf(await onAction(startPayload(), makeCtx({ sm: snap.sm })));
+    expect(second).not.toBe(first); // never reuses the slug
+    await waitFor(async () => (await store.loadRoom(second))?.status === "done");
+    // Each run is its own fresh 2-turn room — the new one isn't contaminated.
+    expect(await store.loadTranscript(second)).toHaveLength(2);
   });
 
   it("room-stop halts an active room", async () => {
@@ -203,8 +215,13 @@ describe("room adapter — live room", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("rejects a path-traversal room slug at the action boundary", async () => {
-    const res = await onAction(startPayload({ slug: "../../etc" }), makeCtx({ sm: snap.sm }));
+  it("rejects a path-traversal slug on a room control", async () => {
+    // room-start assigns its own slug; the slug-bearing controls are the ones to
+    // guard at the action boundary.
+    const res = await onAction(
+      { type: "room-stop", payload: { slug: "../../etc" } },
+      makeCtx({ sm: snap.sm }),
+    );
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("unsafe room slug");
   });
@@ -213,10 +230,11 @@ describe("room adapter — live room", () => {
   it("dispose halts the loop so a later start does not advance", async () => {
     await rib.dispose?.();
     const store = createFileRoomStore(roomsDir());
-    const res = await onAction(startPayload({ slug: "afterdispose" }), makeCtx({ sm: snap.sm }));
-    expect(res.ok).toBe(true);
+    const res = await onAction(startPayload(), makeCtx({ sm: snap.sm }));
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
     await new Promise((r) => setTimeout(r, 30));
     // The room was opened but the disposed loop never stepped it.
-    expect((await store.loadRoom("afterdispose"))?.turnIndex).toBe(0);
+    expect((await store.loadRoom(slug))?.turnIndex).toBe(0);
   });
 });

@@ -34,9 +34,10 @@ export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): Ca
   };
 }
 
-// The controls section: while a room is active, Next / per-participant "Call on
-// <slug>" (a one-shot nextSpeaker override) / Stop; once it ends, a single
-// "Start again" that re-runs the same config.
+// The controls section: while a room is active, a per-participant "Call on
+// <slug>" (a one-shot nextSpeaker override) and Stop (turns advance on their
+// own); once it ends, a single "Start again" that re-runs the same config under
+// a fresh room. Each control carries the room slug so onAction targets it.
 function roomControls(room: Room): CanvasBoardView["sections"][number] {
   if (room.status !== "active") {
     return {
@@ -48,7 +49,6 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
           label: "Start again",
           glyph: "▸",
           payload: {
-            slug: room.slug,
             name: room.name,
             strategy: room.strategy,
             participants: room.participants,
@@ -62,7 +62,6 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
     kind: "actions",
     title: "Controls",
     items: [
-      { type: "room-next", label: "Next", glyph: "▸", payload: { slug: room.slug } },
       ...room.participants.map((p) => ({
         type: "room-inject",
         label: `Call on ${p}`,

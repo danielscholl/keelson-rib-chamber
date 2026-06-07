@@ -236,18 +236,21 @@ MVP), so Phase 2 is unblocked and wired.
   `transcript.jsonl` under the data home), a **push publisher** (cache the
   driver's board, `recompose("rib:chamber:room")` — a live WS push, no collector
   or cadence poll), `runAgentTurn` (`C1`) for the turns, and the roster as the
-  minds resolver. `room-start` opens a room and kicks a **detached auto-advance
-  loop** that drives `step()` to budget/stop, streaming each turn to the canvas;
-  `room-next` is a manual single-step, `room-inject` a director override,
-  `room-stop` ends it. `room-next` is fire-and-return (the 60s socket cap); the
-  driver's serial gate + generation gating keep one turn at a time and let a stop
-  abort an in-flight turn, and a per-room write lock serializes inject vs. a
-  turn's commit so a mid-turn inject can't revert `turnIndex`. Room actions fail
-  closed without the seams. The controls are **board-baked** (the OSDU
-  payload-carrying pattern), not static `actions[]` buttons (those dispatch
+  minds resolver. `room-start` opens a room under a **fresh unique slug** and
+  kicks a **detached auto-advance loop** that drives `step()` to budget/stop,
+  streaming each turn to the canvas (the loop is the sole stepper — no manual
+  next to race it); `room-inject` is a director override (one-shot nextSpeaker),
+  `room-stop` ends it. The driver's serial gate + generation gating keep one turn
+  at a time and let a stop abort an in-flight turn, and a per-room write lock
+  serializes inject vs. a turn's commit so a mid-turn inject can't revert
+  `turnIndex`. A fresh slug per start means a turn still draining from a stopped
+  room (the CLI MVP can't cancel an in-flight child) appends to its own old room
+  dir, never the new one — past rooms persist under `rooms/` as history. Room
+  actions fail closed without the seams. The controls are **board-baked** (the
+  OSDU payload-carrying pattern), not static `actions[]` buttons (those dispatch
   type-only, which a payload-required control can't use): the roster board offers
   **Start room** (participants = the current Minds), and the room board offers
-  **Next / Call on \<mind\> / Stop** (active) or **Start again** (closed).
+  **Call on \<mind\> / Stop** (active) or **Start again** (closed).
 - Reusable substrate confirmed available in the Keelson base: `board` view,
   surface/region layout, action round-trip, cell tone (`G0`–`G4`).
 

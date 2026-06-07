@@ -40,10 +40,8 @@ describe("buildRosterBoard", () => {
     const actions = board.sections.find((s) => s.kind === "actions");
     if (actions?.kind !== "actions") throw new Error("no actions section");
     expect(actions.items[0]?.type).toBe("room-start");
-    expect(actions.items[0]?.payload).toMatchObject({
-      slug: "room",
-      participants: ["a", "b"],
-    });
+    // No slug: the server assigns a fresh one per start.
+    expect(actions.items[0]?.payload).toMatchObject({ participants: ["a", "b"] });
   });
 
   test("offers no start action with fewer than two minds (not a conversation)", () => {

@@ -39,7 +39,6 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
           label: "Start room",
           glyph: "▸",
           payload: {
-            slug: "room",
             name: "Room",
             strategy: "sequential",
             participants: minds.map((m) => m.slug),
