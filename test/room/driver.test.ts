@@ -458,10 +458,11 @@ describe("room driver — settle (I/O + reservation)", () => {
     if (last?.view !== "board") throw new Error("expected a board view");
     const rows = last.sections.find((s) => s.kind === "rows");
     const texts = rows?.kind === "rows" ? rows.items.map((i) => i.text) : [];
-    // Both the concurrently-injected director note and the turn's reply are on
-    // the board — the in-memory transcript stayed consistent with disk.
-    expect(texts).toContain("director note");
-    expect(texts).toContain("agent reply");
+    // Exact ordered rows: the concurrently-injected director note (appended first,
+    // mid-turn) then the turn's reply. Asserting the full ordered sequence — not an
+    // order/count-insensitive toContain — catches a cache/disk divergence (a
+    // double-counted or mis-ordered entry) the looser check would miss.
+    expect(texts).toEqual(["director note", "agent reply"]);
   });
 
   test("concurrent starts: synchronous reservation lets only one win", async () => {
@@ -482,5 +483,87 @@ describe("room driver — settle (I/O + reservation)", () => {
     expect(h.driver.isDisposed()).toBe(false);
     await h.driver.dispose();
     expect(h.driver.isDisposed()).toBe(true);
+  });
+});
+
+describe("room driver — driver-API soundness", () => {
+  // Flush pending microtasks until a turn has actually been invoked. The fresh
+  // turn below reaches runAgentTurn through several awaits; a macrotask tick lets
+  // them settle so we can read its recorded request deterministically.
+  async function waitForTurns(turns: { requests: unknown[] }, n: number) {
+    while (turns.requests.length < n) await new Promise<void>((r) => setTimeout(r, 0));
+  }
+
+  test("step() distinguishes busy (serial-gate no-op) from ended (room closed)", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = gatedRunAgentTurn();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START); // budget 4 -> stays active after one turn
+    const first = driver.step("demo"); // a turn goes in flight
+    await turns.started;
+    // A second step while a turn is in flight is the serial-gate no-op: it must
+    // report "busy" (a transient retry), never "ended" — which is what a second
+    // stepper would use to abandon a still-active room.
+    expect(await driver.step("demo")).toBe("busy");
+    turns.release();
+    expect(await first).toBe("advanced"); // a turn ran and the room is still active
+    // Once stopped, a step reports "ended" — distinct from the transient "busy".
+    await driver.stop("demo");
+    expect(await driver.step("demo")).toBe("ended");
+  });
+
+  test("step() returns 'ended' when the turn closes the room (budget reached)", async () => {
+    const h = harness();
+    await h.driver.start({ ...START, turnBudget: 1 });
+    // The single turn hits the budget and commits terminal — the room ends on this
+    // step (the speak->terminal path, not the already-closed early return).
+    expect(await h.driver.step("demo")).toBe("ended");
+    expect((await h.store.loadRoom("demo"))?.status).toBe("done");
+  });
+
+  test("a stale-generation turn's append stays out of a restarted room's cache", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    // Distinct text so a leaked stale entry is unambiguous in the new room's context.
+    const turns = gatedRunAgentTurn("STALE-GEN1");
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START); // generation 1
+    const stale = driver.step("demo"); // the gen-1 turn goes in flight
+    await turns.started;
+    await driver.stop("demo"); // closes gen 1 (bumps the generation, clears the cache)
+    await driver.start(START); // restart the same slug -> a fresh active generation
+    turns.release(); // the gen-1 turn drains now, after the generation moved on
+    await stale;
+    // The stale turn's reply lands on disk (append-only) but its cache push is
+    // generation-gated, so it never enters the restarted generation's array.
+    expect((await store.loadTranscript("demo")).length).toBe(1); // disk kept it
+
+    // Drive one fresh turn: its prompt is rendered from this generation's cache,
+    // and its board is built from it. Neither may carry the stale gen-1 reply.
+    const fresh = driver.step("demo");
+    await waitForTurns(turns, 2);
+    expect(turns.requests[1]?.prompt ?? "").not.toContain("STALE-GEN1");
+    turns.release();
+    expect(await fresh).toBe("advanced");
+    const last = pub.last();
+    if (last?.view !== "board") throw new Error("expected a board view");
+    const rows = last.sections.find((s) => s.kind === "rows");
+    const items = rows?.kind === "rows" ? rows.items : [];
+    expect(items).toHaveLength(1); // only the fresh reply — the stale entry was gated out
   });
 });

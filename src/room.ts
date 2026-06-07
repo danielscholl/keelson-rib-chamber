@@ -38,13 +38,23 @@ export interface RoomInjectInput {
   text?: string;
 }
 
+// The result of driving one turn. The auto-advance loop only needs "keep going?"
+// (it stops on "ended"), but a second stepper — the planned chat-tool room
+// controls — must tell the serial-gate no-op apart from a closed room, which a
+// bare boolean conflated (both were `false`).
+//   - "advanced": a turn ran and the room is still active — step again.
+//   - "ended":    the room is not active (closed this step, already closed, or a
+//                 newer generation superseded this op) — stop driving.
+//   - "busy":     a turn is already in flight, so this call did nothing. The sole
+//                 auto-advance loop never sees this (it awaits each step fully); a
+//                 second stepper must treat it as "retry later", not "ended".
+export type StepOutcome = "advanced" | "ended" | "busy";
+
 export interface RoomDriver {
   start(config: RoomStartConfig): Promise<Room>;
-  // Drive one turn. Returns true if the room is still active and should be
-  // stepped again, false otherwise (not active, just closed, or superseded) —
-  // the auto-advance loop uses this as its sole stop condition, so it no longer
-  // re-reads room.json itself.
-  step(slug: MindSlug): Promise<boolean>;
+  // Drive one turn; see StepOutcome. The auto-advance loop stops on "ended" and
+  // is the sole stepper, so it no longer re-reads room.json itself.
+  step(slug: MindSlug): Promise<StepOutcome>;
   inject(slug: MindSlug, input: RoomInjectInput): Promise<void>;
   stop(slug: MindSlug): Promise<void>;
   dispose(): Promise<void>;
@@ -115,11 +125,18 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return next;
   }
 
-  // Append to disk (the source of truth) and mirror into the in-memory transcript
-  // so the next prompt/board build needs no re-read. A no-op on the cache when
-  // the room is closed (a late drain from a stopped room still hits disk).
-  async function appendEntry(slug: MindSlug, entry: TurnEntry): Promise<void> {
+  // Append to disk (the append-only source of truth) and mirror into the active
+  // generation's in-memory transcript so the next prompt/board build needs no
+  // re-read. The disk write is unconditional; the cache push is generation-gated:
+  // a turn still draining from a superseded generation (a stop/restart landed
+  // mid-turn) must not push its late reply into the new generation's cache array —
+  // that would pollute the new room's board and the next speaker's prompt context.
+  // The gate also makes the post-await Map lookup sound: an array's identity only
+  // changes when the generation bumps (start opens a new one, stop/terminal deletes
+  // it), so a matching `gen` means `transcripts.get(slug)` is this gen's array.
+  async function appendEntry(slug: MindSlug, gen: number, entry: TurnEntry): Promise<void> {
     await deps.store.appendTranscript(slug, entry);
+    if (generationOf(slug) !== gen) return; // superseded mid-turn — keep it off the new cache
     transcripts.get(slug)?.push(entry);
   }
 
@@ -180,20 +197,32 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
     try {
       const existing = await deps.store.loadRoom(config.slug);
-      // Load the transcript once per room lifetime; every later prompt/board
-      // build reads this in-memory copy instead of re-parsing the file.
-      transcripts.set(config.slug, [...(await deps.store.loadTranscript(config.slug))]);
 
       if (existing && existing.status === "active") {
         // Resume an already-active room — do NOT bump the generation, so an
-        // in-flight turn keeps its lifetime and still commits normally.
+        // in-flight turn keeps its lifetime and still commits normally. Do NOT
+        // re-seed the transcript cache over an existing array either: the driver
+        // is the sole transcript writer, so the in-memory copy is already
+        // authoritative, and replacing it here would race a same-generation
+        // in-flight append (disk gets the entry, this re-seed re-reads it, then
+        // the append's cache push double-counts it). Seed only when there is no
+        // cache yet — e.g. a resume after a process restart, where no in-flight
+        // turn can race it.
+        if (!transcripts.has(config.slug)) {
+          transcripts.set(config.slug, [...(await deps.store.loadTranscript(config.slug))]);
+        }
         await persistAndPublish(existing);
         return existing;
       }
 
       // A fresh start or a restart of a closed (stopped/done) room opens a new
-      // generation, superseding any stale step still draining on this slug.
+      // generation, superseding any stale step still draining on this slug. The
+      // bump and the cache swap happen together (a closed room already deleted its
+      // cache), so a superseded turn's generation gate keeps its late append out of
+      // this fresh array. Loaded once per room lifetime; later prompt/board builds
+      // read this in-memory copy instead of re-parsing the file.
       bumpGeneration(config.slug);
+      transcripts.set(config.slug, [...(await deps.store.loadTranscript(config.slug))]);
       const room: Room = {
         slug: config.slug,
         name: config.name,
@@ -216,11 +245,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     }
   }
 
-  async function step(slug: MindSlug): Promise<boolean> {
+  async function step(slug: MindSlug): Promise<StepOutcome> {
     // Serial gate. The check-and-add is synchronous (no await between), so a
     // second concurrent step while a turn is in flight is a no-op rather than
-    // racing the first — preventing duplicate entries / a lost budget tick.
-    if (inFlight.has(slug)) return false;
+    // racing the first — preventing duplicate entries / a lost budget tick. It
+    // reports "busy" (not "ended") so a second caller can retry instead of
+    // mistaking a transient in-flight turn for a closed room.
+    if (inFlight.has(slug)) return "busy";
     inFlight.add(slug);
     // Allocate the turn's AbortController up front (before any await) so a stop /
     // dispose during the pre-turn async gap aborts the same controller the turn
@@ -232,8 +263,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const gen = generationOf(slug);
     try {
       const loaded = await deps.store.loadRoom(slug);
-      if (loaded?.status !== "active") return false;
-      if (generationOf(slug) !== gen) return false; // superseded during load — abandon
+      if (loaded?.status !== "active") return "ended";
+      if (generationOf(slug) !== gen) return "ended"; // superseded during load — abandon
 
       // (1) consume one-shot director overrides (read + clear). Persist the clear
       // before the turn so an inject arriving mid-turn writes fresh pending that
@@ -263,18 +294,21 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         decision = getStrategy(room.strategy)(room);
       }
 
-      // (3) execute.
+      // (3) execute. commitTerminal / runSpeakTurn report "is the room still
+      // active" as a boolean; map that to the StepOutcome the loop drives on.
       if (decision.kind === "end") {
-        return await commitTerminal(slug, gen, { ...room, status: "done" });
+        await commitTerminal(slug, gen, { ...room, status: "done" });
+        return "ended";
       }
       if (decision.kind === "speak") {
-        return await runSpeakTurn(
+        const active = await runSpeakTurn(
           room,
           decision.mind,
           override.directionInjection,
           controller,
           gen,
         );
+        return active ? "advanced" : "ended";
       }
       // speak-parallel / moderate / synthesize — Phase 3 / deferred concurrent.
       throw new Error(`step kind "${decision.kind}" is not supported in Phase 2`);
@@ -297,6 +331,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // Speaker not in roster — fail closed: note it and end the room.
       await appendEntry(
         room.slug,
+        gen,
         buildTurnEntry({
           roomSlug: room.slug,
           turnIndex: room.turnIndex,
@@ -358,6 +393,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
     await appendEntry(
       room.slug,
+      gen,
       buildTurnEntry({
         roomSlug: room.slug,
         turnIndex: room.turnIndex,
@@ -401,6 +437,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // `from` is forced to "director" server-side regardless of any payload.
       await appendEntry(
         slug,
+        gen,
         buildTurnEntry({
           roomSlug: slug,
           turnIndex: room.turnIndex,
