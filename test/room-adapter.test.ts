@@ -269,14 +269,11 @@ describe("room adapter — live room", () => {
   });
 
   // Must run last: dispose() flips module-global state so the loop stops driving.
-  it("dispose halts the loop so a later start does not advance", async () => {
+  it("refuses a room-start after dispose (no phantom active room)", async () => {
     await rib.dispose?.();
-    const store = createFileRoomStore(roomsDir());
     const res = await onAction(startPayload(), makeCtx({ sm: snap.sm }));
-    const slug = slugOf(res);
-    expect(slug).toMatch(/^room-/);
-    await new Promise((r) => setTimeout(r, 30));
-    // The room was opened but the disposed loop never stepped it.
-    expect((await store.loadRoom(slug))?.turnIndex).toBe(0);
+    // startRoom checks driver.isDisposed() — a start after dispose would otherwise
+    // write an "active" room whose loop never runs and never clears.
+    expect(res.ok).toBe(false);
   });
 });
