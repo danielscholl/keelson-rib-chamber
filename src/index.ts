@@ -9,21 +9,8 @@ import type {
   ToolDefinition,
 } from "@keelson/shared";
 import { canvasViewSchema, z } from "@keelson/shared";
-import {
-  assertSafeSlug,
-  buildGenesisPrompt,
-  type GenesisAuthor,
-  parseGenesisOutput,
-  slugify,
-} from "./genesis.ts";
-import {
-  type MindRecord,
-  mindExists,
-  readMinds,
-  readSoul,
-  retireMind,
-  scaffoldMind,
-} from "./minds-store.ts";
+import { assertSafeSlug, slugify } from "./genesis.ts";
+import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomPublisher, RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
@@ -62,10 +49,11 @@ let activeSlug: string | undefined;
 let lastSlug: string | undefined;
 
 // The roster the driver resolves a speaker's persona from each turn. Cached
-// because it only changes via genesis/retire (both onAction, below); re-reading
-// every mind dir per turn is avoidable disk I/O. invalidateRoster() clears it on
-// any mutation and dispose() resets it, so a fresh boot re-reads. Assumes a fixed
-// workspace per process — the cache is not keyed on KEELSON_WORKSPACE.
+// because it only changes when a Mind is created (the genesis tool) or retired
+// (onAction); re-reading every mind dir per turn is avoidable disk I/O.
+// invalidateRoster() clears it on any mutation and dispose() resets it, so a fresh
+// boot re-reads. Assumes a fixed workspace per process — the cache is not keyed on
+// KEELSON_WORKSPACE.
 let roster: readonly Mind[] | undefined;
 async function resolveMinds(): Promise<readonly Mind[]> {
   if (roster) return roster;
@@ -86,12 +74,6 @@ function invalidateRoster(): void {
 // (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
 // it is shell-quoted where interpolated into the bash node below.
 const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
-
-// The coding-agent CLI genesis shells to author a soul. MVP only: it uses the
-// CLI's ambient auth, so it ignores KEELSON_WORKFLOW_PROVIDER until C1's
-// provider-routed runAgentTurn lands. Override the bin for non-claude setups.
-const AGENT_BIN = process.env.CHAMBER_AGENT_BIN?.trim() || "claude";
-const GENESIS_TIMEOUT_MS = 120_000;
 
 // Validate through the canvas view union (not a bare member schema) so the
 // producer-side guard enforces the same node-id / column-key uniqueness checks
@@ -152,27 +134,47 @@ Keep it tight: a status pill, ~3 KPI stats, a 3-5 item "rows" list (what's live 
 Example — copy this structure exactly, replace the content:
 { "view":"board","title":"Chamber Briefing","header":{"status":{"label":"Phase 0 · lens proof","tone":"brand"}},"sections":[{"kind":"stats","title":"Pulse","items":[{"label":"Minds","value":0,"sub":"genesis lands Phase 1","tone":"neutral"},{"label":"Rooms","value":0,"sub":"Phase 2","tone":"neutral"},{"label":"Lenses","value":1,"sub":"this briefing","tone":"ok"}]},{"kind":"rows","title":"Status","items":[{"text":"Agent-authored briefing lens","glyph":"ok","trailing":"live"},{"text":"Genesis + roster","glyph":"info","trailing":"next"},{"text":"Two-agent room","glyph":"neutral","trailing":"Phase 2"}]},{"kind":"cards","title":"What this proves","items":[{"title":"An agent authored this view","pill":{"label":"lens","tone":"brand"},"fields":[{"label":"key","value":"rib:chamber:brief"}],"footnote":"No hand-coded UI — the board came from an agent turn through Keelson's canvas."}]}] }`;
 
+// Genesis as a workflow (the chamber-brief sibling): one agent turn reads a
+// freeform brief, authors the SOUL.md body + a roster tagline, and persists the
+// Mind by calling the chamber_emit_genesis tool (the deterministic write seam).
+// Unlike brief it publishes no snapshot — its product is files on disk, which the
+// chamber-roster collector then reflects. $ARGUMENTS carries the brief (chat
+// `/workflow run chamber-genesis <brief>`); explicit $inputs.* are honored when a
+// caller supplies them (CLI --inputs). The model is scoped to the one emit tool.
+const GENESIS_WF_PROMPT = `You are authoring the founding identity of a new persistent agent — a "Mind" — for Keelson's Chamber, a multi-agent operating layer.
+
+Brief: $ARGUMENTS
+
+(If these explicit fields are non-empty, prefer them over the brief — name: "$inputs.name", role: "$inputs.role", voice: "$inputs.voice".)
+
+From the brief, decide the Mind's name, role, and voice (how it speaks). Then write an honest founding document — do NOT invent tools, credentials, or capabilities it does not have; describe who it is, what it is for, and how it speaks.
+
+Compose:
+- soul: Markdown for the Mind's SOUL.md, with these sections in order:
+    # <name>
+    ## Persona  — who this Mind is, grounded in the role
+    ## Mission  — what it exists to do
+    ## Voice    — how it speaks (tone, length, habits)
+- tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
+
+Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
+
 const rib: Rib = {
   id: "chamber",
   displayName: "Chamber",
 
-  // Binds the agent-authored keys to the canvas renderer; the buttons appear on
-  // the Ribs page and data arrives when the producers run.
+  // Binds the agent-authored keys to the canvas renderer; data arrives when the
+  // producers (the roster collector, the brief turn, the room driver) run.
   views: [
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
     { key: ROOM_KEY, canvasKind: "view", title: "Room" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
-  // Genesis / retire affordances. The room controls (room-start/inject/stop) are
-  // NOT listed here: a static actions[] button dispatches type-only, but the room
-  // controls need a payload (participants, the target slug, a nextSpeaker), so
-  // they are baked into the roster/room boards as payload-carrying actions (the
-  // OSDU pattern) and still reach onAction below.
-  actions: [
-    { type: "genesis", label: "New agent" },
-    { type: "retire", label: "Retire agent" },
-  ],
+  // No static actions[]: a payload-less button can't carry input, so every Chamber
+  // control lives where its context is. Genesis is the chamber-genesis workflow (it
+  // needs a freeform brief); retire and the room controls (start/inject/stop) are
+  // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
   // The Chamber nav tab. The roster sits in the header (the Minds you genesis),
   // the live room transcript fills the row, and the brief settles into the
@@ -219,7 +221,7 @@ const rib: Rib = {
       definition: {
         name: "chamber-roster",
         description:
-          'Use when: you want to see the agents (Minds) that have been created. Triggers: "show the roster", "list agents", "what minds exist". Does: reads the genesis-authored Minds from the Chamber data home and publishes a roster board (one card per Mind) to the Chamber Roster canvas. NOT for: creating or retiring agents (those are the New agent / Retire actions).',
+          'Use when: you want to see the agents (Minds) that have been created. Triggers: "show the roster", "list agents", "what minds exist". Does: reads the genesis-authored Minds from the Chamber data home and publishes a roster board (one card per Mind) to the Chamber Roster canvas. NOT for: creating or retiring agents (genesis is the chamber-genesis workflow; retire is a roster board action).',
         nodes: [
           {
             id: "collect",
@@ -249,6 +251,25 @@ const rib: Rib = {
       bindSnapshotKey: BRIEF_KEY,
       validate: expectView(BRIEF_KEY, "board"),
     },
+    {
+      // Genesis as a workflow: one prompt turn authors the soul and calls
+      // chamber_emit_genesis to persist it. No bindSnapshotKey/validate — genesis
+      // writes files (the roster collector reflects them), it does not publish a
+      // board. allowed_tools scopes the turn to the single write seam: rib tools are
+      // default-off in workflow prompt nodes, so it must opt in by name.
+      definition: {
+        name: "chamber-genesis",
+        description:
+          'Use when: create a new agent (Mind). Triggers: "create an agent", "new mind", "/workflow run chamber-genesis <brief>". Does: one agent turn reads a brief, authors a SOUL.md + roster tagline, and persists the Mind via chamber_emit_genesis. NOT for: retiring a Mind or running a room.',
+        nodes: [
+          {
+            id: "genesis",
+            prompt: GENESIS_WF_PROMPT,
+            allowed_tools: ["chamber_emit_genesis"],
+          },
+        ],
+      },
+    },
   ],
 
   // Boot-time wiring of the room loop. Registers the push-fed room snapshot and
@@ -258,6 +279,11 @@ const rib: Rib = {
   // store, and the roster as the minds resolver. Both seams are optional, so the
   // driver stays undefined on a host without them and room actions fail closed.
   registerTools: (ctx: RibContext) => {
+    // The genesis write seam is always available: genesis is a workflow whose
+    // prompt node calls chamber_emit_genesis, and the write needs no room driver.
+    // The room-control tools (and the driver) require the C1 agent-turn + snapshot
+    // seams, so they only appear when those are present.
+    const genesisTool = makeGenesisTool();
     const sm = ctx.getSnapshotManager?.();
     const run = ctx.runAgentTurn;
     if (sm && run) {
@@ -308,20 +334,17 @@ const rib: Rib = {
       // sharing the same driver + store this hook just built. Returned only when
       // the seams are present (no driver -> no tools), mirroring how the actions
       // fail closed.
-      return roomControlTools(roomStore);
+      return [genesisTool, ...roomControlTools(roomStore)];
     }
-    return [];
+    return [genesisTool];
   },
 
-  // Genesis a Mind (one agent turn authors its soul, the rib persists it) and
-  // retire one — both mutate the data home and return (the OSDU
+  // Retire a Mind (removes it, then refreshes the roster — the OSDU
   // mutate-then-refresh pattern). The room-* controls drive the room loop; the
   // transcript pushes to the canvas as turns land (no refresh needed). Turns
   // advance on their own (the auto-advance loop), so there is no manual step.
-  onAction: (action, ctx) => {
+  onAction: (action) => {
     switch (action.type) {
-      case "genesis":
-        return genesisAction(action, ctx);
       case "retire":
         return retireAction(action);
       case "room-start":
@@ -581,62 +604,6 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// Shell the coding-agent CLI for one authoring turn. Isolated behind the
-// GenesisAuthor seam so genesis.ts stays provider-free; collapses to
-// ctx.runAgentTurn once C1 lands. `--output-format json` wraps the reply as
-// `{ result }`; the inner text is the GenesisDocs JSON parseGenesisOutput reads.
-function makeAuthor(ctx: RibContext): GenesisAuthor {
-  return async (prompt) => {
-    const res = await ctx
-      .getExec()
-      .runJSON<{ result?: string }>(AGENT_BIN, ["-p", prompt, "--output-format", "json"], {
-        timeoutMs: GENESIS_TIMEOUT_MS,
-      });
-    if (!res.ok) throw new Error(res.error);
-    const text = res.data?.result;
-    if (typeof text !== "string" || text.trim().length === 0) {
-      throw new Error(`${AGENT_BIN} returned no text`);
-    }
-    return text;
-  };
-}
-
-async function genesisAction(action: RibAction, ctx: RibContext): Promise<RibActionResult> {
-  const payload = (action.payload ?? {}) as Record<string, unknown>;
-  const name = asNonEmptyString(payload.name);
-  const role = asNonEmptyString(payload.role);
-  const voice = asNonEmptyString(payload.voice);
-  if (!name || !role || !voice) {
-    return { ok: false, error: "genesis requires payload { name, role, voice }" };
-  }
-  const slug = slugify(name); // always non-empty (falls back for non-Latin names)
-  const model = asNonEmptyString(payload.model);
-  const tools = asStringArray(payload.tools);
-  try {
-    // Fail a known collision before the ~120s (paid) authoring turn, not after.
-    if (await mindExists(mindsDir(), slug)) {
-      return { ok: false, error: `mind '${slug}' already exists` };
-    }
-    const raw = await makeAuthor(ctx)(buildGenesisPrompt({ name, role, voice }));
-    const docs = parseGenesisOutput(raw);
-    const record: MindRecord = {
-      slug,
-      name,
-      role,
-      voice,
-      persona: docs.tagline,
-      ...(model ? { model } : {}),
-      ...(tools.length > 0 ? { tools } : {}),
-      createdAt: new Date().toISOString(),
-    };
-    await scaffoldMind(mindsDir(), record, docs.soul);
-    invalidateRoster(); // a new Mind exists — the driver must see it next turn
-    return { ok: true, data: { slug } };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
 async function retireAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const slug = asNonEmptyString(payload.slug);
@@ -708,6 +675,53 @@ async function renderRoomStatus(store: RoomStore): Promise<string> {
     `participants: ${room.participants.join(", ")}.`;
   const body = transcript.length > 0 ? renderTranscript(transcript) : "(no turns yet)";
   return boundedText(`${head}\n\n${body}`);
+}
+
+// Genesis write seam: the chamber-genesis workflow's prompt node authors the soul
+// + tagline and calls this tool to persist the Mind. Deterministic and in-process
+// (it reuses scaffoldMind), so the generative half stays in the prompt and the
+// write half stays testable.
+const genesisEmitSchema = z.object({
+  name: z.string().min(1),
+  role: z.string().min(1),
+  voice: z.string().min(1),
+  soul: z.string().min(1),
+  tagline: z.string().min(1),
+});
+
+function makeGenesisTool(): ToolDefinition {
+  return {
+    name: "chamber_emit_genesis",
+    description:
+      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
+    inputSchema: genesisEmitSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = genesisEmitSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_emit_genesis: ${parsed.error.message}`, true);
+        return;
+      }
+      const { name, role, voice, soul, tagline } = parsed.data;
+      try {
+        const record: MindRecord = {
+          slug: slugify(name),
+          name,
+          role,
+          voice,
+          // The roster card truncates for display (with an ellipsis); store the
+          // authored tagline trimmed, not hard-cut.
+          persona: tagline.trim(),
+          createdAt: new Date().toISOString(),
+        };
+        await scaffoldMind(mindsDir(), record, soul);
+        invalidateRoster();
+        emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug }));
+      } catch (e) {
+        emitResult(ctx, `chamber_emit_genesis failed: ${errText(e)}`, true);
+      }
+    },
+  };
 }
 
 // The room controls as chat tools — the second `step()` consumer the StepOutcome

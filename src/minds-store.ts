@@ -121,13 +121,6 @@ export async function retireMind(mindsRoot: string, slug: string): Promise<void>
   await rm(dir, { recursive: true, force: true });
 }
 
-// True if anything occupies minds/<slug> (so genesis can fail a collision before
-// running the expensive authoring turn). Used by the genesis action pre-check.
-export async function mindExists(mindsRoot: string, slug: string): Promise<boolean> {
-  assertSafeSlug(slug);
-  return exists(join(mindsRoot, slug));
-}
-
 // stat, not readdir: readdir only succeeds on a directory, so a non-directory
 // entry at the path would read as absent and silently bypass the collision /
 // not-found guards.

@@ -2,10 +2,23 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RibContext, RibExecResult } from "@keelson/shared";
-import { ribSurfaceDescriptorSchema, ribViewDescriptorSchema } from "@keelson/shared";
+import {
+  type RibContext,
+  ribSurfaceDescriptorSchema,
+  ribViewDescriptorSchema,
+} from "@keelson/shared";
 import rib from "../src/index.ts";
-import { readMinds } from "../src/minds-store.ts";
+import { readMinds, scaffoldMind } from "../src/minds-store.ts";
+
+// onAction's contract passes a RibContext, but the chamber rib ignores it for
+// retire/unknown (only OSDU-style actions read it). A getExec-only stub satisfies
+// the type at the call sites below.
+const stubCtx = {
+  getExec: () => ({
+    runJSON: async () => ({ ok: false as const, error: "unused", code: null }),
+    runText: async () => ({ ok: false as const, error: "unused", code: null }),
+  }),
+} as RibContext;
 
 const ROSTER_KEY = "rib:chamber:roster";
 
@@ -13,22 +26,6 @@ function contributions() {
   const ctx = {} as Parameters<NonNullable<typeof rib.contributeWorkflows>>[0];
   return rib.contributeWorkflows?.(ctx) ?? [];
 }
-
-// A RibContext whose exec returns a scripted runJSON result — the genesis turn's
-// only host dependency. runText is present (contract) but unused here.
-function fakeCtx(runJSON: (cmd: string, args: string[]) => RibExecResult<unknown>): RibContext {
-  return {
-    getExec: () => ({
-      runJSON: async (cmd: string, args: string[]) => runJSON(cmd, args) as never,
-      runText: async () => ({ ok: false, error: "unused", code: null }),
-    }),
-  } as RibContext;
-}
-
-const authored = (soul: string, tagline: string): RibExecResult<{ result: string }> => ({
-  ok: true,
-  data: { result: JSON.stringify({ soul, tagline }) },
-});
 
 describe("chamber-roster producer (Phase 1)", () => {
   test("declares the Roster view bound to the rib-namespaced key", () => {
@@ -81,15 +78,9 @@ describe("Chamber surface (Phase 1)", () => {
       if (region?.workflow) expect(contributed.has(region.workflow)).toBe(true);
     }
   });
-
-  test("declares genesis + retire actions", () => {
-    const types = (rib.actions ?? []).map((a) => a.type);
-    expect(types).toContain("genesis");
-    expect(types).toContain("retire");
-  });
 });
 
-describe("genesis / retire actions (Phase 1)", () => {
+describe("retire action", () => {
   let workspace: string;
   let priorWorkspace: string | undefined;
 
@@ -107,79 +98,40 @@ describe("genesis / retire actions (Phase 1)", () => {
 
   const mindsRoot = () => join(workspace, ".keelson", "chamber", "minds");
 
-  test("genesis authors a Mind that the roster then reads back", async () => {
-    const ctx = fakeCtx(() => authored("# Scout\n## Persona\nA researcher.", "Digs up facts."));
-    const res = await rib.onAction?.(
-      { type: "genesis", payload: { name: "Scout", role: "researcher", voice: "terse" } },
-      ctx,
+  async function seedScout(): Promise<void> {
+    await scaffoldMind(
+      mindsRoot(),
+      {
+        slug: "scout",
+        name: "Scout",
+        role: "researcher",
+        voice: "terse",
+        persona: "Digs up facts.",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      "# Scout\n## Persona\nA researcher.",
     );
-    expect(res).toEqual({ ok: true, data: { slug: "scout" } });
-    const minds = await readMinds(mindsRoot());
-    expect(minds.map((m) => m.slug)).toEqual(["scout"]);
-    expect(minds[0]?.persona).toBe("Digs up facts.");
-  });
+  }
 
-  test("a colliding genesis fails fast — before running the (paid) turn", async () => {
-    await rib.onAction?.(
-      { type: "genesis", payload: { name: "Scout", role: "r", voice: "v" } },
-      fakeCtx(() => authored("# Scout", "facts")),
-    );
-    let ran = false;
-    const res = await rib.onAction?.(
-      { type: "genesis", payload: { name: "Scout", role: "r", voice: "v" } },
-      fakeCtx(() => {
-        ran = true;
-        return authored("# Scout 2", "more");
-      }),
-    );
-    expect(res?.ok).toBe(false);
-    expect(ran).toBe(false);
-  });
-
-  test("genesis fails closed when the brief is incomplete (no turn run)", async () => {
-    let ran = false;
-    const ctx = fakeCtx(() => {
-      ran = true;
-      return authored("# X", "y");
-    });
-    const res = await rib.onAction?.({ type: "genesis", payload: { name: "Scout" } }, ctx);
-    expect(res?.ok).toBe(false);
-    expect(ran).toBe(false);
-  });
-
-  test("genesis surfaces a turn failure", async () => {
-    const ctx = fakeCtx(() => ({ ok: false, error: "claude not found", code: null }));
-    const res = await rib.onAction?.(
-      { type: "genesis", payload: { name: "Scout", role: "r", voice: "v" } },
-      ctx,
-    );
-    expect(res?.ok).toBe(false);
-  });
-
-  test("genesis fails closed on a malformed authoring turn", async () => {
-    const ctx = fakeCtx(() => ({ ok: true, data: { result: "the model refused" } }));
-    const res = await rib.onAction?.(
-      { type: "genesis", payload: { name: "Scout", role: "r", voice: "v" } },
-      ctx,
-    );
-    expect(res?.ok).toBe(false);
-    expect(await readMinds(mindsRoot())).toEqual([]);
-  });
-
-  test("retire removes a Mind", async () => {
-    const ctx = fakeCtx(() => authored("# Scout", "facts"));
-    await rib.onAction?.(
-      { type: "genesis", payload: { name: "Scout", role: "r", voice: "v" } },
-      ctx,
-    );
-    const res = await rib.onAction?.({ type: "retire", payload: { slug: "scout" } }, ctx);
+  test("retire removes a Mind from the data home", async () => {
+    await seedScout();
+    const res = await rib.onAction?.({ type: "retire", payload: { slug: "scout" } }, stubCtx);
     expect(res?.ok).toBe(true);
     expect(await readMinds(mindsRoot())).toEqual([]);
   });
 
+  test("retire fails closed without a slug", async () => {
+    const res = await rib.onAction?.({ type: "retire", payload: {} }, stubCtx);
+    expect(res?.ok).toBe(false);
+  });
+
+  test("retire surfaces a missing Mind", async () => {
+    const res = await rib.onAction?.({ type: "retire", payload: { slug: "ghost" } }, stubCtx);
+    expect(res?.ok).toBe(false);
+  });
+
   test("an unknown action is rejected", async () => {
-    const ctx = fakeCtx(() => authored("# X", "y"));
-    const res = await rib.onAction?.({ type: "bogus" }, ctx);
+    const res = await rib.onAction?.({ type: "bogus" }, stubCtx);
     expect(res?.ok).toBe(false);
   });
 });

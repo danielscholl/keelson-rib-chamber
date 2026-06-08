@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -11,7 +11,7 @@ import type {
 } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
-import { scaffoldMind } from "../src/minds-store.ts";
+import { readMinds, scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, roomsDir } from "../src/paths.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
 import { abortableRunAgentTurn } from "./helpers/fakes.ts";
@@ -123,15 +123,19 @@ afterAll(async () => {
 describe("chamber room-control chat tools", () => {
   let openedSlug = "";
 
-  it("registers the four room-control tools, and none without the seams", () => {
+  it("registers the genesis tool always, plus the room-control tools with the seams", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "chamber_emit_genesis",
       "chamber_room_say",
       "chamber_room_start",
       "chamber_room_status",
       "chamber_room_stop",
     ]);
-    // No runAgentTurn -> no driver -> no tools (fails closed like the actions do).
-    expect(registerTools(makeCtx(undefined, sm))).toEqual([]);
+    // No runAgentTurn -> no driver -> no room tools, but the genesis write seam (a
+    // workflow tool that needs no driver) is still registered.
+    expect(registerTools(makeCtx(undefined, sm)).map((t) => t.name)).toEqual([
+      "chamber_emit_genesis",
+    ]);
   });
 
   it("advertises start/say/stop as state-changing and start as requiring confirmation", () => {
@@ -268,5 +272,51 @@ describe("chamber room-control chat tools", () => {
     );
     // Aborted before the state-changing start — nothing opened, nothing emitted.
     expect(chunks.length).toBe(0);
+  });
+});
+
+describe("chamber_emit_genesis (genesis write seam)", () => {
+  it("is advertised as state-changing", () => {
+    expect(tool("chamber_emit_genesis").state_changing).toBe(true);
+  });
+
+  it("persists a Mind (mind.json + SOUL.md) and reports its slug", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "Ariadne",
+        role: "security reviewer",
+        voice: "terse",
+        soul: "# Ariadne\n## Persona\nA meticulous reviewer.",
+        tagline: "Meticulous security reviewer.",
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain('"slug":"ariadne"');
+    const ariadne = (await readMinds(mindsDir())).find((m) => m.slug === "ariadne");
+    expect(ariadne?.persona).toBe("Meticulous security reviewer.");
+    const soul = await readFile(join(mindsDir(), "ariadne", "SOUL.md"), "utf8");
+    expect(soul).toContain("## Persona");
+  });
+
+  it("fails closed on a slug collision (alice was seeded)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      { name: "Alice", role: "skeptic", voice: "terse", soul: "# Alice", tagline: "dupe" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("already exists");
+  });
+
+  it("fails closed on a missing soul, writing nothing", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      { name: "Ghost", role: "x", voice: "y", tagline: "z" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect((await readMinds(mindsDir())).some((m) => m.slug === "ghost")).toBe(false);
   });
 });

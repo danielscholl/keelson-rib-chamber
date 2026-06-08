@@ -15,13 +15,12 @@ describe("rib-chamber", () => {
     expect(keys).toContain("rib:chamber:brief");
   });
 
-  it("lists genesis/retire as static actions; room controls are board-baked", () => {
-    const types = (rib.actions ?? []).map((a) => a.type);
-    expect(types).toEqual(expect.arrayContaining(["genesis", "retire"]));
-    // Room controls need a payload, so they are baked into the boards, not the
-    // payload-less static actions[] (which would always fail from the panel).
-    expect(types).not.toContain("room-start");
-    expect(types).not.toContain("room-inject");
+  it("declares no static actions — every control is a workflow or a board action", () => {
+    // A payload-less static actions[] button can't carry input, so genesis is the
+    // chamber-genesis workflow and retire + the room controls are payload-carrying
+    // board actions that reach onAction. Probe via Object.hasOwn (not `rib.actions`)
+    // so the assertion typechecks against the actions-less Rib contract.
+    expect(Object.hasOwn(rib, "actions")).toBe(false);
   });
 
   it("places the live room transcript in the surface row", () => {
@@ -29,15 +28,16 @@ describe("rib-chamber", () => {
     expect(row?.columns[0]?.key).toBe("rib:chamber:room");
   });
 
-  it("returns no chat tools without the agent-turn + snapshot seams", () => {
-    // A ctx missing getSnapshotManager + runAgentTurn must not build the driver,
-    // so registerTools fails closed with no tools (and no room wiring side effect).
+  it("registers only the genesis write seam without the agent-turn + snapshot seams", () => {
+    // A ctx missing getSnapshotManager + runAgentTurn must not build the room
+    // driver — no room-control tools, no room wiring side effect — but the genesis
+    // tool (driver-free, a workflow write seam) is always registered.
     const ctx = {
       getExec: () => ({
         runJSON: async () => ({ ok: true as const, data: undefined }),
         runText: async () => ({ ok: true as const, data: "" }),
       }),
     } as unknown as RibContext;
-    expect(rib.registerTools?.(ctx) ?? []).toEqual([]);
+    expect((rib.registerTools?.(ctx) ?? []).map((t) => t.name)).toEqual(["chamber_emit_genesis"]);
   });
 });
