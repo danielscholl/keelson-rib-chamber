@@ -38,6 +38,17 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
           type: "room-start",
           label: "Start room",
           glyph: "▸",
+          // The operator types the opening topic; it merges into the payload as
+          // `topic` (roomStartAction reads it). Omitting it falls back to the
+          // driver's non-empty first-turn prompt.
+          fields: [
+            {
+              name: "topic",
+              label: "Topic",
+              placeholder: "What should they discuss? (optional)",
+              multiline: true,
+            },
+          ],
           payload: {
             name: "Room",
             strategy: "sequential",

@@ -49,6 +49,20 @@ describe("buildRosterBoard", () => {
     expect(start?.payload).toMatchObject({ participants: ["a", "b"] });
   });
 
+  test("the Start-room action collects an optional topic input", () => {
+    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const start = actionItems(board).find((i) => i.type === "room-start");
+    expect(start?.fields).toEqual([
+      {
+        name: "topic",
+        label: "Topic",
+        placeholder: "What should they discuss? (optional)",
+        multiline: true,
+      },
+    ]);
+  });
+
   test("offers no Start-room action with fewer than two minds (not a conversation)", () => {
     const hasStart = (minds: Mind[]) =>
       actionItems(buildRosterBoard(minds)).some((i) => i.type === "room-start");
