@@ -15,6 +15,7 @@ import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomPublisher, RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { createFileRoomStore } from "./room-store.ts";
+import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
 import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
 
@@ -441,6 +442,14 @@ async function validateStart(
   if (!Number.isInteger(turnBudget) || turnBudget <= 0 || turnBudget > MAX_ROOM_TURN_BUDGET) {
     return { ok: false, error: `turnBudget must be an integer in 1..${MAX_ROOM_TURN_BUDGET}` };
   }
+  // Reject an unknown/unregistered strategy here (the dry-run calls validateStart but
+  // not driver.start), so a typo or an unimplemented strategy can't be advertised as
+  // startable and then fail in driver.start's getStrategy on the confirmed path.
+  try {
+    getStrategy(strategy as RoomStrategyName);
+  } catch {
+    return { ok: false, error: `unknown strategy "${strategy}"` };
+  }
   const known = new Set((await resolveMinds()).map((m) => m.slug));
   const missing = deduped.filter((s) => !known.has(s));
   if (missing.length > 0) {
@@ -831,8 +840,12 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const topic = (parsed.data.topic ?? "").trim() || undefined;
         const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
         const confirm = parsed.data.confirm ?? false;
-        const strategy = (parsed.data.strategy ?? "").trim() || "sequential";
         const moderator = (parsed.data.moderator ?? "").trim() || undefined;
+        // A `moderator` with no explicit strategy means a moderated room — infer
+        // group-chat so validateStart enforces its rules and the dry-run label below
+        // matches what actually starts (an explicit strategy still wins).
+        const strategy =
+          (parsed.data.strategy ?? "").trim() || (moderator ? "group-chat" : "sequential");
         const synthesizer = (parsed.data.synthesizer ?? "").trim() || undefined;
         const minRounds = parsed.data.minRounds;
         const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;
@@ -860,7 +873,8 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         }
         const who = valid.participants.join(", ");
         const topicNote = topic ? ` on "${topic}"` : " (no topic set)";
-        const modeNote = moderator ? ` (group-chat, moderated by ${moderator})` : "";
+        const modeNote =
+          strategy === "group-chat" && moderator ? ` (group-chat, moderated by ${moderator})` : "";
         if (!confirm) {
           emitResult(
             ctx,
