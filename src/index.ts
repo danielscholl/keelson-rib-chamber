@@ -481,8 +481,15 @@ async function validateStart(
         error: "the moderator must not also be a participant — it routes, it does not speak",
       };
     }
-    if (config.synthesizer && !known.has(config.synthesizer)) {
-      return { ok: false, error: `unknown synthesizer Mind: ${config.synthesizer}` };
+    if (config.synthesizer) {
+      // Same safe/reserved-slug guard as the moderator: a synthesizer authors a
+      // role:"agent" turn, so it must never be a reserved authority (director/system).
+      if (!isValidParticipant(config.synthesizer)) {
+        return { ok: false, error: "synthesizer must be a safe Mind slug (not director/system)" };
+      }
+      if (!known.has(config.synthesizer)) {
+        return { ok: false, error: `unknown synthesizer Mind: ${config.synthesizer}` };
+      }
     }
     // Floor the routing knobs at the shared boundary so every entry point (chat
     // tool, board action, a direct API payload) is protected — a 0 minRounds would

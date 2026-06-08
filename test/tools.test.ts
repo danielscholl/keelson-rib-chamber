@@ -238,6 +238,26 @@ describe("chamber room-control chat tools", () => {
     expect(t.out()).toContain("unknown strategy");
   });
 
+  it("rejects a prototype-chain string as a strategy", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "constructor" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("unknown strategy");
+  });
+
+  it("rejects a reserved-authority synthesizer", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], moderator: "mod", synthesizer: "system" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("not director/system");
+  });
+
   it("chamber_room_start with confirm opens a room the status tool then reports", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute(

@@ -14,7 +14,10 @@ export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
 };
 
 export function getStrategy(name: RoomStrategyName): Strategy {
-  const strategy = strategies[name];
+  // Own-property only: a bare index would resolve inherited Object members
+  // ("constructor", "__proto__", "toString") to truthy non-Strategy values, so a
+  // crafted strategy string would slip past this guard and crash the loop later.
+  const strategy = Object.hasOwn(strategies, name) ? strategies[name] : undefined;
   if (!strategy) throw new Error(`strategy "${name}" is not implemented`);
   return strategy;
 }
