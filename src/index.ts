@@ -448,6 +448,9 @@ async function startRoom(input: {
   if (!valid.ok) return { ok: false, error: valid.error };
   const name = (input.name ?? "").trim() || "Room";
   const strategy = ((input.strategy ?? "").trim() || "sequential") as RoomStrategyName;
+  // Normalize here so both entry points (the chat tool and the board action)
+  // store a trimmed topic or none — a whitespace-only topic becomes no topic.
+  const topic = (input.topic ?? "").trim();
   const slug = freshRoomSlug();
   const activeDriver = driver;
   try {
@@ -459,7 +462,7 @@ async function startRoom(input: {
       strategy,
       participants: valid.participants,
       turnBudget: input.turnBudget,
-      ...(input.topic ? { topic: input.topic } : {}),
+      ...(topic ? { topic } : {}),
     });
     activeSlug = slug;
     lastSlug = slug;
@@ -742,7 +745,8 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           emitResult(ctx, `chamber_room_start: ${parsed.error.message}`, true);
           return;
         }
-        const { participants, name, topic } = parsed.data;
+        const { participants, name } = parsed.data;
+        const topic = (parsed.data.topic ?? "").trim() || undefined;
         const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
         const confirm = parsed.data.confirm ?? false;
         // Validate up front (including roster membership) so the dry-run never
@@ -773,12 +777,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         }
         // A user abort during the awaits above must not still open a paid room.
         if (ctx.abortSignal.aborted) return;
-        const res = await startRoom({
-          participants,
-          turnBudget,
-          ...(name ? { name } : {}),
-          ...(topic ? { topic } : {}),
-        });
+        const res = await startRoom({ participants, turnBudget, name, topic });
         if (res.ok) {
           const slug = (res.data as { slug?: string } | undefined)?.slug ?? "";
           emitResult(

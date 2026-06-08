@@ -18,6 +18,14 @@ export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): Ca
     trailing: entry.aborted ? `${entry.at} · aborted` : entry.at,
   }));
 
+  // Surface the room's framing topic above the feed so an operator watching the
+  // board sees what the discussion is about — it otherwise lives only in the
+  // (system-side) turn prompt.
+  const topic = room.topic?.trim();
+  const topicSection: CanvasBoardView["sections"] = topic
+    ? [{ kind: "rows", title: "Topic", items: [{ glyph: "brand", text: topic }] }]
+    : [];
+
   return {
     view: "board",
     title: room.name,
@@ -26,11 +34,11 @@ export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): Ca
       chip: `${room.turnIndex}/${room.turnBudget}`,
       ...(segments.length > 0 ? { segments } : {}),
     },
-    // The transcript feed, then board-baked controls. Each action carries the
-    // room slug as payload (a static actions[] button can't), so onAction routes
-    // to the right room. Payload-required controls have to live here, not in the
-    // rib's static actions list — those dispatch type-only.
-    sections: [{ kind: "rows", items }, roomControls(room)],
+    // The topic banner, the transcript feed, then board-baked controls. Each
+    // action carries the room slug as payload (a static actions[] button can't),
+    // so onAction routes to the right room. Payload-required controls have to
+    // live here, not in the rib's static actions list — those dispatch type-only.
+    sections: [...topicSection, { kind: "rows", items }, roomControls(room)],
   };
 }
 
@@ -53,6 +61,8 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             strategy: room.strategy,
             participants: room.participants,
             turnBudget: room.turnBudget,
+            // Carry the topic so restarting a finished room keeps its subject.
+            ...(room.topic ? { topic: room.topic } : {}),
           },
         },
       ],

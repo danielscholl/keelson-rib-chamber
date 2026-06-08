@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildRosterBoard } from "../src/boards/roster.ts";
-import { type MindRecord, readMinds, retireMind, scaffoldMind } from "../src/minds-store.ts";
+import {
+  type MindRecord,
+  readMinds,
+  readSoul,
+  retireMind,
+  scaffoldMind,
+} from "../src/minds-store.ts";
 
 let root: string;
 
@@ -125,5 +131,23 @@ describe("retireMind", () => {
   test("errors on an unknown slug and rejects an unsafe one", async () => {
     await expect(retireMind(root, "ghost")).rejects.toThrow(/not found/);
     await expect(retireMind(root, "../escape")).rejects.toThrow();
+  });
+});
+
+describe("readSoul", () => {
+  test("returns the authored SOUL.md body", async () => {
+    await scaffoldMind(root, record(), "# Scout\n## Persona\nDigs up facts.");
+    expect(await readSoul(root, "scout")).toContain("## Persona");
+  });
+
+  test("returns undefined for a missing Mind", async () => {
+    expect(await readSoul(root, "nope")).toBeUndefined();
+  });
+
+  // Unlike the mutating helpers (which throw on a bad slug), readSoul is a
+  // fail-soft read for the turn fallback: an unsafe slug returns undefined so the
+  // room turn falls back to the tagline instead of rejecting the in-flight step.
+  test("returns undefined (does not throw) for an unsafe slug", async () => {
+    expect(await readSoul(root, "../escape")).toBeUndefined();
   });
 });

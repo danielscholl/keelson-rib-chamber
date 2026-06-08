@@ -675,6 +675,13 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
     expect(firstRequest(h.turns).prompt.trim().length).toBeGreaterThan(0);
   });
 
+  test("CR-1: a whitespace-only topic yields no topic line in the prompt", async () => {
+    const h = harness();
+    await h.driver.start({ ...START2, topic: "   " });
+    await h.driver.step("demo");
+    expect(firstRequest(h.turns).prompt).not.toContain("Room topic:");
+  });
+
   test("CR-1: a later turn includes the prior transcript as context", async () => {
     const h = harness({ scripts: [{ text: "first reply from Ada" }, { text: "Bo responds" }] });
     await h.driver.start({ ...START2, topic: "Topic X" });

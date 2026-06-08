@@ -19,7 +19,8 @@ export function buildTurnPrompt(input: {
   directionInjection?: string;
 }): string {
   const parts: string[] = [];
-  if (input.topic) parts.push(`Room topic: ${input.topic}`);
+  const topic = input.topic?.trim();
+  if (topic) parts.push(`Room topic: ${topic}`);
   const context = renderTranscript(input.transcript);
   parts.push(
     context.length > 0
