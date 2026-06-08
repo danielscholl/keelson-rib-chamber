@@ -2,13 +2,23 @@
 
 *Final synthesized design. Buildable from slice 1. Every `file:line` citation verified against the current tree (`keelson-rib-chamber` at HEAD, `keelson` base at `bbb53fe`). Drop into `docs/design/`.*
 
-> **Implementation note (Slices 1 + 1.5 landed).** The routing-*fold* helpers the
-> slice plan lists in Slice 1 (`speakerCounts` / `leastSpoken` / `nextUnheard` /
-> `allHeardInCycle` / `endVoteRatio` / `roundOf`) were **deferred to their
-> consuming slices (2/3)** — they have no caller yet and their transcript-derivation
-> semantics belong with the strategy that uses them (avoids a seam ahead of its
-> consumer). Slice 1 ships only the parser/stripping/vocabulary layer that
-> `renderTranscript` actually consumes (`src/routing.ts`).
+> **Implementation note (Slices 1 + 1.5 as built).** Slice 1's deliverable is
+> *stripping* (keeping control directives out of rendered history), not *parsing*.
+> So `src/routing.ts` ships only the **live stripping core** — `CONTROL_ACTIONS` +
+> `extractTrailingJsonObject` + `stripControlJson`, wired into `renderTranscript`.
+> **Deferred to their consuming slices (2/3):** the control-directive parsers
+> (`parseModeratorDecision` / `parseNomination`, with `extractJsonObject`) and the
+> routing-*fold* helpers (`speakerCounts` / `leastSpoken` / `nextUnheard` /
+> `allHeardInCycle` / `endVoteRatio` / `roundOf`). They have no caller until
+> routing exists, and `parseModeratorDecision`'s first-object parse is best
+> validated against a real moderator turn (Slice 2) — landing them now would be a
+> seam ahead of its consumer, and the route⇒strip integration test belongs with
+> the parser's caller in Slice 3.
+>
+> **`StrategyInput` shipped as `{ room, transcript }`** — the §1 sketch's separate
+> `round` field was dropped as redundant: `round` lives on `room.round` (the
+> authoritative cursor), so a strategy reads `input.room.round` rather than a
+> mirror that could drift.
 
 ---
 

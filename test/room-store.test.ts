@@ -61,6 +61,12 @@ describe("createFileRoomStore", () => {
     expect(await store.loadRoom("bad")).toBeUndefined();
   });
 
+  it("preserves a present (non-zero) round through the load boundary", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(makeRoom({ round: 5 }));
+    expect((await store.loadRoom("room"))?.round).toBe(5);
+  });
+
   it("defaults a missing round to 0 at the load boundary (older room.json)", async () => {
     const store = createFileRoomStore(root);
     await mkdir(join(root, "legacy"), { recursive: true });

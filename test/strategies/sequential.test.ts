@@ -18,8 +18,7 @@ function room(overrides: Partial<Room> = {}): Room {
 }
 
 function input(overrides: Partial<Room> = {}): StrategyInput {
-  const r = room(overrides);
-  return { room: r, transcript: [], round: r.round };
+  return { room: room(overrides), transcript: [] };
 }
 
 describe("sequential strategy", () => {

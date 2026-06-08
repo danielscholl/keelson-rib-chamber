@@ -308,13 +308,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       }
 
       // (2) decide: a valid nextSpeaker override wins; otherwise the strategy
-      // picks over the room, the transcript, and the round cursor.
+      // picks over the room and the transcript (the round cursor is room.round).
       let decision: StrategyStep;
       if (override.nextSpeaker !== undefined && isValidNominee(override.nextSpeaker, room)) {
         decision = { kind: "speak", mind: override.nextSpeaker };
       } else {
         const transcript = await loadCachedTranscript(slug);
-        decision = getStrategy(room.strategy)({ room, transcript, round: room.round });
+        decision = getStrategy(room.strategy)({ room, transcript });
       }
 
       // (3) execute. commitTerminal / runSpeakTurn report "is the room still

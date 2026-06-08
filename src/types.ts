@@ -75,17 +75,15 @@ export type StrategyStep =
   | { kind: "synthesize"; mind: MindSlug }
   | { kind: "end" };
 
-// What a strategy decides over. Richer than the room alone: group-chat's
+// What a strategy decides over. Richer than the room alone because group-chat's
 // all-heard gate and open-floor's "did the last speaker nominate?" both read the
-// transcript, and round-based strategies need the round cursor. A strategy stays
-// pure — it never spawns or parses free text; the driver runs turns, parses any
-// routing tail, and validates a pick against room.participants.
+// transcript, which the room does not carry. The round cursor lives on
+// `room.round` (the authoritative count) — a strategy reads it there. A strategy
+// stays pure: it never spawns or parses free text; the driver runs turns, parses
+// any routing tail, and validates a pick against room.participants.
 export interface StrategyInput {
   room: Room;
   transcript: readonly TurnEntry[];
-  // Mirrors room.round (the authoritative cursor), surfaced so a strategy reads
-  // it without reaching into room.
-  round: number;
 }
 
 export type Strategy = (input: StrategyInput) => StrategyStep;
