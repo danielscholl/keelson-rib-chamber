@@ -1,7 +1,7 @@
 import { buildRoomBoard } from "./boards/room.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
 import { getStrategy } from "./strategies/index.ts";
-import { buildTurnEntry, renderTranscript } from "./transcript.ts";
+import { buildTurnEntry, buildTurnPrompt } from "./transcript.ts";
 import type {
   Mind,
   MindSlug,
@@ -19,6 +19,14 @@ export interface RoomDriverDeps {
   // Resolve persona/model/tools by slug. A function (not a port) — the roster is
   // Phase 1 / genesis territory; the driver only needs to look minds up.
   minds: () => Promise<readonly Mind[]> | readonly Mind[];
+  // Resolve a Mind's authored SOUL.md by slug, used as the turn system prompt so
+  // the speaker behaves like its genesis-authored self. Falls back to the roster
+  // tagline (Mind.persona) when absent, so omitting this keeps a thin persona.
+  readSoul?: (slug: MindSlug) => Promise<string | undefined> | string | undefined;
+  // Neutral working dir for agent turns. Without it the turn inherits the
+  // server's cwd, leaking the host repo's ambient context (git state, files)
+  // into the conversation; pointing it at the Chamber data home isolates that.
+  turnCwd?: string;
   now?: () => Date;
   newId?: () => string;
 }
@@ -29,6 +37,7 @@ export interface RoomStartConfig {
   strategy: RoomStrategyName;
   participants: readonly MindSlug[];
   turnBudget: number;
+  topic?: string;
   config?: RoomConfig;
 }
 
@@ -241,6 +250,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         status: "active",
         turnBudget: config.turnBudget,
         turnIndex: 0,
+        ...(config.topic ? { topic: config.topic } : {}),
         ...(config.config ? { config: config.config } : {}),
         createdAt: now().toISOString(),
       };
@@ -367,16 +377,21 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       text = "";
       aborted = true;
     } else {
-      const context = renderTranscript(transcript);
-      const prompt = directionInjection
-        ? `${context}\n\n[director]: ${directionInjection}`
-        : context;
+      const prompt = buildTurnPrompt({
+        ...(room.topic ? { topic: room.topic } : {}),
+        transcript,
+        ...(directionInjection ? { directionInjection } : {}),
+      });
+      // The authored soul is the turn's identity; fall back to the roster tagline
+      // when a Mind has no readable SOUL.md so the turn still runs in character.
+      const system = (await deps.readSoul?.(mind.slug))?.trim() || mind.persona;
       // tools omitted -> text-only (the room default). Mapping Mind.tools slugs to
       // C1 tool descriptors is deferred. The Mind's model pin is honoured.
       const turn = deps.runAgentTurn({
-        system: mind.persona,
+        system,
         prompt,
         abortSignal: controller.signal,
+        ...(deps.turnCwd ? { cwd: deps.turnCwd } : {}),
         ...(mind.model ? { model: mind.model } : {}),
       });
 

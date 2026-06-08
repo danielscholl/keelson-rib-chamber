@@ -99,6 +99,20 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
   }));
 }
 
+// Read a Mind's authored SOUL.md — the founding identity doc — for the room turn
+// system prompt. Returns undefined on any miss (no such Mind, empty/unreadable
+// file) so the caller falls back to the roster tagline rather than failing the
+// turn.
+export async function readSoul(mindsRoot: string, slug: string): Promise<string | undefined> {
+  assertSafeSlug(slug);
+  try {
+    const text = await readFile(join(mindsRoot, slug, "SOUL.md"), "utf8");
+    return text.trim().length > 0 ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function retireMind(mindsRoot: string, slug: string): Promise<void> {
   assertSafeSlug(slug);
   const dir = join(mindsRoot, slug);

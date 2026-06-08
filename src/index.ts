@@ -16,8 +16,15 @@ import {
   parseGenesisOutput,
   slugify,
 } from "./genesis.ts";
-import { type MindRecord, mindExists, readMinds, retireMind, scaffoldMind } from "./minds-store.ts";
-import { mindsDir, roomsDir } from "./paths.ts";
+import {
+  type MindRecord,
+  mindExists,
+  readMinds,
+  readSoul,
+  retireMind,
+  scaffoldMind,
+} from "./minds-store.ts";
+import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomPublisher, RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { createFileRoomStore } from "./room-store.ts";
@@ -180,6 +187,11 @@ const rib: Rib = {
           key: ROSTER_KEY,
           workflow: "chamber-roster",
           title: "Roster",
+          // The roster is a cheap deterministic collector that only changes on
+          // genesis/retire; a modest cadence keeps it self-populating on open and
+          // fresh after a new Mind without hammering. The Briefing footer is left
+          // cadence-free on purpose — it is a paid agent turn, refreshed on demand.
+          cadenceMs: 120_000,
           glyph: { char: "◇", tone: "brand" },
         },
         rows: [
@@ -285,6 +297,8 @@ const rib: Rib = {
         publisher,
         runAgentTurn: run,
         minds: resolveMinds,
+        readSoul: (slug) => readSoul(mindsDir(), slug),
+        turnCwd: chamberDataHome(),
       });
       // Prime the cache so a client subscribing before the first turn gets the
       // seeded board, not a 204 / loading skeleton (the GET path doesn't
@@ -424,6 +438,7 @@ async function startRoom(input: {
   turnBudget: number;
   name?: string;
   strategy?: string;
+  topic?: string;
 }): Promise<RibActionResult> {
   // Refuse once disposed: driver.start() doesn't check, so without this a start
   // after dispose() would write an "active" room whose loop never runs (ensureLoop
@@ -444,6 +459,7 @@ async function startRoom(input: {
       strategy,
       participants: valid.participants,
       turnBudget: input.turnBudget,
+      ...(input.topic ? { topic: input.topic } : {}),
     });
     activeSlug = slug;
     lastSlug = slug;
@@ -499,6 +515,7 @@ function roomStartAction(action: RibAction): Promise<RibActionResult> {
     turnBudget: typeof payload.turnBudget === "number" ? payload.turnBudget : 0,
     name: asNonEmptyString(payload.name) || undefined,
     strategy: asNonEmptyString(payload.strategy) || undefined,
+    topic: asNonEmptyString(payload.topic) || undefined,
   });
 }
 
@@ -658,6 +675,7 @@ const roomStartSchema = z.object({
   participants: z.array(z.string()).min(2),
   turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).optional(),
   name: z.string().optional(),
+  topic: z.string().optional(),
   confirm: z.boolean().optional(),
 });
 const roomSaySchema = z
@@ -714,7 +732,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Rejected if a room is already active — stop it first. NOT for creating a Mind (that is the New agent / genesis action).",
+        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Rejected if a room is already active — stop it first. NOT for creating a Mind (that is the New agent / genesis action).",
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,
@@ -724,7 +742,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           emitResult(ctx, `chamber_room_start: ${parsed.error.message}`, true);
           return;
         }
-        const { participants, name } = parsed.data;
+        const { participants, name, topic } = parsed.data;
         const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
         const confirm = parsed.data.confirm ?? false;
         // Validate up front (including roster membership) so the dry-run never
@@ -745,16 +763,22 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           return;
         }
         const who = valid.participants.join(", ");
+        const topicNote = topic ? ` on "${topic}"` : " (no topic set)";
         if (!confirm) {
           emitResult(
             ctx,
-            `Would open a room with ${who} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
+            `Would open a room with ${who}${topicNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
           );
           return;
         }
         // A user abort during the awaits above must not still open a paid room.
         if (ctx.abortSignal.aborted) return;
-        const res = await startRoom({ participants, turnBudget, name });
+        const res = await startRoom({
+          participants,
+          turnBudget,
+          ...(name ? { name } : {}),
+          ...(topic ? { topic } : {}),
+        });
         if (res.ok) {
           const slug = (res.data as { slug?: string } | undefined)?.slug ?? "";
           emitResult(

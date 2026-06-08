@@ -54,6 +54,10 @@ export interface Room {
   status: "active" | "stopped" | "done";
   turnBudget: number;
   turnIndex: number;
+  // The opening prompt that frames the discussion, seeded into every turn's
+  // prompt. Optional: a room without one still runs (the prompt builder supplies
+  // a non-empty fallback), it just has no shared subject.
+  topic?: string;
   config?: RoomConfig;
   pending?: RoomPending;
   createdAt: string;
