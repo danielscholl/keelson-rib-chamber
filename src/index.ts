@@ -8,7 +8,7 @@ import type {
   ToolContext,
   ToolDefinition,
 } from "@keelson/shared";
-import { canvasViewSchema, z } from "@keelson/shared";
+import { asNonEmptyString, asStringArray, errText, expectView, z } from "@keelson/shared";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
@@ -74,18 +74,6 @@ function invalidateRoster(): void {
 // (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
 // it is shell-quoted where interpolated into the bash node below.
 const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
-
-// Validate through the canvas view union (not a bare member schema) so the
-// producer-side guard enforces the same node-id / column-key uniqueness checks
-// the SPA render gate runs — before a frame is ever broadcast. Mirrors the OSDU
-// rib's expectView.
-function expectView(key: string, kind: CanvasView["view"]) {
-  return (data: unknown): CanvasView => {
-    const view = canvasViewSchema.parse(data);
-    if (view.view !== kind) throw new Error(`${key} expects a ${kind} view, got "${view.view}"`);
-    return view;
-  };
-}
 
 // The brief's JSON-Schema shape, used twice. As `output_format` it's the
 // structured-output directive appended to the prompt (and flips the node to a
@@ -604,10 +592,6 @@ function isSafeSlug(slug: string): boolean {
   }
 }
 
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
 async function retireAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const slug = asNonEmptyString(payload.slug);
@@ -617,16 +601,8 @@ async function retireAction(action: RibAction): Promise<RibActionResult> {
     invalidateRoster(); // a Mind is gone — drop it from the cached roster
     return { ok: true, data: { slug } };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: errText(e) };
   }
-}
-
-function asNonEmptyString(v: unknown): string {
-  return typeof v === "string" && v.trim().length > 0 ? v.trim() : "";
-}
-
-function asStringArray(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
 // Tool results stream to chat as `tool_result` chunks; keep each well under the
