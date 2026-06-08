@@ -4,7 +4,6 @@ import {
   CONTROL_ACTIONS,
   extractTrailingJsonObject,
   leastSpoken,
-  nextUnheard,
   parseModeratorDecision,
   speakerCounts,
   stripControlJson,
@@ -179,13 +178,9 @@ describe("speakerCounts / leastSpoken / nextUnheard / allHeardInCycle (global fo
     const counts = speakerCounts(transcript);
     expect(leastSpoken(["a", "b"], counts)).toBe("b");
     expect(leastSpoken(["a", "b", "c"], counts)).toBe("c"); // c=0 wins
+    // It prefers an unheard participant (count 0 is the minimum) yet rotates once
+    // all have spoken — so it doubles as the routing fallback (no monopoly).
     expect(leastSpoken([], counts)).toBeUndefined();
-  });
-
-  test("nextUnheard is the first never-heard participant, else the first", () => {
-    const counts = speakerCounts(transcript);
-    expect(nextUnheard(["a", "b", "c"], counts)).toBe("c");
-    expect(nextUnheard(["a", "b"], counts)).toBe("a"); // all heard -> first
   });
 
   test("allHeardInCycle is the participation floor (excludes the moderator slug)", () => {

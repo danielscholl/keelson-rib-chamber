@@ -8,6 +8,7 @@ import {
   makeFakePublisher,
   makeFakeStore,
   scriptedRunAgentTurn,
+  scriptedThenAbortable,
   seqIds,
   type TurnScript,
 } from "../helpers/fakes.ts";
@@ -850,11 +851,11 @@ describe("room driver — group-chat moderate", () => {
     expect(h.turns.requests[3]?.prompt).not.toContain("address the cost");
   });
 
-  test("an invalid/unknown nominee falls back to nextUnheard", async () => {
+  test("an invalid/unknown nominee falls back to the least-spoken participant", async () => {
     const h = gcHarness([
       { text: direct("a") }, // step 1: a speaks
       { text: "a1" },
-      { text: direct("ghost") }, // step 2: unknown -> nextUnheard (b)
+      { text: direct("ghost") }, // step 2: unknown -> leastSpoken (b, unheard)
       { text: "b1" },
     ]);
     await startGc(h.driver);
@@ -863,6 +864,27 @@ describe("room driver — group-chat moderate", () => {
     const froms = (await h.store.loadTranscript("gc")).map((e) => e.from);
     expect(froms).toEqual(["m", "a", "m", "b"]);
     expect(froms).not.toContain("ghost");
+  });
+
+  test("a persistently malformed moderator rotates speakers (no monopoly)", async () => {
+    // No routing JSON in any moderator turn -> the fallback must distribute via
+    // leastSpoken, not pin participants[0]. Expect a, b, a, b — not a, b, a, a.
+    const h = gcHarness([
+      { text: "musing 1" },
+      { text: "a1" },
+      { text: "musing 2" },
+      { text: "b1" },
+      { text: "musing 3" },
+      { text: "a2" },
+      { text: "musing 4" },
+      { text: "b2" },
+    ]);
+    await startGc(h.driver, { moderator: "m" }, 8);
+    for (let i = 0; i < 4; i++) await h.driver.step("gc");
+    const speakers = (await h.store.loadTranscript("gc"))
+      .filter((e) => e.from !== "m")
+      .map((e) => e.from);
+    expect(speakers).toEqual(["a", "b", "a", "b"]);
   });
 
   test("a malformed moderator reply still routes (deterministic nextUnheard)", async () => {
@@ -1027,10 +1049,36 @@ describe("room driver — group-chat moderate", () => {
     const room = await store.loadRoom("gc");
     expect(room?.status).toBe("stopped");
     expect(room?.turnIndex).toBe(1); // only the moderator's tick landed
-    // No phantom speaker entry: the aborted second turn never ran, so the stopped
-    // room's transcript holds only the moderator turn.
+    // No phantom speaker entry: the aborted second turn never STARTED, so the
+    // stopped room's transcript holds only the moderator turn.
     const t = await store.loadTranscript("gc");
     expect(t).toHaveLength(1);
     expect(t[0]?.from).toBe("m");
+  });
+
+  test("a stop after the routed speaker turn has STARTED records its aborted entry", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    // The moderator turn resolves (routing to a); the speaker turn stays in flight.
+    const turns = scriptedThenAbortable(direct("a"));
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS_GC,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await startGc(driver);
+    const stepP = driver.step("gc");
+    await turns.secondStarted; // moderator committed; the speaker turn is mid-flight
+    await driver.stop("gc"); // stop DURING the speaker turn (not before it started)
+    await stepP;
+    const t = await store.loadTranscript("gc");
+    // The speaker turn had started, so its aborted entry is recorded — matching the
+    // single-speaker path, not dropped as a phantom.
+    expect(t.map((e) => e.from)).toEqual(["m", "a"]);
+    expect(t[1]?.aborted).toBe(true);
+    expect((await store.loadRoom("gc"))?.status).toBe("stopped");
   });
 });

@@ -143,6 +143,47 @@ export function gatedRunAgentTurn(text = "reply") {
   return { run, requests, started, release: () => releaseResult() };
 }
 
+// A runAgentTurn whose FIRST call resolves immediately with `firstText` (e.g. a
+// moderator's routing reply) and whose subsequent calls stay in flight until the
+// abort signal fires — so a test can let the moderator turn commit, then stop the
+// room while the routed speaker turn is mid-flight. `secondStarted` resolves when
+// the second turn is invoked.
+export function scriptedThenAbortable(firstText: string) {
+  const requests: RibAgentTurnRequest[] = [];
+  let markSecond: () => void = () => {};
+  const secondStarted = new Promise<void>((resolve) => {
+    markSecond = resolve;
+  });
+  let n = 0;
+  const run: RunAgentTurn = (req) => {
+    requests.push(req);
+    const i = n++;
+    const stream = (async function* (): AsyncGenerator<MessageChunk> {
+      yield { type: "done" };
+    })();
+    if (i === 0) {
+      return {
+        stream,
+        result: Promise.resolve({ status: "ok", text: firstText } satisfies RibAgentTurnResult),
+      };
+    }
+    markSecond();
+    const result = new Promise<RibAgentTurnResult>((resolve) => {
+      const signal = req.abortSignal;
+      if (!signal) return;
+      if (signal.aborted) {
+        resolve({ status: "aborted", text: "" });
+        return;
+      }
+      signal.addEventListener("abort", () => resolve({ status: "aborted", text: "" }), {
+        once: true,
+      });
+    });
+    return { stream, result };
+  };
+  return { run, requests, secondStarted };
+}
+
 export function fixedClock(iso = "2026-01-01T00:00:00.000Z") {
   return () => new Date(iso);
 }

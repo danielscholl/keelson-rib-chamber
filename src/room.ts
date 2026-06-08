@@ -6,7 +6,6 @@ import {
   DEFAULT_MIN_ROUNDS,
   leastSpoken,
   type ModeratorDecision,
-  nextUnheard,
   parseModeratorDecision,
   speakerCounts,
 } from "./routing.ts";
@@ -559,6 +558,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     }
     const speakerMind = await resolveMindOrFailClosed(afterMod, speaker, gen);
     if (!speakerMind) return false;
+    // If a stop superseded the step BEFORE the speaker turn starts (e.g. during the
+    // moderator-to-speaker gap), skip it: appending an entry for a turn that never
+    // ran would leave a phantom on disk after a real moderator turn. A stop DURING
+    // the speaker turn falls through to commitTurn, which records the aborted entry
+    // exactly like the single-speaker path.
+    if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
     const spkPrompt = buildTurnPrompt({
       ...(afterMod.topic ? { topic: afterMod.topic } : {}),
       transcript: postMod,
@@ -571,11 +576,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
     const spkTurn = await runOneTurn(speakerMind, spkPrompt, controller);
     if (spkTurn === "disposed") return false;
-    // A stop that landed between the moderator commit and here aborts the speaker
-    // turn before it ran and bumps the generation; commitTurn would still append an
-    // empty phantom entry to disk before its gen check drops the room write. Bail
-    // first so a stopped room's transcript holds only turns that actually ran.
-    if (spkTurn.aborted && generationOf(room.slug) !== gen) return false;
     return await commitTurn(afterMod, speakerMind, spkTurn.text, spkTurn.aborted, gen);
   }
 
@@ -598,7 +598,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       const others = room.participants.filter((p) => p !== nominee);
       return leastSpoken(others, counts) ?? nominee;
     }
-    return nextUnheard(room.participants, counts);
+    // No valid nominee (missing / unparseable / invalid): the least-spoken
+    // participant. leastSpoken prefers an unheard participant (count 0 is the
+    // minimum) yet also rotates once everyone has spoken, so a malformed moderator
+    // can't monopolize participants[0] (which a plain "next unheard" would).
+    return leastSpoken(room.participants, counts) ?? room.participants[0];
   }
 
   // The closing act of a group-chat: an optional synthesizer authors one summary
@@ -615,17 +619,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       const minds = await deps.minds();
       const synth = minds.find((m) => m.slug === synthSlug);
       if (synth) {
+        // Skip only if a stop superseded before synthesis starts (no phantom entry
+        // for a turn that never ran); a stop during it is recorded, as on the
+        // speaker path.
+        if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
         const prompt = buildSynthesisPrompt({
           ...(room.topic ? { topic: room.topic } : {}),
           transcript: await loadCachedTranscript(room.slug),
         });
         const turn = await runOneTurn(synth, prompt, controller);
         if (turn === "disposed") return false;
-        // A stop during synthesis resolution aborts it before it ran and bumps the
-        // generation — don't append a phantom synthesis entry the stopped room never
-        // produced (the commit below would drop on the gen check, but the append is
-        // unconditional).
-        if (turn.aborted && generationOf(room.slug) !== gen) return false;
         await appendEntry(
           room.slug,
           gen,
