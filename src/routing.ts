@@ -101,6 +101,12 @@ export interface ModeratorDecision {
 export function parseModeratorDecision(text: string): ModeratorDecision | null {
   const json = extractTrailingJsonObject(text);
   if (!json) return null;
+  // Only act on a GENUINELY trailing object (nothing but whitespace after it) —
+  // the same tail-position test stripControlJson applies. A recognized object
+  // mid-prose (an example, or JSON followed by more text) is not a directive: the
+  // stripper would leave it, so the parser must not route on it either.
+  const idx = text.lastIndexOf(json);
+  if (text.slice(idx + json.length).trim().length > 0) return null;
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(json) as Record<string, unknown>;

@@ -1027,6 +1027,10 @@ describe("room driver — group-chat moderate", () => {
     const room = await store.loadRoom("gc");
     expect(room?.status).toBe("stopped");
     expect(room?.turnIndex).toBe(1); // only the moderator's tick landed
-    expect((await store.loadTranscript("gc"))[0]?.from).toBe("m");
+    // No phantom speaker entry: the aborted second turn never ran, so the stopped
+    // room's transcript holds only the moderator turn.
+    const t = await store.loadTranscript("gc");
+    expect(t).toHaveLength(1);
+    expect(t[0]?.from).toBe("m");
   });
 });

@@ -571,6 +571,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
     const spkTurn = await runOneTurn(speakerMind, spkPrompt, controller);
     if (spkTurn === "disposed") return false;
+    // A stop that landed between the moderator commit and here aborts the speaker
+    // turn before it ran and bumps the generation; commitTurn would still append an
+    // empty phantom entry to disk before its gen check drops the room write. Bail
+    // first so a stopped room's transcript holds only turns that actually ran.
+    if (spkTurn.aborted && generationOf(room.slug) !== gen) return false;
     return await commitTurn(afterMod, speakerMind, spkTurn.text, spkTurn.aborted, gen);
   }
 
@@ -616,6 +621,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         });
         const turn = await runOneTurn(synth, prompt, controller);
         if (turn === "disposed") return false;
+        // A stop during synthesis resolution aborts it before it ran and bumps the
+        // generation — don't append a phantom synthesis entry the stopped room never
+        // produced (the commit below would drop on the gen check, but the append is
+        // unconditional).
+        if (turn.aborted && generationOf(room.slug) !== gen) return false;
         await appendEntry(
           room.slug,
           gen,

@@ -111,6 +111,18 @@ describe("parseModeratorDecision (trailing object — same tail the stripper rem
     expect(parseModeratorDecision('{"note":"x"}')).toBeNull();
   });
 
+  test("a recognized object that is NOT the trailing tail does not route (matches the stripper)", () => {
+    // JSON mid-prose or followed by text: stripControlJson would leave it, so the
+    // parser must not act on it (else it routes/closes on incidental text and the
+    // JSON leaks into later prompt history).
+    const followed = '{"action":"close"} — and here is my reasoning afterward';
+    expect(parseModeratorDecision(followed)).toBeNull();
+    expect(stripControlJson(followed)).toBe(followed); // stripper agrees: left intact
+    expect(
+      parseModeratorDecision('{"action":"direct","next_speaker":"a"} then more prose'),
+    ).toBeNull();
+  });
+
   test("'close' survives only when exactly 'close'", () => {
     expect(parseModeratorDecision('{"action":"close"}')).toEqual({ action: "close" });
   });
