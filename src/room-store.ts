@@ -30,7 +30,11 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
       try {
         const raw = await readFile(roomFile(slug), "utf8");
         const parsed: unknown = JSON.parse(raw);
-        return isRoom(parsed) ? parsed : undefined;
+        if (!isRoom(parsed)) return undefined;
+        // `round` was added after some rooms were persisted; default it here at
+        // the load boundary so isRoom (which does not require it) need not change
+        // and an older room.json still loads.
+        return { ...parsed, round: parsed.round ?? 0 };
       } catch {
         return undefined; // no room.json yet, or unreadable/unparseable
       }

@@ -1,10 +1,14 @@
+import { stripControlJson } from "./routing.ts";
 import type { MindSlug, TurnEntry } from "./types.ts";
 
 // Render a transcript as the prompt context fed to the next speaker — oldest to
-// newest, one "from: text" block per turn. Pure.
+// newest, one "from: text" block per turn. A trailing control directive (a
+// moderator's routing JSON, a speaker's nomination tail) is stripped so it never
+// leaks into the next speaker's context and gets mimicked; the on-disk entry is
+// untouched (the driver re-parses the raw text for routing). Pure.
 export function renderTranscript(transcript: readonly TurnEntry[]): string {
   return transcript
-    .map((entry) => `${entry.from}: ${entry.parts.map((p) => p.text).join("\n")}`)
+    .map((entry) => `${entry.from}: ${stripControlJson(entry.parts.map((p) => p.text).join("\n"))}`)
     .join("\n\n");
 }
 

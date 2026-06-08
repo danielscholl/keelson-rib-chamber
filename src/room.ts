@@ -250,6 +250,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         status: "active",
         turnBudget: config.turnBudget,
         turnIndex: 0,
+        round: 0,
         ...(config.topic ? { topic: config.topic } : {}),
         ...(config.config ? { config: config.config } : {}),
         createdAt: now().toISOString(),
@@ -306,12 +307,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         });
       }
 
-      // (2) decide: a valid nextSpeaker override wins; otherwise the strategy picks.
+      // (2) decide: a valid nextSpeaker override wins; otherwise the strategy
+      // picks over the room and the transcript (the round cursor is room.round).
       let decision: StrategyStep;
       if (override.nextSpeaker !== undefined && isValidNominee(override.nextSpeaker, room)) {
         decision = { kind: "speak", mind: override.nextSpeaker };
       } else {
-        decision = getStrategy(room.strategy)(room);
+        const transcript = await loadCachedTranscript(slug);
+        decision = getStrategy(room.strategy)({ room, transcript });
       }
 
       // (3) execute. commitTerminal / runSpeakTurn report "is the room still

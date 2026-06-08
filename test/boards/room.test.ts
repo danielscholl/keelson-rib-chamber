@@ -11,6 +11,7 @@ const room = (over: Partial<Room> = {}): Room => ({
   status: "active",
   turnBudget: 6,
   turnIndex: 0,
+  round: 0,
   createdAt: "2026-01-01T00:00:00.000Z",
   ...over,
 });
