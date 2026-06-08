@@ -33,10 +33,17 @@ describe("chamber-genesis workflow", () => {
     // Rib tools are default-off in workflow prompt nodes; the node opts in to the
     // single write seam by name (and nothing else).
     expect(node?.allowed_tools).toEqual(["chamber_emit_genesis"]);
-    // An agent turn, not a deterministic collector (no bash) and not a structured
-    // snapshot producer (no output_format) — it persists via the tool call.
+    // An agent turn, not a deterministic collector (no bash).
     expect(node?.bash).toBeUndefined();
-    expect(node?.output_format).toBeUndefined();
+  });
+
+  test("fails closed on a tool error so a collision can't report SUCCEEDED (#18)", () => {
+    const node = ((genesis()?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ??
+      [])[0];
+    // The Mind is written inside chamber_emit_genesis, which fails closed on a
+    // slug collision; fail_on_tool_error makes the keelson executor fail the run
+    // on that tool error rather than reporting SUCCEEDED with no Mind written.
+    expect(node?.fail_on_tool_error).toBe(true);
   });
 
   test("the genesis prompt drives the brief through the emit tool", () => {
