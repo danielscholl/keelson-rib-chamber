@@ -806,23 +806,26 @@ describe("room driver — group-chat moderate", () => {
     expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m", "a", "m", "b"]);
   });
 
-  test("at saturation the over-cap redirect never re-picks the nominee itself", async () => {
-    // a and b each reach the cap, then the moderator re-nominates a: the redirect
-    // must pick the OTHER participant, not return a via a leastSpoken tie.
+  test("a fixated moderator (repeated nomination over the cap) rotates, not monopolizes", async () => {
+    // maxSpeakerRepeats 1 with the moderator always nominating 'a': the over-cap
+    // redirect must rotate via leastSpoken over ALL participants (a, b, a, b) — not
+    // pin 'a' (cap ignored) and not pin 'b' (excluding the nominee would).
     const h = gcHarness([
       { text: direct("a") },
       { text: "a1" },
-      { text: direct("b") },
-      { text: "b1" }, // now a=1, b=1, both at cap 1
-      { text: direct("a") }, // a is at cap and tied -> must redirect to b, not a
+      { text: direct("a") },
+      { text: "b1" },
+      { text: direct("a") },
+      { text: "a2" },
+      { text: direct("a") },
       { text: "b2" },
     ]);
-    await startGc(h.driver, { moderator: "m", maxSpeakerRepeats: 1 }, 10);
-    await h.driver.step("gc");
-    await h.driver.step("gc");
-    await h.driver.step("gc");
-    const froms = (await h.store.loadTranscript("gc")).map((e) => e.from);
-    expect(froms).toEqual(["m", "a", "m", "b", "m", "b"]);
+    await startGc(h.driver, { moderator: "m", maxSpeakerRepeats: 1 }, 8);
+    for (let i = 0; i < 4; i++) await h.driver.step("gc");
+    const speakers = (await h.store.loadTranscript("gc"))
+      .filter((e) => e.from !== "m")
+      .map((e) => e.from);
+    expect(speakers).toEqual(["a", "b", "a", "b"]);
   });
 
   test("a director direction (no callOn) steers the moderator's routing turn", async () => {

@@ -590,18 +590,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   ): MindSlug | undefined {
     const cap = room.config?.maxSpeakerRepeats ?? DEFAULT_MAX_SPEAKER_REPEATS;
     const nominee = decision?.nextSpeaker;
-    if (nominee && isValidNominee(nominee, room)) {
-      if ((counts.get(nominee) ?? 0) < cap) return nominee;
-      // Over the cap — redirect, excluding the nominee itself so the cap can't be
-      // re-satisfied by a tie (leastSpoken returns the first minimum, which would
-      // otherwise be the nominee again when everyone is level).
-      const others = room.participants.filter((p) => p !== nominee);
-      return leastSpoken(others, counts) ?? nominee;
+    if (nominee && isValidNominee(nominee, room) && (counts.get(nominee) ?? 0) < cap) {
+      return nominee;
     }
-    // No valid nominee (missing / unparseable / invalid): the least-spoken
-    // participant. leastSpoken prefers an unheard participant (count 0 is the
-    // minimum) yet also rotates once everyone has spoken, so a malformed moderator
-    // can't monopolize participants[0] (which a plain "next unheard" would).
+    // No usable nominee (missing / unparseable / invalid / over the cap): the
+    // least-spoken participant, over ALL participants. leastSpoken prefers an
+    // unheard participant and otherwise rotates by count, so neither a malformed
+    // moderator nor a fixated one can monopolize — and it won't hand every redirect
+    // to a single "other" Mind (which excluding the nominee would, in a 2-Mind
+    // room). The nominee is re-picked only when it is itself the least-spoken, i.e.
+    // balanced rotation, not a monopoly.
     return leastSpoken(room.participants, counts) ?? room.participants[0];
   }
 
