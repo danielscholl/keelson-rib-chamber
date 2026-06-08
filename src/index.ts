@@ -680,16 +680,13 @@ async function renderRoomStatus(store: RoomStore): Promise<string> {
 // Genesis write seam: the chamber-genesis workflow's prompt node authors the soul
 // + tagline and calls this tool to persist the Mind. Deterministic and in-process
 // (it reuses scaffoldMind), so the generative half stays in the prompt and the
-// write half stays testable. model/tools are .optional() (not .default()) for the
-// same z.toJSONSchema `required` reason as the room schema above.
+// write half stays testable.
 const genesisEmitSchema = z.object({
   name: z.string().min(1),
   role: z.string().min(1),
   voice: z.string().min(1),
   soul: z.string().min(1),
   tagline: z.string().min(1),
-  model: z.string().optional(),
-  tools: z.array(z.string()).optional(),
 });
 
 function makeGenesisTool(): ToolDefinition {
@@ -705,16 +702,16 @@ function makeGenesisTool(): ToolDefinition {
         emitResult(ctx, `chamber_emit_genesis: ${parsed.error.message}`, true);
         return;
       }
-      const { name, role, voice, soul, tagline, model, tools } = parsed.data;
+      const { name, role, voice, soul, tagline } = parsed.data;
       try {
         const record: MindRecord = {
           slug: slugify(name),
           name,
           role,
           voice,
-          persona: tagline.slice(0, 120),
-          ...(model ? { model } : {}),
-          ...(tools && tools.length > 0 ? { tools } : {}),
+          // The roster card truncates for display (with an ellipsis); store the
+          // authored tagline trimmed, not hard-cut.
+          persona: tagline.trim(),
           createdAt: new Date().toISOString(),
         };
         await scaffoldMind(mindsDir(), record, soul);

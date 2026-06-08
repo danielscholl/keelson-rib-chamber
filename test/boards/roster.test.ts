@@ -62,6 +62,8 @@ describe("buildRosterBoard", () => {
     const retire = actionItems(board).filter((i) => i.type === "retire");
     expect(retire).toHaveLength(2);
     expect(retire[0]).toMatchObject({ type: "retire", destructive: true, payload: { slug: "a" } });
+    // Each button carries ITS own mind's slug, not all the first one (delete path).
+    expect(retire[1]).toMatchObject({ type: "retire", destructive: true, payload: { slug: "b" } });
   });
 
   test("offers Retire even for a single mind (its slug is on the card)", () => {

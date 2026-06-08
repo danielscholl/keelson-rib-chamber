@@ -18,8 +18,9 @@ describe("rib-chamber", () => {
   it("declares no static actions — every control is a workflow or a board action", () => {
     // A payload-less static actions[] button can't carry input, so genesis is the
     // chamber-genesis workflow and retire + the room controls are payload-carrying
-    // board actions that reach onAction.
-    expect(rib.actions ?? []).toEqual([]);
+    // board actions that reach onAction. Probe via Object.hasOwn (not `rib.actions`)
+    // so the assertion typechecks against the actions-less Rib contract.
+    expect(Object.hasOwn(rib, "actions")).toBe(false);
   });
 
   it("places the live room transcript in the surface row", () => {

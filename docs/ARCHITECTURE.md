@@ -59,14 +59,13 @@ adds the exploratory half. Keep the two framed as complementary modes.
 |---|---|
 | `surfaces` | The **Chamber** nav tab — regions bound to roster / room / brief keys. |
 | `views` | Static view descriptors for `rib:chamber:roster`, `:room`, `:brief`. |
-| `contributeWorkflows` | The **genesis-authoring** workflow and the **newspaper/brief** lens workflow (a `bash`/`prompt` node + `output_schema` + `bindSnapshotKey` + fail-closed `validate`). |
-| `onAction` | Genesis a Mind, retire a Mind, and **room control** (canonical `action.type` literals): `room-start` / `room-next` / `room-inject` / `room-stop` — see [design/A2A-communication.md](./design/A2A-communication.md). |
+| `contributeWorkflows` | The **chamber-genesis** workflow (a `prompt` node scoped via `allowed_tools` to the `chamber_emit_genesis` write tool), the **roster** collector, and the **newspaper/brief** lens workflow (`bash`/`prompt` node + `output_schema` + `bindSnapshotKey` + fail-closed `validate`). |
+| `onAction` | Retire a Mind, and **room control** (canonical `action.type` literals): `room-start` / `room-next` / `room-inject` / `room-stop` — see [design/A2A-communication.md](./design/A2A-communication.md). |
 | `authStatus` | Probe that an agent provider/CLI is reachable. |
 | `registerTools` | Boot-time wiring: builds the room driver singleton and registers the push-fed `rib:chamber:room` snapshot (needs `runAgentTurn` + `getSnapshotManager`; room actions fail closed without them). |
 
 `RibContext` surfaces the rib relies on: `runAgentTurn()` (run an agent turn —
-the room loop's turn seam, `C1`), `getExec()` (shell a coding-agent CLI — still
-the genesis path), `getSnapshotManager()` (publish board frames, register keys
+the room loop's turn seam, `C1`), `getSnapshotManager()` (publish board frames, register keys
 imperatively), `getCredential()` (namespace-scoped secrets).
 
 ## 4. Concept → Keelson seam map
@@ -93,7 +92,7 @@ namespace).
 
 | Surface region | Snapshot key | Producer | Shape |
 |---|---|---|---|
-| Roster (header) | `rib:chamber:roster` | genesis/retire actions + a roster builder | `board` (cards: one per Mind) |
+| Roster (header) | `rib:chamber:roster` | per-Mind retire actions + a roster builder | `board` (cards: one per Mind) |
 | Room transcript (main) | `rib:chamber:room` | the room loop (push) | `board` (rows/cards: one per turn) |
 | Briefing (footer) | `rib:chamber:brief` | the `chamber-brief` workflow (pull) | `board` (briefing sections) |
 | Agent-authored lens | `rib:chamber:lens:<mind>:<id>` | a Mind turn (Phase 3) | `board` (Mind's choice) |
@@ -123,19 +122,21 @@ floor) (Phase 3). A `MindSpec` is `{ slug, persona, model?, tools? }`.
 
 ## 7. Genesis flow
 
-Mirrors chamber/pi-chamber, collapsed to a single agent turn:
+Genesis is the **`chamber-genesis` workflow** — a single `prompt` node scoped via
+`allowed_tools` to the `chamber_emit_genesis` write tool:
 
-1. **Scaffold** the Mind directory under the rib data home (`SOUL.md`,
-   `memory.md`, `rules.md`, `log.md`, `AGENT.md` seeded from a template).
-2. **Author the soul** — one agent turn receives a genesis prompt built from
-   `{ name, role, voice }` and emits the founding documents (as JSON the rib
-   writes, or by writing files directly).
-3. **Validate** the required files are non-empty.
-4. **Persist** and republish `rib:chamber:roster`.
+1. **Author** — one agent turn reads a freeform brief (`$ARGUMENTS`), decides the
+   Mind's `{ name, role, voice }`, and composes its `SOUL.md` body + a roster tagline.
+2. **Persist** — the turn calls `chamber_emit_genesis`, whose handler slugifies the
+   name, `scaffoldMind`s the directory (`mind.json`, `SOUL.md`, seeded `memory.md` /
+   `rules.md` / `log.md` / `AGENT.md`), and invalidates the roster cache.
+   `scaffoldMind` fails closed on a slug collision.
+3. **Reflect** — the `chamber-roster` collector (a cadenced `bash` node) re-reads the
+   Minds into the roster board; genesis itself publishes no snapshot.
 
-Genesis can be an `onAction({ type: "genesis", payload })` or a contributed
-`chamber-genesis` workflow. The action path is simpler for MVP; the workflow
-path inherits provider pinning and determinism controls for free.
+Modeling genesis as a workflow (not an `onAction`) makes it triggerable from chat
+(`/workflow run chamber-genesis <brief>`), the CLI, and the Workflows tab, and runs
+the authoring turn through the provider abstraction instead of a shelled CLI.
 
 ## 8. Persistence model
 
@@ -221,16 +222,14 @@ MVP), so Phase 2 is unblocked and wired.
   briefing; the executor promotes it to structured output and the rib binding
   publishes it fail-closed (`validate` = `canvasViewSchema`, board kind) to
   `rib:chamber:brief`. A `views[]` descriptor renders it.
-- **Phase 1 wired.** Genesis authors a Mind: a `genesis` `onAction` builds a
-  founding-soul prompt from `{ name, role, voice }`, runs one agent turn (the
-  coding-agent CLI via `getExec`, isolated behind a `GenesisAuthor` seam that
-  collapses to `ctx.runAgentTurn` once `C1` lands), and persists `mind.json` +
-  `SOUL.md` + seeded working-memory docs under a self-resolved
-  `<workspace>/.keelson/chamber/minds/<slug>/` (the `C3` MVP). A `chamber-roster`
-  collector reads those Minds back into a `board` of cards on `rib:chamber:roster`;
-  `retire` removes one. The **Chamber** surface now lands the roster in the
-  header and settles the brief into the footer. Mutate-then-refresh, mirroring
-  the OSDU action pattern; zero base change.
+- **Phase 1 wired.** Genesis authors a Mind via the `chamber-genesis` workflow: a
+  `prompt` node reads a brief, authors the soul, and calls `chamber_emit_genesis`
+  to persist `mind.json` + `SOUL.md` + seeded working-memory docs under a
+  self-resolved `<workspace>/.keelson/chamber/minds/<slug>/` (the `C3` MVP). A
+  `chamber-roster` collector reads those Minds back into a `board` of cards on
+  `rib:chamber:roster`; a per-Mind board `retire` action removes one. The
+  **Chamber** surface lands the roster in the header and settles the brief into the
+  footer. Mutate-then-refresh, mirroring the OSDU action pattern; zero base change.
 - **Phase 2 wired.** The room core is bound to the real seams in
   `registerTools`: a file-based `RoomStore` (`rooms/<slug>/room.json` +
   `transcript.jsonl` under the data home), a **push publisher** (cache the
