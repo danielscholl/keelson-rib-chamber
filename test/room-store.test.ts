@@ -14,6 +14,7 @@ function makeRoom(over: Partial<Room> = {}): Room {
     status: "active",
     turnBudget: 4,
     turnIndex: 0,
+    round: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     ...over,
   };
@@ -58,6 +59,28 @@ describe("createFileRoomStore", () => {
     await mkdir(join(root, "bad"), { recursive: true });
     await writeFile(join(root, "bad", "room.json"), "{ not json");
     expect(await store.loadRoom("bad")).toBeUndefined();
+  });
+
+  it("defaults a missing round to 0 at the load boundary (older room.json)", async () => {
+    const store = createFileRoomStore(root);
+    await mkdir(join(root, "legacy"), { recursive: true });
+    // A room.json persisted before `round` existed — must still load (isRoom does
+    // not require round; the store defaults it).
+    const legacy = {
+      slug: "legacy",
+      name: "Room",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: "active",
+      turnBudget: 4,
+      turnIndex: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    await writeFile(join(root, "legacy", "room.json"), JSON.stringify(legacy));
+    const loaded = await store.loadRoom("legacy");
+    expect(loaded?.status).toBe("active");
+    expect(loaded?.turnIndex).toBe(1);
+    expect(loaded?.round).toBe(0);
   });
 
   it("returns undefined for a room.json missing required fields", async () => {

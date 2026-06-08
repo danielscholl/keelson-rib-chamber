@@ -54,6 +54,11 @@ export interface Room {
   status: "active" | "stopped" | "done";
   turnBudget: number;
   turnIndex: number;
+  // Round cursor — the authoritative count for round-based strategies. Stored
+  // (not derived from turnIndex % participants) so a director override or a
+  // moderator's pick can perturb the rotation without losing the round. Defaulted
+  // to 0 at the load boundary so a room.json persisted before it existed loads.
+  round: number;
   // The opening prompt that frames the discussion, seeded into every turn's
   // prompt. Optional: a room without one still runs (the prompt builder supplies
   // a non-empty fallback), it just has no shared subject.
@@ -70,4 +75,17 @@ export type StrategyStep =
   | { kind: "synthesize"; mind: MindSlug }
   | { kind: "end" };
 
-export type Strategy = (room: Room) => StrategyStep;
+// What a strategy decides over. Richer than the room alone: group-chat's
+// all-heard gate and open-floor's "did the last speaker nominate?" both read the
+// transcript, and round-based strategies need the round cursor. A strategy stays
+// pure — it never spawns or parses free text; the driver runs turns, parses any
+// routing tail, and validates a pick against room.participants.
+export interface StrategyInput {
+  room: Room;
+  transcript: readonly TurnEntry[];
+  // Mirrors room.round (the authoritative cursor), surfaced so a strategy reads
+  // it without reaching into room.
+  round: number;
+}
+
+export type Strategy = (input: StrategyInput) => StrategyStep;

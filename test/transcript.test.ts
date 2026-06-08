@@ -25,6 +25,29 @@ describe("renderTranscript", () => {
   test("empty transcript renders empty string", () => {
     expect(renderTranscript([])).toBe("");
   });
+
+  test("strips a trailing control directive from rendered history", () => {
+    const rendered = renderTranscript([
+      entry({
+        from: "amy",
+        parts: [{ text: 'Bob, your turn.\n{"action":"nominate","slug":"bob"}' }],
+      }),
+    ]);
+    expect(rendered).toBe("amy: Bob, your turn.");
+    expect(rendered).not.toContain("{");
+  });
+
+  test("does not mutate the raw entry text when rendering", () => {
+    const raw = 'done\n{"action":"close"}';
+    const e = entry({ from: "mod", parts: [{ text: raw }] });
+    renderTranscript([e]);
+    expect(e.parts[0]?.text).toBe(raw);
+  });
+
+  test("leaves an inline JSON example in prose intact", () => {
+    const text = 'emit {"action":"nominate","slug":"x"} to hand off, but I will continue';
+    expect(renderTranscript([entry({ from: "a", parts: [{ text }] })])).toBe(`a: ${text}`);
+  });
 });
 
 describe("buildTurnEntry", () => {
