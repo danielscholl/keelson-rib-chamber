@@ -128,6 +128,19 @@ beforeAll(async () => {
     },
     "Bob's soul.",
   );
+  // A moderator Mind for group-chat — a roster member that is never a participant.
+  await scaffoldMind(
+    mindsDir(),
+    {
+      slug: "mod",
+      name: "Mod",
+      role: "moderator",
+      voice: "neutral",
+      persona: "You are Mod.",
+      createdAt: at,
+    },
+    "Mod's soul.",
+  );
 });
 afterAll(async () => {
   if (prevWorkspace === undefined) delete process.env.KEELSON_WORKSPACE;
@@ -268,6 +281,48 @@ describe("room adapter — live room", () => {
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.error).toContain("requires payload { slug }");
     }
+  });
+
+  it("auto-advances a group-chat room: the moderator routes and it reaches done", async () => {
+    const store = createFileRoomStore(roomsDir());
+    // The shared scripts carry no routing JSON, so the moderator's reply parses to
+    // no decision and the driver routes by nextUnheard — enough to prove the
+    // moderate flow is wired end-to-end (moderator turn, then a participant turn).
+    const res = await onAction(
+      startPayload({ strategy: "group-chat", moderator: "mod", turnBudget: 2 }),
+      makeCtx({ sm: snap.sm }),
+    );
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    const transcript = await store.loadTranscript(slug);
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.from).toBe("mod"); // the moderator turn ran first
+    expect(["alice", "bob"]).toContain(transcript[1]?.from ?? ""); // routed to a participant
+  });
+
+  it("rejects a group-chat start without a moderator", async () => {
+    const res = await onAction(startPayload({ strategy: "group-chat" }), makeCtx({ sm: snap.sm }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("moderator");
+  });
+
+  it("rejects a group-chat moderator that is also a participant", async () => {
+    const res = await onAction(
+      startPayload({ strategy: "group-chat", moderator: "alice" }),
+      makeCtx({ sm: snap.sm }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("must not also be a participant");
+  });
+
+  it("rejects a group-chat moderator that is not a known Mind", async () => {
+    const res = await onAction(
+      startPayload({ strategy: "group-chat", moderator: "ghost" }),
+      makeCtx({ sm: snap.sm }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("unknown moderator");
   });
 
   // Must run last: dispose() flips module-global state so the loop stops driving.

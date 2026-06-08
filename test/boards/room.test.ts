@@ -86,15 +86,47 @@ describe("buildRoomBoard", () => {
     ]);
   });
 
-  test("a closed room offers a single Start-again carrying the same config", () => {
+  test("a closed room offers Start-again + Start group-chat, both carrying the config", () => {
     for (const status of ["stopped", "done"] as const) {
       const board = buildRoomBoard(room({ status, participants: ["a", "b"], turnBudget: 6 }), []);
+      expect(canvasViewSchema.safeParse(board).success).toBe(true);
       const actions = board.sections.find((s) => s.kind === "actions");
       if (actions?.kind !== "actions") throw new Error("no actions section");
-      expect(actions.items.map((i) => i.type)).toEqual(["room-start"]);
-      // No slug: the server assigns a fresh one per start.
+      expect(actions.items.map((i) => i.type)).toEqual(["room-start", "room-start"]);
+      // Start again — no slug (the server assigns a fresh one per start).
+      expect(actions.items[0]?.label).toBe("Start again");
       expect(actions.items[0]?.payload).toMatchObject({ turnBudget: 6, participants: ["a", "b"] });
     }
+  });
+
+  test("a finished group-chat's Start-again round-trips the moderator config", () => {
+    const board = buildRoomBoard(
+      room({ status: "done", strategy: "group-chat", config: { moderator: "mod", minRounds: 2 } }),
+      [],
+    );
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    expect(actions.items[0]?.payload).toMatchObject({
+      strategy: "group-chat",
+      moderator: "mod",
+      minRounds: 2,
+    });
+  });
+
+  test("the Start group-chat action collects a moderator via a field form", () => {
+    const board = buildRoomBoard(room({ status: "done", participants: ["a", "b"] }), []);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    const gc = actions.items.find((i) => i.label === "Start group-chat");
+    expect(gc?.payload).toMatchObject({ strategy: "group-chat", participants: ["a", "b"] });
+    expect(gc?.fields).toEqual([
+      {
+        name: "moderator",
+        label: "Moderator (a Mind not in the room)",
+        placeholder: "mind-slug",
+        required: true,
+      },
+    ]);
   });
 
   test("a room with a topic shows it as a leading Topic section", () => {

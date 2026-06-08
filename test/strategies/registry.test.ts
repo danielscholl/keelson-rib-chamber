@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getStrategy, sequential } from "../../src/strategies/index.ts";
+import { getStrategy, groupChat, sequential } from "../../src/strategies/index.ts";
 
 describe("strategy registry", () => {
   test("resolves sequential", () => {
@@ -10,8 +10,11 @@ describe("strategy registry", () => {
     expect(getStrategy("concurrent")).toBe(sequential);
   });
 
-  test("group-chat and open-floor are not implemented yet", () => {
-    expect(() => getStrategy("group-chat")).toThrow();
+  test("resolves group-chat", () => {
+    expect(getStrategy("group-chat")).toBe(groupChat);
+  });
+
+  test("open-floor is not implemented yet", () => {
     expect(() => getStrategy("open-floor")).toThrow();
   });
 });

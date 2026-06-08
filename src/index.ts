@@ -16,7 +16,7 @@ import type { RoomPublisher, RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { createFileRoomStore } from "./room-store.ts";
 import { renderTranscript } from "./transcript.ts";
-import type { Mind, RoomStrategyName } from "./types.ts";
+import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
@@ -416,10 +416,21 @@ function ensureLoop(slug: string): void {
 // would otherwise collapse to a one-Mind room — and that each names a real Mind,
 // since the chat tool takes free-form slugs (a typo would otherwise open a room
 // that dies on "unknown mind" mid-rotation after burning paid turns).
+interface StartConfigInput {
+  moderator?: string;
+  minRounds?: number;
+  synthesizer?: string;
+  maxSpeakerRepeats?: number;
+}
+
 async function validateStart(
   participants: readonly string[],
   turnBudget: number,
-): Promise<{ ok: true; participants: string[] } | { ok: false; error: string }> {
+  strategy: string,
+  config: StartConfigInput = {},
+): Promise<
+  { ok: true; participants: string[]; config?: RoomConfig } | { ok: false; error: string }
+> {
   const deduped = [...new Set(participants)];
   if (deduped.length < 2 || !deduped.every(isValidParticipant)) {
     return {
@@ -438,6 +449,58 @@ async function validateStart(
       error: `unknown Mind(s): ${missing.join(", ")} — genesis them first or check the roster`,
     };
   }
+  // group-chat needs a moderator Mind that routes but never speaks: it must be a
+  // real Mind and NOT in the speaker pool (so isValidNominee rejects nominating it
+  // and the board never counts it as a speaker — see docs/design/phase3-rooms.md §1).
+  if (strategy === "group-chat") {
+    const moderator = config.moderator;
+    if (!moderator) {
+      return { ok: false, error: "group-chat needs a moderator Mind — set `moderator`" };
+    }
+    if (!isValidParticipant(moderator)) {
+      return { ok: false, error: "moderator must be a safe Mind slug (not director/system)" };
+    }
+    if (!known.has(moderator)) {
+      return {
+        ok: false,
+        error: `unknown moderator Mind: ${moderator} — genesis it first or check the roster`,
+      };
+    }
+    if (deduped.includes(moderator)) {
+      return {
+        ok: false,
+        error: "the moderator must not also be a participant — it routes, it does not speak",
+      };
+    }
+    if (config.synthesizer && !known.has(config.synthesizer)) {
+      return { ok: false, error: `unknown synthesizer Mind: ${config.synthesizer}` };
+    }
+    // Floor the routing knobs at the shared boundary so every entry point (chat
+    // tool, board action, a direct API payload) is protected — a 0 minRounds would
+    // open the close gate immediately, a 0 maxSpeakerRepeats would redirect every
+    // pick. The chat schema also floors minRounds, but the board/direct paths do not.
+    if (
+      config.minRounds !== undefined &&
+      (!Number.isInteger(config.minRounds) || config.minRounds < 1)
+    ) {
+      return { ok: false, error: "minRounds must be a positive integer" };
+    }
+    if (
+      config.maxSpeakerRepeats !== undefined &&
+      (!Number.isInteger(config.maxSpeakerRepeats) || config.maxSpeakerRepeats < 1)
+    ) {
+      return { ok: false, error: "maxSpeakerRepeats must be a positive integer" };
+    }
+    const roomConfig: RoomConfig = {
+      moderator,
+      ...(config.synthesizer ? { synthesizer: config.synthesizer } : {}),
+      ...(typeof config.minRounds === "number" ? { minRounds: config.minRounds } : {}),
+      ...(typeof config.maxSpeakerRepeats === "number"
+        ? { maxSpeakerRepeats: config.maxSpeakerRepeats }
+        : {}),
+    };
+    return { ok: true, participants: deduped, config: roomConfig };
+  }
   return { ok: true, participants: deduped };
 }
 
@@ -454,15 +517,24 @@ async function startRoom(input: {
   name?: string;
   strategy?: string;
   topic?: string;
+  moderator?: string;
+  minRounds?: number;
+  synthesizer?: string;
+  maxSpeakerRepeats?: number;
 }): Promise<RibActionResult> {
   // Refuse once disposed: driver.start() doesn't check, so without this a start
   // after dispose() would write an "active" room whose loop never runs (ensureLoop
   // bails on isDisposed) — a phantom room nothing ever clears.
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
-  const valid = await validateStart(input.participants, input.turnBudget);
+  const strategy = ((input.strategy ?? "").trim() || "sequential") as RoomStrategyName;
+  const valid = await validateStart(input.participants, input.turnBudget, strategy, {
+    moderator: input.moderator,
+    minRounds: input.minRounds,
+    synthesizer: input.synthesizer,
+    maxSpeakerRepeats: input.maxSpeakerRepeats,
+  });
   if (!valid.ok) return { ok: false, error: valid.error };
   const name = (input.name ?? "").trim() || "Room";
-  const strategy = ((input.strategy ?? "").trim() || "sequential") as RoomStrategyName;
   // Normalize here so both entry points (the chat tool and the board action)
   // store a trimmed topic or none — a whitespace-only topic becomes no topic.
   const topic = (input.topic ?? "").trim();
@@ -478,6 +550,7 @@ async function startRoom(input: {
       participants: valid.participants,
       turnBudget: input.turnBudget,
       ...(topic ? { topic } : {}),
+      ...(valid.config ? { config: valid.config } : {}),
     });
     activeSlug = slug;
     lastSlug = slug;
@@ -528,12 +601,19 @@ async function stopRoom(slug: string): Promise<RibActionResult> {
 
 function roomStartAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
+  // group-chat config arrives as flat payload keys — a board action's collected
+  // `fields` (base #120) merge in flat, so `moderator` is a plain key, not nested.
   return startRoom({
     participants: asStringArray(payload.participants),
     turnBudget: typeof payload.turnBudget === "number" ? payload.turnBudget : 0,
     name: asNonEmptyString(payload.name) || undefined,
     strategy: asNonEmptyString(payload.strategy) || undefined,
     topic: asNonEmptyString(payload.topic) || undefined,
+    moderator: asNonEmptyString(payload.moderator) || undefined,
+    synthesizer: asNonEmptyString(payload.synthesizer) || undefined,
+    minRounds: typeof payload.minRounds === "number" ? payload.minRounds : undefined,
+    maxSpeakerRepeats:
+      typeof payload.maxSpeakerRepeats === "number" ? payload.maxSpeakerRepeats : undefined,
   });
 }
 
@@ -626,6 +706,14 @@ const roomStartSchema = z.object({
   turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).optional(),
   name: z.string().optional(),
   topic: z.string().optional(),
+  // group-chat routing. `strategy` defaults to sequential; `moderator` is required
+  // (and validated) only when strategy is "group-chat". synthesizer/minRounds tune
+  // the close. All optional so a plain two-Mind room needs none of them.
+  strategy: z.string().optional(),
+  moderator: z.string().optional(),
+  synthesizer: z.string().optional(),
+  minRounds: z.number().int().min(1).optional(),
+  maxSpeakerRepeats: z.number().int().min(1).optional(),
   confirm: z.boolean().optional(),
 });
 const roomSaySchema = z
@@ -729,7 +817,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Rejected if a room is already active — stop it first. NOT for creating a Mind (that is the New agent / genesis action).",
+        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Rejected if a room is already active — stop it first. NOT for creating a Mind (that is the New agent / genesis action).',
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,
@@ -743,9 +831,19 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const topic = (parsed.data.topic ?? "").trim() || undefined;
         const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
         const confirm = parsed.data.confirm ?? false;
-        // Validate up front (including roster membership) so the dry-run never
-        // advertises a start the confirm path would reject.
-        const valid = await validateStart(participants, turnBudget);
+        const strategy = (parsed.data.strategy ?? "").trim() || "sequential";
+        const moderator = (parsed.data.moderator ?? "").trim() || undefined;
+        const synthesizer = (parsed.data.synthesizer ?? "").trim() || undefined;
+        const minRounds = parsed.data.minRounds;
+        const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;
+        // Validate up front (including roster membership + group-chat moderator
+        // rules) so the dry-run never advertises a start the confirm path rejects.
+        const valid = await validateStart(participants, turnBudget, strategy, {
+          moderator,
+          synthesizer,
+          minRounds,
+          maxSpeakerRepeats,
+        });
         if (!valid.ok) {
           emitResult(ctx, `chamber_room_start: ${valid.error}`, true);
           return;
@@ -762,16 +860,27 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         }
         const who = valid.participants.join(", ");
         const topicNote = topic ? ` on "${topic}"` : " (no topic set)";
+        const modeNote = moderator ? ` (group-chat, moderated by ${moderator})` : "";
         if (!confirm) {
           emitResult(
             ctx,
-            `Would open a room with ${who}${topicNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
+            `Would open a room with ${who}${topicNote}${modeNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
           );
           return;
         }
         // A user abort during the awaits above must not still open a paid room.
         if (ctx.abortSignal.aborted) return;
-        const res = await startRoom({ participants, turnBudget, name, topic });
+        const res = await startRoom({
+          participants,
+          turnBudget,
+          name,
+          topic,
+          strategy,
+          moderator,
+          synthesizer,
+          minRounds,
+          maxSpeakerRepeats,
+        });
         if (res.ok) {
           const slug = (res.data as { slug?: string } | undefined)?.slug ?? "";
           emitResult(

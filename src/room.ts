@@ -1,7 +1,22 @@
 import { buildRoomBoard } from "./boards/room.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
+import {
+  allHeardInCycle,
+  DEFAULT_MAX_SPEAKER_REPEATS,
+  DEFAULT_MIN_ROUNDS,
+  leastSpoken,
+  type ModeratorDecision,
+  nextUnheard,
+  parseModeratorDecision,
+  speakerCounts,
+} from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
-import { buildTurnEntry, buildTurnPrompt } from "./transcript.ts";
+import {
+  buildModeratorPrompt,
+  buildSynthesisPrompt,
+  buildTurnEntry,
+  buildTurnPrompt,
+} from "./transcript.ts";
 import type {
   Mind,
   MindSlug,
@@ -333,45 +348,65 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         );
         return active ? "advanced" : "ended";
       }
-      // speak-parallel / moderate / synthesize — Phase 3 / deferred concurrent.
-      throw new Error(`step kind "${decision.kind}" is not supported in Phase 2`);
+      if (decision.kind === "moderate") {
+        const active = await runModerateTurn(
+          room,
+          decision.mind,
+          override.directionInjection,
+          controller,
+          gen,
+        );
+        return active ? "advanced" : "ended";
+      }
+      // speak-parallel / synthesize — deferred concurrent (Slice 4); synthesis is
+      // reached inline from a moderate close, never as a strategy-returned step.
+      throw new Error(`step kind "${decision.kind}" is not supported yet`);
     } finally {
       controllers.delete(slug);
       inFlight.delete(slug);
     }
   }
 
-  async function runSpeakTurn(
+  // Resolve a Mind by slug; on a roster miss fail the room closed (a system note
+  // + done) and return undefined so the caller bails. Shared by the speaker, the
+  // moderator, and the synthesizer so an unknown configured Mind never hangs the
+  // room. Note `room.turnIndex` stamps the system entry — a fail-closed step does
+  // not advance the counter.
+  async function resolveMindOrFailClosed(
     room: Room,
     mindSlug: MindSlug,
-    directionInjection: string | undefined,
-    controller: AbortController,
     gen: number,
-  ): Promise<boolean> {
+  ): Promise<Mind | undefined> {
     const minds = await deps.minds();
     const mind = minds.find((m) => m.slug === mindSlug);
-    if (!mind) {
-      // Speaker not in roster — fail closed: note it and end the room.
-      await appendEntry(
-        room.slug,
-        gen,
-        buildTurnEntry({
-          roomSlug: room.slug,
-          turnIndex: room.turnIndex,
-          from: "system",
-          role: "system",
-          text: `unknown mind "${mindSlug}"`,
-          messageId: newId(),
-          at: now().toISOString(),
-        }),
-      );
-      return await withLock(room.slug, () =>
-        commitTerminal(room.slug, gen, { ...room, status: "done" }),
-      );
-    }
+    if (mind) return mind;
+    await appendEntry(
+      room.slug,
+      gen,
+      buildTurnEntry({
+        roomSlug: room.slug,
+        turnIndex: room.turnIndex,
+        from: "system",
+        role: "system",
+        text: `unknown mind "${mindSlug}"`,
+        messageId: newId(),
+        at: now().toISOString(),
+      }),
+    );
+    await withLock(room.slug, () => commitTerminal(room.slug, gen, { ...room, status: "done" }));
+    return undefined;
+  }
 
-    const transcript = await loadCachedTranscript(room.slug);
-
+  // Run one agent turn and return its reply text + aborted flag, or "disposed" if
+  // the rib was torn down mid-turn (the caller drops a disposed turn without
+  // committing). The prompt is built by the caller — the speaker, moderator, and
+  // synthesizer differ only in their prompt — so this owns just the abort
+  // pre-check, the stream drain, and result extraction.
+  async function runOneTurn(
+    mind: Mind,
+    prompt: string,
+    controller: AbortController,
+  ): Promise<{ text: string; aborted: boolean } | "disposed"> {
     let text: string;
     let aborted: boolean;
     if (controller.signal.aborted) {
@@ -380,11 +415,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       text = "";
       aborted = true;
     } else {
-      const prompt = buildTurnPrompt({
-        ...(room.topic ? { topic: room.topic } : {}),
-        transcript,
-        ...(directionInjection ? { directionInjection } : {}),
-      });
       // The authored soul is the turn's identity; fall back to the roster tagline
       // when a Mind has no readable SOUL.md so the turn still runs in character.
       const system = (await deps.readSoul?.(mind.slug))?.trim() || mind.persona;
@@ -397,7 +427,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         ...(deps.turnCwd ? { cwd: deps.turnCwd } : {}),
         ...(mind.model ? { model: mind.model } : {}),
       });
-
       try {
         // Draining the stream could drive throttled partial publishes later; for
         // now the result is the source of truth.
@@ -414,11 +443,25 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           ? (result.error ?? result.text ?? `turn ${result.status}`)
           : result.text;
     }
-
     // Shutdown landed during the (uncancellable) turn — drop the late result so
     // nothing is appended or published after the rib is disposed.
-    if (disposed) return false;
+    if (disposed) return "disposed";
+    return { text, aborted };
+  }
 
+  // Append a finished agent turn and advance the room under the write lock: an
+  // aborted turn -> stopped, the budget reached -> done, else still active.
+  // Returns whether the room remains active (false when superseded/closed). The
+  // entry is stamped with `room.turnIndex` (the snapshot handed in) while the room
+  // advances from the re-loaded current, so a director inject racing the commit is
+  // preserved — the existing single-turn discipline, now shared by moderate steps.
+  async function commitTurn(
+    room: Room,
+    mind: Mind,
+    text: string,
+    aborted: boolean,
+    gen: number,
+  ): Promise<boolean> {
     await appendEntry(
       room.slug,
       gen,
@@ -433,15 +476,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         at: now().toISOString(),
       }),
     );
-
-    // Merge onto the latest stored room, not the pre-turn snapshot, so a director
-    // inject that arrived during the turn (fresh pending) is preserved. Under the
-    // room lock so the load-advance-save can't interleave with an inject commit.
-    // The commit helpers drop the write if a stop/restart has superseded the turn.
     return await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
-      // Advance from the re-loaded current, not the pre-turn snapshot, so the
-      // index stays consistent with the state this commit is merging onto.
       const advanced: Room = { ...current, turnIndex: current.turnIndex + 1 };
       if (aborted) {
         return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
@@ -451,6 +487,163 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       }
       return await commitActive(room.slug, gen, advanced);
     });
+  }
+
+  async function runSpeakTurn(
+    room: Room,
+    mindSlug: MindSlug,
+    directionInjection: string | undefined,
+    controller: AbortController,
+    gen: number,
+  ): Promise<boolean> {
+    const mind = await resolveMindOrFailClosed(room, mindSlug, gen);
+    if (!mind) return false;
+    const prompt = buildTurnPrompt({
+      ...(room.topic ? { topic: room.topic } : {}),
+      transcript: await loadCachedTranscript(room.slug),
+      ...(directionInjection ? { directionInjection } : {}),
+    });
+    const turn = await runOneTurn(mind, prompt, controller);
+    if (turn === "disposed") return false;
+    return await commitTurn(room, mind, turn.text, turn.aborted, gen);
+  }
+
+  // A group-chat moderate step: run the moderator, then route on its reply. Up to
+  // two turns under one step() (the serial gate + the shared controller/gen cover
+  // both). The moderator commits first (so the speaker is prompted from a
+  // transcript that already holds its direction); the budget gate is the commit's
+  // own terminal check — if the moderator's tick reaches turnBudget the commit
+  // returns inactive and no speaker/synthesis runs.
+  async function runModerateTurn(
+    room: Room,
+    moderatorSlug: MindSlug,
+    directionInjection: string | undefined,
+    controller: AbortController,
+    gen: number,
+  ): Promise<boolean> {
+    const moderator = await resolveMindOrFailClosed(room, moderatorSlug, gen);
+    if (!moderator) return false;
+    const modPrompt = buildModeratorPrompt({
+      ...(room.topic ? { topic: room.topic } : {}),
+      transcript: await loadCachedTranscript(room.slug),
+      participants: room.participants,
+      // A director steer is guidance for the routing decision, so it goes to the
+      // moderator (who decides who speaks), not directly to a speaker.
+      ...(directionInjection ? { directionInjection } : {}),
+    });
+    const modTurn = await runOneTurn(moderator, modPrompt, controller);
+    if (modTurn === "disposed") return false;
+    const modActive = await commitTurn(room, moderator, modTurn.text, modTurn.aborted, gen);
+    if (!modActive) return false; // aborted/stopped, budget -> done, or superseded
+
+    // Re-load so the speaker/synthesis turn advances from the moderator's commit,
+    // not the pre-moderator snapshot — its entry index must follow the moderator's.
+    const afterMod = await deps.store.loadRoom(room.slug);
+    if (afterMod?.status !== "active" || generationOf(room.slug) !== gen) return false;
+
+    const decision = parseModeratorDecision(modTurn.text);
+    const postMod = await loadCachedTranscript(room.slug);
+    const counts = speakerCounts(postMod);
+    const minRounds = afterMod.config?.minRounds ?? DEFAULT_MIN_ROUNDS;
+
+    if (decision?.action === "close" && allHeardInCycle(afterMod.participants, counts, minRounds)) {
+      return await runCloseSynthesis(afterMod, controller, gen);
+    }
+
+    const speaker = pickGroupChatSpeaker(decision, afterMod, counts);
+    if (!speaker) {
+      // No resolvable participant to route to — close cleanly rather than hang.
+      return await withLock(room.slug, () =>
+        commitTerminal(room.slug, gen, { ...afterMod, status: "done" }),
+      );
+    }
+    const speakerMind = await resolveMindOrFailClosed(afterMod, speaker, gen);
+    if (!speakerMind) return false;
+    const spkPrompt = buildTurnPrompt({
+      ...(afterMod.topic ? { topic: afterMod.topic } : {}),
+      transcript: postMod,
+      // The moderator's `direction` is guidance for the Mind it nominated, so
+      // surface it only when that nominee actually got the turn — a cap-redirect or
+      // fallback routes to someone else, for whom the steer was not written.
+      ...(decision?.direction && speaker === decision.nextSpeaker
+        ? { directionInjection: decision.direction }
+        : {}),
+    });
+    const spkTurn = await runOneTurn(speakerMind, spkPrompt, controller);
+    if (spkTurn === "disposed") return false;
+    return await commitTurn(afterMod, speakerMind, spkTurn.text, spkTurn.aborted, gen);
+  }
+
+  // The driver's speaker pick for a moderate step: the moderator's validated
+  // nominee under the anti-monopoly cap, else the least-spoken OTHER participant;
+  // an invalid/missing nominee falls back to nextUnheard. Never throws — routing
+  // always degrades to a deterministic pick.
+  function pickGroupChatSpeaker(
+    decision: ModeratorDecision | null,
+    room: Room,
+    counts: Map<MindSlug, number>,
+  ): MindSlug | undefined {
+    const cap = room.config?.maxSpeakerRepeats ?? DEFAULT_MAX_SPEAKER_REPEATS;
+    const nominee = decision?.nextSpeaker;
+    if (nominee && isValidNominee(nominee, room)) {
+      if ((counts.get(nominee) ?? 0) < cap) return nominee;
+      // Over the cap — redirect, excluding the nominee itself so the cap can't be
+      // re-satisfied by a tie (leastSpoken returns the first minimum, which would
+      // otherwise be the nominee again when everyone is level).
+      const others = room.participants.filter((p) => p !== nominee);
+      return leastSpoken(others, counts) ?? nominee;
+    }
+    return nextUnheard(room.participants, counts);
+  }
+
+  // The closing act of a group-chat: an optional synthesizer authors one summary
+  // turn, then the room ends (done). Synthesis always closes — even an errored
+  // turn — and a disposed turn drops cleanly. Only reached when the moderator's
+  // commit left budget, so the synthesis turn always fits.
+  async function runCloseSynthesis(
+    room: Room,
+    controller: AbortController,
+    gen: number,
+  ): Promise<boolean> {
+    const synthSlug = room.config?.synthesizer;
+    if (synthSlug) {
+      const minds = await deps.minds();
+      const synth = minds.find((m) => m.slug === synthSlug);
+      if (synth) {
+        const prompt = buildSynthesisPrompt({
+          ...(room.topic ? { topic: room.topic } : {}),
+          transcript: await loadCachedTranscript(room.slug),
+        });
+        const turn = await runOneTurn(synth, prompt, controller);
+        if (turn === "disposed") return false;
+        await appendEntry(
+          room.slug,
+          gen,
+          buildTurnEntry({
+            roomSlug: room.slug,
+            turnIndex: room.turnIndex,
+            from: synth.slug,
+            role: "agent",
+            text: turn.text,
+            aborted: turn.aborted,
+            messageId: newId(),
+            at: now().toISOString(),
+          }),
+        );
+        return await withLock(room.slug, async () => {
+          const current = (await deps.store.loadRoom(room.slug)) ?? room;
+          return await commitTerminal(room.slug, gen, {
+            ...current,
+            turnIndex: current.turnIndex + 1,
+            status: "done",
+          });
+        });
+      }
+    }
+    // No synthesizer configured/resolvable — just close.
+    return await withLock(room.slug, () =>
+      commitTerminal(room.slug, gen, { ...room, status: "done" }),
+    );
   }
 
   async function inject(slug: MindSlug, input: RoomInjectInput): Promise<boolean> {
