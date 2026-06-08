@@ -105,6 +105,18 @@ beforeAll(async () => {
     },
     "Bob's soul.",
   );
+  await scaffoldMind(
+    mindsDir(),
+    {
+      slug: "mod",
+      name: "Mod",
+      role: "moderator",
+      voice: "neutral",
+      persona: "You are Mod.",
+      createdAt: at,
+    },
+    "Mod's soul.",
+  );
   // An abort-aware turn holds the first turn in flight (it resolves only on abort),
   // so a started room stays active for the status/say assertions until stop.
   abort = abortableRunAgentTurn();
@@ -193,6 +205,57 @@ describe("chamber room-control chat tools", () => {
     );
     expect(t.errored()).toBe(true);
     expect(t.out()).toContain("unknown Mind");
+  });
+
+  it("a `moderator` with no explicit strategy is treated as group-chat", async () => {
+    // The dry-run labels it group-chat AND validateStart enforces group-chat rules:
+    // a valid (non-participant) moderator dry-runs as group-chat...
+    const ok = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], moderator: "mod" },
+      ok.ctx,
+    );
+    expect(ok.errored()).toBe(false);
+    expect(ok.out()).toContain("group-chat, moderated by mod");
+    // ...and a moderator that is also a participant is rejected (it would have been
+    // silently ignored if the request defaulted to sequential).
+    const bad = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], moderator: "alice" },
+      bad.ctx,
+    );
+    expect(bad.errored()).toBe(true);
+    expect(bad.out()).toContain("must not also be a participant");
+  });
+
+  it("rejects an unknown/unimplemented strategy in the dry-run (not just at start)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "open-floor" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("unknown strategy");
+  });
+
+  it("rejects a prototype-chain string as a strategy", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "constructor" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("unknown strategy");
+  });
+
+  it("rejects a reserved-authority synthesizer", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], moderator: "mod", synthesizer: "system" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("not director/system");
   });
 
   it("chamber_room_start with confirm opens a room the status tool then reports", async () => {

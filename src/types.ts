@@ -38,6 +38,9 @@ export interface RoomConfig {
   minRounds?: number;
   endVoteThreshold?: number;
   synthesizer?: MindSlug;
+  // Anti-monopoly cap: a moderator pick at/over this many prior turns is
+  // redirected to the least-spoken participant, so routing can't fixate.
+  maxSpeakerRepeats?: number;
 }
 
 // One-shot director overrides, consumed and cleared before the next turn.

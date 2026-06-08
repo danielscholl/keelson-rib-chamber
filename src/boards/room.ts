@@ -1,14 +1,14 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import { speakerCounts } from "../routing.ts";
 import type { Room, TurnEntry } from "../types.ts";
 
 // Pure: a room + its transcript -> a canvas `board` (a `rows` feed, one row per
 // turn, plus a participant `segments` header). Validated against canvasViewSchema
 // in tests.
 export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): CanvasBoardView {
-  const counts = new Map<string, number>();
-  for (const entry of transcript) {
-    if (entry.role === "agent") counts.set(entry.from, (counts.get(entry.from) ?? 0) + 1);
-  }
+  // Same fold the routing engine uses, so the board's per-speaker counts can never
+  // drift from the anti-monopoly cap / close gate.
+  const counts = speakerCounts(transcript);
   const segments = room.participants.map((slug) => ({ label: slug, n: counts.get(slug) ?? 0 }));
 
   const items = transcript.map((entry) => ({
@@ -61,9 +61,36 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             strategy: room.strategy,
             participants: room.participants,
             turnBudget: room.turnBudget,
-            // Carry the topic so restarting a finished room keeps its subject.
+            // Carry the topic so restarting a finished room keeps its subject, and
+            // the routing config (flat keys) so a finished group-chat restarts with
+            // the same moderator rather than failing start validation.
+            ...(room.topic ? { topic: room.topic } : {}),
+            ...configPayload(room),
+          },
+        },
+        {
+          // Re-open as a moderated group-chat: a `fields` form (base #120) collects
+          // the moderator slug, merged flat into the dispatched payload. The
+          // moderator must be a Mind NOT among participants — start validation
+          // rejects otherwise.
+          type: "room-start",
+          label: "Start group-chat",
+          glyph: "◇",
+          payload: {
+            name: room.name,
+            strategy: "group-chat",
+            participants: room.participants,
+            turnBudget: room.turnBudget,
             ...(room.topic ? { topic: room.topic } : {}),
           },
+          fields: [
+            {
+              name: "moderator",
+              label: "Moderator (a Mind not in the room)",
+              placeholder: "mind-slug",
+              required: true,
+            },
+          ],
         },
       ],
     };
@@ -87,6 +114,20 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
         payload: { slug: room.slug },
       },
     ],
+  };
+}
+
+// The room's routing config as flat payload keys, so "Start again" round-trips a
+// group-chat through start validation. Sequential rooms carry no config and emit
+// nothing.
+function configPayload(room: Room): Record<string, string | number> {
+  const c = room.config;
+  if (!c) return {};
+  return {
+    ...(c.moderator ? { moderator: c.moderator } : {}),
+    ...(c.synthesizer ? { synthesizer: c.synthesizer } : {}),
+    ...(typeof c.minRounds === "number" ? { minRounds: c.minRounds } : {}),
+    ...(typeof c.maxSpeakerRepeats === "number" ? { maxSpeakerRepeats: c.maxSpeakerRepeats } : {}),
   };
 }
 

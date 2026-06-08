@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getStrategy, sequential } from "../../src/strategies/index.ts";
+import { getStrategy, groupChat, sequential } from "../../src/strategies/index.ts";
 
 describe("strategy registry", () => {
   test("resolves sequential", () => {
@@ -10,8 +10,19 @@ describe("strategy registry", () => {
     expect(getStrategy("concurrent")).toBe(sequential);
   });
 
-  test("group-chat and open-floor are not implemented yet", () => {
-    expect(() => getStrategy("group-chat")).toThrow();
+  test("resolves group-chat", () => {
+    expect(getStrategy("group-chat")).toBe(groupChat);
+  });
+
+  test("open-floor is not implemented yet", () => {
     expect(() => getStrategy("open-floor")).toThrow();
+  });
+
+  test("does not resolve inherited Object members as strategies", () => {
+    // A bare index would return Object.prototype members for these names; the
+    // lookup must be own-property only so a crafted strategy string is rejected.
+    for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(() => getStrategy(name as Parameters<typeof getStrategy>[0])).toThrow();
+    }
   });
 });

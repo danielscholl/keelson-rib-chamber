@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createRoomDriver } from "../../src/room.ts";
-import type { Mind } from "../../src/types.ts";
+import type { Mind, RoomConfig } from "../../src/types.ts";
 import {
   abortableRunAgentTurn,
   fixedClock,
@@ -8,6 +8,7 @@ import {
   makeFakePublisher,
   makeFakeStore,
   scriptedRunAgentTurn,
+  scriptedThenAbortable,
   seqIds,
   type TurnScript,
 } from "../helpers/fakes.ts";
@@ -297,7 +298,8 @@ describe("room driver — concurrency & model", () => {
 describe("room driver — lifecycle edge cases", () => {
   test("start rejects an unimplemented strategy and activates nothing", async () => {
     const h = harness();
-    await expect(h.driver.start({ ...START, strategy: "group-chat" })).rejects.toThrow();
+    // open-floor is the still-unregistered Phase-3 strategy (group-chat now resolves).
+    await expect(h.driver.start({ ...START, strategy: "open-floor" })).rejects.toThrow();
     expect(await h.store.loadRoom("demo")).toBeUndefined();
     expect(h.pub.all()).toHaveLength(0);
   });
@@ -721,5 +723,365 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
     await h.driver.start({ ...START2, topic: "Topic" });
     await h.driver.step("demo");
     expect(firstRequest(h.turns).cwd).toBeUndefined();
+  });
+});
+
+// group-chat (Slice 2): a moderate step runs the moderator, then routes on its
+// reply — up to two turns per step(). The strategy is pure rhythm; all parsing /
+// routing / the close gate live in the driver and are exercised here through the
+// real getStrategy("group-chat").
+describe("room driver — group-chat moderate", () => {
+  const MINDS_GC: Mind[] = [
+    { slug: "a", name: "Ada", persona: "You are Ada." },
+    { slug: "b", name: "Bo", persona: "You are Bo." },
+    { slug: "m", name: "Mod", persona: "You are Mod." },
+    { slug: "s", name: "Synth", persona: "You are Synth." },
+  ];
+
+  function gcHarness(scripts: TurnScript[], minds: Mind[] = MINDS_GC) {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn(scripts);
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => minds,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    return { driver, store, pub, turns };
+  }
+
+  function startGc(
+    driver: ReturnType<typeof createRoomDriver>,
+    config: RoomConfig = { moderator: "m" },
+    turnBudget = 6,
+  ) {
+    return driver.start({
+      slug: "gc",
+      name: "GC",
+      strategy: "group-chat",
+      participants: ["a", "b"],
+      turnBudget,
+      config,
+    });
+  }
+
+  const direct = (slug: string, extra = "") =>
+    `${extra}{"action":"direct","next_speaker":"${slug}"}`;
+
+  async function waitFor(pred: () => boolean, ms = 2000): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (!pred()) {
+      if (Date.now() > deadline) throw new Error("waitFor timed out");
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
+  }
+
+  test("a moderate step runs the moderator then the routed speaker (turnIndex +2)", async () => {
+    const h = gcHarness([{ text: direct("a") }, { text: "Ada speaks." }]);
+    await startGc(h.driver);
+    expect(await h.driver.step("gc")).toBe("advanced");
+    const t = await h.store.loadTranscript("gc");
+    expect(t.map((e) => e.from)).toEqual(["m", "a"]);
+    expect(t.every((e) => e.role === "agent")).toBe(true);
+    expect((await h.store.loadRoom("gc"))?.turnIndex).toBe(2);
+    // The moderator turn uses its own persona/soul and is asked for routing JSON.
+    expect(h.turns.requests[0]?.system).toBe("You are Mod.");
+    expect(h.turns.requests[0]?.prompt).toContain('"action":"direct"');
+    expect(h.turns.requests[1]?.system).toBe("You are Ada.");
+  });
+
+  test("an over-cap nominee is redirected to leastSpoken (anti-monopoly)", async () => {
+    const h = gcHarness([
+      { text: direct("a") }, // step 1: route to a
+      { text: "a1" },
+      { text: direct("a") }, // step 2: a is at the cap -> redirect
+      { text: "b1" },
+    ]);
+    await startGc(h.driver, { moderator: "m", maxSpeakerRepeats: 1 });
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m", "a", "m", "b"]);
+  });
+
+  test("a fixated moderator (repeated nomination over the cap) rotates, not monopolizes", async () => {
+    // maxSpeakerRepeats 1 with the moderator always nominating 'a': the over-cap
+    // redirect must rotate via leastSpoken over ALL participants (a, b, a, b) — not
+    // pin 'a' (cap ignored) and not pin 'b' (excluding the nominee would).
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("a") },
+      { text: "b1" },
+      { text: direct("a") },
+      { text: "a2" },
+      { text: direct("a") },
+      { text: "b2" },
+    ]);
+    await startGc(h.driver, { moderator: "m", maxSpeakerRepeats: 1 }, 8);
+    for (let i = 0; i < 4; i++) await h.driver.step("gc");
+    const speakers = (await h.store.loadTranscript("gc"))
+      .filter((e) => e.from !== "m")
+      .map((e) => e.from);
+    expect(speakers).toEqual(["a", "b", "a", "b"]);
+  });
+
+  test("a director direction (no callOn) steers the moderator's routing turn", async () => {
+    const h = gcHarness([{ text: direct("a") }, { text: "a1" }]);
+    await startGc(h.driver);
+    await h.driver.inject("gc", { directionInjection: "wrap it up" });
+    await h.driver.step("gc");
+    // The steer reaches the moderator (who decides who speaks), not a bare speaker.
+    expect(h.turns.requests[0]?.system).toBe("You are Mod.");
+    expect(h.turns.requests[0]?.prompt).toContain("wrap it up");
+  });
+
+  test("the moderator's direction is NOT delivered to a redirected speaker", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" }, // a=1 (at cap 1)
+      { text: '{"action":"direct","next_speaker":"a","direction":"address the cost"}' },
+      { text: "b1" }, // a over cap -> redirected to b
+    ]);
+    await startGc(h.driver, { moderator: "m", maxSpeakerRepeats: 1 }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    const froms = (await h.store.loadTranscript("gc")).map((e) => e.from);
+    expect(froms).toEqual(["m", "a", "m", "b"]);
+    // b got the turn via redirect, so the direction written for 'a' must not leak to b.
+    expect(h.turns.requests[3]?.prompt).not.toContain("address the cost");
+  });
+
+  test("an invalid/unknown nominee falls back to the least-spoken participant", async () => {
+    const h = gcHarness([
+      { text: direct("a") }, // step 1: a speaks
+      { text: "a1" },
+      { text: direct("ghost") }, // step 2: unknown -> leastSpoken (b, unheard)
+      { text: "b1" },
+    ]);
+    await startGc(h.driver);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    const froms = (await h.store.loadTranscript("gc")).map((e) => e.from);
+    expect(froms).toEqual(["m", "a", "m", "b"]);
+    expect(froms).not.toContain("ghost");
+  });
+
+  test("a persistently malformed moderator rotates speakers (no monopoly)", async () => {
+    // No routing JSON in any moderator turn -> the fallback must distribute via
+    // leastSpoken, not pin participants[0]. Expect a, b, a, b — not a, b, a, a.
+    const h = gcHarness([
+      { text: "musing 1" },
+      { text: "a1" },
+      { text: "musing 2" },
+      { text: "b1" },
+      { text: "musing 3" },
+      { text: "a2" },
+      { text: "musing 4" },
+      { text: "b2" },
+    ]);
+    await startGc(h.driver, { moderator: "m" }, 8);
+    for (let i = 0; i < 4; i++) await h.driver.step("gc");
+    const speakers = (await h.store.loadTranscript("gc"))
+      .filter((e) => e.from !== "m")
+      .map((e) => e.from);
+    expect(speakers).toEqual(["a", "b", "a", "b"]);
+  });
+
+  test("a malformed moderator reply still routes (deterministic nextUnheard)", async () => {
+    const h = gcHarness([{ text: "no json here, just musing" }, { text: "a1" }]);
+    await startGc(h.driver);
+    expect(await h.driver.step("gc")).toBe("advanced");
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m", "a"]);
+  });
+
+  test("a moderator tick that reaches turnBudget runs no speaker (room done)", async () => {
+    const h = gcHarness([{ text: direct("a") }, { text: "should-not-run" }]);
+    await startGc(h.driver, { moderator: "m" }, 1); // budget 1 -> the moderator tick hits it
+    expect(await h.driver.step("gc")).toBe("ended");
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m"]);
+    expect(h.turns.requests).toHaveLength(1); // no speaker turn was invoked
+  });
+
+  test("an unknown moderator fails the room closed", async () => {
+    const h = gcHarness([{ text: "x" }]);
+    await startGc(h.driver, { moderator: "ghost" });
+    expect(await h.driver.step("gc")).toBe("ended");
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    const t = await h.store.loadTranscript("gc");
+    expect(t[0]?.role).toBe("system");
+    expect(t[0]?.parts[0]?.text).toContain('unknown mind "ghost"');
+  });
+
+  test("a director cannot nominate the moderator as a speaker", async () => {
+    const h = gcHarness([{ text: direct("a") }, { text: "a1" }]);
+    await startGc(h.driver);
+    await h.driver.inject("gc", { nextSpeaker: "m" }); // m is not a participant -> ignored
+    await h.driver.step("gc");
+    // The moderate flow still ran (moderator -> participant), m never spoke as a speaker.
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m", "a"]);
+    expect((await h.store.loadRoom("gc"))?.turnIndex).toBe(2);
+  });
+
+  test("the close gate blocks an early close (routes until all heard)", async () => {
+    const h = gcHarness([{ text: '{"action":"close"}' }, { text: "a1" }]);
+    await startGc(h.driver); // nobody has spoken -> close not yet allowed
+    await h.driver.step("gc");
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m", "a"]);
+    expect((await h.store.loadRoom("gc"))?.status).toBe("active");
+  });
+
+  test("a gated close runs the synthesizer then ends the room", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' }, // both heard -> close allowed
+      { text: "Synthesis." },
+    ]);
+    await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    expect(await h.driver.step("gc")).toBe("ended");
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual([
+      "m",
+      "a",
+      "m",
+      "b",
+      "m",
+      "s",
+    ]);
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+  });
+
+  test("a synthesis turn that errors still closes the room", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+      { text: "", status: "error" }, // the synth turn errors
+    ]);
+    await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    const t = await h.store.loadTranscript("gc");
+    expect(t[t.length - 1]?.from).toBe("s");
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+  });
+
+  test("a gated close with no synthesizer ends the room without an extra turn", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+    ]);
+    await startGc(h.driver, { moderator: "m" }, 10); // no synthesizer
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    expect(await h.driver.step("gc")).toBe("ended");
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual([
+      "m",
+      "a",
+      "m",
+      "b",
+      "m",
+    ]);
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+  });
+
+  test("the moderator's routing tail is stripped from the speaker's prompt but kept on disk", async () => {
+    const h = gcHarness([
+      { text: 'Hand off to Ada.\n{"action":"direct","next_speaker":"a","direction":"go deeper"}' },
+      { text: "a1" },
+    ]);
+    await startGc(h.driver);
+    await h.driver.step("gc");
+    const speakerReq = h.turns.requests[1];
+    if (!speakerReq) throw new Error("expected a speaker turn request");
+    expect(speakerReq.prompt).not.toContain('"action":"direct"'); // routing JSON stripped
+    expect(speakerReq.prompt).toContain("Hand off to Ada."); // deliberation prose survives
+    expect(speakerReq.prompt).toContain("go deeper"); // the direction is injected for the speaker
+    const t = await h.store.loadTranscript("gc");
+    expect(t[0]?.parts[0]?.text).toContain('"action":"direct"'); // raw entry untouched on disk
+  });
+
+  test("a stop between the moderator and speaker turns finalizes cleanly", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn([{ text: direct("a") }, { text: "should-be-dropped" }]);
+    let calls = 0;
+    let releaseSecond: () => void = () => {};
+    const secondMinds = new Promise<Mind[]>((r) => {
+      releaseSecond = () => r(MINDS_GC);
+    });
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      // The moderator resolve (1st minds()) returns immediately; the speaker resolve
+      // (2nd) blocks, so we can stop precisely between the two turns.
+      minds: () => {
+        calls += 1;
+        return calls >= 2 ? secondMinds : MINDS_GC;
+      },
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start({
+      slug: "gc",
+      name: "GC",
+      strategy: "group-chat",
+      participants: ["a", "b"],
+      turnBudget: 6,
+      config: { moderator: "m" },
+    });
+    const stepP = driver.step("gc");
+    await waitFor(() => calls >= 2); // the moderator committed; the speaker resolve is parked
+    await driver.stop("gc"); // bumps the generation, aborts the shared controller
+    releaseSecond();
+    await stepP;
+    const room = await store.loadRoom("gc");
+    expect(room?.status).toBe("stopped");
+    expect(room?.turnIndex).toBe(1); // only the moderator's tick landed
+    // No phantom speaker entry: the aborted second turn never STARTED, so the
+    // stopped room's transcript holds only the moderator turn.
+    const t = await store.loadTranscript("gc");
+    expect(t).toHaveLength(1);
+    expect(t[0]?.from).toBe("m");
+  });
+
+  test("a stop after the routed speaker turn has STARTED records its aborted entry", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    // The moderator turn resolves (routing to a); the speaker turn stays in flight.
+    const turns = scriptedThenAbortable(direct("a"));
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS_GC,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await startGc(driver);
+    const stepP = driver.step("gc");
+    await turns.secondStarted; // moderator committed; the speaker turn is mid-flight
+    await driver.stop("gc"); // stop DURING the speaker turn (not before it started)
+    await stepP;
+    const t = await store.loadTranscript("gc");
+    // The speaker turn had started, so its aborted entry is recorded — matching the
+    // single-speaker path, not dropped as a phantom.
+    expect(t.map((e) => e.from)).toEqual(["m", "a"]);
+    expect(t[1]?.aborted).toBe(true);
+    expect((await store.loadRoom("gc"))?.status).toBe("stopped");
   });
 });

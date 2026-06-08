@@ -38,6 +38,54 @@ export function buildTurnPrompt(input: {
   return parts.join("\n\n");
 }
 
+// The moderator's prompt for a group-chat turn: the discussion so far plus an
+// instruction to route or close by ending the reply with a single trailing JSON
+// object. The control words are the SAME members of CONTROL_ACTIONS the parser
+// reads and the stripper removes, so prompt, parser, and stripper never drift.
+// Deliberation prose is encouraged and stays visible on the board; only the
+// trailing JSON is stripped from the next speaker's context. Always non-empty.
+export function buildModeratorPrompt(input: {
+  topic?: string;
+  transcript: readonly TurnEntry[];
+  participants: readonly MindSlug[];
+  directionInjection?: string;
+}): string {
+  const parts: string[] = [];
+  const topic = input.topic?.trim();
+  if (topic) parts.push(`Room topic: ${topic}`);
+  const context = renderTranscript(input.transcript);
+  parts.push(
+    context.length > 0
+      ? `Conversation so far:\n\n${context}`
+      : "The discussion has not started yet — open it by directing the first speaker.",
+  );
+  parts.push(`Participants you may direct: ${input.participants.join(", ")}.`);
+  if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
+  parts.push(
+    "You are the moderator. Briefly weigh the discussion, then END your reply with ONE JSON object on its own line:\n" +
+      '{"action":"direct","next_speaker":"<participant>","direction":"<what they should address>"} to hand off, ' +
+      'or {"action":"close"} to end the room. Pick next_speaker from the participants above.',
+  );
+  return parts.join("\n\n");
+}
+
+// The closing synthesis prompt: the discussion so far plus an instruction to sum
+// up. No routing JSON — synthesis is the room's last act. Always non-empty.
+export function buildSynthesisPrompt(input: {
+  topic?: string;
+  transcript: readonly TurnEntry[];
+}): string {
+  const parts: string[] = [];
+  const topic = input.topic?.trim();
+  if (topic) parts.push(`Room topic: ${topic}`);
+  const context = renderTranscript(input.transcript);
+  if (context.length > 0) parts.push(`Conversation so far:\n\n${context}`);
+  parts.push(
+    "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. Speak in your own voice. Do not emit any routing JSON.",
+  );
+  return parts.join("\n\n");
+}
+
 export interface BuildTurnEntryInput {
   roomSlug: MindSlug;
   turnIndex: number;
