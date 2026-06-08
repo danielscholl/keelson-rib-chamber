@@ -610,3 +610,116 @@ describe("room driver — driver-API soundness", () => {
     expect((await store.loadRoom("demo"))?.turnIndex).toBe(0);
   });
 });
+
+// These assert on the *request* handed to runAgentTurn — the surface the
+// canned-text fakes never checked, which is why an empty first-turn prompt, the
+// tagline-instead-of-soul system, and the missing cwd all shipped unseen.
+describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () => {
+  const MINDS2: Mind[] = [
+    { slug: "a", name: "Ada", persona: "Ada — the tagline." },
+    { slug: "b", name: "Bo", persona: "Bo — the tagline." },
+  ];
+
+  const START2 = {
+    slug: "demo",
+    name: "Demo",
+    strategy: "sequential" as const,
+    participants: ["a", "b"],
+    turnBudget: 4,
+  };
+
+  function harness(
+    opts: {
+      scripts?: TurnScript[];
+      readSoul?: (slug: string) => Promise<string | undefined> | string | undefined;
+      turnCwd?: string;
+    } = {},
+  ) {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn(opts.scripts ?? [{ text: "reply" }]);
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS2,
+      ...(opts.readSoul ? { readSoul: opts.readSoul } : {}),
+      ...(opts.turnCwd ? { turnCwd: opts.turnCwd } : {}),
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    return { driver, turns, store };
+  }
+
+  function firstRequest(turns: ReturnType<typeof scriptedRunAgentTurn>) {
+    const req = turns.requests[0];
+    if (!req) throw new Error("expected a recorded turn request");
+    return req;
+  }
+
+  test("CR-1: the first turn's prompt is non-empty and carries the topic", async () => {
+    const h = harness();
+    await h.driver.start({ ...START2, topic: "What should we build next?" });
+    await h.driver.step("demo");
+    const req = firstRequest(h.turns);
+    expect(req.prompt.length).toBeGreaterThan(0);
+    expect(req.prompt).toContain("What should we build next?");
+  });
+
+  test("CR-1: the first turn's prompt is non-empty even with no topic", async () => {
+    const h = harness();
+    await h.driver.start(START2); // no topic
+    await h.driver.step("demo");
+    // The empty-prompt CLI error was the original bug; the builder always yields a
+    // non-empty instruction even when topic and transcript are both empty.
+    expect(firstRequest(h.turns).prompt.trim().length).toBeGreaterThan(0);
+  });
+
+  test("CR-1: a whitespace-only topic yields no topic line in the prompt", async () => {
+    const h = harness();
+    await h.driver.start({ ...START2, topic: "   " });
+    await h.driver.step("demo");
+    expect(firstRequest(h.turns).prompt).not.toContain("Room topic:");
+  });
+
+  test("CR-1: a later turn includes the prior transcript as context", async () => {
+    const h = harness({ scripts: [{ text: "first reply from Ada" }, { text: "Bo responds" }] });
+    await h.driver.start({ ...START2, topic: "Topic X" });
+    await h.driver.step("demo"); // Ada
+    await h.driver.step("demo"); // Bo
+    const second = h.turns.requests[1];
+    if (!second) throw new Error("expected a second turn request");
+    expect(second.prompt).toContain("Conversation so far");
+    expect(second.prompt).toContain("first reply from Ada");
+  });
+
+  test("CR-2: the turn system prompt is the full soul, not the tagline", async () => {
+    const h = harness({ readSoul: (slug) => `# ${slug}\n\nFull authored soul body for ${slug}.` });
+    await h.driver.start({ ...START2, topic: "Topic" });
+    await h.driver.step("demo");
+    const req = firstRequest(h.turns);
+    expect(req.system).toContain("Full authored soul body for a");
+    expect(req.system).not.toBe("Ada — the tagline.");
+  });
+
+  test("CR-2: falls back to the roster tagline when no soul is readable", async () => {
+    const h = harness({ readSoul: () => undefined }); // soul miss
+    await h.driver.start({ ...START2, topic: "Topic" });
+    await h.driver.step("demo");
+    expect(firstRequest(h.turns).system).toBe("Ada — the tagline.");
+  });
+
+  test("CR-3: room turns run in the configured neutral cwd", async () => {
+    const h = harness({ turnCwd: "/tmp/chamber-home" });
+    await h.driver.start({ ...START2, topic: "Topic" });
+    await h.driver.step("demo");
+    expect(firstRequest(h.turns).cwd).toBe("/tmp/chamber-home");
+  });
+
+  test("CR-3: no cwd is set when none is configured", async () => {
+    const h = harness();
+    await h.driver.start({ ...START2, topic: "Topic" });
+    await h.driver.step("demo");
+    expect(firstRequest(h.turns).cwd).toBeUndefined();
+  });
+});

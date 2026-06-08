@@ -95,4 +95,28 @@ describe("buildRoomBoard", () => {
       expect(actions.items[0]?.payload).toMatchObject({ turnBudget: 6, participants: ["a", "b"] });
     }
   });
+
+  test("a room with a topic shows it as a leading Topic section", () => {
+    const board = buildRoomBoard(room({ topic: "Ship strategies before lenses?" }), []);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const first = board.sections[0];
+    expect(first?.kind).toBe("rows");
+    if (first?.kind === "rows") {
+      expect(first.title).toBe("Topic");
+      expect(first.items[0]?.text).toBe("Ship strategies before lenses?");
+    }
+  });
+
+  test("no Topic section when the room has no topic", () => {
+    const board = buildRoomBoard(room(), []);
+    const titled = board.sections.find((s) => s.kind === "rows" && s.title === "Topic");
+    expect(titled).toBeUndefined();
+  });
+
+  test("Start-again carries the room's topic so a restart keeps its subject", () => {
+    const board = buildRoomBoard(room({ status: "done", topic: "Q3 roadmap" }), []);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    expect(actions.items[0]?.payload).toMatchObject({ topic: "Q3 roadmap" });
+  });
 });

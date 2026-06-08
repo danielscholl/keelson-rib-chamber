@@ -8,6 +8,32 @@ export function renderTranscript(transcript: readonly TurnEntry[]): string {
     .join("\n\n");
 }
 
+// The prompt fed to the next speaker: the room topic (if any), the conversation
+// so far, an optional director steer, and a standing instruction to reply in
+// character. Always non-empty — a first turn (empty transcript, no topic) still
+// yields the instruction, so the agent is never invoked with an empty prompt (a
+// CLI errors on that). Pure.
+export function buildTurnPrompt(input: {
+  topic?: string;
+  transcript: readonly TurnEntry[];
+  directionInjection?: string;
+}): string {
+  const parts: string[] = [];
+  const topic = input.topic?.trim();
+  if (topic) parts.push(`Room topic: ${topic}`);
+  const context = renderTranscript(input.transcript);
+  parts.push(
+    context.length > 0
+      ? `Conversation so far:\n\n${context}`
+      : "You are the first to speak — open the discussion.",
+  );
+  if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
+  parts.push(
+    "Respond with your next message in the conversation — in character, concise, no narration of others.",
+  );
+  return parts.join("\n\n");
+}
+
 export interface BuildTurnEntryInput {
   roomSlug: MindSlug;
   turnIndex: number;
