@@ -265,6 +265,10 @@ const rib: Rib = {
           {
             id: "genesis",
             prompt: GENESIS_WF_PROMPT,
+            // Fail closed: chamber_emit_genesis writes the Mind and fails closed
+            // on a slug collision; fail_on_tool_error makes that tool error fail
+            // the run instead of reporting SUCCEEDED with no Mind written (#18).
+            fail_on_tool_error: true,
             allowed_tools: ["chamber_emit_genesis"],
           },
         ],
