@@ -48,6 +48,24 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
       ],
     });
   }
+  // One destructive Retire button per Mind — the slug to remove is on the card, so
+  // it rides as the action payload (the room-control pattern), reaching onAction.
+  // Genesis (the inverse) is the chamber-genesis workflow instead: authoring a soul
+  // needs a freeform brief a payload-less button can't carry.
+  if (minds.length > 0) {
+    sections.push({
+      kind: "actions",
+      title: "Retire",
+      items: minds.map((mind) => ({
+        type: "retire",
+        label: `Retire ${mind.name}`,
+        glyph: "✕",
+        tone: "warn" as CanvasTone,
+        destructive: true,
+        payload: { slug: mind.slug },
+      })),
+    });
+  }
 
   return {
     view: "board",

@@ -10,6 +10,12 @@ const mind = (over: Partial<Mind> = {}): Mind => ({
   ...over,
 });
 
+// All action-button items across every actions section of a board (the roster
+// can emit both a Room section and a Retire section).
+function actionItems(board: ReturnType<typeof buildRosterBoard>) {
+  return board.sections.flatMap((s) => (s.kind === "actions" ? s.items : []));
+}
+
 describe("buildRosterBoard", () => {
   test("empty roster is a valid board", () => {
     const board = buildRosterBoard([]);
@@ -37,15 +43,34 @@ describe("buildRosterBoard", () => {
   test("bakes a Start-room action carrying all mind slugs once there are >= 2", () => {
     const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const actions = board.sections.find((s) => s.kind === "actions");
-    if (actions?.kind !== "actions") throw new Error("no actions section");
-    expect(actions.items[0]?.type).toBe("room-start");
+    const start = actionItems(board).find((i) => i.type === "room-start");
+    expect(start).toBeDefined();
     // No slug: the server assigns a fresh one per start.
-    expect(actions.items[0]?.payload).toMatchObject({ participants: ["a", "b"] });
+    expect(start?.payload).toMatchObject({ participants: ["a", "b"] });
   });
 
-  test("offers no start action with fewer than two minds (not a conversation)", () => {
+  test("offers no Start-room action with fewer than two minds (not a conversation)", () => {
+    const hasStart = (minds: Mind[]) =>
+      actionItems(buildRosterBoard(minds)).some((i) => i.type === "room-start");
+    expect(hasStart([])).toBe(false);
+    expect(hasStart([mind()])).toBe(false);
+  });
+
+  test("bakes a destructive Retire action per mind, carrying the slug", () => {
+    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const retire = actionItems(board).filter((i) => i.type === "retire");
+    expect(retire).toHaveLength(2);
+    expect(retire[0]).toMatchObject({ type: "retire", destructive: true, payload: { slug: "a" } });
+  });
+
+  test("offers Retire even for a single mind (its slug is on the card)", () => {
+    expect(
+      actionItems(buildRosterBoard([mind({ slug: "solo" })])).some((i) => i.type === "retire"),
+    ).toBe(true);
+  });
+
+  test("an empty roster has no action sections at all", () => {
     expect(buildRosterBoard([]).sections.some((s) => s.kind === "actions")).toBe(false);
-    expect(buildRosterBoard([mind()]).sections.some((s) => s.kind === "actions")).toBe(false);
   });
 });
