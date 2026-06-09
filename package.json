@@ -23,5 +23,13 @@
     "@biomejs/biome": "2.4.16",
     "@types/bun": "latest",
     "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@keelson/shared": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@keelson/shared": {
+      "optional": true
+    }
   }
 }
