@@ -41,7 +41,7 @@ the *generative* half.
 Into an installed Keelson (the managed home at `~/.keelson`):
 
 ```bash
-keelson rib add chamber     # resolves to github:danielscholl/keelson-rib-chamber
+keelson rib add https://github.com/danielscholl/keelson-rib-chamber
 keelson serve
 ```
 
