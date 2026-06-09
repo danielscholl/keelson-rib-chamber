@@ -69,6 +69,37 @@ export function buildModeratorPrompt(input: {
   return parts.join("\n\n");
 }
 
+// The prompt for an open-floor (unmoderated) speaker: the discussion so far plus
+// the nominate/pass/end vocabulary, so each speaker hands off or votes to close by
+// ending its reply with a single trailing JSON object. The control words are the
+// SAME members of CONTROL_ACTIONS the parser reads and the stripper removes, so
+// prompt, parser, and stripper never drift. Always non-empty.
+export function buildOpenFloorPrompt(input: {
+  topic?: string;
+  transcript: readonly TurnEntry[];
+  participants: readonly MindSlug[];
+  directionInjection?: string;
+}): string {
+  const parts: string[] = [];
+  const topic = input.topic?.trim();
+  if (topic) parts.push(`Room topic: ${topic}`);
+  const context = renderTranscript(input.transcript);
+  parts.push(
+    context.length > 0
+      ? `Conversation so far:\n\n${context}`
+      : "You are the first to speak — open the discussion.",
+  );
+  parts.push(`Participants you may nominate: ${input.participants.join(", ")}.`);
+  if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
+  parts.push(
+    "Speak in character, then END your reply with ONE JSON object on its own line:\n" +
+      '{"action":"nominate","slug":"<participant>","reason":"<why>"} to hand off, ' +
+      '{"action":"pass"} to defer, or {"action":"end"} to vote to close the room. ' +
+      "Pick slug from the participants above (not yourself).",
+  );
+  return parts.join("\n\n");
+}
+
 // The closing synthesis prompt: the discussion so far plus an instruction to sum
 // up. No routing JSON — synthesis is the room's last act. Always non-empty.
 export function buildSynthesisPrompt(input: {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createRoomDriver } from "../../src/room.ts";
-import type { Mind, RoomConfig } from "../../src/types.ts";
+import type { Mind, RoomConfig, RoomStrategyName } from "../../src/types.ts";
 import {
   abortableRunAgentTurn,
   fixedClock,
@@ -296,10 +296,15 @@ describe("room driver — concurrency & model", () => {
 });
 
 describe("room driver — lifecycle edge cases", () => {
-  test("start rejects an unimplemented strategy and activates nothing", async () => {
+  test("start rejects an unknown strategy and activates nothing", async () => {
     const h = harness();
-    // open-floor is the still-unregistered Phase-3 strategy (group-chat now resolves).
-    await expect(h.driver.start({ ...START, strategy: "open-floor" })).rejects.toThrow();
+    // All four RoomStrategyName values now resolve; an unregistered name still fails
+    // closed at start (getStrategy throws), leaking no active slot. The driver's
+    // fail-closed throw on an unimplemented STEP KIND (speak-parallel/synthesize,
+    // room.ts) gets real coverage once Slice 4 lands a strategy that emits them.
+    await expect(
+      h.driver.start({ ...START, strategy: "nonexistent" as RoomStrategyName }),
+    ).rejects.toThrow();
     expect(await h.store.loadRoom("demo")).toBeUndefined();
     expect(h.pub.all()).toHaveLength(0);
   });
@@ -1083,5 +1088,157 @@ describe("room driver — group-chat moderate", () => {
     expect(t.map((e) => e.from)).toEqual(["m", "a"]);
     expect(t[1]?.aborted).toBe(true);
     expect((await store.loadRoom("gc"))?.status).toBe("stopped");
+  });
+});
+
+// open-floor (Slice 3): an unmoderated room — each step runs ONE speaker turn,
+// and the driver routes the next from the prior turn's nomination tail. The
+// strategy is pure (tier-3 seed/leastSpoken); all parsing (the end-vote close, the
+// peer nomination) lives in the driver's decideOpenFloor, exercised here through
+// the real getStrategy("open-floor"). Precedence: director > nomination > seed.
+describe("room driver — open-floor", () => {
+  const MINDS_OF: Mind[] = [
+    { slug: "a", name: "Ada", persona: "You are Ada." },
+    { slug: "b", name: "Bo", persona: "You are Bo." },
+    { slug: "c", name: "Cy", persona: "You are Cy." },
+  ];
+
+  function ofHarness(scripts: TurnScript[], minds: Mind[] = MINDS_OF) {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn(scripts);
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => minds,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    return { driver, store, pub, turns };
+  }
+
+  function startOf(
+    driver: ReturnType<typeof createRoomDriver>,
+    config: RoomConfig = {},
+    participants: string[] = ["a", "b"],
+    turnBudget = 6,
+  ) {
+    return driver.start({
+      slug: "of",
+      name: "OF",
+      strategy: "open-floor",
+      participants,
+      turnBudget,
+      config,
+    });
+  }
+
+  const nominate = (slug: string, extra = "") => `${extra}{"action":"nominate","slug":"${slug}"}`;
+  const endVote = (extra = "") => `${extra}{"action":"end"}`;
+
+  test("the first turn is seeded to participants[0], then a valid nomination routes the next", async () => {
+    const h = ofHarness([{ text: nominate("b", "Over to Bo.\n") }, { text: "b1" }]);
+    await startOf(h.driver);
+    expect(await h.driver.step("of")).toBe("advanced"); // seed -> a, which nominates b
+    await h.driver.step("of"); // tier-2 nomination -> b
+    expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b"]);
+    expect(h.turns.requests[0]?.system).toBe("You are Ada.");
+    // The open-floor speaker is asked for the nominate/pass/end vocabulary.
+    expect(h.turns.requests[0]?.prompt).toContain('"action":"nominate"');
+  });
+
+  test("a self-nomination falls back to the least-spoken participant", async () => {
+    const h = ofHarness([{ text: nominate("a") }, { text: "b1" }]);
+    await startOf(h.driver);
+    await h.driver.step("of"); // a speaks, nominates itself
+    await h.driver.step("of"); // self rejected -> leastSpoken -> b
+    expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b"]);
+  });
+
+  test("a non-participant nomination falls back to least-spoken", async () => {
+    const h = ofHarness([{ text: nominate("ghost") }, { text: "b1" }]);
+    await startOf(h.driver);
+    await h.driver.step("of");
+    await h.driver.step("of");
+    const froms = (await h.store.loadTranscript("of")).map((e) => e.from);
+    expect(froms).toEqual(["a", "b"]);
+    expect(froms).not.toContain("ghost");
+  });
+
+  test("an over-cap nomination falls back to the least-spoken (unheard) participant", async () => {
+    const h = ofHarness([
+      { text: nominate("b") }, // a -> b
+      { text: nominate("a") }, // b -> a, but a is already at the cap (1)
+      { text: "c1" }, // over cap -> leastSpoken -> c (unheard)
+    ]);
+    await startOf(h.driver, { maxSpeakerRepeats: 1 }, ["a", "b", "c"]);
+    await h.driver.step("of");
+    await h.driver.step("of");
+    await h.driver.step("of");
+    expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b", "c"]);
+  });
+
+  test("a director 'call on' override beats a conflicting agent nomination (tier 1 > tier 2)", async () => {
+    const h = ofHarness([{ text: nominate("b") }, { text: "a2" }]);
+    await startOf(h.driver);
+    await h.driver.step("of"); // a speaks, nominates b
+    await h.driver.inject("of", { nextSpeaker: "a" }); // director overrides the nomination
+    await h.driver.step("of");
+    // a (the override) speaks again, NOT b (the nominee).
+    expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "a"]);
+  });
+
+  test("an end-vote closes the room once all have spoken and the threshold is passed", async () => {
+    const h = ofHarness([{ text: endVote() }, { text: endVote() }]);
+    await startOf(h.driver); // 2 Minds, default threshold 0.49
+    await h.driver.step("of"); // a votes end
+    await h.driver.step("of"); // b votes end -> both heard, ratio 1.0 > 0.49
+    expect(await h.driver.step("of")).toBe("ended");
+    expect((await h.store.loadRoom("of"))?.status).toBe("done");
+    expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b"]);
+  });
+
+  test("an end-vote at exactly the threshold does not close (strict >: 0.5 is not > 0.5)", async () => {
+    const h = ofHarness([
+      { text: nominate("b") }, // a -> b (a heard, not an end vote)
+      { text: endVote() }, // b votes end (b heard); current ratio 1/2 = 0.5
+      { text: nominate("b") }, // a speaks again rather than closing
+    ]);
+    await startOf(h.driver, { endVoteThreshold: 0.5 });
+    await h.driver.step("of");
+    await h.driver.step("of");
+    expect(await h.driver.step("of")).toBe("advanced"); // 0.5 not > 0.5 -> keep going
+    expect((await h.store.loadRoom("of"))?.status).toBe("active");
+  });
+
+  test("a nomination tail is stripped from the next speaker's prompt but kept on disk", async () => {
+    const h = ofHarness([
+      { text: 'Over to Bo.\n{"action":"nominate","slug":"b","reason":"data"}' },
+      { text: "b1" },
+    ]);
+    await startOf(h.driver);
+    await h.driver.step("of");
+    await h.driver.step("of");
+    const speakerReq = h.turns.requests[1];
+    if (!speakerReq) throw new Error("expected a speaker turn request");
+    expect(speakerReq.prompt).toContain("Over to Bo."); // deliberation prose survives
+    // The concrete tail values are gone from rendered history (the instruction's
+    // placeholder vocabulary, "slug":"<participant>", is unrelated).
+    expect(speakerReq.prompt).not.toContain('"slug":"b"');
+    const t = await h.store.loadTranscript("of");
+    expect(t[0]?.parts[0]?.text).toContain('"slug":"b"'); // raw entry untouched on disk
+  });
+
+  test("a participant with no roster Mind fails the room closed", async () => {
+    // 'ghost' leads the participant order, so the seed picks it; resolveMindOrFailClosed
+    // records a system note and ends the room rather than hanging.
+    const h = ofHarness([{ text: "unused" }]);
+    await startOf(h.driver, {}, ["ghost", "a"]);
+    expect(await h.driver.step("of")).toBe("ended");
+    expect((await h.store.loadRoom("of"))?.status).toBe("done");
+    const t = await h.store.loadTranscript("of");
+    expect(t[0]?.role).toBe("system");
+    expect(t[0]?.parts[0]?.text).toContain('unknown mind "ghost"');
   });
 });
