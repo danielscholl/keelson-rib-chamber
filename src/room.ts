@@ -2,16 +2,21 @@ import { buildRoomBoard } from "./boards/room.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
 import {
   allHeardInCycle,
+  DEFAULT_END_VOTE_THRESHOLD,
   DEFAULT_MAX_SPEAKER_REPEATS,
   DEFAULT_MIN_ROUNDS,
+  endVoteRatio,
   leastSpoken,
   type ModeratorDecision,
   parseModeratorDecision,
+  parseNomination,
   speakerCounts,
 } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
+import { openFloor } from "./strategies/open-floor.ts";
 import {
   buildModeratorPrompt,
+  buildOpenFloorPrompt,
   buildSynthesisPrompt,
   buildTurnEntry,
   buildTurnPrompt,
@@ -328,7 +333,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         decision = { kind: "speak", mind: override.nextSpeaker };
       } else {
         const transcript = await loadCachedTranscript(slug);
-        decision = getStrategy(room.strategy)({ room, transcript });
+        // open-floor's routing (end-vote close + peer nomination) is driver-side
+        // parsing, so it goes through decideOpenFloor rather than the pure strategy.
+        decision =
+          room.strategy === "open-floor"
+            ? decideOpenFloor(room, transcript)
+            : getStrategy(room.strategy)({ room, transcript });
       }
 
       // (3) execute. commitTerminal / runSpeakTurn report "is the room still
@@ -488,6 +498,30 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
   }
 
+  // The speaker prompt for a `speak` step. open-floor speakers get the
+  // nominate/pass/end vocabulary (they route the room themselves); every other
+  // strategy — sequential, concurrent, a group-chat-routed speaker, a director
+  // override — gets the plain turn prompt.
+  function composeSpeakPrompt(
+    room: Room,
+    transcript: readonly TurnEntry[],
+    directionInjection: string | undefined,
+  ): string {
+    if (room.strategy === "open-floor") {
+      return buildOpenFloorPrompt({
+        ...(room.topic ? { topic: room.topic } : {}),
+        transcript,
+        participants: room.participants,
+        ...(directionInjection ? { directionInjection } : {}),
+      });
+    }
+    return buildTurnPrompt({
+      ...(room.topic ? { topic: room.topic } : {}),
+      transcript,
+      ...(directionInjection ? { directionInjection } : {}),
+    });
+  }
+
   async function runSpeakTurn(
     room: Room,
     mindSlug: MindSlug,
@@ -497,11 +531,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   ): Promise<boolean> {
     const mind = await resolveMindOrFailClosed(room, mindSlug, gen);
     if (!mind) return false;
-    const prompt = buildTurnPrompt({
-      ...(room.topic ? { topic: room.topic } : {}),
-      transcript: await loadCachedTranscript(room.slug),
-      ...(directionInjection ? { directionInjection } : {}),
-    });
+    const prompt = composeSpeakPrompt(
+      room,
+      await loadCachedTranscript(room.slug),
+      directionInjection,
+    );
     const turn = await runOneTurn(mind, prompt, controller);
     if (turn === "disposed") return false;
     return await commitTurn(room, mind, turn.text, turn.aborted, gen);
@@ -601,6 +635,45 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // room). The nominee is re-picked only when it is itself the least-spoken, i.e.
     // balanced rotation, not a monopoly.
     return leastSpoken(room.participants, counts) ?? room.participants[0];
+  }
+
+  // The driver's routing for an open-floor (unmoderated) step, computed from the
+  // prior transcript before the turn runs. Honors the same purity split as
+  // group-chat — the strategy never parses; all text parsing (the end-vote, the
+  // peer nomination) lives here. Precedence below the director override (tier 1,
+  // handled in step()): end-vote close > a valid peer nomination (tier 2) > the
+  // pure strategy's seed/leastSpoken fallback (tier 3). Never throws.
+  function decideOpenFloor(room: Room, transcript: readonly TurnEntry[]): StrategyStep {
+    const counts = speakerCounts(transcript);
+    const minRounds = room.config?.minRounds ?? DEFAULT_MIN_ROUNDS;
+    const threshold = room.config?.endVoteThreshold ?? DEFAULT_END_VOTE_THRESHOLD;
+    // Close gate: every participant has spoken its floor AND more than the
+    // threshold fraction currently votes to end (STRICT `>`). Checked before
+    // routing so a quorum-end wins even over a pending nomination.
+    if (
+      allHeardInCycle(room.participants, counts, minRounds) &&
+      endVoteRatio(transcript, room.participants) > threshold
+    ) {
+      return { kind: "end" };
+    }
+    // Tier 2: the last speaker's nomination, if it names a valid OTHER participant
+    // under the anti-monopoly cap. Self-nominations and over-cap picks fall through.
+    const lastAgent = [...transcript].reverse().find((e) => e.role === "agent");
+    if (lastAgent) {
+      const nom = parseNomination(lastAgent.parts.map((p) => p.text).join("\n"));
+      if (nom?.action === "nominate" && nom.slug) {
+        const cap = room.config?.maxSpeakerRepeats ?? DEFAULT_MAX_SPEAKER_REPEATS;
+        if (
+          isValidNominee(nom.slug, room) &&
+          nom.slug !== lastAgent.from &&
+          (counts.get(nom.slug) ?? 0) < cap
+        ) {
+          return { kind: "speak", mind: nom.slug };
+        }
+      }
+    }
+    // Tier 3: the pure strategy seeds the first speaker / rotates by leastSpoken.
+    return openFloor({ room, transcript });
   }
 
   // The closing act of a group-chat: an optional synthesizer authors one summary

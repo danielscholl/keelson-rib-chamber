@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   allHeardInCycle,
   CONTROL_ACTIONS,
+  endVoteRatio,
   extractTrailingJsonObject,
   leastSpoken,
   parseModeratorDecision,
+  parseNomination,
   speakerCounts,
   stripControlJson,
 } from "../src/routing.ts";
@@ -189,5 +191,98 @@ describe("speakerCounts / leastSpoken / nextUnheard / allHeardInCycle (global fo
     expect(allHeardInCycle(["a", "b"], counts, 2)).toBe(false); // b spoke once
     expect(allHeardInCycle(["a", "b", "c"], counts, 1)).toBe(false); // c unheard
     expect(allHeardInCycle([], counts, 1)).toBe(false);
+  });
+});
+
+describe("parseNomination (trailing object — same tail the stripper removes)", () => {
+  test("parses a trailing nominate after prose", () => {
+    expect(
+      parseNomination(
+        'Alice, take it from here.\n{"action":"nominate","slug":"alice","reason":"data"}',
+      ),
+    ).toEqual({ action: "nominate", slug: "alice", reason: "data" });
+  });
+
+  test("parses pass and end (no slug needed)", () => {
+    expect(parseNomination('I\'ll defer.\n{"action":"pass"}')).toEqual({ action: "pass" });
+    expect(parseNomination('We\'ve converged.\n{"action":"end"}')).toEqual({ action: "end" });
+  });
+
+  test("nominate WITHOUT a slug is meaningless -> null", () => {
+    expect(parseNomination('{"action":"nominate"}')).toBeNull();
+    expect(parseNomination('{"action":"nominate","slug":"   "}')).toBeNull();
+  });
+
+  test("only the open-floor vocabulary routes; everything else is null", () => {
+    expect(parseNomination('{"action":"direct","next_speaker":"a"}')).toBeNull(); // moderator action
+    expect(parseNomination('{"action":"vote","slug":"a"}')).toBeNull();
+    expect(parseNomination('{"slug":"a"}')).toBeNull();
+    expect(parseNomination("here is my plan {}")).toBeNull();
+  });
+
+  test("a recognized object that is NOT the trailing tail does not route (matches the stripper)", () => {
+    const followed = '{"action":"nominate","slug":"a"} — and here is why afterward';
+    expect(parseNomination(followed)).toBeNull();
+    expect(stripControlJson(followed)).toBe(followed); // stripper agrees: left intact
+  });
+
+  test("leaves an inline JSON example in prose alone (returns null)", () => {
+    expect(
+      parseNomination('Reply with {"action":"nominate","slug":"x"} to hand off, but I continue'),
+    ).toBeNull();
+  });
+
+  test("trims slug/reason and returns null for no object or malformed JSON", () => {
+    expect(parseNomination('{"action":"nominate","slug":" bob ","reason":" why "}')).toEqual({
+      action: "nominate",
+      slug: "bob",
+      reason: "why",
+    });
+    expect(parseNomination("just prose, no directive")).toBeNull();
+    expect(parseNomination('trailing {"action":"nominate"')).toBeNull();
+  });
+
+  test("the parsed nominate tail is exactly what stripControlJson removes (no leak)", () => {
+    const text = 'Over to Bob.\n{"action":"nominate","slug":"bob"}';
+    expect(parseNomination(text)?.slug).toBe("bob");
+    expect(stripControlJson(text)).toBe("Over to Bob.");
+  });
+});
+
+describe("endVoteRatio (current standing, not an accumulating tally)", () => {
+  const endTail = '{"action":"end"}';
+  const nomTail = (slug: string) => `{"action":"nominate","slug":"${slug}"}`;
+
+  test("counts distinct participants whose latest turn votes end, over participant count", () => {
+    const transcript: TurnEntry[] = [
+      agentEntry("a", { parts: [{ text: `done\n${endTail}` }] }),
+      agentEntry("b", { parts: [{ text: `done\n${endTail}` }] }),
+    ];
+    expect(endVoteRatio(transcript, ["a", "b"])).toBe(1);
+  });
+
+  test("a single end vote in a 2-Mind room is ratio 0.5 (caller applies strict >)", () => {
+    const transcript: TurnEntry[] = [
+      agentEntry("a", { parts: [{ text: `done\n${endTail}` }] }),
+      agentEntry("b", { parts: [{ text: `more to say\n${nomTail("a")}` }] }),
+    ];
+    expect(endVoteRatio(transcript, ["a", "b"])).toBe(0.5);
+  });
+
+  test("vote-then-speak-again withdraws the vote (latest entry wins)", () => {
+    const transcript: TurnEntry[] = [
+      agentEntry("a", { parts: [{ text: `done\n${endTail}` }] }),
+      agentEntry("a", { parts: [{ text: "actually one more thing" }] }),
+    ];
+    expect(endVoteRatio(transcript, ["a", "b"])).toBe(0);
+  });
+
+  test("ignores a non-participant author and an empty participant pool", () => {
+    const transcript: TurnEntry[] = [
+      agentEntry("ghost", { parts: [{ text: `done\n${endTail}` }] }),
+      agentEntry("a", { parts: [{ text: `done\n${endTail}` }] }),
+    ];
+    expect(endVoteRatio(transcript, ["a", "b"])).toBe(0.5); // ghost not counted
+    expect(endVoteRatio(transcript, [])).toBe(0);
   });
 });

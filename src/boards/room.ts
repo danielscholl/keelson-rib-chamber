@@ -1,4 +1,5 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import { flatFromRoomConfig } from "../room-config.ts";
 import { speakerCounts } from "../routing.ts";
 import type { Room, TurnEntry } from "../types.ts";
 
@@ -62,10 +63,10 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             participants: room.participants,
             turnBudget: room.turnBudget,
             // Carry the topic so restarting a finished room keeps its subject, and
-            // the routing config (flat keys) so a finished group-chat restarts with
-            // the same moderator rather than failing start validation.
+            // the routing config (flat keys) so a finished group-chat/open-floor
+            // restarts with the same config rather than failing start validation.
             ...(room.topic ? { topic: room.topic } : {}),
-            ...configPayload(room),
+            ...flatFromRoomConfig(room.config),
           },
         },
         {
@@ -92,6 +93,20 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             },
           ],
         },
+        {
+          // Re-open as an unmoderated open-floor: speakers nominate the next and
+          // vote to close. No fields — the end-vote threshold has a default.
+          type: "room-start",
+          label: "Start open-floor",
+          glyph: "◎",
+          payload: {
+            name: room.name,
+            strategy: "open-floor",
+            participants: room.participants,
+            turnBudget: room.turnBudget,
+            ...(room.topic ? { topic: room.topic } : {}),
+          },
+        },
       ],
     };
   }
@@ -114,20 +129,6 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
         payload: { slug: room.slug },
       },
     ],
-  };
-}
-
-// The room's routing config as flat payload keys, so "Start again" round-trips a
-// group-chat through start validation. Sequential rooms carry no config and emit
-// nothing.
-function configPayload(room: Room): Record<string, string | number> {
-  const c = room.config;
-  if (!c) return {};
-  return {
-    ...(c.moderator ? { moderator: c.moderator } : {}),
-    ...(c.synthesizer ? { synthesizer: c.synthesizer } : {}),
-    ...(typeof c.minRounds === "number" ? { minRounds: c.minRounds } : {}),
-    ...(typeof c.maxSpeakerRepeats === "number" ? { maxSpeakerRepeats: c.maxSpeakerRepeats } : {}),
   };
 }
 

@@ -325,6 +325,31 @@ describe("room adapter — live room", () => {
     if (!res.ok) expect(res.error).toContain("unknown moderator");
   });
 
+  it("auto-advances an open-floor room: speakers rotate via leastSpoken to done", async () => {
+    const store = createFileRoomStore(roomsDir());
+    // The shared scripts carry no nomination JSON, so each reply parses to no
+    // nomination and the driver routes by leastSpoken — proving the open-floor flow
+    // is wired end-to-end (seed, then rotate) with no moderator.
+    const res = await onAction(
+      startPayload({ strategy: "open-floor", turnBudget: 2 }),
+      makeCtx({ sm: snap.sm }),
+    );
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    const transcript = await store.loadTranscript(slug);
+    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob"]);
+  });
+
+  it("rejects an open-floor start with a moderator", async () => {
+    const res = await onAction(
+      startPayload({ strategy: "open-floor", moderator: "mod" }),
+      makeCtx({ sm: snap.sm }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("no moderator");
+  });
+
   // Must run last: dispose() flips module-global state so the loop stops driving.
   it("refuses a room-start after dispose (no phantom active room)", async () => {
     await rib.dispose?.();

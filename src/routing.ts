@@ -12,6 +12,11 @@ export const CONTROL_ACTIONS = new Set<string>(["nominate", "pass", "end", "dire
 export const DEFAULT_MIN_ROUNDS = 1;
 export const DEFAULT_MAX_SPEAKER_REPEATS = 2;
 
+// open-floor end-vote default. The close gate is a STRICT `>` against this, so at
+// 0.49 a single end vote in a 2-Mind room (ratio 0.5) closes, but an operator who
+// sets 0.5 requires more than half (a 0.5 tie does not close).
+export const DEFAULT_END_VOTE_THRESHOLD = 0.49;
+
 // Last balanced top-level {...}, scanned string-aware so a brace inside a JSON
 // string never miscounts depth. A speaker may embed a JSON code example earlier
 // in prose, so the trailing object is the one carrying a control directive. An
@@ -69,20 +74,35 @@ export function extractTrailingJsonObject(text: string): string | null {
 // control action — an inline JSON code example mid-prose is left intact.
 // Render-only: the on-disk entry keeps the raw text.
 export function stripControlJson(text: string, actions: Set<string> = CONTROL_ACTIONS): string {
-  const json = extractTrailingJsonObject(text);
-  if (!json) return text;
-  const idx = text.lastIndexOf(json);
-  if (text.slice(idx + json.length).trim().length > 0) return text; // not a tail
-  try {
-    const parsed = JSON.parse(json) as Record<string, unknown>;
-    if (typeof parsed.action === "string" && actions.has(parsed.action)) {
-      return text.slice(0, idx).trimEnd();
-    }
-  } catch {
-    // not JSON — leave as-is
-  }
-  return text;
+  return parseTrailingControl(text, actions)?.head ?? text;
 }
+
+// The single trailing-control-directive contract, shared by the stripper and every
+// directive parser so they can never disagree on what counts as a directive: a
+// GENUINELY trailing balanced JSON object (nothing but whitespace after it) whose
+// `action` is one of `actions`. Returns the parsed object plus the prose before it
+// (`head`), or null. A recognized object mid-prose is NOT a directive — the
+// stripper leaves it, so the parsers built on this must not route on it either.
+function parseTrailingControl(
+  text: string,
+  actions: Set<string>,
+): { parsed: Record<string, unknown>; head: string } | null {
+  const json = extractTrailingJsonObject(text);
+  if (!json) return null;
+  const idx = text.lastIndexOf(json);
+  if (text.slice(idx + json.length).trim().length > 0) return null; // not a tail
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null; // not JSON
+  }
+  if (typeof parsed.action !== "string" || !actions.has(parsed.action)) return null;
+  return { parsed, head: text.slice(0, idx).trimEnd() };
+}
+
+const MODERATOR_ACTIONS = new Set<string>(["direct", "close"]);
+const NOMINATION_ACTIONS = new Set<string>(["nominate", "pass", "end"]);
 
 // A moderator's routing decision, parsed driver-side from its turn. The wire
 // form is a trailing JSON object — the SAME object stripControlJson removes from
@@ -99,22 +119,10 @@ export interface ModeratorDecision {
 }
 
 export function parseModeratorDecision(text: string): ModeratorDecision | null {
-  const json = extractTrailingJsonObject(text);
-  if (!json) return null;
-  // Only act on a GENUINELY trailing object (nothing but whitespace after it) —
-  // the same tail-position test stripControlJson applies. A recognized object
-  // mid-prose (an example, or JSON followed by more text) is not a directive: the
-  // stripper would leave it, so the parser must not route on it either.
-  const idx = text.lastIndexOf(json);
-  if (text.slice(idx + json.length).trim().length > 0) return null;
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(json) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  if (parsed.action !== "direct" && parsed.action !== "close") return null;
-  const action = parsed.action;
+  const match = parseTrailingControl(text, MODERATOR_ACTIONS);
+  if (!match) return null;
+  const { parsed } = match;
+  const action = parsed.action as "direct" | "close";
   // Tolerate both the snake_case wire key (what the prompt asks for) and camelCase.
   const next = parsed.next_speaker ?? parsed.nextSpeaker;
   const direction = parsed.direction;
@@ -176,4 +184,56 @@ export function allHeardInCycle(
 ): boolean {
   if (participants.length === 0) return false;
   return participants.every((p) => (counts.get(p) ?? 0) >= minRounds);
+}
+
+// An open-floor speaker's trailing directive, parsed driver-side from its turn.
+// Same wire/strip discipline as parseModeratorDecision: a GENUINELY trailing JSON
+// object whose action is in the open-floor vocabulary ("nominate"/"pass"/"end",
+// all members of CONTROL_ACTIONS so the stripper removes whatever the parser
+// routes). `nominate` without a slug is meaningless and collapses to null so the
+// driver falls back deterministically. Anything else (a code example, a non-tail
+// object, an off-vocabulary action) returns null.
+export interface Nomination {
+  action: "nominate" | "pass" | "end";
+  slug?: MindSlug;
+  reason?: string;
+}
+
+export function parseNomination(text: string): Nomination | null {
+  const match = parseTrailingControl(text, NOMINATION_ACTIONS);
+  if (!match) return null;
+  const { parsed } = match;
+  const action = parsed.action as "nominate" | "pass" | "end";
+  const slugTrimmed = typeof parsed.slug === "string" ? parsed.slug.trim() : "";
+  const reasonTrimmed = typeof parsed.reason === "string" ? parsed.reason.trim() : "";
+  // A nomination must name who is next; without a slug it carries no routing.
+  if (action === "nominate" && !slugTrimmed) return null;
+  return {
+    action,
+    ...(slugTrimmed ? { slug: slugTrimmed } : {}),
+    ...(reasonTrimmed ? { reason: reasonTrimmed } : {}),
+  };
+}
+
+// The fraction of participants whose CURRENT standing is an end vote: a
+// participant counts iff its most-recent agent turn parses to action "end". This
+// is current standing, not an accumulating tally — a participant who votes end and
+// then speaks again has withdrawn the vote — so no per-round reset is needed. The
+// caller compares with a STRICT `>` against the threshold.
+export function endVoteRatio(
+  transcript: readonly TurnEntry[],
+  participants: readonly MindSlug[],
+): number {
+  if (participants.length === 0) return 0;
+  let votes = 0;
+  for (const p of participants) {
+    let latest: TurnEntry | undefined;
+    for (const entry of transcript) {
+      if (entry.role === "agent" && entry.from === p) latest = entry;
+    }
+    if (!latest) continue;
+    const nom = parseNomination(latest.parts.map((part) => part.text).join("\n"));
+    if (nom?.action === "end") votes++;
+  }
+  return votes / participants.length;
 }

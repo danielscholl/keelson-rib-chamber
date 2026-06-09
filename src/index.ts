@@ -14,7 +14,9 @@ import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomPublisher, RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
+import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
 import { createFileRoomStore } from "./room-store.ts";
+import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
 import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
@@ -417,11 +419,27 @@ function ensureLoop(slug: string): void {
 // would otherwise collapse to a one-Mind room — and that each names a real Mind,
 // since the chat tool takes free-form slugs (a typo would otherwise open a room
 // that dies on "unknown mind" mid-rotation after burning paid turns).
-interface StartConfigInput {
-  moderator?: string;
-  minRounds?: number;
-  synthesizer?: string;
-  maxSpeakerRepeats?: number;
+type StartConfigInput = RoomConfigInput;
+
+// The positive-integer floor for the routing knobs both group-chat and open-floor
+// accept. Floored at the shared boundary so every entry point (chat tool, board
+// action, a direct API payload) is protected — a 0 minRounds would open the close
+// gate immediately, a 0 maxSpeakerRepeats would redirect every pick. Returns an
+// error message, or null when the knobs are valid/absent.
+function routingKnobError(config: StartConfigInput): string | null {
+  if (
+    config.minRounds !== undefined &&
+    (!Number.isInteger(config.minRounds) || config.minRounds < 1)
+  ) {
+    return "minRounds must be a positive integer";
+  }
+  if (
+    config.maxSpeakerRepeats !== undefined &&
+    (!Number.isInteger(config.maxSpeakerRepeats) || config.maxSpeakerRepeats < 1)
+  ) {
+    return "maxSpeakerRepeats must be a positive integer";
+  }
+  return null;
 }
 
 async function validateStart(
@@ -491,22 +509,8 @@ async function validateStart(
         return { ok: false, error: `unknown synthesizer Mind: ${config.synthesizer}` };
       }
     }
-    // Floor the routing knobs at the shared boundary so every entry point (chat
-    // tool, board action, a direct API payload) is protected — a 0 minRounds would
-    // open the close gate immediately, a 0 maxSpeakerRepeats would redirect every
-    // pick. The chat schema also floors minRounds, but the board/direct paths do not.
-    if (
-      config.minRounds !== undefined &&
-      (!Number.isInteger(config.minRounds) || config.minRounds < 1)
-    ) {
-      return { ok: false, error: "minRounds must be a positive integer" };
-    }
-    if (
-      config.maxSpeakerRepeats !== undefined &&
-      (!Number.isInteger(config.maxSpeakerRepeats) || config.maxSpeakerRepeats < 1)
-    ) {
-      return { ok: false, error: "maxSpeakerRepeats must be a positive integer" };
-    }
+    const knobError = routingKnobError(config);
+    if (knobError) return { ok: false, error: knobError };
     const roomConfig: RoomConfig = {
       moderator,
       ...(config.synthesizer ? { synthesizer: config.synthesizer } : {}),
@@ -514,6 +518,41 @@ async function validateStart(
       ...(typeof config.maxSpeakerRepeats === "number"
         ? { maxSpeakerRepeats: config.maxSpeakerRepeats }
         : {}),
+    };
+    return { ok: true, participants: deduped, config: roomConfig };
+  }
+  // open-floor is unmoderated: every speaker nominates the next and the room closes
+  // by an end-vote. Same routing-knob floors as group-chat, plus the end-vote
+  // threshold (a (0,1) fraction; the close gate is a strict `>` against it).
+  if (strategy === "open-floor") {
+    // open-floor has no routing Mind: speakers nominate each other and vote to
+    // close. Reject a moderator/synthesizer rather than silently dropping it, so an
+    // operator who reused a group-chat payload sees why the field had no effect.
+    if (config.moderator) {
+      return {
+        ok: false,
+        error: "open-floor has no moderator — every speaker nominates the next",
+      };
+    }
+    if (config.synthesizer) {
+      return { ok: false, error: "open-floor has no closing synthesizer — drop `synthesizer`" };
+    }
+    const knobError = routingKnobError(config);
+    if (knobError) return { ok: false, error: knobError };
+    if (
+      config.endVoteThreshold !== undefined &&
+      (!Number.isFinite(config.endVoteThreshold) ||
+        config.endVoteThreshold <= 0 ||
+        config.endVoteThreshold >= 1)
+    ) {
+      return { ok: false, error: "endVoteThreshold must be a number in (0,1)" };
+    }
+    const roomConfig: RoomConfig = {
+      ...(typeof config.minRounds === "number" ? { minRounds: config.minRounds } : {}),
+      ...(typeof config.maxSpeakerRepeats === "number"
+        ? { maxSpeakerRepeats: config.maxSpeakerRepeats }
+        : {}),
+      endVoteThreshold: config.endVoteThreshold ?? DEFAULT_END_VOTE_THRESHOLD,
     };
     return { ok: true, participants: deduped, config: roomConfig };
   }
@@ -527,17 +566,15 @@ async function validateStart(
 // MVP can't cancel an in-flight turn, so a turn still draining from a stopped
 // room must land in its own old dir, never a reused one. Past rooms remain under
 // rooms/ as history (a retention sweep is a follow-up).
-async function startRoom(input: {
-  participants: readonly string[];
-  turnBudget: number;
-  name?: string;
-  strategy?: string;
-  topic?: string;
-  moderator?: string;
-  minRounds?: number;
-  synthesizer?: string;
-  maxSpeakerRepeats?: number;
-}): Promise<RibActionResult> {
+async function startRoom(
+  input: {
+    participants: readonly string[];
+    turnBudget: number;
+    name?: string;
+    strategy?: string;
+    topic?: string;
+  } & RoomConfigInput,
+): Promise<RibActionResult> {
   // Refuse once disposed: driver.start() doesn't check, so without this a start
   // after dispose() would write an "active" room whose loop never runs (ensureLoop
   // bails on isDisposed) — a phantom room nothing ever clears.
@@ -548,6 +585,7 @@ async function startRoom(input: {
     minRounds: input.minRounds,
     synthesizer: input.synthesizer,
     maxSpeakerRepeats: input.maxSpeakerRepeats,
+    endVoteThreshold: input.endVoteThreshold,
   });
   if (!valid.ok) return { ok: false, error: valid.error };
   const name = (input.name ?? "").trim() || "Room";
@@ -617,19 +655,16 @@ async function stopRoom(slug: string): Promise<RibActionResult> {
 
 function roomStartAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
-  // group-chat config arrives as flat payload keys — a board action's collected
-  // `fields` (base #120) merge in flat, so `moderator` is a plain key, not nested.
+  // Routing config arrives as flat payload keys — a board action's collected
+  // `fields` (base #120) merge in flat, so `moderator`/`endVoteThreshold` etc. are
+  // plain keys, not nested. roomConfigFromFlat owns that flat-key contract.
   return startRoom({
     participants: asStringArray(payload.participants),
     turnBudget: typeof payload.turnBudget === "number" ? payload.turnBudget : 0,
     name: asNonEmptyString(payload.name) || undefined,
     strategy: asNonEmptyString(payload.strategy) || undefined,
     topic: asNonEmptyString(payload.topic) || undefined,
-    moderator: asNonEmptyString(payload.moderator) || undefined,
-    synthesizer: asNonEmptyString(payload.synthesizer) || undefined,
-    minRounds: typeof payload.minRounds === "number" ? payload.minRounds : undefined,
-    maxSpeakerRepeats:
-      typeof payload.maxSpeakerRepeats === "number" ? payload.maxSpeakerRepeats : undefined,
+    ...roomConfigFromFlat(payload),
   });
 }
 
@@ -722,14 +757,15 @@ const roomStartSchema = z.object({
   turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).optional(),
   name: z.string().optional(),
   topic: z.string().optional(),
-  // group-chat routing. `strategy` defaults to sequential; `moderator` is required
-  // (and validated) only when strategy is "group-chat". synthesizer/minRounds tune
-  // the close. All optional so a plain two-Mind room needs none of them.
+  // Routing config. `strategy` defaults to sequential; `moderator` is required
+  // (and validated) only for "group-chat"; `endVoteThreshold` tunes "open-floor"'s
+  // close. All optional so a plain two-Mind room needs none of them.
   strategy: z.string().optional(),
   moderator: z.string().optional(),
   synthesizer: z.string().optional(),
   minRounds: z.number().int().min(1).optional(),
   maxSpeakerRepeats: z.number().int().min(1).optional(),
+  endVoteThreshold: z.number().optional(),
   confirm: z.boolean().optional(),
 });
 const roomSaySchema = z
@@ -856,6 +892,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const synthesizer = (parsed.data.synthesizer ?? "").trim() || undefined;
         const minRounds = parsed.data.minRounds;
         const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;
+        const endVoteThreshold = parsed.data.endVoteThreshold;
         // Validate up front (including roster membership + group-chat moderator
         // rules) so the dry-run never advertises a start the confirm path rejects.
         const valid = await validateStart(participants, turnBudget, strategy, {
@@ -863,6 +900,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           synthesizer,
           minRounds,
           maxSpeakerRepeats,
+          endVoteThreshold,
         });
         if (!valid.ok) {
           emitResult(ctx, `chamber_room_start: ${valid.error}`, true);
@@ -901,6 +939,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           synthesizer,
           minRounds,
           maxSpeakerRepeats,
+          endVoteThreshold,
         });
         if (res.ok) {
           const slug = (res.data as { slug?: string } | undefined)?.slug ?? "";

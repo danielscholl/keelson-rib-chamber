@@ -86,15 +86,19 @@ describe("buildRoomBoard", () => {
     ]);
   });
 
-  test("a closed room offers Start-again + Start group-chat, both carrying the config", () => {
+  test("a closed room offers Start-again + Start group-chat + Start open-floor", () => {
     for (const status of ["stopped", "done"] as const) {
       const board = buildRoomBoard(room({ status, participants: ["a", "b"], turnBudget: 6 }), []);
       expect(canvasViewSchema.safeParse(board).success).toBe(true);
       const actions = board.sections.find((s) => s.kind === "actions");
       if (actions?.kind !== "actions") throw new Error("no actions section");
-      expect(actions.items.map((i) => i.type)).toEqual(["room-start", "room-start"]);
+      expect(actions.items.map((i) => i.type)).toEqual(["room-start", "room-start", "room-start"]);
+      expect(actions.items.map((i) => i.label)).toEqual([
+        "Start again",
+        "Start group-chat",
+        "Start open-floor",
+      ]);
       // Start again — no slug (the server assigns a fresh one per start).
-      expect(actions.items[0]?.label).toBe("Start again");
       expect(actions.items[0]?.payload).toMatchObject({ turnBudget: 6, participants: ["a", "b"] });
     }
   });
@@ -113,6 +117,19 @@ describe("buildRoomBoard", () => {
     });
   });
 
+  test("a finished open-floor's Start-again round-trips the end-vote threshold", () => {
+    const board = buildRoomBoard(
+      room({ status: "done", strategy: "open-floor", config: { endVoteThreshold: 0.6 } }),
+      [],
+    );
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    expect(actions.items[0]?.payload).toMatchObject({
+      strategy: "open-floor",
+      endVoteThreshold: 0.6,
+    });
+  });
+
   test("the Start group-chat action collects a moderator via a field form", () => {
     const board = buildRoomBoard(room({ status: "done", participants: ["a", "b"] }), []);
     const actions = board.sections.find((s) => s.kind === "actions");
@@ -127,6 +144,15 @@ describe("buildRoomBoard", () => {
         required: true,
       },
     ]);
+  });
+
+  test("the Start open-floor action carries the strategy with no required fields", () => {
+    const board = buildRoomBoard(room({ status: "done", participants: ["a", "b"] }), []);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    const of = actions.items.find((i) => i.label === "Start open-floor");
+    expect(of?.payload).toMatchObject({ strategy: "open-floor", participants: ["a", "b"] });
+    expect(of?.fields).toBeUndefined();
   });
 
   test("a room with a topic shows it as a leading Topic section", () => {

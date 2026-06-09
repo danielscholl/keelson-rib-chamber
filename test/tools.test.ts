@@ -228,14 +228,39 @@ describe("chamber room-control chat tools", () => {
     expect(bad.out()).toContain("must not also be a participant");
   });
 
-  it("rejects an unknown/unimplemented strategy in the dry-run (not just at start)", async () => {
-    const t = makeToolCtx();
+  it("dry-runs open-floor and validates its config (no moderator, in-range threshold)", async () => {
+    // A valid two-Mind open-floor request dry-runs cleanly — it needs no extra fields.
+    const ok = makeToolCtx();
     await tool("chamber_room_start").execute(
       { participants: ["alice", "bob"], strategy: "open-floor" },
-      t.ctx,
+      ok.ctx,
     );
-    expect(t.errored()).toBe(true);
-    expect(t.out()).toContain("unknown strategy");
+    expect(ok.errored()).toBe(false);
+    // An out-of-range end-vote threshold is rejected in the dry-run, not at start.
+    const badThreshold = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "open-floor", endVoteThreshold: 1.5 },
+      badThreshold.ctx,
+    );
+    expect(badThreshold.errored()).toBe(true);
+    expect(badThreshold.out()).toContain("in (0,1)");
+    // A moderator makes no sense for an unmoderated room.
+    const withMod = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "open-floor", moderator: "mod" },
+      withMod.ctx,
+    );
+    expect(withMod.errored()).toBe(true);
+    expect(withMod.out()).toContain("no moderator");
+    // A synthesizer is rejected too (not silently dropped) — open-floor has no close
+    // synthesis, so reusing a group-chat payload surfaces why the field had no effect.
+    const withSynth = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "open-floor", synthesizer: "mod" },
+      withSynth.ctx,
+    );
+    expect(withSynth.errored()).toBe(true);
+    expect(withSynth.out()).toContain("synthesizer");
   });
 
   it("rejects a prototype-chain string as a strategy", async () => {

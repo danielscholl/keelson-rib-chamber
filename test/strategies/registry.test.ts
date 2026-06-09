@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getStrategy, groupChat, sequential } from "../../src/strategies/index.ts";
+import { getStrategy, groupChat, openFloor, sequential } from "../../src/strategies/index.ts";
 
 describe("strategy registry", () => {
   test("resolves sequential", () => {
@@ -14,8 +14,8 @@ describe("strategy registry", () => {
     expect(getStrategy("group-chat")).toBe(groupChat);
   });
 
-  test("open-floor is not implemented yet", () => {
-    expect(() => getStrategy("open-floor")).toThrow();
+  test("resolves open-floor", () => {
+    expect(getStrategy("open-floor")).toBe(openFloor);
   });
 
   test("does not resolve inherited Object members as strategies", () => {

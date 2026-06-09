@@ -1,16 +1,18 @@
 import type { RoomStrategyName, Strategy } from "../types.ts";
 import { groupChat } from "./group-chat.ts";
+import { openFloor } from "./open-floor.ts";
 import { sequential } from "./sequential.ts";
 
 // concurrent aliases sequential in Phase 2: its parallel execution is deferred
 // behind the snapshot-coalescing pump (docs/design/A2A-communication.md), so it
 // runs serially for now rather than faking parallelism. group-chat is the
-// moderator-routed Phase 3 strategy; open-floor is still absent, so getStrategy
-// throws for it until it is registered.
+// moderator-routed Phase 3 strategy; open-floor is the unmoderated one (each
+// speaker nominates the next, the driver does the routing).
 export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
   sequential,
   concurrent: sequential,
   "group-chat": groupChat,
+  "open-floor": openFloor,
 };
 
 export function getStrategy(name: RoomStrategyName): Strategy {
@@ -22,4 +24,4 @@ export function getStrategy(name: RoomStrategyName): Strategy {
   return strategy;
 }
 
-export { groupChat, sequential };
+export { groupChat, openFloor, sequential };

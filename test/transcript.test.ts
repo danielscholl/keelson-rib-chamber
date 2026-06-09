@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildModeratorPrompt,
+  buildOpenFloorPrompt,
   buildSynthesisPrompt,
   buildTurnEntry,
   renderTranscript,
@@ -72,6 +73,27 @@ describe("buildModeratorPrompt", () => {
     });
     expect(p).toContain("Room topic: Ship strategies?");
     expect(p).toContain("a: I think yes");
+  });
+});
+
+describe("buildOpenFloorPrompt", () => {
+  test("non-empty with no topic/transcript; lists participants and the nominate vocabulary", () => {
+    const p = buildOpenFloorPrompt({ transcript: [], participants: ["a", "b"] });
+    expect(p.trim().length).toBeGreaterThan(0);
+    expect(p).toContain("a, b");
+    expect(p).toContain('"action":"nominate"');
+    expect(p).toContain('"action":"pass"');
+    expect(p).toContain('"action":"end"');
+  });
+
+  test("carries the topic and the stripped discussion so far", () => {
+    const p = buildOpenFloorPrompt({
+      topic: "Ship it?",
+      transcript: [entry({ from: "a", parts: [{ text: 'yes\n{"action":"end"}' }] })],
+      participants: ["a", "b"],
+    });
+    expect(p).toContain("Room topic: Ship it?");
+    expect(p).toContain("a: yes"); // the end-vote tail is stripped from rendered history
   });
 });
 
