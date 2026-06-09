@@ -36,6 +36,20 @@ Keelson already owns the *deterministic* half of chamber — `packages/workflows
 (the Archon DAG) and the canvas `board` view (the lens renderer). This rib adds
 the *generative* half.
 
+## Install into Keelson
+
+Into an installed Keelson (the managed home at `~/.keelson`):
+
+```bash
+keelson rib add chamber     # resolves to github:danielscholl/keelson-rib-chamber
+keelson serve
+```
+
+`@keelson/shared` is provided by the harness as a peer dependency (one copy
+shared across the harness and every rib). Chamber needs only a configured
+provider (Copilot/Claude, or `KEELSON_PROVIDERS=stub` to try the wiring) — no
+external CLIs.
+
 ## Develop against a local Keelson
 
 ```bash
