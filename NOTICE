@@ -6,7 +6,7 @@ Licensed under the Apache License, Version 2.0. See LICENSE for the full text.
 This rib re-expresses the Chamber multi-agent desktop app as a Keelson rib. It
 imports none of the upstream code: its genesis, room, and lens machinery is a
 clean-room port of the concepts below onto the `Rib` contract. Attribution to
-the upstream projects whose tooling and vision this rib builds on follows.
+the upstream project whose vision this rib builds on follows.
 
 ==============================================================================
 Concepts from: Chamber (minds, lenses, genesis, A2A rooms)
@@ -23,21 +23,7 @@ re-typed for Keelson and driven by the `Rib` contract; nothing is imported.
   License: MIT (https://opensource.org/licenses/MIT)
 
 ==============================================================================
-Concepts from: Archon (workflow schema + executor design)
-==============================================================================
-
-The rib's workflows ride Keelson's `packages/workflows` engine, whose YAML
-schema, DAG node taxonomy, and `$nodeId.output` substitution model borrow
-concepts from Archon by Cole Medin, used under the MIT License. The harness
-credits Archon for the engine; this rib carries the credit forward because its
-`chamber-brief` and genesis workflows are authored against that schema.
-
-  Project: Archon
-  Source:  https://github.com/coleam00/Archon
-  License: MIT (https://opensource.org/licenses/MIT)
-
-==============================================================================
-MIT License (applies to both Chamber and Archon, above)
+MIT License (Chamber, above)
 ==============================================================================
 
     MIT License

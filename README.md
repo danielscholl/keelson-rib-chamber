@@ -78,17 +78,11 @@ for the product scope and the phase plan.
 
 ## Acknowledgments
 
-This rib is a clean-room port: it imports no upstream code, but its concepts and
-its workflow engine come from two projects it credits.
-
-- **[Chamber](https://github.com/ianphil/chamber)** (MIT, by Ian Philpot): the
-  originating multi-agent desktop app. Its model — minds authored on demand
-  (genesis), agent-to-agent rooms, and agent-authored lenses — is re-typed here
-  and driven by the `Rib` contract.
-- **[Archon](https://github.com/coleam00/Archon)** (MIT, by Cole Medin): the
-  workflow schema and DAG executor design that Keelson's `packages/workflows`
-  borrows. This rib's `chamber-brief` and genesis workflows are authored against
-  that engine, so the credit travels with the package.
+This rib is a clean-room port of [Chamber](https://github.com/ianphil/chamber)
+(MIT, by Ian Philpot), the originating multi-agent desktop app. It imports no
+upstream code; Chamber's model — minds authored on demand (genesis),
+agent-to-agent rooms, and agent-authored lenses — is re-typed here and driven by
+the `Rib` contract.
 
 Full attribution lives in [NOTICE](NOTICE).
 
