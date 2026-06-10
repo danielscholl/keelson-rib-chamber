@@ -68,6 +68,31 @@ cd ../keelson && KEELSON_RIBS=chamber bun dev
 
 Then open `http://127.0.0.1:5173` → the **Chamber** tab (or **Ribs**).
 
+## Documentation
+
+The docs site lives under [`docs/`](docs/) — an Astro Starlight project that
+mirrors the keelson documentation tiers (concepts, guides, tutorials, reference,
+design). Build it locally with `cd docs && bun install && bun run build`, or read
+[`docs/PRD.md`](docs/PRD.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+for the product scope and the phase plan.
+
+## Acknowledgments
+
+This rib is a clean-room port: it imports no upstream code, but its concepts and
+its workflow engine come from two projects it credits.
+
+- **[Chamber](https://github.com/ianphil/chamber)** (MIT, by Ian Philpot): the
+  originating multi-agent desktop app. Its model — minds authored on demand
+  (genesis), agent-to-agent rooms, and agent-authored lenses — is re-typed here
+  and driven by the `Rib` contract.
+- **[Archon](https://github.com/coleam00/Archon)** (MIT, by Cole Medin): the
+  workflow schema and DAG executor design that Keelson's `packages/workflows`
+  borrows. This rib's `chamber-brief` and genesis workflows are authored against
+  that engine, so the credit travels with the package.
+
+Full attribution lives in [NOTICE](NOTICE).
+
 ## License
 
-Apache-2.0.
+Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for
+third-party attribution.
