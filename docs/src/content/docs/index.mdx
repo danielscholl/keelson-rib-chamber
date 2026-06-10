@@ -1,0 +1,53 @@
+---
+title: Keelson Rib · Chamber
+description: Chamber as a Keelson rib.
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+The `@keelson/rib-chamber` package is the generative half of
+[Chamber](https://github.com/ianphil/chamber) as a
+[Keelson](https://danielscholl.github.io/keelson/) **rib**: a discovery-based
+extension that brings a multi-agent operating layer to the harness. It contributes
+**genesis** (author a persistent agent on demand), **rooms** (orchestrate
+agent-to-agent turns), and **agent-authored lenses** (agents that render their own
+views through the canvas). The harness stays domain-free; all of the multi-agent
+machinery lives here, and the rib ships zero React into the trusted SPA.
+
+These docs mirror the keelson documentation tiers. Keelson documents the generic,
+reusable rib contract; this site documents the concrete Chamber rib that implements
+it. Where the OSDU rib is the external-system bridge, Chamber is its opposite: a
+generative multi-agent surface that proves an agent can author its own lens.
+
+:::note
+Scaffold in progress. The pages below are placeholders while the documentation
+structure and tooling come up. Content lands tier by tier.
+:::
+
+<CardGrid>
+  <LinkCard
+    title="Concepts"
+    href="concepts/"
+    description="Genesis, minds, rooms, strategies, and agent-authored lenses, and the Keelson canvas they render through."
+  />
+  <LinkCard
+    title="Guides"
+    href="guides/"
+    description="Task-oriented how-tos: author a mind, run a room, render a lens, link into a local keelson."
+  />
+  <LinkCard
+    title="Tutorials"
+    href="tutorials/"
+    description="A problem-first learning rail. The capstone is authoring a new room strategy."
+  />
+  <LinkCard
+    title="Reference"
+    href="reference/"
+    description="The contract tier: surfaces, snapshot keys, workflows, strategies, and the view payloads."
+  />
+  <LinkCard
+    title="Design"
+    href="design/"
+    description="Decision records and the Keelson base gaps this rib was built against."
+  />
+</CardGrid>

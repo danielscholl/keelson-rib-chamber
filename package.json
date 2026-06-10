@@ -10,6 +10,8 @@
     "src",
     "bin",
     "workflows",
+    "LICENSE",
+    "NOTICE",
     "README.md"
   ],
   "scripts": {

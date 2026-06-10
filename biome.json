@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**/*.ts", "**/*.json", "!**/node_modules", "!**/dist", "!bun.lock"]
+    "includes": ["**/*.ts", "**/*.json", "!**/node_modules", "!**/dist", "!docs", "!bun.lock"]
   },
   "formatter": {
     "enabled": true,
