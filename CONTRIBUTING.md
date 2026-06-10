@@ -91,10 +91,9 @@ needed — explains *why*, not *what*; the diff already shows the what.
 ## License and attribution
 
 The rib is Apache-2.0 (see [LICENSE](LICENSE)). It is a clean-room port of
-[Chamber](https://github.com/ianphil/chamber) and rides Keelson's Archon-derived
-workflow engine; both are credited in [NOTICE](NOTICE). A change that ports or
-shells new upstream tooling must carry its attribution forward into `NOTICE` and
-the README Acknowledgments.
+[Chamber](https://github.com/ianphil/chamber), credited in [NOTICE](NOTICE). A
+change that ports or shells new upstream tooling must carry its attribution
+forward into `NOTICE` and the README Acknowledgments.
 
 ## Security
 
