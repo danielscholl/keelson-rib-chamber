@@ -134,6 +134,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return value;
   }
 
+  // Release a closed slug's in-memory state, gated so it never fires while a
+  // turn is in flight or the slug is active. Deleting `generations` is safe
+  // because the rib mints a unique slug per start (freshRoomSlug) — a slug is
+  // never reused, so a new lifetime can't realign with a stale generation.
   function releaseSlugState(slug: MindSlug): void {
     if (inFlight.has(slug) || activeSlug === slug) return;
     controllers.delete(slug);

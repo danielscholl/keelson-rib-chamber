@@ -151,6 +151,15 @@ Minds and room transcripts live under a per-rib data home:
 At MVP the rib resolves this path itself (it knows `KEELSON_WORKSPACE` /
 `.keelson/`); the blessed form is a `ctx.getDataDir()` on `RibContext` (`C3`).
 
+Closed rooms are retained, not unbounded. Because every room start mints a fresh
+unique slug, `rooms/` would otherwise grow forever; `sweepClosedRooms()`
+(`src/room-store.ts`) prunes `done`/`stopped` room directories to the newest
+`DEFAULT_CLOSED_ROOM_RETENTION` (25) by `createdAt`, never touching an `active`
+room or an unreadable/unsafe directory. The sweep runs best-effort and
+serialized at lifecycle-safe points — after the driver registers and after each
+auto-advance loop exits — so it never races a room it is creating. There is no
+TTL or operator override yet.
+
 ## 9. Keelson base gap analysis (the gating work)
 
 The same virtuous cycle the OSDU rib ran with `G0`–`G4`: each gap below is

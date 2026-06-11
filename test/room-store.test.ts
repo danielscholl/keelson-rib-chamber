@@ -185,6 +185,60 @@ describe("createFileRoomStore", () => {
     expect(await pathExists(join(root, "loose.txt"))).toBe(true);
   });
 
+  it("rejects an invalid keep count", async () => {
+    await expect(sweepClosedRooms(root, { keep: -1 })).rejects.toThrow();
+    await expect(sweepClosedRooms(root, { keep: 1.5 })).rejects.toThrow();
+  });
+
+  it("skips (never deletes) unsafe, slug-mismatched, and unparseable-date rooms", async () => {
+    const store = createFileRoomStore(root);
+    // A real closed room that SHOULD be pruned once over the keep count.
+    await store.saveRoom(
+      makeRoom({ slug: "closed", status: "done", createdAt: "2026-01-01T00:00:00.000Z" }),
+    );
+    // Unsafe directory name (assertSafeSlug rejects it) — skipped before any read.
+    await mkdir(join(root, "Bad_Slug"), { recursive: true });
+    await writeFile(
+      join(root, "Bad_Slug", "room.json"),
+      JSON.stringify(makeRoom({ slug: "Bad_Slug", status: "done" })),
+    );
+    // room.json whose slug disagrees with its directory — skipped.
+    await mkdir(join(root, "mismatch"), { recursive: true });
+    await writeFile(
+      join(root, "mismatch", "room.json"),
+      JSON.stringify(makeRoom({ slug: "other", status: "done" })),
+    );
+    // Valid shape but an unparseable createdAt — skipped, not deleted.
+    await mkdir(join(root, "bad-date"), { recursive: true });
+    await writeFile(
+      join(root, "bad-date", "room.json"),
+      JSON.stringify(makeRoom({ slug: "bad-date", status: "done", createdAt: "not-a-date" })),
+    );
+
+    const result = await sweepClosedRooms(root, { keep: 0 });
+
+    expect(result.removed).toEqual(["closed"]);
+    expect(result.skipped).toEqual(expect.arrayContaining(["Bad_Slug", "mismatch", "bad-date"]));
+    expect(await pathExists(join(root, "Bad_Slug"))).toBe(true);
+    expect(await pathExists(join(root, "mismatch"))).toBe(true);
+    expect(await pathExists(join(root, "bad-date"))).toBe(true);
+    expect(await pathExists(join(root, "closed"))).toBe(false);
+  });
+
+  it("breaks createdAt ties deterministically, keeping the newest slug", async () => {
+    const store = createFileRoomStore(root);
+    const at = "2026-02-02T00:00:00.000Z";
+    await store.saveRoom(makeRoom({ slug: "tie-a", status: "done", createdAt: at }));
+    await store.saveRoom(makeRoom({ slug: "tie-b", status: "done", createdAt: at }));
+    await store.saveRoom(makeRoom({ slug: "tie-c", status: "done", createdAt: at }));
+
+    const result = await sweepClosedRooms(root, { keep: 1 });
+
+    // Equal createdAt → byte-order tie-break keeps the largest (newest) slug.
+    expect(result.kept).toEqual(["tie-c"]);
+    expect(result.removed).toEqual(["tie-b", "tie-a"]);
+  });
+
   it("no-ops on a missing or empty rooms root", async () => {
     expect(await sweepClosedRooms(join(root, "missing"), { keep: 1 })).toEqual({
       removed: [],
