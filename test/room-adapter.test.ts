@@ -13,7 +13,7 @@ import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, roomsDir } from "../src/paths.ts";
-import { createFileRoomStore } from "../src/room-store.ts";
+import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 import { scriptedRunAgentTurn } from "./helpers/fakes.ts";
 
@@ -348,6 +348,38 @@ describe("room adapter — live room", () => {
     );
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("no moderator");
+  });
+
+  it("prunes old closed room dirs after a fresh room loop completes", async () => {
+    const store = createFileRoomStore(roomsDir());
+    const oldSlugs = Array.from(
+      { length: DEFAULT_CLOSED_ROOM_RETENTION + 5 },
+      (_, i) => `old-closed-${i.toString().padStart(2, "0")}`,
+    );
+    const oldest = oldSlugs[0];
+    if (!oldest) throw new Error("expected seeded room slugs");
+    for (const [i, slug] of oldSlugs.entries()) {
+      await store.saveRoom({
+        slug,
+        name: `Old ${i}`,
+        strategy: "sequential",
+        participants: ["alice", "bob"],
+        status: i % 2 === 0 ? "done" : "stopped",
+        turnBudget: 1,
+        turnIndex: 1,
+        round: 0,
+        createdAt: `2025-01-${(i + 1).toString().padStart(2, "0")}T00:00:00.000Z`,
+      } satisfies Room);
+    }
+
+    const slug = slugOf(await onAction(startPayload({ turnBudget: 1 }), makeCtx({ sm: snap.sm })));
+    expect(slug).toMatch(/^room-/);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    await waitFor(async () => (await store.loadRoom(oldest)) === undefined);
+
+    expect(await store.loadRoom(oldest)).toBeUndefined();
+    expect((await store.loadRoom(slug))?.status).toBe("done");
+    expect(await store.loadTranscript(slug)).toHaveLength(1);
   });
 
   // Must run last: dispose() flips module-global state so the loop stops driving.
