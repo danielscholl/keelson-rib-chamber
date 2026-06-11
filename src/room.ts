@@ -134,6 +134,17 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return value;
   }
 
+  // Release a closed slug's in-memory state, gated so it never fires while a
+  // turn is in flight or the slug is active. Deleting `generations` is safe
+  // because the rib mints a unique slug per start (freshRoomSlug) — a slug is
+  // never reused, so a new lifetime can't realign with a stale generation.
+  function releaseSlugState(slug: MindSlug): void {
+    if (inFlight.has(slug) || activeSlug === slug) return;
+    controllers.delete(slug);
+    transcripts.delete(slug);
+    generations.delete(slug);
+  }
+
   // Per-room serialization for the load-modify-save commit sections. A director
   // inject runs concurrently with an in-flight turn (it must — the turn is
   // awaiting the agent), so without this their commits can interleave: inject
@@ -146,13 +157,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const next = prev.then(fn, fn);
     // Keep the chain going even if this section throws (one failure must not
     // wedge the room's future commits).
-    writeChains.set(
-      slug,
-      next.then(
-        () => {},
-        () => {},
-      ),
+    const stored = next.then(
+      () => {},
+      () => {},
     );
+    writeChains.set(slug, stored);
+    void stored.then(() => {
+      if (writeChains.get(slug) !== stored) return;
+      writeChains.delete(slug);
+      releaseSlugState(slug);
+    });
     return next;
   }
 
@@ -200,7 +214,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     bumpGeneration(slug);
     clearActive(slug);
     await persistAndPublish(room);
-    transcripts.delete(slug);
+    releaseSlugState(slug);
     return false;
   }
 
@@ -373,6 +387,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     } finally {
       controllers.delete(slug);
       inFlight.delete(slug);
+      releaseSlugState(slug);
     }
   }
 
@@ -794,15 +809,22 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       controllers.get(slug)?.abort();
       clearActive(slug);
       await persistAndPublish({ ...room, status: "stopped", pending: undefined });
-      transcripts.delete(slug);
     });
+    releaseSlugState(slug);
   }
 
   async function dispose(): Promise<void> {
     disposed = true;
+    const slugs = new Set([
+      ...controllers.keys(),
+      ...transcripts.keys(),
+      ...generations.keys(),
+      ...writeChains.keys(),
+    ]);
     for (const controller of controllers.values()) controller.abort();
     controllers.clear();
     activeSlug = undefined;
+    for (const slug of slugs) releaseSlugState(slug);
   }
 
   function isDisposed(): boolean {

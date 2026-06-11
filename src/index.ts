@@ -15,7 +15,7 @@ import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomPublisher, RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
-import { createFileRoomStore } from "./room-store.ts";
+import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
@@ -50,6 +50,7 @@ let activeSlug: string | undefined;
 // room ending, so chamber_room_status can still show a just-finished transcript.
 // Cleared only on dispose.
 let lastSlug: string | undefined;
+let roomRetentionSweep = Promise.resolve();
 
 // The roster the driver resolves a speaker's persona from each turn. Cached
 // because it only changes when a Mind is created (the genesis tool) or retired
@@ -70,6 +71,22 @@ async function resolveMinds(): Promise<readonly Mind[]> {
 }
 function invalidateRoster(): void {
   roster = undefined;
+}
+
+function queueRoomRetentionSweep(): void {
+  const root = roomsDir();
+  roomRetentionSweep = roomRetentionSweep.then(
+    () => runRoomRetentionSweep(root),
+    () => runRoomRetentionSweep(root),
+  );
+}
+
+async function runRoomRetentionSweep(root: string): Promise<void> {
+  try {
+    await sweepClosedRooms(root);
+  } catch (e) {
+    console.error(`[rib-chamber] room retention sweep failed: ${errText(e)}`);
+  }
 }
 
 // Absolute path to the roster collector, resolved at module load so the workflow
@@ -321,6 +338,7 @@ const rib: Rib = {
         readSoul: (slug) => readSoul(mindsDir(), slug),
         turnCwd: chamberDataHome(),
       });
+      queueRoomRetentionSweep();
       // Prime the cache so a client subscribing before the first turn gets the
       // seeded board, not a 204 / loading skeleton (the GET path doesn't
       // lazy-compose).
@@ -408,6 +426,7 @@ function ensureLoop(slug: string): void {
       loops.delete(slug);
       // The room left "active" — drop it as the chat tools' target.
       if (activeSlug === slug) activeSlug = undefined;
+      queueRoomRetentionSweep();
     }
   })();
 }
@@ -564,8 +583,8 @@ async function validateStart(
 // validation, the single-active reservation, and the fresh-slug discipline live
 // in one place. Each start opens a brand-new room under a unique slug: the CLI
 // MVP can't cancel an in-flight turn, so a turn still draining from a stopped
-// room must land in its own old dir, never a reused one. Past rooms remain under
-// rooms/ as history (a retention sweep is a follow-up).
+// room must land in its own old dir, never a reused one. Past closed rooms remain
+// as bounded history under rooms/ via the retention sweep.
 async function startRoom(
   input: {
     participants: readonly string[];

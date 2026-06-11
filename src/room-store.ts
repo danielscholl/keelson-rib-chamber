@@ -1,8 +1,20 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
 import type { RoomStore } from "./ports.ts";
 import type { MindSlug, Room, TurnEntry } from "./types.ts";
+
+export const DEFAULT_CLOSED_ROOM_RETENTION = 25;
+
+export interface SweepClosedRoomsOptions {
+  keep?: number;
+}
+
+export interface SweepClosedRoomsResult {
+  removed: MindSlug[];
+  kept: MindSlug[];
+  skipped: MindSlug[];
+}
 
 // File-based RoomStore (C3): one directory per room under the data home's rooms/
 // root — room.json holds the current state, transcript.jsonl is the append-only
@@ -27,17 +39,7 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
   return {
     async loadRoom(slug) {
       assertSafeSlug(slug);
-      try {
-        const raw = await readFile(roomFile(slug), "utf8");
-        const parsed: unknown = JSON.parse(raw);
-        if (!isRoom(parsed)) return undefined;
-        // `round` was added after some rooms were persisted; default it here at
-        // the load boundary so isRoom (which does not require it) need not change
-        // and an older room.json still loads.
-        return { ...parsed, round: parsed.round ?? 0 };
-      } catch {
-        return undefined; // no room.json yet, or unreadable/unparseable
-      }
+      return parseRoomJson(roomFile(slug));
     },
 
     async saveRoom(room) {
@@ -80,6 +82,99 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
   };
 }
 
+export async function sweepClosedRooms(
+  roomsRoot: string,
+  options: SweepClosedRoomsOptions = {},
+): Promise<SweepClosedRoomsResult> {
+  const keep = options.keep ?? DEFAULT_CLOSED_ROOM_RETENTION;
+  if (!Number.isInteger(keep) || keep < 0) {
+    throw new Error("closed room retention keep must be a non-negative integer");
+  }
+
+  const result: SweepClosedRoomsResult = { removed: [], kept: [], skipped: [] };
+  let entries: { name: string; isDirectory(): boolean }[];
+  try {
+    entries = await readdir(roomsRoot, { withFileTypes: true });
+  } catch (e) {
+    if (isNodeError(e) && e.code === "ENOENT") return result;
+    throw e;
+  }
+
+  const closedRooms: { slug: MindSlug; createdAtMs: number }[] = [];
+  for (const entry of entries) {
+    const slug = entry.name;
+    if (!entry.isDirectory()) {
+      result.skipped.push(slug);
+      continue;
+    }
+    try {
+      assertSafeSlug(slug);
+    } catch {
+      result.skipped.push(slug);
+      continue;
+    }
+
+    const room = await parseRoomJson(join(roomsRoot, slug, "room.json"));
+    const createdAtMs = room ? Date.parse(room.createdAt) : Number.NaN;
+    if (!room || room.slug !== slug || !Number.isFinite(createdAtMs)) {
+      result.skipped.push(slug);
+      continue;
+    }
+    if (room.status === "active") {
+      result.skipped.push(slug);
+      continue;
+    }
+    closedRooms.push({ slug, createdAtMs });
+  }
+
+  closedRooms.sort(
+    (a, b) =>
+      b.createdAtMs - a.createdAtMs ||
+      // Tie on createdAt (same-millisecond starts): keep the newer slug. Slugs
+      // are `room-<ts36>-<seq36>`, so the larger slug is the later mint. Byte
+      // order (not localeCompare) keeps retention deterministic across locales.
+      (a.slug < b.slug ? 1 : a.slug > b.slug ? -1 : 0),
+  );
+  for (const [index, room] of closedRooms.entries()) {
+    if (index < keep) {
+      result.kept.push(room.slug);
+      continue;
+    }
+    // Re-read room.json immediately before deleting: the scan above can be stale
+    // if the room transitioned (e.g. became active) between enumeration and now.
+    // Skip rather than delete if it no longer reads as the same closed room.
+    const fresh = await parseRoomJson(join(roomsRoot, room.slug, "room.json"));
+    if (!fresh || fresh.slug !== room.slug || fresh.status === "active") {
+      result.skipped.push(room.slug);
+      continue;
+    }
+    try {
+      await rm(join(roomsRoot, room.slug), { recursive: true, force: true });
+      result.removed.push(room.slug);
+    } catch {
+      // One unremovable dir (permissions/lock) must not abort the sweep; skip
+      // it so the remaining closed rooms are still pruned.
+      result.skipped.push(room.slug);
+    }
+  }
+
+  return result;
+}
+
+// Parse a room.json, tolerant of a missing/corrupt/torn file (degrades to
+// undefined). `round` was added after some rooms were persisted, so default it
+// here at the load boundary. Shared by the store's loadRoom and the retention
+// sweep so the isRoom shape + round back-compat default live in one place.
+async function parseRoomJson(path: string): Promise<Room | undefined> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    if (!isRoom(parsed)) return undefined;
+    return { ...parsed, round: parsed.round ?? 0 };
+  } catch {
+    return undefined;
+  }
+}
+
 function isRoom(value: unknown): value is Room {
   if (typeof value !== "object" || value === null) return false;
   const r = value as Record<string, unknown>;
@@ -108,4 +203,8 @@ function isTurnEntry(value: unknown): value is TurnEntry {
     Array.isArray(e.parts) &&
     typeof e.at === "string"
   );
+}
+
+function isNodeError(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error && "code" in value;
 }

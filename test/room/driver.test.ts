@@ -62,6 +62,42 @@ describe("room driver — lifecycle", () => {
     const resumed = await h.driver.start(START);
     expect(resumed.turnIndex).toBe(1);
   });
+
+  test("restarting a done same-slug room starts with a clean transcript cache", async () => {
+    const h = harness([{ text: "old done reply" }, { text: "fresh reply" }]);
+    await h.driver.start({ ...START, turnBudget: 1 });
+    expect(await h.driver.step("demo")).toBe("ended");
+    expect((await h.store.loadRoom("demo"))?.status).toBe("done");
+    expect(await h.store.loadTranscript("demo")).toHaveLength(1);
+
+    await h.driver.start(START);
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(0);
+    const reopened = h.pub.last();
+    if (reopened?.view !== "board") throw new Error("expected a board view");
+    const reopenedRows = reopened.sections.find((s) => s.kind === "rows");
+    expect(reopenedRows?.kind === "rows" ? reopenedRows.items : []).toHaveLength(0);
+
+    await h.driver.step("demo");
+    expect(h.turns.requests[1]?.prompt ?? "").not.toContain("old done reply");
+  });
+
+  test("restarting a stopped same-slug room starts with a clean transcript cache", async () => {
+    const h = harness([{ text: "fresh after stop" }]);
+    await h.driver.start(START);
+    await h.driver.inject("demo", { text: "old director note" });
+    await h.driver.stop("demo");
+    expect((await h.store.loadRoom("demo"))?.status).toBe("stopped");
+    expect(await h.store.loadTranscript("demo")).toHaveLength(1);
+
+    await h.driver.start(START);
+    const reopened = h.pub.last();
+    if (reopened?.view !== "board") throw new Error("expected a board view");
+    const reopenedRows = reopened.sections.find((s) => s.kind === "rows");
+    expect(reopenedRows?.kind === "rows" ? reopenedRows.items : []).toHaveLength(0);
+
+    await h.driver.step("demo");
+    expect(h.turns.requests[0]?.prompt ?? "").not.toContain("old director note");
+  });
 });
 
 describe("room driver — step", () => {
