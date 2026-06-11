@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileRoomStore } from "../src/room-store.ts";
+import { createFileRoomStore, sweepClosedRooms } from "../src/room-store.ts";
 import type { Room, TurnEntry } from "../src/types.ts";
 
 function makeRoom(over: Partial<Room> = {}): Room {
@@ -31,6 +31,15 @@ function makeEntry(over: Partial<TurnEntry> = {}): TurnEntry {
     at: "2026-01-01T00:00:00.000Z",
     ...over,
   };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 describe("createFileRoomStore", () => {
@@ -134,5 +143,60 @@ describe("createFileRoomStore", () => {
     await expect(store.loadRoom("../escape")).rejects.toThrow();
     await expect(store.loadTranscript("../escape")).rejects.toThrow();
     await expect(store.appendTranscript("../escape", makeEntry())).rejects.toThrow();
+  });
+
+  it("sweeps only closed rooms beyond the newest keep count", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(
+      makeRoom({ slug: "closed-1", status: "done", createdAt: "2026-01-01T00:00:00.000Z" }),
+    );
+    await store.saveRoom(
+      makeRoom({ slug: "closed-2", status: "stopped", createdAt: "2026-01-02T00:00:00.000Z" }),
+    );
+    await store.saveRoom(
+      makeRoom({ slug: "closed-3", status: "done", createdAt: "2026-01-03T00:00:00.000Z" }),
+    );
+    await store.saveRoom(
+      makeRoom({ slug: "closed-4", status: "stopped", createdAt: "2026-01-04T00:00:00.000Z" }),
+    );
+    await store.saveRoom(
+      makeRoom({ slug: "active", status: "active", createdAt: "2026-01-05T00:00:00.000Z" }),
+    );
+    await mkdir(join(root, "bad-json"), { recursive: true });
+    await writeFile(join(root, "bad-json", "room.json"), "{ not json");
+    await mkdir(join(root, "not-room"), { recursive: true });
+    await writeFile(join(root, "not-room", "room.json"), JSON.stringify({ slug: "not-room" }));
+    await writeFile(join(root, "loose.txt"), "not a room dir");
+
+    const result = await sweepClosedRooms(root, { keep: 2 });
+
+    expect(result.kept).toEqual(["closed-4", "closed-3"]);
+    expect(result.removed).toEqual(["closed-2", "closed-1"]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining(["active", "bad-json", "not-room", "loose.txt"]),
+    );
+    expect(await pathExists(join(root, "closed-4"))).toBe(true);
+    expect(await pathExists(join(root, "closed-3"))).toBe(true);
+    expect(await pathExists(join(root, "closed-2"))).toBe(false);
+    expect(await pathExists(join(root, "closed-1"))).toBe(false);
+    expect(await pathExists(join(root, "active"))).toBe(true);
+    expect(await pathExists(join(root, "bad-json"))).toBe(true);
+    expect(await pathExists(join(root, "not-room"))).toBe(true);
+    expect(await pathExists(join(root, "loose.txt"))).toBe(true);
+  });
+
+  it("no-ops on a missing or empty rooms root", async () => {
+    expect(await sweepClosedRooms(join(root, "missing"), { keep: 1 })).toEqual({
+      removed: [],
+      kept: [],
+      skipped: [],
+    });
+    const empty = join(root, "empty");
+    await mkdir(empty);
+    expect(await sweepClosedRooms(empty, { keep: 1 })).toEqual({
+      removed: [],
+      kept: [],
+      skipped: [],
+    });
   });
 });
