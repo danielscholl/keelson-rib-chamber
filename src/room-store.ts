@@ -1,8 +1,20 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
 import type { RoomStore } from "./ports.ts";
 import type { MindSlug, Room, TurnEntry } from "./types.ts";
+
+export const DEFAULT_CLOSED_ROOM_RETENTION = 25;
+
+export interface SweepClosedRoomsOptions {
+  keep?: number;
+}
+
+export interface SweepClosedRoomsResult {
+  removed: MindSlug[];
+  kept: MindSlug[];
+  skipped: MindSlug[];
+}
 
 // File-based RoomStore (C3): one directory per room under the data home's rooms/
 // root — room.json holds the current state, transcript.jsonl is the append-only
@@ -80,6 +92,74 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
   };
 }
 
+export async function sweepClosedRooms(
+  roomsRoot: string,
+  options: SweepClosedRoomsOptions = {},
+): Promise<SweepClosedRoomsResult> {
+  const keep = options.keep ?? DEFAULT_CLOSED_ROOM_RETENTION;
+  if (!Number.isInteger(keep) || keep < 0) {
+    throw new Error("closed room retention keep must be a non-negative integer");
+  }
+
+  const result: SweepClosedRoomsResult = { removed: [], kept: [], skipped: [] };
+  let entries: { name: string; isDirectory(): boolean }[];
+  try {
+    entries = await readdir(roomsRoot, { withFileTypes: true });
+  } catch (e) {
+    if (isNodeError(e) && e.code === "ENOENT") return result;
+    throw e;
+  }
+
+  const closedRooms: { slug: MindSlug; createdAtMs: number }[] = [];
+  for (const entry of entries) {
+    const slug = entry.name;
+    if (!entry.isDirectory()) {
+      result.skipped.push(slug);
+      continue;
+    }
+    try {
+      assertSafeSlug(slug);
+    } catch {
+      result.skipped.push(slug);
+      continue;
+    }
+
+    const room = await loadRoomFile(join(roomsRoot, slug, "room.json"));
+    const createdAtMs = room ? Date.parse(room.createdAt) : Number.NaN;
+    if (!room || room.slug !== slug || !Number.isFinite(createdAtMs)) {
+      result.skipped.push(slug);
+      continue;
+    }
+    if (room.status === "active") {
+      result.skipped.push(slug);
+      continue;
+    }
+    closedRooms.push({ slug, createdAtMs });
+  }
+
+  closedRooms.sort((a, b) => b.createdAtMs - a.createdAtMs || a.slug.localeCompare(b.slug));
+  for (const [index, room] of closedRooms.entries()) {
+    if (index < keep) {
+      result.kept.push(room.slug);
+      continue;
+    }
+    await rm(join(roomsRoot, room.slug), { recursive: true, force: true });
+    result.removed.push(room.slug);
+  }
+
+  return result;
+}
+
+async function loadRoomFile(path: string): Promise<Room | undefined> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    if (!isRoom(parsed)) return undefined;
+    return { ...parsed, round: parsed.round ?? 0 };
+  } catch {
+    return undefined;
+  }
+}
+
 function isRoom(value: unknown): value is Room {
   if (typeof value !== "object" || value === null) return false;
   const r = value as Record<string, unknown>;
@@ -108,4 +188,8 @@ function isTurnEntry(value: unknown): value is TurnEntry {
     Array.isArray(e.parts) &&
     typeof e.at === "string"
   );
+}
+
+function isNodeError(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error && "code" in value;
 }
