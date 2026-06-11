@@ -13,17 +13,18 @@ agent renders its own view onto the canvas. The harness stays domain-free — al
 of the multi-agent machinery lives in the rib, and it ships **zero React** into
 the trusted SPA.
 
-> Status: **Phase 0.** The `chamber-brief` workflow renders an agent-authored
-> board lens today; **genesis**, **rooms**, and on-demand lenses are next. See
-> [docs/PRD.md](docs/PRD.md) for scope and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-> for the phase plan.
+> Status: **experimental.** Genesis, rooms (sequential, moderated **group-chat**,
+> and unmoderated **open-floor**), and agent-authored lenses all work today —
+> driven from chat tools, the Chamber surface, or workflows. The contract is
+> still alpha. See [docs/PRD.md](docs/PRD.md) and
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## What it adds
 
-- **Genesis** — author a persistent agent on demand.
-- **Rooms** — orchestrate agent-to-agent turns.
-- **Lenses** — let an agent produce a structured view, rendered through Keelson's canvas.
-- **Zero trusted React** — every view renders through the canvas contract, not hand-coded UI shipped from the rib.
+- **Genesis** — author persistent agents (Minds) on demand from a freeform brief.
+- **Rooms** — run multi-agent conversations: sequential, moderated **group-chat**, or unmoderated **open-floor**; steer them live (call on a speaker, inject a direction, stop).
+- **Lenses** — agents author their own canvas boards — a briefing, the roster, the live room transcript — rendered through Keelson's canvas with no hand-coded UI.
+- **Zero trusted React** — every view renders through the canvas contract, not UI shipped from the rib.
 
 ## Install into Keelson
 
@@ -41,23 +42,20 @@ keelson serve
 
 ## Try it
 
-Open `http://127.0.0.1:7878` → the **Chamber** surface, or run the briefing
-workflow and watch its lens publish:
+Open `http://127.0.0.1:7878` → the **Chamber** surface, then:
 
-```bash
-keelson workflow run chamber-brief --watch
-```
-
-The agent turn authors a canvas `board` lens, published fail-closed to
-`rib:chamber:brief` and rendered on the Chamber surface with no hand-coded UI.
+- **Create an agent** — `keelson workflow run chamber-genesis "a terse SRE who reasons about blast radius"` (or ask chat to create one). It authors a Mind you'll see on the Roster.
+- **Run a room** — ask chat to start a room between two Minds, or use the **Start room** control on the surface; steer it live and watch the transcript render as turns land.
+- **See a lens** — `keelson workflow run chamber-brief` runs one agent turn that authors a briefing board, published fail-closed to `rib:chamber:brief` and rendered with no hand-coded UI.
 
 ## How it works
 
 Keelson already owns the *deterministic* half of Chamber — `packages/workflows`
 (the Archon DAG) and the canvas `board` view that renders a lens. This rib adds
-the *generative* half: agents that author their own lenses and orchestrate each
-other through rooms. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-phase plan and the Keelson base seams it depends on.
+the *generative* half: agents authored on demand, rooms that orchestrate their
+turns, and agents that author their own lenses. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and the Keelson base
+seams it builds on.
 
 ## Develop locally
 
@@ -81,7 +79,8 @@ Then open `http://127.0.0.1:5173` → the **Chamber** tab (or **Ribs**).
 The docs site lives under [`docs/`](docs/) — an Astro Starlight project mirroring
 Keelson's documentation tiers. Build it locally with `cd docs && bun install &&
 bun run build`, or read [`docs/PRD.md`](docs/PRD.md) and
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for scope and the phase plan.
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the product design and the
+Keelson seams it builds on.
 
 ## Acknowledgments
 
