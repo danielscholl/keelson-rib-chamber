@@ -1,15 +1,45 @@
 import { stripControlJson } from "./routing.ts";
 import type { MindSlug, TurnEntry } from "./types.ts";
 
+// Cap on history turns carried in a prompt (and the status-tool view): unbounded
+// history grows prompt cost linearly per turn (worse under concurrent rounds, which
+// fan one transcript into N prompts). Below MAX_ROOM_TURN_BUDGET (50) so it actually
+// caps rooms that approach the budget, not just hypothetical larger ones.
+export const TRANSCRIPT_WINDOW_TURNS = 40;
+
 // Render a transcript as the prompt context fed to the next speaker — oldest to
-// newest, one "from: text" block per turn. A trailing control directive (a
+// newest, one "from: text" block per turn, bounded to the last TRANSCRIPT_WINDOW_TURNS
+// with a one-line elision marker when truncated. A trailing control directive (a
 // moderator's routing JSON, a speaker's nomination tail) is stripped so it never
 // leaks into the next speaker's context and gets mimicked; the on-disk entry is
-// untouched (the driver re-parses the raw text for routing). Pure.
+// untouched (the driver re-parses the raw text for routing). Also backs the
+// chamber_room_status tool's body. Pure.
 export function renderTranscript(transcript: readonly TurnEntry[]): string {
-  return transcript
+  const omitted = Math.max(0, transcript.length - TRANSCRIPT_WINDOW_TURNS);
+  const rendered = transcript
+    .slice(-TRANSCRIPT_WINDOW_TURNS)
     .map((entry) => `${entry.from}: ${stripControlJson(entry.parts.map((p) => p.text).join("\n"))}`)
     .join("\n\n");
+  if (omitted === 0) return rendered;
+  const marker = `…(${omitted} earlier turn${omitted === 1 ? "" : "s"} omitted)`;
+  return `${marker}\n\n${rendered}`;
+}
+
+// The shared head of every speaker/moderator/synthesis prompt: the room topic (if
+// any), then the rendered (windowed) discussion so far, or `emptyContext` when there
+// is no history yet — omit `emptyContext` (synthesis) to push nothing. Pure.
+function promptPreamble(input: {
+  topic?: string;
+  transcript: readonly TurnEntry[];
+  emptyContext?: string;
+}): string[] {
+  const parts: string[] = [];
+  const topic = input.topic?.trim();
+  if (topic) parts.push(`Room topic: ${topic}`);
+  const context = renderTranscript(input.transcript);
+  if (context.length > 0) parts.push(`Conversation so far:\n\n${context}`);
+  else if (input.emptyContext) parts.push(input.emptyContext);
+  return parts;
 }
 
 // The prompt fed to the next speaker: the room topic (if any), the conversation
@@ -22,15 +52,11 @@ export function buildTurnPrompt(input: {
   transcript: readonly TurnEntry[];
   directionInjection?: string;
 }): string {
-  const parts: string[] = [];
-  const topic = input.topic?.trim();
-  if (topic) parts.push(`Room topic: ${topic}`);
-  const context = renderTranscript(input.transcript);
-  parts.push(
-    context.length > 0
-      ? `Conversation so far:\n\n${context}`
-      : "You are the first to speak — open the discussion.",
-  );
+  const parts = promptPreamble({
+    topic: input.topic,
+    transcript: input.transcript,
+    emptyContext: "You are the first to speak — open the discussion.",
+  });
   if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
   parts.push(
     "Respond with your next message in the conversation — in character, concise, no narration of others.",
@@ -50,15 +76,11 @@ export function buildModeratorPrompt(input: {
   participants: readonly MindSlug[];
   directionInjection?: string;
 }): string {
-  const parts: string[] = [];
-  const topic = input.topic?.trim();
-  if (topic) parts.push(`Room topic: ${topic}`);
-  const context = renderTranscript(input.transcript);
-  parts.push(
-    context.length > 0
-      ? `Conversation so far:\n\n${context}`
-      : "The discussion has not started yet — open it by directing the first speaker.",
-  );
+  const parts = promptPreamble({
+    topic: input.topic,
+    transcript: input.transcript,
+    emptyContext: "The discussion has not started yet — open it by directing the first speaker.",
+  });
   parts.push(`Participants you may direct: ${input.participants.join(", ")}.`);
   if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
   parts.push(
@@ -80,15 +102,11 @@ export function buildOpenFloorPrompt(input: {
   participants: readonly MindSlug[];
   directionInjection?: string;
 }): string {
-  const parts: string[] = [];
-  const topic = input.topic?.trim();
-  if (topic) parts.push(`Room topic: ${topic}`);
-  const context = renderTranscript(input.transcript);
-  parts.push(
-    context.length > 0
-      ? `Conversation so far:\n\n${context}`
-      : "You are the first to speak — open the discussion.",
-  );
+  const parts = promptPreamble({
+    topic: input.topic,
+    transcript: input.transcript,
+    emptyContext: "You are the first to speak — open the discussion.",
+  });
   parts.push(`Participants you may nominate: ${input.participants.join(", ")}.`);
   if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
   parts.push(
@@ -106,11 +124,7 @@ export function buildSynthesisPrompt(input: {
   topic?: string;
   transcript: readonly TurnEntry[];
 }): string {
-  const parts: string[] = [];
-  const topic = input.topic?.trim();
-  if (topic) parts.push(`Room topic: ${topic}`);
-  const context = renderTranscript(input.transcript);
-  if (context.length > 0) parts.push(`Conversation so far:\n\n${context}`);
+  const parts = promptPreamble({ topic: input.topic, transcript: input.transcript });
   parts.push(
     "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. Speak in your own voice. Do not emit any routing JSON.",
   );
