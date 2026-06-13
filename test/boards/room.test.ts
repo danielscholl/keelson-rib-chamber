@@ -271,4 +271,21 @@ describe("buildRoomBoard", () => {
     ]);
     expect(feedOf(board)).toHaveLength(3);
   });
+
+  test("a trailing control directive is stripped from the rendered turn text", () => {
+    const board = buildRoomBoard(room({ strategy: "open-floor" }), [
+      entry({
+        from: "a",
+        parts: [
+          {
+            text: 'Ship the narrow gate.\n{"action":"nominate","slug":"b","reason":"pressure-test it"}',
+          },
+        ],
+      }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const row = feedOf(board).find((i) => i.chip?.label === "a");
+    expect(row?.text).toBe("Ship the narrow gate.");
+    expect(row?.text).not.toContain("nominate");
+  });
 });
