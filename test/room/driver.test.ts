@@ -154,6 +154,33 @@ describe("room driver — step", () => {
   });
 });
 
+describe("room driver — round cursor", () => {
+  test("sequential: round advances when the roster completes a cycle; entries are stamped", async () => {
+    const h = harness([{ text: "a1" }, { text: "b1" }, { text: "a2" }, { text: "b2" }]);
+    await h.driver.start(START); // participants [a, b], turnBudget 4
+    await h.driver.step("demo"); // a — cycle not yet complete
+    expect((await h.store.loadRoom("demo"))?.round).toBe(0);
+    await h.driver.step("demo"); // b — first cycle complete
+    expect((await h.store.loadRoom("demo"))?.round).toBe(1);
+    await h.driver.step("demo"); // a again
+    expect((await h.store.loadRoom("demo"))?.round).toBe(1);
+    await h.driver.step("demo"); // b again — second cycle complete (room then done)
+    expect((await h.store.loadRoom("demo"))?.round).toBe(2);
+    // each entry carries the round it was authored in
+    expect((await h.store.loadTranscript("demo")).map((e) => e.round)).toEqual([0, 0, 1, 1]);
+  });
+
+  test("concurrent: one parallel batch is a full round, sharing one stamp", async () => {
+    const h = harness([{ text: "a1" }, { text: "b1" }]);
+    await h.driver.start({ ...START, strategy: "concurrent", turnBudget: 4 });
+    expect(await h.driver.step("demo")).toBe("advanced"); // [a, b] in one round
+    expect((await h.store.loadRoom("demo"))?.round).toBe(1);
+    const t = await h.store.loadTranscript("demo");
+    expect(t.map((e) => e.from)).toEqual(["a", "b"]);
+    expect(t.map((e) => e.round)).toEqual([0, 0]); // both authored before the cursor advanced
+  });
+});
+
 describe("room driver — director overrides", () => {
   test("nextSpeaker override is consumed once and routes the next turn", async () => {
     const h = harness();
@@ -836,6 +863,24 @@ describe("room driver — group-chat moderate", () => {
     expect(h.turns.requests[1]?.system).toBe("You are Ada.");
   });
 
+  test("round advances only when the last unheard participant speaks; moderator turns don't bump it", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+    ]);
+    await startGc(h.driver); // participants [a, b]
+    await h.driver.step("gc"); // m -> a, b still unheard
+    expect((await h.store.loadRoom("gc"))?.round).toBe(0);
+    await h.driver.step("gc"); // m -> b, the cycle completes
+    expect((await h.store.loadRoom("gc"))?.round).toBe(1);
+    const t = await h.store.loadTranscript("gc");
+    expect(t.map((e) => e.from)).toEqual(["m", "a", "m", "b"]);
+    // the moderator (a non-participant) authors agent turns that never lift the cursor
+    expect(t.map((e) => e.round)).toEqual([0, 0, 0, 0]);
+  });
+
   test("an over-cap nominee is redirected to leastSpoken (anti-monopoly)", async () => {
     const h = gcHarness([
       { text: direct("a") }, // step 1: route to a
@@ -1402,7 +1447,10 @@ describe("room driver — concurrent (speak-parallel)", () => {
     expect(last.header?.status?.label).toBe("stopped");
     const rows = last.sections.find((s) => s.kind === "rows");
     const items = rows?.kind === "rows" ? rows.items : [];
-    expect(items).toHaveLength(0); // the gen-1 batch was gated out of the board
+    // The gen-1 batch was gated out of the board — the only feed row is the
+    // termination marker the stopped frame carries.
+    expect(items).toHaveLength(1);
+    expect(items[0]?.text).toBe("Stopped");
   });
 
   test("a director nextSpeaker override routes a single speaker, then parallel rounds resume", async () => {

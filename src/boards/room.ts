@@ -1,7 +1,7 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
 import { speakerCounts } from "../routing.ts";
-import type { Room, TurnEntry } from "../types.ts";
+import type { MindSlug, Room, TurnEntry } from "../types.ts";
 
 // Pure: a room + its transcript -> a canvas `board` (a `rows` feed, one row per
 // turn, plus a participant `segments` header). Validated against canvasViewSchema
@@ -12,12 +12,7 @@ export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): Ca
   const counts = speakerCounts(transcript);
   const segments = room.participants.map((slug) => ({ label: slug, n: counts.get(slug) ?? 0 }));
 
-  const items = transcript.map((entry) => ({
-    glyph: entry.aborted ? ("error" as CanvasTone) : roleTone(entry.role),
-    chip: { label: entry.from, tone: roleTone(entry.role) },
-    text: turnText(entry),
-    trailing: entry.aborted ? `${entry.at} · aborted` : entry.at,
-  }));
+  const items = buildFeed(room, transcript);
 
   // Surface the room's framing topic above the feed so an operator watching the
   // board sees what the discussion is about — it otherwise lives only in the
@@ -130,6 +125,86 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
       },
     ],
   };
+}
+
+// One rows item — the feed mixes turn rows with thin round/termination markers.
+type FeedItem = Extract<CanvasBoardView["sections"][number], { kind: "rows" }>["items"][number];
+
+// The transcript feed: a row per turn, with a thin "Round N" divider wherever the
+// round cursor advances and a single termination marker once the room closes.
+// Facilitator turns (the moderator's routing, the synthesizer's closing summary)
+// read distinctly from participant chatter — both are non-participant Minds, so an
+// identity check on `from` is exact (start validation keeps them out of the roster).
+function buildFeed(room: Room, transcript: readonly TurnEntry[]): FeedItem[] {
+  const moderator = room.config?.moderator;
+  const synthesizer = room.config?.synthesizer;
+  const items: FeedItem[] = [];
+  let prevRound: number | undefined;
+  for (const entry of transcript) {
+    if (entry.round !== undefined) {
+      if (prevRound !== undefined && entry.round > prevRound) {
+        items.push({ icon: "—", glyph: "neutral", text: `Round ${entry.round + 1}` });
+      }
+      prevRound = entry.round;
+    }
+    items.push(turnRow(entry, moderator, synthesizer));
+  }
+  const end = terminationMarker(room);
+  if (end) items.push(end);
+  return items;
+}
+
+function turnRow(
+  entry: TurnEntry,
+  moderator: MindSlug | undefined,
+  synthesizer: MindSlug | undefined,
+): FeedItem {
+  const text = turnText(entry);
+  const trailing = entry.aborted ? `${entry.at} · aborted` : entry.at;
+  // An aborted turn reads as an error dot whoever authored it.
+  if (entry.aborted) {
+    return {
+      glyph: "error",
+      chip: { label: entry.from, tone: roleTone(entry.role) },
+      text,
+      trailing,
+    };
+  }
+  if (entry.from === synthesizer) {
+    return {
+      glyph: "brand",
+      chip: { label: entry.from, tone: "brand" },
+      icon: "◆",
+      text,
+      trailing,
+    };
+  }
+  if (entry.from === moderator) {
+    return {
+      glyph: "accent",
+      chip: { label: entry.from, tone: "accent" },
+      icon: "◇",
+      text,
+      trailing,
+    };
+  }
+  return {
+    glyph: roleTone(entry.role),
+    chip: { label: entry.from, tone: roleTone(entry.role) },
+    text,
+    trailing,
+  };
+}
+
+// A closed room ends with one thin marker: "Stopped" (interrupted) vs "Closed"
+// (ran to a natural end). The room records no close reason, and the turn count
+// can't tell a budget-gate close from a moderator close that lands on budget, so
+// the marker stays coarse — the header's turnIndex/turnBudget chip already shows
+// whether the budget was reached.
+function terminationMarker(room: Room): FeedItem | undefined {
+  if (room.status === "active") return undefined;
+  if (room.status === "stopped") return { icon: "—", glyph: "warn", text: "Stopped" };
+  return { icon: "—", glyph: "neutral", text: "Closed" };
 }
 
 function turnText(entry: TurnEntry): string {

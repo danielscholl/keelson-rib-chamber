@@ -186,6 +186,23 @@ export function allHeardInCycle(
   return participants.every((p) => (counts.get(p) ?? 0) >= minRounds);
 }
 
+// The number of all-heard cycles every participant has completed — the minimum
+// agent-turn count across participants. Counts turns taken (not turnIndex %
+// roster), so a director/moderator perturbing who-speaks-next never desyncs it;
+// the driver stores this on room.round and the board reads it. 0 for an empty
+// roster. Non-participant (moderator/synthesizer) turns are ignored — they are
+// never in `participants`.
+export function roundOf(
+  participants: readonly MindSlug[],
+  transcript: readonly TurnEntry[],
+): number {
+  if (participants.length === 0) return 0;
+  const counts = speakerCounts(transcript);
+  let min = Number.POSITIVE_INFINITY;
+  for (const p of participants) min = Math.min(min, counts.get(p) ?? 0);
+  return min;
+}
+
 // An open-floor speaker's trailing directive, parsed driver-side from its turn.
 // Same wire/strip discipline as parseModeratorDecision: a GENUINELY trailing JSON
 // object whose action is in the open-floor vocabulary ("nominate"/"pass"/"end",
