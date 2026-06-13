@@ -1,6 +1,6 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
-import { speakerCounts } from "../routing.ts";
+import { speakerCounts, stripControlJson } from "../routing.ts";
 import type { MindSlug, Room, TurnEntry } from "../types.ts";
 
 // Pure: a room + its transcript -> a canvas `board` (a `rows` feed, one row per
@@ -208,10 +208,10 @@ function terminationMarker(room: Room): FeedItem | undefined {
 }
 
 function turnText(entry: TurnEntry): string {
-  const text = entry.parts
-    .map((p) => p.text)
-    .join("\n")
-    .trim();
+  // Strip the trailing control directive (a moderator's routing JSON, an
+  // open-floor speaker's nomination tail) the same way the prompt context does
+  // (transcript.ts), so the machine-routing JSON never leaks into the rendered turn.
+  const text = stripControlJson(entry.parts.map((p) => p.text).join("\n")).trim();
   return text.length > 0 ? text : "(no text)";
 }
 
