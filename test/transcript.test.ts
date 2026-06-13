@@ -4,7 +4,9 @@ import {
   buildOpenFloorPrompt,
   buildSynthesisPrompt,
   buildTurnEntry,
+  buildTurnPrompt,
   renderTranscript,
+  TRANSCRIPT_WINDOW_TURNS,
 } from "../src/transcript.ts";
 import type { TurnEntry } from "../src/types.ts";
 
@@ -53,6 +55,62 @@ describe("renderTranscript", () => {
   test("leaves an inline JSON example in prose intact", () => {
     const text = 'emit {"action":"nominate","slug":"x"} to hand off, but I will continue';
     expect(renderTranscript([entry({ from: "a", parts: [{ text }] })])).toBe(`a: ${text}`);
+  });
+});
+
+describe("renderTranscript windowing", () => {
+  // Zero-padded labels so substring assertions are unambiguous ("turn 004" never
+  // matches "turn 040").
+  const turns = (n: number): TurnEntry[] =>
+    Array.from({ length: n }, (_, i) =>
+      entry({ from: "a", parts: [{ text: `turn ${String(i).padStart(3, "0")}` }] }),
+    );
+
+  test("at the window size renders every turn with no elision marker", () => {
+    const rendered = renderTranscript(turns(TRANSCRIPT_WINDOW_TURNS));
+    expect(rendered).not.toContain("omitted");
+    expect(rendered).toContain("turn 000");
+    expect(rendered).toContain(`turn ${String(TRANSCRIPT_WINDOW_TURNS - 1).padStart(3, "0")}`);
+  });
+
+  test("over the window keeps only the last N turns behind an elision marker", () => {
+    const total = TRANSCRIPT_WINDOW_TURNS + 5;
+    const rendered = renderTranscript(turns(total));
+    expect(rendered.startsWith("…(5 earlier turns omitted)")).toBe(true);
+    // turns 000..004 dropped; the window opens at turn 005.
+    expect(rendered).not.toContain("turn 000");
+    expect(rendered).not.toContain("turn 004");
+    expect(rendered).toContain("turn 005");
+    expect(rendered).toContain(`turn ${String(total - 1).padStart(3, "0")}`);
+  });
+
+  test("the elision marker reports the omitted count (singular and plural)", () => {
+    expect(
+      renderTranscript(turns(TRANSCRIPT_WINDOW_TURNS + 1)).startsWith("…(1 earlier turn omitted)"),
+    ).toBe(true);
+    expect(
+      renderTranscript(turns(TRANSCRIPT_WINDOW_TURNS + 3)).startsWith("…(3 earlier turns omitted)"),
+    ).toBe(true);
+  });
+
+  test("still strips a control tail from a turn inside the window", () => {
+    const transcript = [
+      ...turns(TRANSCRIPT_WINDOW_TURNS),
+      entry({
+        from: "amy",
+        parts: [{ text: 'Bob, your turn.\n{"action":"nominate","slug":"bob"}' }],
+      }),
+    ];
+    const rendered = renderTranscript(transcript);
+    expect(rendered).toContain("amy: Bob, your turn.");
+    expect(rendered).not.toContain("{");
+  });
+
+  test("buildTurnPrompt keeps the topic and shows the marker when history exceeds the window", () => {
+    const p = buildTurnPrompt({ topic: "Roadmap", transcript: turns(TRANSCRIPT_WINDOW_TURNS + 2) });
+    expect(p.startsWith("Room topic: Roadmap")).toBe(true);
+    expect(p).toContain("…(2 earlier turns omitted)");
+    expect(p).toContain(`turn ${String(TRANSCRIPT_WINDOW_TURNS + 1).padStart(3, "0")}`);
   });
 });
 
