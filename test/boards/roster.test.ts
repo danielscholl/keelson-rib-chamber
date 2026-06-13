@@ -70,6 +70,21 @@ describe("buildRosterBoard", () => {
     expect(hasStart([mind()])).toBe(false);
   });
 
+  test("bakes an Enter action per mind, carrying its slug", () => {
+    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const enters = actionItems(board).filter((i) => i.type === "enter-mind");
+    expect(enters).toHaveLength(2);
+    expect(enters[0]).toMatchObject({ type: "enter-mind", payload: { slug: "a" } });
+    expect(enters[1]?.payload).toEqual({ slug: "b" });
+  });
+
+  test("offers Enter even for a single mind", () => {
+    expect(
+      actionItems(buildRosterBoard([mind({ slug: "solo" })])).some((i) => i.type === "enter-mind"),
+    ).toBe(true);
+  });
+
   test("bakes a destructive Retire action per mind, carrying the slug", () => {
     const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);

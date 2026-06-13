@@ -76,6 +76,21 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
       ],
     });
   }
+  // Enter a Mind for a direct 1:1 chat — the primary, non-destructive verb. The
+  // action returns an open-chat directive (its soul seeded as the system prompt)
+  // the harness turns into a fresh seeded conversation.
+  if (minds.length > 0) {
+    sections.push({
+      kind: "actions",
+      title: "Enter",
+      items: minds.map((mind) => ({
+        type: "enter-mind",
+        label: `Enter ${mind.name}`,
+        glyph: "→",
+        payload: { slug: mind.slug },
+      })),
+    });
+  }
   // One destructive Retire button per Mind — the slug to remove is on the card, so
   // it rides as the action payload (the room-control pattern), reaching onAction.
   // Genesis (the inverse) is the chamber-genesis workflow instead: authoring a soul

@@ -114,6 +114,24 @@ export async function readSoul(mindsRoot: string, slug: string): Promise<string 
   }
 }
 
+// Read one of a Mind's authored docs (memory.md, rules.md, log.md) by name, with
+// the same fail-soft contract as readSoul: undefined on any miss (no such Mind,
+// empty/unreadable file, unsafe slug), never throws. composeMindSystemPrompt
+// stacks these into the direct-chat soul prompt.
+export async function readMindDoc(
+  mindsRoot: string,
+  slug: string,
+  file: string,
+): Promise<string | undefined> {
+  try {
+    assertSafeSlug(slug);
+    const text = await readFile(join(mindsRoot, slug, file), "utf8");
+    return text.trim().length > 0 ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function retireMind(mindsRoot: string, slug: string): Promise<void> {
   assertSafeSlug(slug);
   const dir = join(mindsRoot, slug);
