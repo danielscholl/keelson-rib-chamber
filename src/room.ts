@@ -381,8 +381,18 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         );
         return active ? "advanced" : "ended";
       }
-      // speak-parallel / synthesize — deferred concurrent (Slice 4); synthesis is
-      // reached inline from a moderate close, never as a strategy-returned step.
+      if (decision.kind === "speak-parallel") {
+        const active = await runParallelTurn(
+          room,
+          decision.minds,
+          override.directionInjection,
+          controller,
+          gen,
+        );
+        return active ? "advanced" : "ended";
+      }
+      // synthesize is reached inline from a moderate close (runCloseSynthesis),
+      // never as a strategy-returned step, so it never reaches step().
       throw new Error(`step kind "${decision.kind}" is not supported yet`);
     } finally {
       controllers.delete(slug);
@@ -400,8 +410,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     room: Room,
     mindSlug: MindSlug,
     gen: number,
+    roster?: readonly Mind[],
   ): Promise<Mind | undefined> {
-    const minds = await deps.minds();
+    const minds = roster ?? (await deps.minds());
     const mind = minds.find((m) => m.slug === mindSlug);
     if (mind) return mind;
     await appendEntry(
@@ -424,8 +435,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   // Run one agent turn and return its reply text + aborted flag, or "disposed" if
   // the rib was torn down mid-turn (the caller drops a disposed turn without
   // committing). The prompt is built by the caller — the speaker, moderator, and
-  // synthesizer differ only in their prompt — so this owns just the abort
-  // pre-check, the stream drain, and result extraction.
+  // synthesizer differ only in their prompt — so this owns just the abort check
+  // (before AND after the SOUL read), the stream drain, and result extraction.
   async function runOneTurn(
     mind: Mind,
     prompt: string,
@@ -433,15 +444,20 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   ): Promise<{ text: string; aborted: boolean } | "disposed"> {
     let text: string;
     let aborted: boolean;
+    // The authored soul is the turn's identity; fall back to the roster tagline when
+    // a Mind has no readable SOUL.md so the turn still runs in character. Skip the
+    // (async, file-backed) read entirely if a stop/dispose already landed.
+    const system = controller.signal.aborted
+      ? mind.persona
+      : (await deps.readSoul?.(mind.slug))?.trim() || mind.persona;
+    // Re-check AFTER the SOUL read: a stop/dispose can land before OR during it, and
+    // a turn must not be invoked with an already-aborted signal — in a concurrent
+    // round that would fan out N wasted agent calls. Finalize as aborted instead, so
+    // no normal reply is appended after a stop.
     if (controller.signal.aborted) {
-      // A stop / dispose landed during the async gap above — finalize without
-      // invoking a turn, so no normal reply is appended after a stop.
       text = "";
       aborted = true;
     } else {
-      // The authored soul is the turn's identity; fall back to the roster tagline
-      // when a Mind has no readable SOUL.md so the turn still runs in character.
-      const system = (await deps.readSoul?.(mind.slug))?.trim() || mind.persona;
       // tools omitted -> text-only (the room default). Mapping Mind.tools slugs to
       // C1 tool descriptors is deferred. The Mind's model pin is honoured.
       const turn = deps.runAgentTurn({
@@ -473,6 +489,28 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return { text, aborted };
   }
 
+  // Build an agent-authored transcript entry (a Mind's turn) with driver-stamped
+  // id/time. Shared by the single-speaker, synthesis, and concurrent-batch commits
+  // so the agent-entry shape lives in one place — a later field (e.g. a round
+  // stamp) lands once, not per call site.
+  function buildAgentEntry(
+    roomSlug: MindSlug,
+    turnIndex: number,
+    fromSlug: MindSlug,
+    reply: { text: string; aborted: boolean },
+  ): TurnEntry {
+    return buildTurnEntry({
+      roomSlug,
+      turnIndex,
+      from: fromSlug,
+      role: "agent",
+      text: reply.text,
+      aborted: reply.aborted,
+      messageId: newId(),
+      at: now().toISOString(),
+    });
+  }
+
   // Append a finished agent turn and advance the room under the write lock: an
   // aborted turn -> stopped, the budget reached -> done, else still active.
   // Returns whether the room remains active (false when superseded/closed). The
@@ -489,16 +527,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     await appendEntry(
       room.slug,
       gen,
-      buildTurnEntry({
-        roomSlug: room.slug,
-        turnIndex: room.turnIndex,
-        from: mind.slug,
-        role: "agent",
-        text,
-        aborted,
-        messageId: newId(),
-        at: now().toISOString(),
-      }),
+      buildAgentEntry(room.slug, room.turnIndex, mind.slug, { text, aborted }),
     );
     return await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
@@ -554,6 +583,94 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const turn = await runOneTurn(mind, prompt, controller);
     if (turn === "disposed") return false;
     return await commitTurn(room, mind, turn.text, turn.aborted, gen);
+  }
+
+  // A concurrent round: run the round's speakers at once — each prompted from the
+  // SAME pre-round transcript (so they don't hear each other) and sharing the one
+  // per-room AbortController (so a stop aborts the whole round) — then append their
+  // replies in participant order under ONE lock, advancing turnIndex past the batch
+  // with a single publish. A pre-spawn budget gate trims the batch to the
+  // remaining budget so a round never overshoots turnBudget. Mirrors commitTurn's
+  // discipline batched: the disk append is unconditional, the cache push and the
+  // room-state commit are generation-gated — so a stop racing the commit drops the
+  // whole batch, and the append-only disk entries stay contained by fresh slugs.
+  async function runParallelTurn(
+    room: Room,
+    mindSlugs: readonly MindSlug[],
+    directionInjection: string | undefined,
+    controller: AbortController,
+    gen: number,
+  ): Promise<boolean> {
+    // Pre-spawn budget gate: trim to the remaining budget so the batch can't
+    // advance turnIndex past turnBudget. The strategy only emits speak-parallel
+    // while turnIndex < turnBudget (remaining >= 1); the guard closes cleanly in
+    // the degenerate case rather than spawning an empty round.
+    const remaining = room.turnBudget - room.turnIndex;
+    const slugs = remaining > 0 ? mindSlugs.slice(0, remaining) : [];
+    if (slugs.length === 0) {
+      return await withLock(room.slug, () =>
+        commitTerminal(room.slug, gen, { ...room, status: "done" }),
+      );
+    }
+    // Resolve every speaker up front against ONE roster read; an unknown one fails
+    // the whole room closed (the single-speaker discipline) rather than running a
+    // partial round.
+    const roster = await deps.minds();
+    const minds: Mind[] = [];
+    for (const slug of slugs) {
+      const mind = await resolveMindOrFailClosed(room, slug, gen, roster);
+      if (!mind) return false; // resolveMindOrFailClosed already closed the room
+      minds.push(mind);
+    }
+    // All speakers share the pre-round transcript and one director steer (if any).
+    const prompt = composeSpeakPrompt(
+      room,
+      await loadCachedTranscript(room.slug),
+      directionInjection,
+    );
+    const turns = minds.map((m) => runOneTurn(m, prompt, controller));
+    let results: ({ text: string; aborted: boolean } | "disposed")[];
+    try {
+      results = await Promise.all(turns);
+    } catch (err) {
+      // A turn threw (a readSoul / turn-seam failure, not a status the result maps).
+      // Promise.all short-circuits on the first rejection, leaving the sibling turns
+      // in flight — abort the shared controller to cancel them and await all settle
+      // so none is orphaned once step() drops the controller, then propagate. The
+      // auto-loop force-stops the room, exactly as it would for a single thrown turn.
+      controller.abort();
+      await Promise.allSettled(turns);
+      throw err;
+    }
+    if (results.some((r) => r === "disposed")) return false; // torn down mid-round
+    const replies = results as { text: string; aborted: boolean }[];
+
+    // One lock for the whole batch: append every reply in participant order, indices
+    // running from the re-loaded current.turnIndex; the room then advances to that
+    // same running index, so the entry count and the advance share one source (no
+    // separate +N that could drift from what was actually appended). Commit once.
+    // An aborted reply (a stop landed mid-round) stops the room; reaching the budget
+    // closes it done.
+    return await withLock(room.slug, async () => {
+      const current = (await deps.store.loadRoom(room.slug)) ?? room;
+      let nextIdx = current.turnIndex;
+      let anyAborted = false;
+      for (let k = 0; k < minds.length; k++) {
+        const reply = replies[k];
+        const mind = minds[k];
+        if (!reply || !mind) continue;
+        if (reply.aborted) anyAborted = true;
+        await appendEntry(room.slug, gen, buildAgentEntry(room.slug, nextIdx++, mind.slug, reply));
+      }
+      const advanced: Room = { ...current, turnIndex: nextIdx };
+      if (anyAborted) {
+        return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
+      }
+      if (advanced.turnIndex >= advanced.turnBudget) {
+        return await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
+      }
+      return await commitActive(room.slug, gen, advanced);
+    });
   }
 
   // A group-chat moderate step: run the moderator, then route on its reply. Up to
@@ -718,15 +835,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         await appendEntry(
           room.slug,
           gen,
-          buildTurnEntry({
-            roomSlug: room.slug,
-            turnIndex: room.turnIndex,
-            from: synth.slug,
-            role: "agent",
+          buildAgentEntry(room.slug, room.turnIndex, synth.slug, {
             text: turn.text,
             aborted: turn.aborted,
-            messageId: newId(),
-            at: now().toISOString(),
           }),
         );
         return await withLock(room.slug, async () => {

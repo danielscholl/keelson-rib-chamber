@@ -5,12 +5,14 @@ import {
   abortableRunAgentTurn,
   fixedClock,
   gatedRunAgentTurn,
+  gatedRunAgentTurnPool,
   makeFakePublisher,
   makeFakeStore,
   scriptedRunAgentTurn,
   scriptedThenAbortable,
   seqIds,
   type TurnScript,
+  throwingThenAbortable,
 } from "../helpers/fakes.ts";
 
 const MINDS: Mind[] = [
@@ -335,9 +337,9 @@ describe("room driver — lifecycle edge cases", () => {
   test("start rejects an unknown strategy and activates nothing", async () => {
     const h = harness();
     // All four RoomStrategyName values now resolve; an unregistered name still fails
-    // closed at start (getStrategy throws), leaking no active slot. The driver's
-    // fail-closed throw on an unimplemented STEP KIND (speak-parallel/synthesize,
-    // room.ts) gets real coverage once Slice 4 lands a strategy that emits them.
+    // closed at start (getStrategy throws), leaking no active slot. speak-parallel
+    // now executes (concurrent emits it); the remaining step() throw guards only
+    // synthesize, which is reached inline from a moderate close, never from step().
     await expect(
       h.driver.start({ ...START, strategy: "nonexistent" as RoomStrategyName }),
     ).rejects.toThrow();
@@ -1276,5 +1278,204 @@ describe("room driver — open-floor", () => {
     const t = await h.store.loadTranscript("of");
     expect(t[0]?.role).toBe("system");
     expect(t[0]?.parts[0]?.text).toContain('unknown mind "ghost"');
+  });
+});
+
+describe("room driver — concurrent (speak-parallel)", () => {
+  const START_CONC = {
+    slug: "demo",
+    name: "Demo",
+    strategy: "concurrent" as const,
+    participants: ["a", "b"],
+    turnBudget: 4,
+  };
+
+  function poolHarness() {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const pool = gatedRunAgentTurnPool();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: pool.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    return { driver, store, pub, pool };
+  }
+
+  test("runs all participants in one parallel round, appended in participant order", async () => {
+    const h = poolHarness();
+    await h.driver.start(START_CONC);
+    const stepP = h.driver.step("demo");
+    await h.pool.started(2); // both turns are in flight at once — genuinely parallel
+    expect(h.pool.requests).toHaveLength(2);
+    // Release in REVERSE order: completion order must not affect append order.
+    h.pool.release(1, "from bo");
+    h.pool.release(0, "from ada");
+    expect(await stepP).toBe("advanced");
+    const t = await h.store.loadTranscript("demo");
+    expect(t.map((e) => e.from)).toEqual(["a", "b"]); // participant order, not completion
+    expect(t.map((e) => e.parts[0]?.text)).toEqual(["from ada", "from bo"]);
+    expect(t.map((e) => e.turnIndex)).toEqual([0, 1]); // contiguous, seeded from current
+    const room = await h.store.loadRoom("demo");
+    expect(room?.turnIndex).toBe(2); // advanced by the batch size, not 1
+    expect(room?.status).toBe("active"); // budget 4 not yet reached
+  });
+
+  test("publishes once per round (batched), not once per speaker", async () => {
+    const h = harness([{ text: "x" }]); // scripted turns resolve immediately
+    await h.driver.start({ ...START_CONC, turnBudget: 2 });
+    const before = h.pub.all().length; // start published the seed frame
+    await h.driver.step("demo"); // one parallel round of two -> done
+    expect(h.pub.all().length).toBe(before + 1); // exactly one more frame for the whole batch
+    expect(await h.store.loadTranscript("demo")).toHaveLength(2);
+    expect((await h.store.loadRoom("demo"))?.status).toBe("done");
+  });
+
+  test("trims the batch to the remaining budget — a round never overshoots", async () => {
+    // budget 3, 2 participants: round 1 = [a,b] (idx 0,1 -> turnIndex 2); round 2
+    // has one slot left, so it trims to [a] (idx 2 -> turnIndex 3 -> done).
+    const h = harness([{ text: "r" }]);
+    await h.driver.start({ ...START_CONC, turnBudget: 3 });
+    expect(await h.driver.step("demo")).toBe("advanced"); // round 1
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(2);
+    expect(await h.driver.step("demo")).toBe("ended"); // round 2: trimmed, hits budget
+    const t = await h.store.loadTranscript("demo");
+    expect(t.map((e) => e.from)).toEqual(["a", "b", "a"]); // exactly turnBudget turns
+    const room = await h.store.loadRoom("demo");
+    expect(room?.turnIndex).toBe(3); // never exceeds turnBudget
+    expect(room?.status).toBe("done");
+  });
+
+  test("an unknown participant fails the whole round closed (no partial round)", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const pool = gatedRunAgentTurnPool();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: pool.run,
+      minds: () => MINDS, // only "a" and "b" exist
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start({ ...START_CONC, participants: ["a", "ghost"] });
+    expect(await driver.step("demo")).toBe("ended");
+    expect((await store.loadRoom("demo"))?.status).toBe("done");
+    // No speaker turn ran (the round failed closed at resolution); the only entry
+    // is the system note for the unknown Mind.
+    expect(pool.requests).toHaveLength(0);
+    const t = await store.loadTranscript("demo");
+    expect(t.some((e) => e.role === "system" && e.parts[0]?.text.includes("ghost"))).toBe(true);
+  });
+
+  test("dispose during a parallel round drops the whole batch (clean teardown)", async () => {
+    const h = poolHarness();
+    await h.driver.start(START_CONC);
+    const stepP = h.driver.step("demo");
+    await h.pool.started(2);
+    await h.driver.dispose(); // aborts the shared controller + flags disposed
+    h.pool.releaseAll(); // the turns settle after teardown
+    await stepP;
+    // Disposed mid-round -> the batch is dropped: nothing appended or published.
+    expect(await h.store.loadTranscript("demo")).toHaveLength(0);
+  });
+
+  test("a stop after the turns settle but before the commit drops the batch from the board", async () => {
+    const h = poolHarness();
+    await h.driver.start(START_CONC); // generation 1
+    const stepP = h.driver.step("demo");
+    await h.pool.started(2);
+    await h.driver.stop("demo"); // bumps the generation, aborts, saves the stopped frame
+    h.pool.releaseAll(); // the gen-1 round settles after the stop
+    await stepP;
+    const room = await h.store.loadRoom("demo");
+    expect(room?.status).toBe("stopped");
+    expect(room?.turnIndex).toBe(0); // the generation-gated batch never advanced it
+    // The append-only disk entries survive (contained by the fresh-slug invariant),
+    // but the batch never reached the cache/board: the last frame is the stopped one.
+    expect((await h.store.loadTranscript("demo")).length).toBe(2);
+    const last = h.pub.last();
+    if (last?.view !== "board") throw new Error("expected a board view");
+    expect(last.header?.status?.label).toBe("stopped");
+    const rows = last.sections.find((s) => s.kind === "rows");
+    const items = rows?.kind === "rows" ? rows.items : [];
+    expect(items).toHaveLength(0); // the gen-1 batch was gated out of the board
+  });
+
+  test("a director nextSpeaker override routes a single speaker, then parallel rounds resume", async () => {
+    const h = harness([{ text: "r" }]);
+    await h.driver.start({ ...START_CONC, turnBudget: 6 });
+    await h.driver.inject("demo", { nextSpeaker: "b" }); // steer a concurrent room to one Mind
+    expect(await h.driver.step("demo")).toBe("advanced");
+    // The override collapses this one step to a single speaker — the same one-shot
+    // semantics every other strategy gives a director override — advancing by 1, not
+    // a full parallel round.
+    expect((await h.store.loadTranscript("demo")).map((e) => e.from)).toEqual(["b"]);
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(1);
+    // The next step has no pending override, so the parallel cadence resumes.
+    expect(await h.driver.step("demo")).toBe("advanced");
+    expect((await h.store.loadTranscript("demo")).map((e) => e.from)).toEqual(["b", "a", "b"]);
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(3);
+  });
+
+  test("a turn-seam failure aborts the in-flight siblings and propagates (no orphaned calls)", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const fake = throwingThenAbortable("turn seam failed");
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: fake.run,
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START_CONC);
+    // The first speaker's turn throws -> Promise.all short-circuits. The round must
+    // abort the shared controller (cancel the sibling) and await it to settle before
+    // propagating, rather than dropping the controller with a turn still in flight.
+    await expect(driver.step("demo")).rejects.toThrow("turn seam failed");
+    expect(fake.abortedSibling()).toBe(true); // the sibling's controller was aborted
+    expect(fake.settledSibling()).toBe(true); // and awaited to settle (not orphaned)
+  });
+
+  test("a stop during the SOUL read cancels the round before any agent turn is invoked", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn([{ text: "should not run" }]);
+    let enterSoul: () => void = () => {};
+    const soulEntered = new Promise<void>((resolve) => {
+      enterSoul = resolve;
+    });
+    let releaseSoul: () => void = () => {};
+    const soulGate = new Promise<void>((resolve) => {
+      releaseSoul = resolve;
+    });
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      readSoul: async () => {
+        enterSoul();
+        await soulGate; // suspend the round inside the (async) SOUL read
+        return "soul";
+      },
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START_CONC);
+    const stepP = driver.step("demo");
+    await soulEntered; // the parallel round is now suspended in the SOUL read
+    await driver.stop("demo"); // stop while the reads are in flight
+    releaseSoul(); // the reads resolve AFTER the stop
+    await stepP;
+    // The post-read re-check finalizes each turn as aborted without invoking the
+    // agent, so a quick stop fans out zero agent calls.
+    expect(turns.requests).toHaveLength(0);
+    expect((await store.loadRoom("demo"))?.status).toBe("stopped");
   });
 });

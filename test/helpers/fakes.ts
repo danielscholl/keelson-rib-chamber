@@ -184,6 +184,94 @@ export function scriptedThenAbortable(firstText: string) {
   return { run, requests, secondStarted };
 }
 
+// A runAgentTurn pool for concurrent rounds: every call gets its OWN gate, so a
+// test can release the N in-flight turns in any order (proving the driver appends
+// in participant order regardless of completion order) or hold them while a stop
+// races the batch. `release(i, text?)` settles the i-th turn; `releaseAll` settles
+// them all; `started(n)` resolves once at least n turns are in flight.
+export function gatedRunAgentTurnPool() {
+  const requests: RibAgentTurnRequest[] = [];
+  const releases: ((text?: string) => void)[] = [];
+  let started = 0;
+  const waiters: { n: number; resolve: () => void }[] = [];
+  const run: RunAgentTurn = (req) => {
+    requests.push(req);
+    let releaseResult: (text?: string) => void = () => {};
+    const result = new Promise<RibAgentTurnResult>((resolve) => {
+      releaseResult = (text = "reply") => resolve({ status: "ok", text });
+    });
+    releases.push(releaseResult);
+    started += 1;
+    for (let k = waiters.length - 1; k >= 0; k--) {
+      const w = waiters[k];
+      if (w && started >= w.n) {
+        w.resolve();
+        waiters.splice(k, 1);
+      }
+    }
+    return {
+      stream: (async function* (): AsyncGenerator<MessageChunk> {
+        yield { type: "done" };
+      })(),
+      result,
+    };
+  };
+  return {
+    run,
+    requests,
+    release: (i: number, text?: string) => releases[i]?.(text),
+    releaseAll: (texts?: string[]) => {
+      for (let i = 0; i < releases.length; i++) releases[i]?.(texts?.[i]);
+    },
+    started: (n: number) =>
+      new Promise<void>((resolve) => {
+        if (started >= n) resolve();
+        else waiters.push({ n, resolve });
+      }),
+  };
+}
+
+// A runAgentTurn whose FIRST call throws synchronously (a turn-seam failure) and
+// whose later calls stay in flight until aborted — for proving a concurrent round
+// cancels its in-flight siblings and awaits them (no orphaned calls) when one turn
+// rejects. `abortedSibling`/`settledSibling` report whether a later turn observed
+// the abort and settled.
+export function throwingThenAbortable(reason = "turn seam failed") {
+  const requests: RibAgentTurnRequest[] = [];
+  let abortedSibling = false;
+  let settledSibling = false;
+  let n = 0;
+  const run: RunAgentTurn = (req) => {
+    requests.push(req);
+    const i = n++;
+    if (i === 0) throw new Error(reason); // the first speaker's turn seam throws
+    const result = new Promise<RibAgentTurnResult>((resolve) => {
+      const signal = req.abortSignal;
+      const onAbort = () => {
+        abortedSibling = true;
+        resolve({ status: "aborted", text: "" });
+      };
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+    }).then((r) => {
+      settledSibling = true;
+      return r;
+    });
+    return {
+      stream: (async function* (): AsyncGenerator<MessageChunk> {
+        yield { type: "done" };
+      })(),
+      result,
+    };
+  };
+  return {
+    run,
+    requests,
+    abortedSibling: () => abortedSibling,
+    settledSibling: () => settledSibling,
+  };
+}
+
 export function fixedClock(iso = "2026-01-01T00:00:00.000Z") {
   return () => new Date(iso);
 }
