@@ -10,6 +10,7 @@ import {
   type ModeratorDecision,
   parseModeratorDecision,
   parseNomination,
+  roundOf,
   speakerCounts,
 } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
@@ -491,13 +492,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
   // Build an agent-authored transcript entry (a Mind's turn) with driver-stamped
   // id/time. Shared by the single-speaker, synthesis, and concurrent-batch commits
-  // so the agent-entry shape lives in one place — a later field (e.g. a round
-  // stamp) lands once, not per call site.
+  // so the agent-entry shape lives in one place. `round` is the cursor the turn was
+  // authored in (room.round at turn start); the room advances its own round from the
+  // post-append transcript.
   function buildAgentEntry(
     roomSlug: MindSlug,
     turnIndex: number,
     fromSlug: MindSlug,
     reply: { text: string; aborted: boolean },
+    round: number,
   ): TurnEntry {
     return buildTurnEntry({
       roomSlug,
@@ -506,9 +509,17 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       role: "agent",
       text: reply.text,
       aborted: reply.aborted,
+      round,
       messageId: newId(),
       at: now().toISOString(),
     });
+  }
+
+  // The room's round after the current turn was appended: roundOf folded over the
+  // post-append transcript (appendEntry has already pushed the entry into the cache).
+  // Shared by the commit points so room.round is recomputed the same way at each.
+  async function roundAfter(slug: MindSlug, current: Room): Promise<number> {
+    return roundOf(current.participants, await loadCachedTranscript(slug));
   }
 
   // Append a finished agent turn and advance the room under the write lock: an
@@ -527,11 +538,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     await appendEntry(
       room.slug,
       gen,
-      buildAgentEntry(room.slug, room.turnIndex, mind.slug, { text, aborted }),
+      buildAgentEntry(room.slug, room.turnIndex, mind.slug, { text, aborted }, room.round),
     );
     return await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
-      const advanced: Room = { ...current, turnIndex: current.turnIndex + 1 };
+      const advanced: Room = {
+        ...current,
+        turnIndex: current.turnIndex + 1,
+        round: await roundAfter(room.slug, current),
+      };
       if (aborted) {
         return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
       }
@@ -655,14 +670,24 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
       let nextIdx = current.turnIndex;
       let anyAborted = false;
+      // One shared round for the whole parallel batch — every speaker spoke in the
+      // same round, before any of them advanced the cursor.
       for (let k = 0; k < minds.length; k++) {
         const reply = replies[k];
         const mind = minds[k];
         if (!reply || !mind) continue;
         if (reply.aborted) anyAborted = true;
-        await appendEntry(room.slug, gen, buildAgentEntry(room.slug, nextIdx++, mind.slug, reply));
+        await appendEntry(
+          room.slug,
+          gen,
+          buildAgentEntry(room.slug, nextIdx++, mind.slug, reply, current.round),
+        );
       }
-      const advanced: Room = { ...current, turnIndex: nextIdx };
+      const advanced: Room = {
+        ...current,
+        turnIndex: nextIdx,
+        round: await roundAfter(room.slug, current),
+      };
       if (anyAborted) {
         return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
       }
@@ -835,16 +860,20 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         await appendEntry(
           room.slug,
           gen,
-          buildAgentEntry(room.slug, room.turnIndex, synth.slug, {
-            text: turn.text,
-            aborted: turn.aborted,
-          }),
+          buildAgentEntry(
+            room.slug,
+            room.turnIndex,
+            synth.slug,
+            { text: turn.text, aborted: turn.aborted },
+            room.round,
+          ),
         );
         return await withLock(room.slug, async () => {
           const current = (await deps.store.loadRoom(room.slug)) ?? room;
           return await commitTerminal(room.slug, gen, {
             ...current,
             turnIndex: current.turnIndex + 1,
+            round: await roundAfter(room.slug, current),
             status: "done",
           });
         });

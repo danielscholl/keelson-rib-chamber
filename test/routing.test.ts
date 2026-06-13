@@ -7,6 +7,7 @@ import {
   leastSpoken,
   parseModeratorDecision,
   parseNomination,
+  roundOf,
   speakerCounts,
   stripControlJson,
 } from "../src/routing.ts";
@@ -191,6 +192,32 @@ describe("speakerCounts / leastSpoken / nextUnheard / allHeardInCycle (global fo
     expect(allHeardInCycle(["a", "b"], counts, 2)).toBe(false); // b spoke once
     expect(allHeardInCycle(["a", "b", "c"], counts, 1)).toBe(false); // c unheard
     expect(allHeardInCycle([], counts, 1)).toBe(false);
+  });
+});
+
+describe("roundOf (completed all-heard cycles)", () => {
+  // a=2, b=1, mod=1 (a non-participant slug), director not an agent turn.
+  const transcript: TurnEntry[] = [
+    agentEntry("a"),
+    agentEntry("b"),
+    agentEntry("a"),
+    agentEntry("mod"),
+  ];
+
+  test("is the minimum agent-turn count across participants", () => {
+    expect(roundOf(["a", "b"], transcript)).toBe(1); // min(2, 1)
+    expect(roundOf(["a"], transcript)).toBe(2);
+  });
+
+  test("is 0 until everyone has spoken at least once", () => {
+    expect(roundOf(["a", "b", "c"], transcript)).toBe(0); // c unheard
+    expect(roundOf(["a", "b"], [agentEntry("a")])).toBe(0); // b unheard
+  });
+
+  test("ignores non-participant (moderator) turns and an empty roster/transcript", () => {
+    expect(roundOf(["a", "b"], transcript)).toBe(1); // mod's turn doesn't lift it
+    expect(roundOf([], transcript)).toBe(0);
+    expect(roundOf(["a", "b"], [])).toBe(0);
   });
 });
 

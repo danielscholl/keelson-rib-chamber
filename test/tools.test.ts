@@ -283,6 +283,26 @@ describe("chamber room-control chat tools", () => {
     expect(t.out()).toContain("not director/system");
   });
 
+  it("rejects a synthesizer that is also a participant (mirrors the moderator rule)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], moderator: "mod", synthesizer: "bob" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("must not also be a participant");
+  });
+
+  it("rejects a synthesizer that is also the moderator (distinct roles)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], moderator: "mod", synthesizer: "mod" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("must not also be the moderator");
+  });
+
   it("chamber_room_start with confirm opens a room the status tool then reports", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute(

@@ -504,6 +504,19 @@ async function validateStart(
       if (!known.has(config.synthesizer)) {
         return { ok: false, error: `unknown synthesizer Mind: ${config.synthesizer}` };
       }
+      if (deduped.includes(config.synthesizer)) {
+        return {
+          ok: false,
+          error:
+            "the synthesizer must not also be a participant — it writes the closing summary, it does not debate",
+        };
+      }
+      if (config.synthesizer === moderator) {
+        return {
+          ok: false,
+          error: "the synthesizer must not also be the moderator — they are distinct roles",
+        };
+      }
     }
     const knobError = routingKnobError(config);
     if (knobError) return { ok: false, error: knobError };
