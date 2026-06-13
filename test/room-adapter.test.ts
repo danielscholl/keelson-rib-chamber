@@ -350,6 +350,22 @@ describe("room adapter — live room", () => {
     if (!res.ok) expect(res.error).toContain("no moderator");
   });
 
+  it("auto-advances a concurrent room: all participants speak in one parallel round to done", async () => {
+    const store = createFileRoomStore(roomsDir());
+    // turnBudget 2 with two participants = exactly one parallel round (a, b), proving
+    // concurrent is wired end-to-end through registerTools/onAction and the pump.
+    const res = await onAction(
+      startPayload({ strategy: "concurrent", turnBudget: 2 }),
+      makeCtx({ sm: snap.sm }),
+    );
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    const transcript = await store.loadTranscript(slug);
+    expect(transcript).toHaveLength(2);
+    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob"]); // participant order
+  });
+
   it("prunes old closed room dirs after a fresh room loop completes", async () => {
     const store = createFileRoomStore(roomsDir());
     const oldSlugs = Array.from(

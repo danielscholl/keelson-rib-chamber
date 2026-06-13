@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { getStrategy, groupChat, openFloor, sequential } from "../../src/strategies/index.ts";
+import {
+  concurrent,
+  getStrategy,
+  groupChat,
+  openFloor,
+  sequential,
+} from "../../src/strategies/index.ts";
 
 describe("strategy registry", () => {
   test("resolves sequential", () => {
     expect(getStrategy("sequential")).toBe(sequential);
   });
 
-  test("concurrent aliases sequential (parallel execution deferred)", () => {
-    expect(getStrategy("concurrent")).toBe(sequential);
+  test("resolves concurrent (its own parallel strategy, no longer a sequential alias)", () => {
+    expect(getStrategy("concurrent")).toBe(concurrent);
+    expect(getStrategy("concurrent")).not.toBe(sequential);
   });
 
   test("resolves group-chat", () => {

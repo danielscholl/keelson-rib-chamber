@@ -1,6 +1,5 @@
 import { fileURLToPath } from "node:url";
 import type {
-  CanvasView,
   Rib,
   RibAction,
   RibActionResult,
@@ -12,9 +11,10 @@ import { asNonEmptyString, asStringArray, errText, expectView, z } from "@keelso
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
-import type { RoomPublisher, RoomStore } from "./ports.ts";
+import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
+import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
@@ -301,34 +301,11 @@ const rib: Rib = {
     if (sm && run) {
       // Seed a valid empty board so a client subscribing before the first turn
       // gets a well-formed view; every publish replaces it with the live board.
-      let latest: CanvasView = { view: "board", title: "Room", sections: [] };
-      sm.register(ROOM_KEY, () => latest, { validate: expectView(ROOM_KEY, "board") });
-      // Dirty-flag pump (mirrors the base's bound-workflow publish): recompose
-      // coalesces concurrent calls onto one in-flight compose, so a publish that
-      // lands while another is composing would otherwise never broadcast its
-      // board (e.g. a director inject racing a turn's terminal commit). Re-run
-      // once more whenever a publish arrived mid-compose, so the latest board
-      // always reaches the canvas.
-      let composing = false;
-      let dirty = false;
-      const publisher: RoomPublisher = {
-        async publish(view) {
-          latest = view;
-          if (composing) {
-            dirty = true;
-            return;
-          }
-          composing = true;
-          try {
-            do {
-              dirty = false;
-              await sm.recompose(ROOM_KEY);
-            } while (dirty);
-          } finally {
-            composing = false;
-          }
-        },
-      };
+      // The coalescing pump lives in createCoalescingPublisher so it is unit-
+      // tested apart from the rib boot — true concurrent depends on it to not
+      // lose a frame when a parallel round's commit and a director inject overlap.
+      const { publisher, latest } = createCoalescingPublisher(() => sm.recompose(ROOM_KEY));
+      sm.register(ROOM_KEY, latest, { validate: expectView(ROOM_KEY, "board") });
       const roomStore = createFileRoomStore(roomsDir());
       driver = createRoomDriver({
         store: roomStore,
