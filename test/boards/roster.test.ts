@@ -89,4 +89,14 @@ describe("buildRosterBoard", () => {
   test("an empty roster has no action sections at all", () => {
     expect(buildRosterBoard([]).sections.some((s) => s.kind === "actions")).toBe(false);
   });
+
+  test("an empty roster guides the operator to author Minds from Chat", () => {
+    const board = buildRosterBoard([]);
+    const guidance = board.sections.find((s) => s.kind === "rows");
+    expect(guidance?.kind).toBe("rows");
+    if (guidance?.kind !== "rows") throw new Error("no guidance section");
+    expect(guidance.items[0]?.text).toMatch(/Chat/);
+    // No empty cards void left behind.
+    expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
+  });
 });

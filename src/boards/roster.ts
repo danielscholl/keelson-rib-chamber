@@ -25,7 +25,24 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
     };
   });
 
-  const sections: CanvasBoardView["sections"] = [{ kind: "cards", items }];
+  // An empty roster is a new operator's first screen; genesis can't be a baked
+  // button (it needs a freeform brief), so point them at the path that authors
+  // Minds — asking the agent in Chat — instead of leaving a blank board.
+  const sections: CanvasBoardView["sections"] =
+    minds.length === 0
+      ? [
+          {
+            kind: "rows",
+            title: "Get started",
+            items: [
+              {
+                glyph: "brand",
+                text: 'No Minds yet. Open Chat and ask the agent to author a roster — for example, "convene a chamber: a chair, a critic, and a scout." They appear here, ready to start a room.',
+              },
+            ],
+          },
+        ]
+      : [{ kind: "cards", items }];
   // A room needs at least two Minds to be a conversation; bake the participants
   // (all current Minds) into the start action so the payload-required control
   // works from the canvas, not just the API.
