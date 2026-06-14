@@ -1,4 +1,5 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import { GENESIS_STARTERS } from "../starters.ts";
 import type { Mind } from "../types.ts";
 
 // Default room length when starting from the roster (turns, not rounds). The
@@ -27,7 +28,8 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
 
   // An empty roster is a new operator's first screen; genesis can't be a baked
   // button (it needs a freeform brief), so point them at the path that authors
-  // Minds — asking the agent in Chat — instead of leaving a blank board.
+  // Minds — asking the agent in Chat — and offer the starter archetypes as a
+  // ready-made first move (the agent authors each from model-local knowledge).
   const sections: CanvasBoardView["sections"] =
     minds.length === 0
       ? [
@@ -37,8 +39,13 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
             items: [
               {
                 glyph: "brand",
-                text: 'No Minds yet. Open Chat and ask the agent to author a roster — for example, "convene a chamber: a chair, a critic, and a scout." They appear here, ready to start a room.',
+                text: "No Minds yet. Open Chat and ask the agent to convene a roster — describe the minds you want, or start with a preset below (e.g. “convene Moneypenny”).",
               },
+              ...GENESIS_STARTERS.map((s) => ({
+                glyph: "info" as const,
+                text: `${s.name} — ${s.tagline}`,
+                trailing: `convene ${s.slug}`,
+              })),
             ],
           },
         ]

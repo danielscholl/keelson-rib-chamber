@@ -114,4 +114,14 @@ describe("buildRosterBoard", () => {
     // No empty cards void left behind.
     expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
   });
+
+  test("an empty roster lists the starter archetypes as a first move", () => {
+    const board = buildRosterBoard([]);
+    const guidance = board.sections.find((s) => s.kind === "rows");
+    if (guidance?.kind !== "rows") throw new Error("no guidance section");
+    const text = guidance.items.map((i) => i.text).join("\n");
+    expect(text).toMatch(/Moneypenny/);
+    expect(text).toMatch(/Mycroft/);
+    expect(text).toMatch(/Jarvis/);
+  });
 });

@@ -91,15 +91,16 @@ export async function buildSeedFor(
 }
 
 // A seeded doc counts as substance only if, with its markdown headers and the
-// `_(empty)_` / `_(none yet)_` placeholders stripped, anything is left. So a
-// brand-new Mind's template memory.md/rules.md contribute no section.
+// exact `_(empty)_` / `_(none yet)_` seed placeholders stripped, anything is
+// left. So a brand-new Mind's template memory.md/rules.md contribute no section,
+// but real operator content that happens to use an italic parenthetical is kept.
 function substance(doc: string | undefined): string | undefined {
   if (!doc) return undefined;
   const stripped = doc
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("#"))
     .join("\n")
-    .replace(/_\([^)]*\)_/g, "")
+    .replace(/_\((?:empty|none yet)\)_/g, "")
     .trim();
   return stripped.length > 0 ? doc.trim() : undefined;
 }

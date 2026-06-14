@@ -12,6 +12,7 @@ import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
+import { listPersonas, resolvePersona } from "./personas.ts";
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
@@ -350,6 +351,11 @@ const rib: Rib = {
         return { ok: false, error: `unknown action '${action.type}'` };
     }
   },
+
+  // Personas: every Mind is enterable via the harness /mind command. resolvePersona
+  // builds the same seed the roster Enter action does (buildSeedFor).
+  listPersonas: () => listPersonas(),
+  resolvePersona: (slug: string) => resolvePersona(slug),
 
   // Shutdown: stop the auto-advance loops and abort any in-flight turn so a CLI
   // child can't keep running (or publish) after teardown. driver.dispose() sets
