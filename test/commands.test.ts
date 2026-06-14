@@ -76,6 +76,37 @@ describe("invokeCommand", () => {
     expect(text).not.toContain("`");
   });
 
+  it("/mind no-arg list stays under the shared 8000-char message cap for a large roster", async () => {
+    const ws = await mkdtemp(join(tmpdir(), "chamber-bigmind-"));
+    const saved = process.env.KEELSON_WORKSPACE;
+    process.env.KEELSON_WORKSPACE = ws;
+    try {
+      for (let i = 0; i < 40; i++) {
+        await scaffoldMind(
+          mindsDir(),
+          {
+            slug: `m${i}`,
+            name: `Mind ${i}`,
+            role: "r",
+            voice: "v",
+            persona: "x".repeat(280),
+            createdAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+          },
+          "soul",
+        );
+      }
+      const res = await rib.invokeCommand?.("mind", "", ctx);
+      expect(res?.ok).toBe(true);
+      const text = res && "effect" in res && res.effect.effect === "message" ? res.effect.text : "";
+      expect(text.length).toBeLessThanOrEqual(8000);
+      expect(text).toContain("more (type a slug to filter)");
+    } finally {
+      if (saved === undefined) delete process.env.KEELSON_WORKSPACE;
+      else process.env.KEELSON_WORKSPACE = saved;
+      await rm(ws, { recursive: true, force: true });
+    }
+  });
+
   it("/mind with an unknown slug fails", async () => {
     expect(await rib.invokeCommand?.("mind", "ghost", ctx)).toEqual({
       ok: false,

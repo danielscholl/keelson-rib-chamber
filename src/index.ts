@@ -200,6 +200,23 @@ async function completeChamberCommand(
     .map((a) => ({ value: a.slug, description: a.description }));
 }
 
+// The message effect's text is capped by the shared commandEffectSchema (8000);
+// keep the inline list under it so a large roster can't 500 the invoke route.
+const MESSAGE_TEXT_BUDGET = 7000;
+function boundedLines(header: string, rows: readonly string[]): string {
+  const out = [header];
+  let used = header.length;
+  let shown = 0;
+  for (const row of rows) {
+    if (used + 1 + row.length > MESSAGE_TEXT_BUDGET) break;
+    out.push(row);
+    used += 1 + row.length;
+    shown += 1;
+  }
+  if (shown < rows.length) out.push(`  …and ${rows.length - shown} more (type a slug to filter)`);
+  return out.join("\n");
+}
+
 // Run a chamber command server-side and return the closed effect the surface
 // performs. /mind resolves to an open-agent effect (the surface resolves the seed
 // through the agents seam), or an inline list when called with no slug; /genesis
@@ -223,7 +240,7 @@ async function invokeChamberCommand(name: string, arg: string): Promise<CommandI
       );
       return {
         ok: true,
-        effect: { effect: "message", text: ["Minds:", ...rows].join("\n") },
+        effect: { effect: "message", text: boundedLines("Minds:", rows) },
       };
     }
     if (!agents.some((a) => a.slug === value)) {
