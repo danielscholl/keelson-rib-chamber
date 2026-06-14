@@ -1,0 +1,60 @@
+# Dependabot configuration.
+#
+# The rib root and docs/ are two standalone Bun projects (no workspace tree),
+# each with its own package.json + bun.lock. Dependabot's npm ecosystem bumps
+# the package.json files but cannot update Bun's lockfiles, so CI's frozen
+# install would reject the PR. The dependabot-bun-lock.yml workflow closes that
+# gap: on every Dependabot PR it regenerates both lockfiles and pushes them back
+# onto the branch, so the frozen-lockfile install passes without a manual
+# refresh. One npm entry per project — Dependabot scans the `directory` only.
+
+version: 2
+updates:
+  # Root project (Biome, TypeScript, @types/bun)
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      types:
+        patterns:
+          - "@types/*"
+      dev-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Docs site (Astro Starlight)
+  - package-ecosystem: npm
+    directory: "/docs"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - documentation
+    groups:
+      astro:
+        patterns:
+          - "astro"
+          - "@astrojs/*"
+      dev-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions pinned in .github/workflows/
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
