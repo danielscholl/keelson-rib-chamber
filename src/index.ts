@@ -355,7 +355,7 @@ const rib: Rib = {
   // Personas: every Mind is enterable via the harness /mind command. resolvePersona
   // builds the same seed the roster Enter action does (buildSeedFor).
   listPersonas: () => listPersonas(),
-  resolvePersona: (slug) => resolvePersona(slug),
+  resolvePersona: (slug: string) => resolvePersona(slug),
 
   // Shutdown: stop the auto-advance loops and abort any in-flight turn so a CLI
   // child can't keep running (or publish) after teardown. driver.dispose() sets

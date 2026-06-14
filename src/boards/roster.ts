@@ -42,7 +42,7 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
                 text: "No Minds yet. Open Chat and ask the agent to convene a roster — describe the minds you want, or start with a preset below (e.g. “convene Moneypenny”).",
               },
               ...GENESIS_STARTERS.map((s) => ({
-                glyph: "info" as CanvasTone,
+                glyph: "info" as const,
                 text: `${s.name} — ${s.tagline}`,
                 trailing: `convene ${s.slug}`,
               })),
