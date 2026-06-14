@@ -273,7 +273,7 @@ describe("room driver — stop / abort", () => {
 });
 
 describe("room driver — concurrency & model", () => {
-  test("honours the Mind's model pin in the turn request", async () => {
+  test("honours the Mind's model + provider pin in the turn request", async () => {
     const { store } = makeFakeStore();
     const pub = makeFakePublisher();
     const turns = scriptedRunAgentTurn([{ text: "ok" }]);
@@ -281,13 +281,16 @@ describe("room driver — concurrency & model", () => {
       store,
       publisher: pub.publisher,
       runAgentTurn: turns.run,
-      minds: () => [{ slug: "a", name: "Ada", persona: "You are Ada.", model: "claude-x" }],
+      minds: () => [
+        { slug: "a", name: "Ada", persona: "You are Ada.", model: "claude-x", provider: "claude" },
+      ],
       now: fixedClock(),
       newId: seqIds(),
     });
     await driver.start({ ...START, participants: ["a"] });
     await driver.step("demo");
     expect(turns.requests[0]?.model).toBe("claude-x");
+    expect(turns.requests[0]?.provider).toBe("claude");
   });
 
   test("concurrent step() calls do not race (the second is a no-op)", async () => {

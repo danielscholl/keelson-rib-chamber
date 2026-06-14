@@ -13,6 +13,10 @@ export interface Mind {
   name: string;
   persona: string;
   model?: string;
+  // The provider that serves `model`. Pin it alongside `model` so entering the
+  // Mind sends a coherent provider/model pair (a model from one provider can't
+  // run on another); omitted keeps the surface's current provider.
+  provider?: string;
   fallbackModels?: readonly string[];
   // Capability slugs this Mind may invoke — NOT C1 tool descriptors. Omitting
   // tools yields a text-only turn (the room default).

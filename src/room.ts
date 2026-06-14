@@ -460,13 +460,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       aborted = true;
     } else {
       // tools omitted -> text-only (the room default). Mapping Mind.tools slugs to
-      // C1 tool descriptors is deferred. The Mind's model pin is honoured.
+      // C1 tool descriptors is deferred. The Mind's model/provider pin is honoured
+      // (provider alongside model so a cross-provider pin resolves coherently here,
+      // the same as a direct /mind chat — not just against the default provider).
       const turn = deps.runAgentTurn({
         system,
         prompt,
         abortSignal: controller.signal,
         ...(deps.turnCwd ? { cwd: deps.turnCwd } : {}),
         ...(mind.model ? { model: mind.model } : {}),
+        ...(mind.provider ? { provider: mind.provider } : {}),
       });
       try {
         // Draining the stream could drive throttled partial publishes later; for
