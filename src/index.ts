@@ -213,17 +213,17 @@ async function invokeChamberCommand(name: string, arg: string): Promise<CommandI
         ok: true,
         effect: {
           effect: "message",
-          markdown: "No Minds yet — author one with `/genesis <brief>`.",
+          text: "No Minds yet — author one with /genesis <brief>.",
         },
       };
     }
     if (value.length === 0) {
       const rows = agents.map((a) =>
-        a.description ? `- \`${a.slug}\` — ${a.description}` : `- \`${a.slug}\``,
+        a.description ? `  ${a.slug} — ${a.description}` : `  ${a.slug}`,
       );
       return {
         ok: true,
-        effect: { effect: "message", markdown: ["**Minds:**", ...rows].join("\n") },
+        effect: { effect: "message", text: ["Minds:", ...rows].join("\n") },
       };
     }
     if (!agents.some((a) => a.slug === value)) {

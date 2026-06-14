@@ -136,4 +136,9 @@ describe("buildSeedFor", () => {
       "claude-sonnet-4-6",
     );
   });
+
+  test("carries the Mind's provider as providerId when set, omits it otherwise", async () => {
+    expect((await buildSeedFor(root, mind())).providerId).toBeUndefined();
+    expect((await buildSeedFor(root, mind({ provider: "claude" }))).providerId).toBe("claude");
+  });
 });

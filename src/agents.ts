@@ -17,11 +17,16 @@ export async function listAgents(): Promise<{ slug: string; name: string; descri
 }
 
 // Resolve one Mind to a chat seed — the SAME seed the roster Enter action builds
-// (buildSeedFor), so the two entry points can't drift. Carries the Mind's model
-// when set so entering it runs on that model. Null for an unknown slug.
-export async function resolveAgent(
-  slug: string,
-): Promise<{ systemPrompt: string; name: string; openingPrompt: string; model?: string } | null> {
+// (buildSeedFor), so the two entry points can't drift. Carries the Mind's
+// model/provider when set so entering it runs on that model. Null for an unknown
+// slug.
+export async function resolveAgent(slug: string): Promise<{
+  systemPrompt: string;
+  name: string;
+  openingPrompt: string;
+  model?: string;
+  providerId?: string;
+} | null> {
   const mind = (await readMinds(mindsDir())).find((m) => m.slug === slug);
   if (!mind) return null;
   return buildSeedFor(mindsDir(), mind);

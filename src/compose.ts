@@ -82,12 +82,19 @@ export async function composeMindSystemPrompt(mindsRoot: string, mind: Mind): Pr
 export async function buildSeedFor(
   mindsRoot: string,
   mind: Mind,
-): Promise<{ systemPrompt: string; name: string; openingPrompt: string; model?: string }> {
+): Promise<{
+  systemPrompt: string;
+  name: string;
+  openingPrompt: string;
+  model?: string;
+  providerId?: string;
+}> {
   return {
     systemPrompt: await composeMindSystemPrompt(mindsRoot, mind),
     name: mind.name.slice(0, 80),
     openingPrompt: ENTER_OPENING_PROMPT,
     ...(mind.model ? { model: mind.model } : {}),
+    ...(mind.provider ? { providerId: mind.provider } : {}),
   };
 }
 

@@ -64,10 +64,16 @@ describe("invokeCommand", () => {
     });
   });
 
-  it("/mind with no slug lists the Minds inline", async () => {
+  it("/mind with no slug lists the Minds inline as plain text", async () => {
     const res = await rib.invokeCommand?.("mind", "", ctx);
     expect(res?.ok).toBe(true);
     expect(res && "effect" in res && res.effect.effect).toBe("message");
+    // The surfaces render the message verbatim, so it must be plain text — no
+    // markdown bold/code that would show literal `**`/backticks to the user.
+    const text = res && "effect" in res && res.effect.effect === "message" ? res.effect.text : "";
+    expect(text).toContain("Minds:");
+    expect(text).not.toContain("**");
+    expect(text).not.toContain("`");
   });
 
   it("/mind with an unknown slug fails", async () => {

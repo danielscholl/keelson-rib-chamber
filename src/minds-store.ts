@@ -18,6 +18,7 @@ export interface MindRecord {
   voice: string;
   persona: string;
   model?: string;
+  provider?: string;
   tools?: readonly string[];
   createdAt: string;
 }
@@ -80,6 +81,7 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
         persona: rec.persona,
         createdAt: typeof rec.createdAt === "string" ? rec.createdAt : "",
         ...(typeof rec.model === "string" && rec.model ? { model: rec.model } : {}),
+        ...(typeof rec.provider === "string" && rec.provider ? { provider: rec.provider } : {}),
         ...(Array.isArray(rec.tools) && rec.tools.length > 0
           ? { tools: rec.tools.filter((t): t is string => typeof t === "string") }
           : {}),
@@ -95,6 +97,7 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
     name: r.name,
     persona: r.persona,
     ...(r.model ? { model: r.model } : {}),
+    ...(r.provider ? { provider: r.provider } : {}),
     ...(r.tools && r.tools.length > 0 ? { tools: r.tools } : {}),
   }));
 }
