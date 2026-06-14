@@ -8,6 +8,7 @@ import type {
   ToolDefinition,
 } from "@keelson/shared";
 import { asNonEmptyString, asStringArray, errText, expectView, z } from "@keelson/shared";
+import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
@@ -335,6 +336,8 @@ const rib: Rib = {
   // advance on their own (the auto-advance loop), so there is no manual step.
   onAction: (action) => {
     switch (action.type) {
+      case "enter-mind":
+        return enterMindAction(action);
       case "retire":
         return retireAction(action);
       case "room-start":
@@ -729,6 +732,24 @@ function isSafeSlug(slug: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+// Open a mind as a seeded chat: compose its soul into a system prompt and hand
+// the harness an "open-chat" directive (the generic seam the SPA interprets to
+// start a fresh seeded conversation). Read-only against minds/ — resolving via
+// resolveMinds() returns the unknown-mind error on a retire-then-enter race.
+async function enterMindAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const slug = asNonEmptyString(payload.slug);
+  if (!slug) return { ok: false, error: "enter-mind requires payload { slug }" };
+  try {
+    const mind = (await resolveMinds()).find((m) => m.slug === slug);
+    if (!mind) return { ok: false, error: `unknown Mind: ${slug}` };
+    const seed = await buildSeedFor(mindsDir(), mind);
+    return { ok: true, data: { effect: "open-chat", seed } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
   }
 }
 
