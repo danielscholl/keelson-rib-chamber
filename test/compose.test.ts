@@ -129,4 +129,11 @@ describe("buildSeedFor", () => {
     const seed = await buildSeedFor(root, mind({ name: "N".repeat(120) }));
     expect(seed.name.length).toBe(80);
   });
+
+  test("carries the Mind's model when set, omits it otherwise", async () => {
+    expect((await buildSeedFor(root, mind())).model).toBeUndefined();
+    expect((await buildSeedFor(root, mind({ model: "claude-sonnet-4-6" }))).model).toBe(
+      "claude-sonnet-4-6",
+    );
+  });
 });

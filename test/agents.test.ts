@@ -2,15 +2,15 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { listAgents, resolveAgent } from "../src/agents.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir } from "../src/paths.ts";
-import { listPersonas, resolvePersona } from "../src/personas.ts";
 
 let workspace: string;
 let prev: string | undefined;
 
 beforeAll(async () => {
-  workspace = await mkdtemp(join(tmpdir(), "chamber-personas-"));
+  workspace = await mkdtemp(join(tmpdir(), "chamber-agents-"));
   prev = process.env.KEELSON_WORKSPACE;
   process.env.KEELSON_WORKSPACE = workspace;
   await scaffoldMind(
@@ -45,18 +45,18 @@ afterAll(async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
-describe("listPersonas", () => {
+describe("listAgents", () => {
   it("maps each Mind to slug/name/description, newest first", async () => {
-    const personas = await listPersonas();
-    expect(personas).toEqual([
+    const agents = await listAgents();
+    expect(agents).toEqual([
       { slug: "bo", name: "Bo", description: "Ships things." },
       { slug: "ada", name: "Ada", description: "Digs up facts." },
     ]);
   });
 });
 
-describe("listPersonas clamping", () => {
-  it("clamps an over-long name and description to the persona summary caps", async () => {
+describe("listAgents clamping", () => {
+  it("clamps an over-long name and description to the agent summary caps", async () => {
     await scaffoldMind(
       mindsDir(),
       {
@@ -69,15 +69,15 @@ describe("listPersonas clamping", () => {
       },
       "Verbose soul.",
     );
-    const p = (await listPersonas()).find((x) => x.slug === "verbose");
-    expect(p?.name.length).toBe(80);
-    expect(p?.description.length).toBe(280);
+    const a = (await listAgents()).find((x) => x.slug === "verbose");
+    expect(a?.name.length).toBe(80);
+    expect(a?.description.length).toBe(280);
   });
 });
 
-describe("resolvePersona", () => {
+describe("resolveAgent", () => {
   it("resolves a known slug to a seed carrying the soul", async () => {
-    const seed = await resolvePersona("ada");
+    const seed = await resolveAgent("ada");
     expect(seed).not.toBeNull();
     expect(seed?.name).toBe("Ada");
     expect(seed?.systemPrompt).toContain("relentless researcher");
@@ -85,11 +85,29 @@ describe("resolvePersona", () => {
     expect(seed?.openingPrompt.length).toBeGreaterThan(0);
   });
 
+  it("carries the Mind's model into the seed when set, omits it otherwise", async () => {
+    await scaffoldMind(
+      mindsDir(),
+      {
+        slug: "tuned",
+        name: "Tuned",
+        role: "r",
+        voice: "v",
+        persona: "Runs on a pinned model.",
+        model: "claude-sonnet-4-6",
+        createdAt: "2026-04-01T00:00:00.000Z",
+      },
+      "Tuned soul.",
+    );
+    expect((await resolveAgent("tuned"))?.model).toBe("claude-sonnet-4-6");
+    expect((await resolveAgent("ada"))?.model).toBeUndefined();
+  });
+
   it("returns null for an unknown slug", async () => {
-    expect(await resolvePersona("ghost")).toBeNull();
+    expect(await resolveAgent("ghost")).toBeNull();
   });
 
   it("returns null for an unsafe slug without throwing", async () => {
-    expect(await resolvePersona("../escape")).toBeNull();
+    expect(await resolveAgent("../escape")).toBeNull();
   });
 });

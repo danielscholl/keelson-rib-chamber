@@ -1,18 +1,21 @@
 import { fileURLToPath } from "node:url";
 import type {
+  CommandCompletion,
+  CommandInvokeResult,
   Rib,
   RibAction,
   RibActionResult,
+  RibCommandDescriptor,
   RibContext,
   ToolContext,
   ToolDefinition,
 } from "@keelson/shared";
 import { asNonEmptyString, asStringArray, errText, expectView, z } from "@keelson/shared";
+import { listAgents, resolveAgent } from "./agents.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
-import { listPersonas, resolvePersona } from "./personas.ts";
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
@@ -168,6 +171,77 @@ Compose:
 - tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
 
 Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
+
+// The rib's slash commands for the harness command registry (GET /api/commands).
+// /mind opens a Mind as a seeded chat; /genesis authors a new Mind from a brief.
+// All chamber vocabulary lives here — the harness knows only "a rib offered a
+// command" and performs the closed effect the invoke returns.
+const CHAMBER_COMMANDS: readonly RibCommandDescriptor[] = [
+  {
+    name: "mind",
+    description: "Open a Mind as a seeded chat",
+    argument: { hint: "<slug>", completes: true },
+  },
+  {
+    name: "genesis",
+    description: "Author a new Mind from a freeform brief",
+    argument: { hint: "<brief>" },
+  },
+];
+
+// Slug type-ahead for /mind — the Minds on the roster, filtered by prefix.
+async function completeChamberCommand(
+  name: string,
+  prefix: string,
+): Promise<readonly CommandCompletion[]> {
+  if (name !== "mind") return [];
+  return (await listAgents())
+    .filter((a) => a.slug.startsWith(prefix))
+    .map((a) => ({ value: a.slug, description: a.description }));
+}
+
+// Run a chamber command server-side and return the closed effect the surface
+// performs. /mind resolves to an open-agent effect (the surface resolves the seed
+// through the agents seam), or an inline list when called with no slug; /genesis
+// to a run-workflow effect (chamber-genesis, brief as $ARGUMENTS).
+async function invokeChamberCommand(name: string, arg: string): Promise<CommandInvokeResult> {
+  const value = arg.trim();
+  if (name === "mind") {
+    const agents = await listAgents();
+    if (agents.length === 0) {
+      return {
+        ok: true,
+        effect: {
+          effect: "message",
+          markdown: "No Minds yet — author one with `/genesis <brief>`.",
+        },
+      };
+    }
+    if (value.length === 0) {
+      const rows = agents.map((a) =>
+        a.description ? `- \`${a.slug}\` — ${a.description}` : `- \`${a.slug}\``,
+      );
+      return {
+        ok: true,
+        effect: { effect: "message", markdown: ["**Minds:**", ...rows].join("\n") },
+      };
+    }
+    if (!agents.some((a) => a.slug === value)) {
+      return { ok: false, error: `No Mind "${value}".` };
+    }
+    return { ok: true, effect: { effect: "open-agent", ribId: "chamber", slug: value } };
+  }
+  if (name === "genesis") {
+    if (value.length === 0) {
+      return { ok: false, error: "usage: /genesis <brief> — describe the agent to author" };
+    }
+    return {
+      ok: true,
+      effect: { effect: "run-workflow", workflow: "chamber-genesis", args: value },
+    };
+  }
+  return { ok: false, error: `unknown command: ${name}` };
+}
 
 const rib: Rib = {
   id: "chamber",
@@ -352,10 +426,18 @@ const rib: Rib = {
     }
   },
 
-  // Personas: every Mind is enterable via the harness /mind command. resolvePersona
-  // builds the same seed the roster Enter action does (buildSeedFor).
-  listPersonas: () => listPersonas(),
-  resolvePersona: (slug: string) => resolvePersona(slug),
+  // Agents: every Mind is enterable as a keelson agent (GET /api/agents, the /mind
+  // command's source). resolveAgent builds the same seed the roster Enter action
+  // does (buildSeedFor), so the two entry points can't drift.
+  listAgents: () => listAgents(),
+  resolveAgent: (slug: string) => resolveAgent(slug),
+
+  // Slash commands: /mind opens a Mind as a seeded chat (resolved through the
+  // agents seam via the open-agent effect); /genesis authors a new Mind by running
+  // the chamber-genesis workflow with the brief as $ARGUMENTS.
+  listCommands: () => CHAMBER_COMMANDS,
+  completeCommand: (name, prefix) => completeChamberCommand(name, prefix),
+  invokeCommand: (name, arg) => invokeChamberCommand(name, arg),
 
   // Shutdown: stop the auto-advance loops and abort any in-flight turn so a CLI
   // child can't keep running (or publish) after teardown. driver.dispose() sets
