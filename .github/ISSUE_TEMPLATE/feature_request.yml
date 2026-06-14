@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a capability or change to the Chamber rib.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Chamber is the multi-agent layer for Keelson. Genesis, rooms, and lenses
+        all live in this rib; the harness stays domain-free. Propose your idea here
+        and we'll figure out where it fits.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that's hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like to see. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the rib does this touch?
+      options:
+        - Genesis (authoring Minds)
+        - Rooms (strategies / driver)
+        - Lenses (agent-authored boards)
+        - Chamber surface / canvas
+        - Chat tools / commands
+        - Docs
+        - Not sure / other
+    validations:
+      required: true
