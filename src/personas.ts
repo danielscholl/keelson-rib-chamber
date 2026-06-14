@@ -7,10 +7,13 @@ import { mindsDir } from "./paths.ts";
 export async function listPersonas(): Promise<
   { slug: string; name: string; description: string }[]
 > {
+  // Clamp to the shared personaSummary caps (name 80, description 280): the host
+  // DROPS a whole summary that fails validation, so an over-long persona would
+  // silently vanish from /mind while still being enterable from the roster.
   return (await readMinds(mindsDir())).map((m) => ({
     slug: m.slug,
-    name: m.name,
-    description: m.persona,
+    name: m.name.slice(0, 80),
+    description: m.persona.slice(0, 280),
   }));
 }
 

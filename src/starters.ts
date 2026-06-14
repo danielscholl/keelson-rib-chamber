@@ -48,7 +48,3 @@ export const GENESIS_STARTERS: readonly GenesisStarter[] = [
   MYCROFT_STARTER,
   JARVIS_STARTER,
 ] as const;
-
-export function findStarterBySlug(slug: string): GenesisStarter | undefined {
-  return GENESIS_STARTERS.find((s) => s.slug === slug);
-}

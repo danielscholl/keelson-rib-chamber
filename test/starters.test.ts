@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assertSafeSlug } from "../src/genesis.ts";
-import { findStarterBySlug, GENESIS_STARTERS } from "../src/starters.ts";
+import { GENESIS_STARTERS } from "../src/starters.ts";
 
 describe("genesis starters", () => {
   test("ships the three archetypes with safe slugs", () => {
@@ -17,10 +17,5 @@ describe("genesis starters", () => {
       expect(s.voiceDescription).toMatch(/do not copy a prebaked template/i);
       expect(s.voiceDescription).toMatch(/model-local knowledge/i);
     }
-  });
-
-  test("findStarterBySlug resolves a known slug and misses cleanly", () => {
-    expect(findStarterBySlug("mycroft")?.name).toBe("Mycroft");
-    expect(findStarterBySlug("ghost")).toBeUndefined();
   });
 });

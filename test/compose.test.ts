@@ -57,6 +57,17 @@ describe("composeMindSystemPrompt", () => {
     expect(prompt).toContain("## Recent log");
   });
 
+  test("keeps real memory content even when it uses an italic parenthetical", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity body.");
+    await writeFile(
+      join(root, "scout", "memory.md"),
+      "# Working memory\n\n_(launch ships Friday)_",
+    );
+    const prompt = await composeMindSystemPrompt(root, mind());
+    expect(prompt).toContain("## Durable memory");
+    expect(prompt).toContain("launch ships Friday");
+  });
+
   test("includes memory and rules once they carry substance", async () => {
     await scaffoldMind(root, record(), "# Scout\n\nIdentity body.");
     await writeFile(

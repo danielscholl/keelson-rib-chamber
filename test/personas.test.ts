@@ -55,6 +55,26 @@ describe("listPersonas", () => {
   });
 });
 
+describe("listPersonas clamping", () => {
+  it("clamps an over-long name and description to the persona summary caps", async () => {
+    await scaffoldMind(
+      mindsDir(),
+      {
+        slug: "verbose",
+        name: "N".repeat(120),
+        role: "r",
+        voice: "v",
+        persona: "p".repeat(400),
+        createdAt: "2026-03-01T00:00:00.000Z",
+      },
+      "Verbose soul.",
+    );
+    const p = (await listPersonas()).find((x) => x.slug === "verbose");
+    expect(p?.name.length).toBe(80);
+    expect(p?.description.length).toBe(280);
+  });
+});
+
 describe("resolvePersona", () => {
   it("resolves a known slug to a seed carrying the soul", async () => {
     const seed = await resolvePersona("ada");
