@@ -75,18 +75,19 @@ export async function composeMindSystemPrompt(mindsRoot: string, mind: Mind): Pr
   return out.length > MIND_PROMPT_BUDGET ? out.slice(0, MIND_PROMPT_BUDGET) : out;
 }
 
-// The seed both entry points (the roster Enter action and the /mind persona
+// The seed both entry points (the roster Enter action and the /mind agent
 // resolver) hand to the harness, so the two can never drift. Structurally the
 // shared OpenChatSeed; chamber emits it as opaque action data, so it needn't
-// import the type.
+// import the type. Carries the Mind's model when set so a seeded chat runs on it.
 export async function buildSeedFor(
   mindsRoot: string,
   mind: Mind,
-): Promise<{ systemPrompt: string; name: string; openingPrompt: string }> {
+): Promise<{ systemPrompt: string; name: string; openingPrompt: string; model?: string }> {
   return {
     systemPrompt: await composeMindSystemPrompt(mindsRoot, mind),
     name: mind.name.slice(0, 80),
     openingPrompt: ENTER_OPENING_PROMPT,
+    ...(mind.model ? { model: mind.model } : {}),
   };
 }
 
