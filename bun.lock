@@ -9,6 +9,12 @@
         "@types/bun": "latest",
         "typescript": "^6.0.3",
       },
+      "peerDependencies": {
+        "@keelson/shared": "^0.1.0",
+      },
+      "optionalPeers": [
+        "@keelson/shared",
+      ],
     },
   },
   "packages": {
