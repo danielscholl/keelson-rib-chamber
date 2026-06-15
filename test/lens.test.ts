@@ -36,8 +36,8 @@ describe("slot allocator (LRU)", () => {
     const a = createSlotAllocator(3);
     a.allocate("x");
     a.allocate("y");
-    expect(a.allocate("x")).toBe(0);
-    expect(a.assignments().size).toBe(2);
+    expect(a.allocate("x")).toBe(0); // reused, not displaced
+    expect(a.slotOf("y")).toBe(1);
   });
 
   test("evicts the least-recently-authored when the pool is full", () => {
@@ -114,5 +114,21 @@ describe("lens registry", () => {
     expect((await reg.publish("a", board("A1"))).slot).toBe(0);
     expect((await reg.publish("b", board("B"))).slot).toBe(1);
     expect((await reg.publish("a", board("A2"))).slot).toBe(0);
+  });
+
+  test("fails closed on a board the publish gate rejects, without consuming a slot", async () => {
+    const { sm } = fakeSnapshotManager();
+    const reg = createLensRegistry(sm);
+    // Duplicate table column keys pass canvasBoardViewSchema (the member schema)
+    // but fail canvasViewSchema's uniqueness refine — the board the manager would
+    // otherwise silently drop at recompose.
+    const dupColumns = {
+      view: "board",
+      title: "Dup",
+      sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
+    } as unknown as CanvasView;
+    await expect(reg.publish("bad", dupColumns)).rejects.toThrow();
+    // The rejected board never allocated a slot — a later valid lens still takes 0.
+    expect((await reg.publish("good", board("Good"))).slot).toBe(0);
   });
 });

@@ -171,6 +171,24 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(true);
   });
 
+  it("chamber_emit_lens fails closed on a board that fails the publish-time gate", async () => {
+    // Duplicate table column keys pass the board member schema but fail the canvas
+    // union's uniqueness refine — the tool must report the error, not a silent ok.
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      {
+        id: "dup",
+        board: {
+          view: "board",
+          title: "Dup",
+          sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
+        },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+  });
+
   it("advertises start/say/stop as state-changing and start as requiring confirmation", () => {
     expect(tool("chamber_room_status").state_changing ?? false).toBe(false);
     expect(tool("chamber_room_start").state_changing).toBe(true);

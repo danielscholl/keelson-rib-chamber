@@ -46,13 +46,11 @@ export function emptyLensBoard(): CanvasView {
 export interface SlotAllocator {
   allocate(id: string): number;
   slotOf(id: string): number | undefined;
-  assignments(): ReadonlyMap<string, number>;
 }
 
 export function createSlotAllocator(count: number): SlotAllocator {
   if (count < 1) throw new Error("lens slot pool needs at least one slot");
   const idToSlot = new Map<string, number>();
-  const slotToId: (string | undefined)[] = Array.from({ length: count }, () => undefined);
   // Least-recently-authored first; the eviction victim is always lru[0].
   const lru: string[] = [];
   const touch = (id: string): void => {
@@ -67,8 +65,12 @@ export function createSlotAllocator(count: number): SlotAllocator {
         touch(id);
         return existing;
       }
-      let slot = slotToId.indexOf(undefined);
-      if (slot === -1) {
+      let slot: number;
+      if (idToSlot.size < count) {
+        // Slots fill densely from 0 and never free (eviction reuses the victim's
+        // slot), so the next free index is exactly the current occupancy count.
+        slot = idToSlot.size;
+      } else {
         const victim = lru.shift();
         if (victim === undefined) throw new Error("lens allocator: full pool with empty LRU");
         const victimSlot = idToSlot.get(victim);
@@ -77,12 +79,10 @@ export function createSlotAllocator(count: number): SlotAllocator {
         idToSlot.delete(victim);
       }
       idToSlot.set(id, slot);
-      slotToId[slot] = id;
       touch(id);
       return slot;
     },
     slotOf: (id) => idToSlot.get(id),
-    assignments: () => new Map(idToSlot),
   };
 }
 
@@ -108,6 +108,12 @@ export function createLensRegistry(sm: SnapshotManager): LensRegistry {
   for (const key of LENS_KEYS) void sm.recompose(key);
   return {
     async publish(id, board) {
+      // The manager swallows a validate throw at recompose (keeps the prior frame,
+      // broadcasts nothing), so a board that fails the slot's expectView gate would
+      // be dropped while the caller is told it published. Validate against the same
+      // gate here, and BEFORE allocating, so a board we can't render fails closed
+      // loudly and never evicts a live lens for nothing.
+      expectView("rib:chamber:lens", "board")(board);
       const slot = allocator.allocate(id);
       const publisher = publishers[slot];
       if (!publisher) throw new Error(`lens slot ${slot} has no publisher`);

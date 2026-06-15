@@ -59,9 +59,15 @@ manifest re-fetch.
 - **No new publish abstraction.** Reuse `createCoalescingPublisher` with a
   per-slot seed (its only change: an optional `seed` argument; the room call site
   and its test are untouched).
-- **Fail closed twice.** The tool parses the board with `canvasBoardViewSchema`; the
-  slot's `expectView` guard re-validates before broadcast, so a malformed board
-  never reaches a renderer.
+- **Fail closed, loudly.** The tool parses the board with `canvasBoardViewSchema`
+  (the model-facing shape), then `createLensRegistry.publish` re-validates through
+  the full `canvasViewSchema` gate (`expectView`) *before* allocating a slot. The
+  union gate carries the uniqueness refine the member schema lacks; without the
+  eager check, a board that passes the member schema but fails the union (e.g. a
+  table section with duplicate column keys) would be silently dropped at
+  `recompose` — the manager swallows the validate throw and keeps the prior frame —
+  while the caller is told it published. Validating before allocate also stops a bad
+  board from evicting a live lens for nothing.
 - **`id` is a routing key, not a path.** Lenses publish to fixed slot keys, never an
   `id`-named key on disk, so `id` needs no filesystem-safety guard (unlike Mind
   slugs).
