@@ -152,17 +152,16 @@ describe("chamber room-control chat tools", () => {
     ]);
   });
 
-  it("chamber_emit_lens publishes a board and reports its slot", async () => {
+  it("chamber_emit_lens publishes a board and reports its key", async () => {
     const t = makeToolCtx();
     await tool("chamber_emit_lens").execute(
       { id: "lens-demo", board: { view: "board", title: "Demo", sections: [] } },
       t.ctx,
     );
     expect(t.errored()).toBe(false);
-    const out = JSON.parse(t.out()) as { ok: boolean; slot: number; key: string };
+    const out = JSON.parse(t.out()) as { ok: boolean; key: string };
     expect(out.ok).toBe(true);
-    expect(typeof out.slot).toBe("number");
-    expect(out.key).toMatch(/^rib:chamber:lens:\d+$/);
+    expect(out.key).toBe("rib:chamber:lens:lens-demo");
   });
 
   it("chamber_emit_lens fails closed on a non-board payload", async () => {
@@ -189,7 +188,7 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(true);
   });
 
-  it("chamber_emit_lens canonicalizes the id so one subject maps to one slot", async () => {
+  it("chamber_emit_lens canonicalizes the id so one subject maps to one key", async () => {
     const spaced = makeToolCtx();
     await tool("chamber_emit_lens").execute(
       { id: "Release Risks", board: { view: "board", title: "R1", sections: [] } },
@@ -200,9 +199,11 @@ describe("chamber room-control chat tools", () => {
       { id: "release-risks", board: { view: "board", title: "R2", sections: [] } },
       kebab.ctx,
     );
-    const slotA = (JSON.parse(spaced.out()) as { slot: number }).slot;
-    const slotB = (JSON.parse(kebab.out()) as { slot: number }).slot;
-    expect(slotA).toBe(slotB); // "Release Risks" and "release-risks" canonicalize to one slot
+    const keyA = (JSON.parse(spaced.out()) as { key: string }).key;
+    const keyB = (JSON.parse(kebab.out()) as { key: string }).key;
+    // "Release Risks" and "release-risks" canonicalize to one key, one panel.
+    expect(keyA).toBe(keyB);
+    expect(keyA).toBe("rib:chamber:lens:release-risks");
   });
 
   it("chamber_emit_lens rejects an id with no usable characters", async () => {

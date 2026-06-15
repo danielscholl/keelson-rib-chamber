@@ -1,27 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import type { CanvasBoardView, SnapshotManager } from "@keelson/shared";
+import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
 import {
+  CHAMBER_SURFACE_ID,
   canonicalLensId,
   createLensRegistry,
-  createSlotAllocator,
   emptyLensBoard,
-  LENS_KEYS,
-  LENS_SLOT_COUNT,
   lensKey,
 } from "../src/lens.ts";
 
 const board = (title: string): CanvasBoardView => ({ view: "board", title, sections: [] });
 
 describe("lens keys + placeholder", () => {
-  test("declares LENS_SLOT_COUNT namespaced keys", () => {
-    expect(LENS_KEYS).toHaveLength(LENS_SLOT_COUNT);
-    expect(LENS_KEYS).toEqual([0, 1, 2].map(lensKey));
-    for (const key of LENS_KEYS) expect(key).toMatch(/^rib:chamber:lens:\d+$/);
+  test("keys a lens by its subject id under the chamber namespace", () => {
+    expect(lensKey("release-risks")).toBe("rib:chamber:lens:release-risks");
   });
 
   test("emptyLensBoard is a renderable board view", () => {
-    expect(() => expectView(lensKey(0), "board")(emptyLensBoard())).not.toThrow();
+    expect(() => expectView(lensKey("x"), "board")(emptyLensBoard())).not.toThrow();
   });
 });
 
@@ -42,60 +38,24 @@ describe("canonicalLensId", () => {
   });
 });
 
-describe("slot allocator (LRU)", () => {
-  test("fills free slots in order", () => {
-    const a = createSlotAllocator(3);
-    expect(a.allocate("x")).toBe(0);
-    expect(a.allocate("y")).toBe(1);
-    expect(a.allocate("z")).toBe(2);
-  });
-
-  test("re-allocating a mapped id reuses its slot", () => {
-    const a = createSlotAllocator(3);
-    a.allocate("x");
-    a.allocate("y");
-    expect(a.allocate("x")).toBe(0); // reused, not displaced
-    expect(a.slotOf("y")).toBe(1);
-  });
-
-  test("evicts the least-recently-authored when the pool is full", () => {
-    const a = createSlotAllocator(2);
-    expect(a.allocate("x")).toBe(0);
-    expect(a.allocate("y")).toBe(1);
-    expect(a.allocate("z")).toBe(0); // full -> evict x (LRU) -> reuse slot 0
-    expect(a.slotOf("x")).toBeUndefined();
-    expect(a.slotOf("z")).toBe(0);
-    expect(a.slotOf("y")).toBe(1);
-  });
-
-  test("re-authoring refreshes recency so the true LRU is evicted", () => {
-    const a = createSlotAllocator(2);
-    a.allocate("x"); // slot 0
-    a.allocate("y"); // slot 1
-    a.allocate("x"); // touch x -> y is now least-recent
-    expect(a.allocate("z")).toBe(1); // evicts y, not x
-    expect(a.slotOf("x")).toBe(0);
-    expect(a.slotOf("y")).toBeUndefined();
-  });
-
-  test("rejects a zero-slot pool", () => {
-    expect(() => createSlotAllocator(0)).toThrow();
-  });
-});
-
 describe("lens registry", () => {
   // A SnapshotManager double that runs the registered composer and its validator on
   // recompose, capturing the validated frame — so a published board is proven to
-  // flow through the same fail-closed gate the real manager applies.
+  // flow through the same fail-closed gate the real manager applies. register throws
+  // on a duplicate key like the real one, so a leaked registration surfaces loudly.
   function fakeSnapshotManager() {
     const composers = new Map<string, () => unknown>();
     const validators = new Map<string, (d: unknown) => unknown>();
     const broadcasts: { key: string; view: unknown }[] = [];
     const sm = {
       register(key: string, compose: () => unknown, opts?: { validate?: (d: unknown) => unknown }) {
+        if (composers.has(key)) throw new Error(`duplicate key ${key}`);
         composers.set(key, compose);
         if (opts?.validate) validators.set(key, opts.validate);
-        return () => composers.delete(key);
+        return () => {
+          composers.delete(key);
+          validators.delete(key);
+        };
       },
       async recompose(key: string) {
         const composed = await composers.get(key)?.();
@@ -110,35 +70,61 @@ describe("lens registry", () => {
     return { sm, broadcasts, keys: () => [...composers.keys()] };
   }
 
-  test("registers every lens slot key", () => {
-    const { sm, keys } = fakeSnapshotManager();
-    createLensRegistry(sm);
-    for (const key of LENS_KEYS) expect(keys()).toContain(key);
+  // A registerRegion double recording each call and its unregister invocations.
+  function fakeRegisterRegion() {
+    const calls: { surfaceId: string; region: RibSurfaceRegion }[] = [];
+    let unregisters = 0;
+    return {
+      register: (surfaceId: string, region: RibSurfaceRegion) => {
+        calls.push({ surfaceId, region });
+        return () => {
+          unregisters += 1;
+        };
+      },
+      calls,
+      unregisters: () => unregisters,
+    };
+  }
+
+  test("registers the snapshot key and a grouped surface region on first publish", async () => {
+    const { sm, broadcasts, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register);
+    const { key } = await reg.publish("findings", board("Findings"));
+    expect(key).toBe(lensKey("findings"));
+    expect(keys()).toContain(lensKey("findings"));
+    expect(region.calls).toHaveLength(1);
+    expect(region.calls[0]?.surfaceId).toBe(CHAMBER_SURFACE_ID);
+    expect(region.calls[0]?.region.key).toBe(lensKey("findings"));
+    expect(region.calls[0]?.region.group).toBe("lens");
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("findings"), view: board("Findings") });
   });
 
-  test("publishes a board to the id's slot and broadcasts it", async () => {
+  test("re-authoring the same id updates the panel without re-registering", async () => {
     const { sm, broadcasts } = fakeSnapshotManager();
-    const reg = createLensRegistry(sm);
-    const { slot } = await reg.publish("findings", board("Findings"));
-    expect(slot).toBe(0);
-    const last = broadcasts.at(-1);
-    expect(last?.key).toBe(lensKey(0));
-    expect(last?.view).toEqual(board("Findings"));
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register);
+    await reg.publish("a", board("A1"));
+    await reg.publish("a", board("A2"));
+    expect(region.calls).toHaveLength(1); // region added once, not per publish
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A2") });
   });
 
-  test("re-authoring the same id updates the same slot", async () => {
-    const { sm } = fakeSnapshotManager();
-    const reg = createLensRegistry(sm);
-    expect((await reg.publish("a", board("A1"))).slot).toBe(0);
-    expect((await reg.publish("b", board("B"))).slot).toBe(1);
-    expect((await reg.publish("a", board("A2"))).slot).toBe(0);
+  test("authors distinct subjects as distinct panels with no eviction", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register);
+    for (const id of ["a", "b", "c", "d"]) await reg.publish(id, board(id));
+    expect(keys()).toEqual(["a", "b", "c", "d"].map(lensKey));
+    expect(region.calls.map((c) => c.region.key)).toEqual(["a", "b", "c", "d"].map(lensKey));
   });
 
-  test("fails closed on a board the publish gate rejects, without consuming a slot", async () => {
-    const { sm } = fakeSnapshotManager();
-    const reg = createLensRegistry(sm);
-    // Duplicate table column keys pass canvasBoardViewSchema (the member schema)
-    // but fail canvasViewSchema's uniqueness refine — the board the manager would
+  test("fails closed on a board the publish gate rejects, registering nothing", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register);
+    // Duplicate table column keys pass canvasBoardViewSchema (the member schema) but
+    // fail canvasViewSchema's uniqueness refine — the board the manager would
     // otherwise silently drop at recompose.
     const dupColumns = {
       view: "board",
@@ -146,61 +132,41 @@ describe("lens registry", () => {
       sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
     } as unknown as CanvasBoardView;
     await expect(reg.publish("bad", dupColumns)).rejects.toThrow();
-    // The rejected board never allocated a slot — a later valid lens still takes 0.
-    expect((await reg.publish("good", board("Good"))).slot).toBe(0);
+    expect(keys()).toEqual([]);
+    expect(region.calls).toHaveLength(0);
+    // A later valid lens still registers cleanly at its own key.
+    await reg.publish("good", board("Good"));
+    expect(keys()).toEqual([lensKey("good")]);
   });
 
-  test("publishing more ids than slots evicts the LRU slot and broadcasts the new board", async () => {
-    const { sm, broadcasts } = fakeSnapshotManager();
-    const reg = createLensRegistry(sm);
-    // Fill every slot, oldest first.
-    for (let i = 0; i < LENS_SLOT_COUNT; i++) await reg.publish(`fill-${i}`, board(`F${i}`));
-    // One more id evicts the LRU (fill-0, in slot 0) and reuses its slot.
-    expect((await reg.publish("overflow", board("Overflow"))).slot).toBe(0);
-    const slot0 = broadcasts.filter((b) => b.key === lensKey(0)).at(-1);
-    expect(slot0?.view).toEqual(board("Overflow"));
+  test("dispose releases both the snapshot keys and the surface regions", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register);
+    await reg.publish("a", board("A"));
+    await reg.publish("b", board("B"));
+    reg.dispose();
+    expect(keys()).toEqual([]);
+    expect(region.unregisters()).toBe(2);
+    // The keys are free, so a fresh registry on the same manager re-registers cleanly.
+    const reg2 = createLensRegistry(sm, region.register);
+    await expect(reg2.publish("a", board("A"))).resolves.toEqual({ key: lensKey("a") });
   });
 
-  test("dispose releases the slot keys so a fresh pool can re-register", () => {
-    // A strict manager that rejects duplicate keys, like the real SnapshotManager.
-    const composers = new Map<string, () => unknown>();
-    const sm = {
-      register(key: string, compose: () => unknown) {
-        if (composers.has(key)) throw new Error(`duplicate key ${key}`);
-        composers.set(key, compose);
-        return () => composers.delete(key);
-      },
-      recompose: async () => undefined,
-      latest: () => undefined,
-      keys: () => [...composers.keys()],
-      dispose: async () => {},
-    } as unknown as SnapshotManager;
-    const first = createLensRegistry(sm);
-    // A second pool on the same manager, before releasing the first, hits the
-    // duplicate-key guard.
-    expect(() => createLensRegistry(sm)).toThrow();
-    // After dispose the keys are free and a fresh pool registers cleanly.
-    first.dispose();
-    expect(() => createLensRegistry(sm)).not.toThrow();
+  test("publishes without a panel when the registerRegion seam is absent", async () => {
+    const { sm, broadcasts, keys } = fakeSnapshotManager();
+    const reg = createLensRegistry(sm); // older harness: no registerRegion
+    await expect(reg.publish("x", board("X"))).resolves.toEqual({ key: lensKey("x") });
+    expect(keys()).toEqual([lensKey("x")]);
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("x"), view: board("X") });
   });
 
-  test("rolls back earlier registrations if a later register throws", () => {
-    const composers = new Map<string, () => unknown>();
-    let calls = 0;
-    const sm = {
-      register(key: string, compose: () => unknown) {
-        calls += 1;
-        if (calls === 2) throw new Error("boom on the 2nd key");
-        composers.set(key, compose);
-        return () => composers.delete(key);
-      },
-      recompose: async () => undefined,
-      latest: () => undefined,
-      keys: () => [...composers.keys()],
-      dispose: async () => {},
-    } as unknown as SnapshotManager;
-    expect(() => createLensRegistry(sm)).toThrow("boom");
-    // The first key's registration was rolled back — nothing leaked.
-    expect(composers.size).toBe(0);
+  test("releases the snapshot registration if registerRegion throws", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const reg = createLensRegistry(sm, () => {
+      throw new Error("region limit reached");
+    });
+    await expect(reg.publish("x", board("X"))).rejects.toThrow(/region limit/);
+    expect(keys()).toEqual([]); // no leaked snapshot key
   });
 });

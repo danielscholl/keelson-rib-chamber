@@ -23,12 +23,11 @@ import { listAgents, resolveAgent } from "./agents.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import {
+  CHAMBER_SURFACE_ID,
   canonicalLensId,
   createLensRegistry,
-  LENS_KEYS,
   LENS_TOOL_NAME,
   type LensRegistry,
-  lensKey,
 } from "./lens.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
@@ -59,10 +58,10 @@ const DEFAULT_ROOM_TURN_BUDGET = 8;
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
 // stays undefined when either seam is absent, and room actions then fail closed.
 let driver: RoomDriver | undefined;
-// The lens slot pool is a boot-time singleton too: it owns the snapshot
-// registrations for the fixed lens keys, created once in registerTools and disposed
-// in dispose() so a re-register doesn't duplicate-register its keys. lensSm tracks the
-// manager it was built against, so a re-bootstrap with a different one rebinds it.
+// The lens registry is a boot-time singleton too: it owns the per-subject snapshot
+// registrations and surface regions, created once in registerTools and disposed in
+// dispose() so a re-register doesn't duplicate-register. lensSm tracks the manager it
+// was built against, so a re-bootstrap with a different one rebinds it.
 let lensRegistry: LensRegistry | undefined;
 let lensSm: SnapshotManager | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
@@ -195,8 +194,8 @@ Compose:
 Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
 
 // The lens authoring prompt (the chamber-brief sibling): one agent turn composes a
-// canvas board on a subject and calls chamber_emit_lens to publish it to a slot.
-// Unlike brief it is not pinned to one key — the tool routes by `id` to a slot, so
+// canvas board on a subject and calls chamber_emit_lens to publish it. Unlike brief
+// it is not pinned to one key — the tool routes by `id` to a per-subject key, so
 // distinct subjects land in distinct panels and re-authoring a subject updates it.
 const LENS_WF_PROMPT = `You are authoring a LENS for Keelson's Chamber — a one-screen canvas \`board\` view on a subject, rendered live on the Chamber surface with no hand-coded UI.
 
@@ -329,7 +328,6 @@ const rib: Rib = {
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
     { key: ROOM_KEY, canvasKind: "view", title: "Room" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
-    ...LENS_KEYS.map((key, i) => ({ key, canvasKind: "view" as const, title: `Lens ${i + 1}` })),
   ],
 
   // No static actions[]: a payload-less button can't carry input, so every Chamber
@@ -340,10 +338,12 @@ const rib: Rib = {
   // The Chamber nav tab. The roster sits in the header (the Minds you genesis),
   // the live room transcript fills the row, and the brief settles into the
   // footer. The room region carries no workflow: it is push-fed — the driver
-  // recomposes ROOM_KEY on every turn (no collector, no cadence poll).
+  // recomposes ROOM_KEY on every turn (no collector, no cadence poll). Lens panels
+  // are not declared here: a Mind authors them at runtime (chamber_emit_lens),
+  // each registering its own region below the room row via the registerRegion seam.
   surfaces: [
     {
-      id: "chamber",
+      id: CHAMBER_SURFACE_ID,
       title: "Chamber",
       layout: {
         header: {
@@ -359,13 +359,6 @@ const rib: Rib = {
         },
         rows: [
           { columns: [{ key: ROOM_KEY, title: "Room", glyph: { char: "▦", tone: "brand" } }] },
-          {
-            columns: LENS_KEYS.map((key, i) => ({
-              key,
-              title: `Lens ${i + 1}`,
-              glyph: { char: "✦", tone: "accent" as const },
-            })),
-          },
         ],
         footer: {
           key: BRIEF_KEY,
@@ -443,14 +436,14 @@ const rib: Rib = {
       },
     },
     {
-      // The lens producer (the chamber-brief sibling, but slot-routed): one agent
+      // The lens producer (the chamber-brief sibling, but key-routed): one agent
       // turn composes a board for the subject and calls chamber_emit_lens to publish
-      // it. No bindSnapshotKey — the slot is chosen at run time by the tool, not
-      // pinned to one static key.
+      // it. No bindSnapshotKey — the per-subject key is chosen at run time by the
+      // tool, not pinned to one static key.
       definition: {
         name: "chamber-lens",
         description:
-          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it to a Chamber lens slot (no hand-coded UI). NOT for: the standing Chamber briefing (chamber-brief), genesis-ing agents, or running a room.',
+          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber briefing (chamber-brief), genesis-ing agents, or running a room.',
         nodes: [
           {
             id: "compose",
@@ -480,9 +473,11 @@ const rib: Rib = {
     const genesisTool = makeGenesisTool();
     const sm = ctx.getSnapshotManager?.();
     const run = ctx.runAgentTurn;
-    // Lenses publish through the snapshot manager alone, so the slot pool and its
+    // Lenses publish through the snapshot manager alone, so the registry and its
     // emit tool wire up whenever it is present — independent of the room's C1
-    // agent-turn seam (the room tools below additionally require runAgentTurn).
+    // agent-turn seam (the room tools below additionally require runAgentTurn). It
+    // takes the registerRegion seam so each authored lens adds its own panel; when
+    // the harness lacks it the lens still publishes, it just renders no panel.
     // Created once (a module singleton, like the room driver) and reused on a later
     // registerTools so its keys aren't registered twice. If a different manager
     // arrives (a re-bootstrap without an intervening dispose), rebuild against it
@@ -490,7 +485,7 @@ const rib: Rib = {
     // disposing the old one, so a failed rebuild leaves the existing registry and
     // lensSm consistent (never a disposed registry still marked current).
     if (sm && sm !== lensSm) {
-      const next = createLensRegistry(sm);
+      const next = createLensRegistry(sm, ctx.registerRegion);
       lensRegistry?.dispose();
       lensRegistry = next;
       lensSm = sm;
@@ -1092,9 +1087,9 @@ function makeGenesisTool(): ToolDefinition {
 }
 
 // Lens publish seam: the chamber-lens workflow's prompt node composes a canvas
-// board and calls this tool to publish it to one of the fixed lens slots. `id`
-// routes re-authoring of the same subject back to the same panel; the board is
-// validated fail-closed (the slot's expectView guard) before it is broadcast.
+// board and calls this tool to publish it under a per-subject key. `id` routes
+// re-authoring of the same subject back to the same panel; the board is validated
+// fail-closed (the key's expectView guard) before it is broadcast.
 const lensEmitSchema = z.object({
   id: z.string().min(1).max(64),
   board: canvasBoardViewSchema,
@@ -1104,7 +1099,7 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
   return {
     name: LENS_TOOL_NAME,
     description:
-      "Author a lens: render a canvas `board` you compose onto a Chamber lens slot, where it shows live as a panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Call it once per lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.",
+      "Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Call it once per lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.",
     inputSchema: lensEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -1123,8 +1118,8 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         return;
       }
       try {
-        const { slot } = await registry.publish(id, parsed.data.board);
-        emitResult(ctx, JSON.stringify({ ok: true, slot, key: lensKey(slot) }));
+        const { key } = await registry.publish(id, parsed.data.board);
+        emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);
       }

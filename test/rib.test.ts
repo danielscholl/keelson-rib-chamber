@@ -1,10 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { RibContext, SnapshotManager } from "@keelson/shared";
 import rib from "../src/index.ts";
-import { LENS_KEYS } from "../src/lens.ts";
 
-// A minimal SnapshotManager double — registerTools only needs register/recompose
-// not to throw when it wires the lens slot pool.
+// A minimal SnapshotManager double — the lens registry and room wiring only need
+// register/recompose not to throw.
 function fakeSnapshotManager(): SnapshotManager {
   const composers = new Map<string, () => unknown>();
   return {
@@ -61,16 +60,15 @@ describe("rib-chamber", () => {
     expect((rib.registerTools?.(ctx) ?? []).map((t) => t.name)).toEqual(["chamber_emit_genesis"]);
   });
 
-  it("declares the lens slot views", () => {
+  it("declares no static lens views — a lens registers its own at author time", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
-    for (const k of LENS_KEYS) expect(keys).toContain(k);
+    expect(keys.some((k) => k.startsWith("rib:chamber:lens:"))).toBe(false);
   });
 
-  it("lays the lens slots out in a surface row after the room", () => {
+  it("declares no static lens row — the surface ships with just the room row", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
-    expect(rows[0]?.columns[0]?.key).toBe("rib:chamber:room");
-    const lensRow = rows.find((r) => r.columns.some((c) => c.key === LENS_KEYS[0]));
-    expect(lensRow?.columns.map((c) => c.key)).toEqual([...LENS_KEYS]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.columns.map((c) => c.key)).toEqual(["rib:chamber:room"]);
   });
 
   it("contributes the chamber-lens workflow", () => {
@@ -80,7 +78,9 @@ describe("rib-chamber", () => {
     expect(names).toContain("chamber-lens");
   });
 
-  it("registers chamber_emit_lens with a snapshot manager but no agent-turn seam", () => {
+  it("registers chamber_emit_lens with a snapshot manager but no agent-turn or registerRegion seam", () => {
+    // No registerRegion on the ctx: registerTools must still wire the lens tool
+    // (the registry degrades to publishing without a panel), not throw.
     const ctx = {
       getExec: () => ({
         runJSON: async () => ({ ok: true as const, data: undefined }),
