@@ -10,10 +10,18 @@ import type {
   ToolContext,
   ToolDefinition,
 } from "@keelson/shared";
-import { asNonEmptyString, asStringArray, errText, expectView, z } from "@keelson/shared";
+import {
+  asNonEmptyString,
+  asStringArray,
+  canvasBoardViewSchema,
+  errText,
+  expectView,
+  z,
+} from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
+import { createLensRegistry, LENS_KEYS, type LensRegistry, lensKey } from "./lens.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomStore } from "./ports.ts";
@@ -172,6 +180,29 @@ Compose:
 
 Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
 
+// The lens authoring prompt (the chamber-brief sibling): one agent turn composes a
+// canvas board on a subject and calls chamber_emit_lens to publish it to a slot.
+// Unlike brief it is not pinned to one key — the tool routes by `id` to a slot, so
+// distinct subjects land in distinct panels and re-authoring a subject updates it.
+const LENS_WF_PROMPT = `You are authoring a LENS for Keelson's Chamber — a one-screen canvas \`board\` view on a subject, rendered live on the Chamber surface with no hand-coded UI.
+
+Subject: $ARGUMENTS
+
+Compose ONE canvas board about the subject. Be honest — do NOT invent data you cannot see; if the subject is abstract, lay out its structure, parts, or status rather than fabricating metrics.
+
+The board shape:
+  { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
+Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
+Use 2-4 Section kinds, in a sensible order:
+  - stats: { "kind":"stats", "title"?:string, "items":[{ "label":string, "value":string|number, "sub"?:string, "tone"?:Tone }] }
+  - rows:  { "kind":"rows", "title"?:string, "items":[{ "text":string, "glyph"?:Tone, "trailing"?:string }] }
+  - cards: { "kind":"cards", "title"?:string, "items":[{ "title":string, "pill"?:{ "label":string, "tone"?:Tone }, "fields"?:[{ "label"?:string, "value":string|number }], "footnote"?:string }] }
+
+Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board }:
+  - id: a short, stable, kebab-case identifier for this subject (e.g. "release-risks") — re-authoring the same subject reuses its panel.
+  - board: the canvas board object above.
+Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
+
 // The rib's slash commands for the harness command registry (GET /api/commands).
 // /mind opens a Mind as a seeded chat; /genesis authors a new Mind from a brief.
 // All chamber vocabulary lives here — the harness knows only "a rib offered a
@@ -270,6 +301,7 @@ const rib: Rib = {
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
     { key: ROOM_KEY, canvasKind: "view", title: "Room" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
+    ...LENS_KEYS.map((key, i) => ({ key, canvasKind: "view" as const, title: `Lens ${i + 1}` })),
   ],
 
   // No static actions[]: a payload-less button can't carry input, so every Chamber
@@ -299,6 +331,13 @@ const rib: Rib = {
         },
         rows: [
           { columns: [{ key: ROOM_KEY, title: "Room", glyph: { char: "▦", tone: "brand" } }] },
+          {
+            columns: LENS_KEYS.map((key, i) => ({
+              key,
+              title: `Lens ${i + 1}`,
+              glyph: { char: "✦", tone: "accent" as const },
+            })),
+          },
         ],
         footer: {
           key: BRIEF_KEY,
@@ -375,6 +414,28 @@ const rib: Rib = {
         ],
       },
     },
+    {
+      // The lens producer (the chamber-brief sibling, but slot-routed): one agent
+      // turn composes a board for the subject and calls chamber_emit_lens to publish
+      // it. No bindSnapshotKey — the slot is chosen at run time by the tool, not
+      // pinned to one static key.
+      definition: {
+        name: "chamber-lens",
+        description:
+          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it to a Chamber lens slot (no hand-coded UI). NOT for: the standing Chamber briefing (chamber-brief), genesis-ing agents, or running a room.',
+        nodes: [
+          {
+            id: "compose",
+            prompt: LENS_WF_PROMPT,
+            // Fail closed: chamber_emit_lens validates the board and the workflow
+            // should fail loudly if the publish errors, not report SUCCEEDED with
+            // no lens rendered.
+            fail_on_tool_error: true,
+            allowed_tools: ["chamber_emit_lens"],
+          },
+        ],
+      },
+    },
   ],
 
   // Boot-time wiring of the room loop. Registers the push-fed room snapshot and
@@ -391,6 +452,10 @@ const rib: Rib = {
     const genesisTool = makeGenesisTool();
     const sm = ctx.getSnapshotManager?.();
     const run = ctx.runAgentTurn;
+    // Lenses publish through the snapshot manager alone, so the slot pool and its
+    // emit tool wire up whenever it is present — independent of the room's C1
+    // agent-turn seam (the room tools below additionally require runAgentTurn).
+    const lensTools = sm ? [makeLensTool(createLensRegistry(sm))] : [];
     if (sm && run) {
       // Seed a valid empty board so a client subscribing before the first turn
       // gets a well-formed view; every publish replaces it with the live board.
@@ -417,9 +482,9 @@ const rib: Rib = {
       // sharing the same driver + store this hook just built. Returned only when
       // the seams are present (no driver -> no tools), mirroring how the actions
       // fail closed.
-      return [genesisTool, ...roomControlTools(roomStore)];
+      return [genesisTool, ...lensTools, ...roomControlTools(roomStore)];
     }
-    return [genesisTool];
+    return [genesisTool, ...lensTools];
   },
 
   // Retire a Mind (removes it, then refreshes the roster — the OSDU
@@ -974,6 +1039,43 @@ function makeGenesisTool(): ToolDefinition {
         emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_genesis failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+// Lens publish seam: the chamber-lens workflow's prompt node composes a canvas
+// board and calls this tool to publish it to one of the fixed lens slots. `id`
+// routes re-authoring of the same subject back to the same panel; the board is
+// validated fail-closed (the slot's expectView guard) before it is broadcast.
+const lensEmitSchema = z.object({
+  id: z.string().min(1).max(64),
+  board: canvasBoardViewSchema,
+});
+
+function makeLensTool(registry: LensRegistry): ToolDefinition {
+  return {
+    name: "chamber_emit_lens",
+    description:
+      "Internal publish-seam for the chamber-lens workflow: render an authored canvas `board` onto a Chamber lens slot. `id` is a short, stable identifier for the lens subject (re-authoring the same id updates the same panel); `board` is the canvas board view. To author a lens, run the chamber-lens workflow (e.g. /workflow run chamber-lens <subject>) rather than calling this directly.",
+    inputSchema: lensEmitSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = lensEmitSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_emit_lens: ${parsed.error.message}`, true);
+        return;
+      }
+      const id = parsed.data.id.trim();
+      if (!id) {
+        emitResult(ctx, "chamber_emit_lens: id must not be blank", true);
+        return;
+      }
+      try {
+        const { slot } = await registry.publish(id, parsed.data.board);
+        emitResult(ctx, JSON.stringify({ ok: true, slot, key: lensKey(slot) }));
+      } catch (e) {
+        emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);
       }
     },
   };

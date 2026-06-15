@@ -11,13 +11,17 @@ import type { RoomPublisher } from "./ports.ts";
 //
 // `latest` is the registered snapshot composer (`() => CanvasView`): the manager
 // reads it at compose time, so it must return the most recently published board.
-// It is seeded with a valid empty board so a client subscribing before the first
-// turn gets a well-formed view, not a loading skeleton.
-export function createCoalescingPublisher(recompose: () => Promise<unknown>): {
+// It is seeded with `seed` (default: an empty Room board; the lens pool passes its
+// own placeholder) so a client subscribing before the first publish gets a
+// well-formed view, not a loading skeleton.
+export function createCoalescingPublisher(
+  recompose: () => Promise<unknown>,
+  seed: CanvasView = { view: "board", title: "Room", sections: [] },
+): {
   publisher: RoomPublisher;
   latest: () => CanvasView;
 } {
-  let latest: CanvasView = { view: "board", title: "Room", sections: [] };
+  let latest: CanvasView = seed;
   let composing = false;
   let dirty = false;
   const publisher: RoomPublisher = {
