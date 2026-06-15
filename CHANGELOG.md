@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.2.0...v0.3.0) (2026-06-15)
+
+
+### Added
+
+* **lens:** implement agent-authored lenses with fixed slot pool ([#56](https://github.com/danielscholl/keelson-rib-chamber/issues/56)) ([8a87e82](https://github.com/danielscholl/keelson-rib-chamber/commit/8a87e8227ab3eae16cf26bc4a6cdf3fcfbe76385))
+* **room:** wire the lens tool into room turns via turnTools ([#58](https://github.com/danielscholl/keelson-rib-chamber/issues/58)) ([f2832eb](https://github.com/danielscholl/keelson-rib-chamber/commit/f2832ebed5e563f0f656c0b0636ee208bad24076))
+
 ## [0.2.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.1.0...v0.2.0) (2026-06-14)
 
 
