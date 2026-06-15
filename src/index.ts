@@ -26,6 +26,7 @@ import {
   canonicalLensId,
   createLensRegistry,
   LENS_KEYS,
+  LENS_TOOL_NAME,
   type LensRegistry,
   lensKey,
 } from "./lens.ts";
@@ -458,7 +459,7 @@ const rib: Rib = {
             // should fail loudly if the publish errors, not report SUCCEEDED with
             // no lens rendered.
             fail_on_tool_error: true,
-            allowed_tools: ["chamber_emit_lens"],
+            allowed_tools: [LENS_TOOL_NAME],
           },
         ],
       },
@@ -511,6 +512,10 @@ const rib: Rib = {
         minds: resolveMinds,
         readSoul: (slug) => readSoul(mindsDir(), slug),
         turnCwd: chamberDataHome(),
+        // When the lens seam is wired, let a Mind author a lens mid-room: the C1
+        // turn seam resolves this name to the rib's registered chamber_emit_lens
+        // def and projects it to the provider. Without it, room turns stay text-only.
+        ...(lensRegistry ? { turnTools: [{ name: LENS_TOOL_NAME }] } : {}),
       });
       queueRoomRetentionSweep();
       // Prime the cache so a client subscribing before the first turn gets the
@@ -1097,9 +1102,9 @@ const lensEmitSchema = z.object({
 
 function makeLensTool(registry: LensRegistry): ToolDefinition {
   return {
-    name: "chamber_emit_lens",
+    name: LENS_TOOL_NAME,
     description:
-      "Internal publish-seam for the chamber-lens workflow: render an authored canvas `board` onto a Chamber lens slot. `id` is a short, stable identifier for the lens subject (re-authoring the same id updates the same panel); `board` is the canvas board view. To author a lens, run the chamber-lens workflow (e.g. /workflow run chamber-lens <subject>) rather than calling this directly.",
+      "Author a lens: render a canvas `board` you compose onto a Chamber lens slot, where it shows live as a panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Call it once per lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.",
     inputSchema: lensEmitSchema,
     state_changing: true,
     async execute(input, ctx) {

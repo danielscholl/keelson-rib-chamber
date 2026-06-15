@@ -293,6 +293,31 @@ describe("room driver — concurrency & model", () => {
     expect(turns.requests[0]?.provider).toBe("claude");
   });
 
+  test("forwards turnTools as the turn request's tools (a Mind can author a lens mid-room)", async () => {
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const turns = scriptedRunAgentTurn([{ text: "ok" }]);
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: turns.run,
+      minds: () => MINDS,
+      turnTools: [{ name: "chamber_emit_lens" }],
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    await driver.step("demo");
+    expect(turns.requests[0]?.tools).toEqual([{ name: "chamber_emit_lens" }]);
+  });
+
+  test("omits tools from the turn request when no turnTools configured (text-only default)", async () => {
+    const h = harness();
+    await h.driver.start(START);
+    await h.driver.step("demo");
+    expect(h.turns.requests[0]?.tools).toBeUndefined();
+  });
+
   test("concurrent step() calls do not race (the second is a no-op)", async () => {
     const { store } = makeFakeStore();
     const pub = makeFakePublisher();

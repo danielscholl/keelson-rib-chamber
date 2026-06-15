@@ -10,6 +10,11 @@ import { createCoalescingPublisher } from "./room-publisher.ts";
 // docs/design/phase3-lenses.md.
 export const LENS_SLOT_COUNT = 3;
 
+// The lens write-seam tool name. One source of truth: the tool registration, the
+// chamber-lens workflow's allowed_tools, and the room driver's turn-tools all
+// reference this so a Mind can author a lens from the workflow OR from a room turn.
+export const LENS_TOOL_NAME = "chamber_emit_lens";
+
 export function lensKey(slot: number): string {
   return `rib:chamber:lens:${slot}`;
 }
