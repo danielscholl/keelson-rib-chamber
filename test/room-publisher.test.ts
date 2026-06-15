@@ -10,6 +10,12 @@ describe("coalescing room publisher", () => {
     expect(latest()).toEqual({ view: "board", title: "Room", sections: [] });
   });
 
+  test("uses a caller-supplied seed when given", () => {
+    const seed = board("Lens");
+    const { latest } = createCoalescingPublisher(() => Promise.resolve(), seed);
+    expect(latest()).toEqual(seed);
+  });
+
   test("latest() returns the most recently published board", async () => {
     const { publisher, latest } = createCoalescingPublisher(() => Promise.resolve());
     await publisher.publish(board("first"));

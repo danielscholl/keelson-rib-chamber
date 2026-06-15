@@ -135,19 +135,83 @@ afterAll(async () => {
 describe("chamber room-control chat tools", () => {
   let openedSlug = "";
 
-  it("registers the genesis tool always, plus the room-control tools with the seams", () => {
+  it("registers the genesis + lens seams always, plus the room-control tools with the seams", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "chamber_emit_genesis",
+      "chamber_emit_lens",
       "chamber_room_say",
       "chamber_room_start",
       "chamber_room_status",
       "chamber_room_stop",
     ]);
-    // No runAgentTurn -> no driver -> no room tools, but the genesis write seam (a
-    // workflow tool that needs no driver) is still registered.
+    // No runAgentTurn -> no driver -> no room tools, but the genesis write seam and
+    // the lens publish seam (both need only the snapshot manager) are still there.
     expect(registerTools(makeCtx(undefined, sm)).map((t) => t.name)).toEqual([
       "chamber_emit_genesis",
+      "chamber_emit_lens",
     ]);
+  });
+
+  it("chamber_emit_lens publishes a board and reports its slot", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "lens-demo", board: { view: "board", title: "Demo", sections: [] } },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const out = JSON.parse(t.out()) as { ok: boolean; slot: number; key: string };
+    expect(out.ok).toBe(true);
+    expect(typeof out.slot).toBe("number");
+    expect(out.key).toMatch(/^rib:chamber:lens:\d+$/);
+  });
+
+  it("chamber_emit_lens fails closed on a non-board payload", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "bad", board: { view: "board" } }, t.ctx);
+    expect(t.errored()).toBe(true);
+  });
+
+  it("chamber_emit_lens fails closed on a board that fails the publish-time gate", async () => {
+    // Duplicate table column keys pass the board member schema but fail the canvas
+    // union's uniqueness refine — the tool must report the error, not a silent ok.
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      {
+        id: "dup",
+        board: {
+          view: "board",
+          title: "Dup",
+          sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
+        },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+  });
+
+  it("chamber_emit_lens canonicalizes the id so one subject maps to one slot", async () => {
+    const spaced = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "Release Risks", board: { view: "board", title: "R1", sections: [] } },
+      spaced.ctx,
+    );
+    const kebab = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "release-risks", board: { view: "board", title: "R2", sections: [] } },
+      kebab.ctx,
+    );
+    const slotA = (JSON.parse(spaced.out()) as { slot: number }).slot;
+    const slotB = (JSON.parse(kebab.out()) as { slot: number }).slot;
+    expect(slotA).toBe(slotB); // "Release Risks" and "release-risks" canonicalize to one slot
+  });
+
+  it("chamber_emit_lens rejects an id with no usable characters", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "!!!", board: { view: "board", title: "X", sections: [] } },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
   });
 
   it("advertises start/say/stop as state-changing and start as requiring confirmation", () => {
