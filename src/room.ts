@@ -47,6 +47,11 @@ export interface RoomDriverDeps {
   // server's cwd, leaking the host repo's ambient context (git state, files)
   // into the conversation; pointing it at the Chamber data home isolates that.
   turnCwd?: string;
+  // Tool names every room turn may invoke, forwarded as the turn's `tools` (the
+  // C1 seam resolves them to the rib's registered defs). The rib decides what is
+  // safe for a room turn — today the lens write seam, so a Mind can author a lens
+  // mid-room. Omitted/empty keeps the turn text-only (the room default).
+  turnTools?: readonly { name: string }[];
   now?: () => Date;
   newId?: () => string;
 }
@@ -459,15 +464,18 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       text = "";
       aborted = true;
     } else {
-      // tools omitted -> text-only (the room default). Mapping Mind.tools slugs to
-      // C1 tool descriptors is deferred. The Mind's model/provider pin is honoured
-      // (provider alongside model so a cross-provider pin resolves coherently here,
-      // the same as a direct /mind chat — not just against the default provider).
+      // turnTools (when configured) let a Mind call the rib's own tools mid-turn —
+      // today the lens write seam; omitted keeps the turn text-only. Per-Mind
+      // Mind.tools mapping is still deferred. The Mind's model/provider pin is
+      // honoured (provider alongside model so a cross-provider pin resolves
+      // coherently here, the same as a direct /mind chat — not just against the
+      // default provider).
       const turn = deps.runAgentTurn({
         system,
         prompt,
         abortSignal: controller.signal,
         ...(deps.turnCwd ? { cwd: deps.turnCwd } : {}),
+        ...(deps.turnTools && deps.turnTools.length > 0 ? { tools: deps.turnTools } : {}),
         ...(mind.model ? { model: mind.model } : {}),
         ...(mind.provider ? { provider: mind.provider } : {}),
       });
