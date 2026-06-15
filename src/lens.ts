@@ -1,31 +1,30 @@
-import type { CanvasBoardView, SnapshotManager } from "@keelson/shared";
+import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
-// A fixed pool of pre-declared lens snapshot keys. A Mind authors a lens by
-// publishing a board to one of these slots (chamber_emit_lens); because the keys
-// ship in the boot manifest, a freshly authored lens renders with no manifest
-// re-fetch. Unbounded per-lens keys (rib:chamber:lens:<mind>:<id>) would need a
-// base dynamic-view seam (registerView) the harness lacks today — see
-// docs/design/phase3-lenses.md.
-export const LENS_SLOT_COUNT = 3;
+// A Mind authors a lens by publishing a board under a per-subject key
+// (rib:chamber:lens:<id>). The registry registers that snapshot key AND adds a
+// surface region for it through the harness `registerRegion` seam, so each new
+// subject appears as its own panel — unbounded, no fixed pool, no eviction. The
+// rib withholds the lens tool entirely when that seam is absent (see index.ts), so
+// the registry requires it rather than publish invisible, unrendered keys.
+
+// The id of the Chamber surface lens panels attach to. Shared with the surface
+// declaration in index.ts so the registerRegion target can't drift from it.
+export const CHAMBER_SURFACE_ID = "chamber";
 
 // The lens write-seam tool name. One source of truth: the tool registration, the
 // chamber-lens workflow's allowed_tools, and the room driver's turn-tools all
 // reference this so a Mind can author a lens from the workflow OR from a room turn.
 export const LENS_TOOL_NAME = "chamber_emit_lens";
 
-export function lensKey(slot: number): string {
-  return `rib:chamber:lens:${slot}`;
+export function lensKey(id: string): string {
+  return `rib:chamber:lens:${id}`;
 }
 
-export const LENS_KEYS: readonly string[] = Array.from({ length: LENS_SLOT_COUNT }, (_, i) =>
-  lensKey(i),
-);
-
-// The seed a slot renders before any Mind authors into it: a valid, titled board
-// with one hint row, so an empty slot reads as an empty panel rather than a
-// loading skeleton. The authored board (with its own title) replaces it on publish.
+// The seed a panel renders before its board publishes: a valid, titled board so a
+// client subscribing the instant the region appears reads an empty panel rather
+// than a loading skeleton. The authored board (its own title) replaces it on publish.
 export function emptyLensBoard(): CanvasBoardView {
   return {
     view: "board",
@@ -57,107 +56,83 @@ export function canonicalLensId(raw: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-// Maps a logical lens id to a fixed slot, LRU. Re-authoring the same id reuses its
-// slot (the panel updates in place); a new id takes the next free slot, then evicts
-// the least-recently-authored once the pool is full. Pure and deterministic, so the
-// routing is unit-testable apart from the publish side.
-export interface SlotAllocator {
-  allocate(id: string): number;
-  slotOf(id: string): number | undefined;
-}
+type RegisterRegion = (surfaceId: string, region: RibSurfaceRegion) => () => void;
 
-export function createSlotAllocator(count: number): SlotAllocator {
-  if (count < 1) throw new Error("lens slot pool needs at least one slot");
-  const idToSlot = new Map<string, number>();
-  // Least-recently-authored first; the eviction victim is always lru[0].
-  const lru: string[] = [];
-  const touch = (id: string): void => {
-    const at = lru.indexOf(id);
-    if (at >= 0) lru.splice(at, 1);
-    lru.push(id);
-  };
-  return {
-    allocate(id) {
-      const existing = idToSlot.get(id);
-      if (existing !== undefined) {
-        touch(id);
-        return existing;
-      }
-      let slot: number;
-      if (idToSlot.size < count) {
-        // Slots fill densely from 0 and never free (eviction reuses the victim's
-        // slot), so the next free index is exactly the current occupancy count.
-        slot = idToSlot.size;
-      } else {
-        const victim = lru.shift();
-        if (victim === undefined) throw new Error("lens allocator: full pool with empty LRU");
-        const victimSlot = idToSlot.get(victim);
-        if (victimSlot === undefined) throw new Error("lens allocator: LRU/slot desync");
-        slot = victimSlot;
-        idToSlot.delete(victim);
-      }
-      idToSlot.set(id, slot);
-      touch(id);
-      return slot;
-    },
-    slotOf: (id) => idToSlot.get(id),
-  };
-}
-
-// The publish side: registers each slot key on the snapshot manager (seeded +
-// fail-closed via expectView), then routes a board to the id's slot and broadcasts
-// a live frame. Holds the allocator, so re-authoring an id refreshes the same panel.
+// Publishes a Mind-authored board to its per-subject lens key, registering the key
+// and a matching surface region the first time an id is seen; re-authoring the same
+// id updates the existing panel in place. Holds the snapshot + region handles per id
+// so dispose() releases both (letting a re-bootstrap re-register cleanly).
 export interface LensRegistry {
-  publish(id: string, board: CanvasBoardView): Promise<{ slot: number }>;
-  // Releases the slot keys' snapshot registrations. Called from the rib's dispose so
-  // a re-bootstrap can re-register without the manager rejecting duplicate keys.
+  publish(id: string, board: CanvasBoardView): Promise<{ key: string }>;
   dispose(): void;
 }
 
-export function createLensRegistry(sm: SnapshotManager): LensRegistry {
-  const allocator = createSlotAllocator(LENS_SLOT_COUNT);
-  const unregisters: (() => void)[] = [];
-  let publishers: { publish(board: CanvasBoardView): Promise<void> }[];
-  try {
-    publishers = LENS_KEYS.map((key) => {
-      const { publisher, latest } = createCoalescingPublisher(
-        () => sm.recompose(key),
-        emptyLensBoard(),
-      );
-      unregisters.push(sm.register(key, latest, { validate: expectView(key, "board") }));
-      return publisher;
-    });
-  } catch (e) {
-    // A mid-loop register failure (e.g. a duplicate key) would otherwise leak the
-    // handles already collected — no caller holds dispose() for a throwing
-    // constructor. Release them, then rethrow.
-    for (const unregister of unregisters) unregister();
-    throw e;
+interface LensEntry {
+  key: string;
+  publisher: { publish(board: CanvasBoardView): Promise<void> };
+  unregisterSnapshot: () => void;
+  unregisterRegion: () => void;
+}
+
+export function createLensRegistry(
+  sm: SnapshotManager,
+  registerRegion: RegisterRegion,
+): LensRegistry {
+  const entries = new Map<string, LensEntry>();
+
+  // Register a new subject's snapshot key and surface region. Fully synchronous
+  // (no await between the entries.get miss in publish and this entries.set), so
+  // two concurrent publishes of the same new id — the tool is both a workflow seam
+  // and a room turn-tool — can't both reach sm.register and trip its duplicate-key
+  // guard; the second finds the entry and just republishes.
+  function register(id: string): LensEntry {
+    const key = lensKey(id);
+    const { publisher, latest } = createCoalescingPublisher(
+      () => sm.recompose(key),
+      emptyLensBoard(),
+    );
+    const unregisterSnapshot = sm.register(key, latest, { validate: expectView(key, "board") });
+    let unregisterRegion: () => void;
+    try {
+      unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, {
+        key,
+        title: id,
+        glyph: { char: "✦", tone: "accent" },
+        group: "lens",
+      });
+    } catch (e) {
+      // A failed region add (e.g. the harness per-surface ceiling) must not leak
+      // the snapshot registration we already made.
+      unregisterSnapshot();
+      throw e;
+    }
+    const entry: LensEntry = { key, publisher, unregisterSnapshot, unregisterRegion };
+    entries.set(id, entry);
+    return entry;
   }
-  // Prime each slot so a client subscribing before any lens is authored gets the
-  // seeded board, not a loading skeleton (the GET path doesn't lazy-compose). Capture
-  // the priming so publish can await it: the manager coalesces concurrent recomposes
-  // per key, so a publish that raced an in-flight priming recompose would settle onto
-  // it and broadcast only the seed.
-  const primed = Promise.allSettled(LENS_KEYS.map((key) => sm.recompose(key)));
+
   return {
     async publish(id, board) {
-      // The manager swallows a validate throw at recompose (keeps the prior frame,
-      // broadcasts nothing), so a board that fails the slot's expectView gate would
-      // be dropped while the caller is told it published. Validate against the same
-      // gate here, and BEFORE allocating, so a board we can't render fails closed
-      // loudly and never evicts a live lens for nothing.
-      expectView("rib:chamber:lens", "board")(board);
-      await primed;
-      const slot = allocator.allocate(id);
-      const publisher = publishers[slot];
-      if (!publisher) throw new Error(`lens slot ${slot} has no publisher`);
-      await publisher.publish(board);
-      return { slot };
+      // Validate the board BEFORE registering anything, so a board we can't render
+      // fails closed loudly and never leaves a dangling key or empty panel behind.
+      expectView(lensKey(id), "board")(board);
+      let entry = entries.get(id);
+      if (!entry) {
+        entry = register(id);
+        // Seed the cache so a client subscribing the instant the panel appears gets
+        // the seed board, not a 204 (the GET path doesn't lazy-compose). The entry is
+        // already mapped, so this await can't reopen the duplicate-register race.
+        await sm.recompose(entry.key);
+      }
+      await entry.publisher.publish(board);
+      return { key: entry.key };
     },
     dispose() {
-      for (const unregister of unregisters) unregister();
-      unregisters.length = 0;
+      for (const entry of entries.values()) {
+        entry.unregisterRegion();
+        entry.unregisterSnapshot();
+      }
+      entries.clear();
     },
   };
 }
