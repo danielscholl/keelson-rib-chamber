@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CanvasView, SnapshotManager } from "@keelson/shared";
+import type { CanvasBoardView, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
 import {
   createLensRegistry,
@@ -10,7 +10,7 @@ import {
   lensKey,
 } from "../src/lens.ts";
 
-const board = (title: string): CanvasView => ({ view: "board", title, sections: [] });
+const board = (title: string): CanvasBoardView => ({ view: "board", title, sections: [] });
 
 describe("lens keys + placeholder", () => {
   test("declares LENS_SLOT_COUNT namespaced keys", () => {
@@ -126,9 +126,43 @@ describe("lens registry", () => {
       view: "board",
       title: "Dup",
       sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
-    } as unknown as CanvasView;
+    } as unknown as CanvasBoardView;
     await expect(reg.publish("bad", dupColumns)).rejects.toThrow();
     // The rejected board never allocated a slot — a later valid lens still takes 0.
     expect((await reg.publish("good", board("Good"))).slot).toBe(0);
+  });
+
+  test("publishing more ids than slots evicts the LRU slot and broadcasts the new board", async () => {
+    const { sm, broadcasts } = fakeSnapshotManager();
+    const reg = createLensRegistry(sm);
+    // Fill every slot, oldest first.
+    for (let i = 0; i < LENS_SLOT_COUNT; i++) await reg.publish(`fill-${i}`, board(`F${i}`));
+    // One more id evicts the LRU (fill-0, in slot 0) and reuses its slot.
+    expect((await reg.publish("overflow", board("Overflow"))).slot).toBe(0);
+    const slot0 = broadcasts.filter((b) => b.key === lensKey(0)).at(-1);
+    expect(slot0?.view).toEqual(board("Overflow"));
+  });
+
+  test("dispose releases the slot keys so a fresh pool can re-register", () => {
+    // A strict manager that rejects duplicate keys, like the real SnapshotManager.
+    const composers = new Map<string, () => unknown>();
+    const sm = {
+      register(key: string, compose: () => unknown) {
+        if (composers.has(key)) throw new Error(`duplicate key ${key}`);
+        composers.set(key, compose);
+        return () => composers.delete(key);
+      },
+      recompose: async () => undefined,
+      latest: () => undefined,
+      keys: () => [...composers.keys()],
+      dispose: async () => {},
+    } as unknown as SnapshotManager;
+    const first = createLensRegistry(sm);
+    // A second pool on the same manager, before releasing the first, hits the
+    // duplicate-key guard.
+    expect(() => createLensRegistry(sm)).toThrow();
+    // After dispose the keys are free and a fresh pool registers cleanly.
+    first.dispose();
+    expect(() => createLensRegistry(sm)).not.toThrow();
   });
 });

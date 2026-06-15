@@ -51,6 +51,10 @@ const DEFAULT_ROOM_TURN_BUDGET = 8;
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
 // stays undefined when either seam is absent, and room actions then fail closed.
 let driver: RoomDriver | undefined;
+// The lens slot pool is a boot-time singleton too: it owns the snapshot
+// registrations for the fixed lens keys, created once in registerTools and disposed
+// in dispose() so a re-register doesn't duplicate-register its keys.
+let lensRegistry: LensRegistry | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -218,6 +222,11 @@ const CHAMBER_COMMANDS: readonly RibCommandDescriptor[] = [
     description: "Author a new Mind from a freeform brief",
     argument: { hint: "<brief>" },
   },
+  {
+    name: "lens",
+    description: "Author a lens — a canvas board on a subject",
+    argument: { hint: "<subject>" },
+  },
 ];
 
 // Slug type-ahead for /mind — the Minds on the roster, filtered by prefix.
@@ -286,6 +295,15 @@ async function invokeChamberCommand(name: string, arg: string): Promise<CommandI
     return {
       ok: true,
       effect: { effect: "run-workflow", workflow: "chamber-genesis", args: value },
+    };
+  }
+  if (name === "lens") {
+    if (value.length === 0) {
+      return { ok: false, error: "usage: /lens <subject> — describe the lens to author" };
+    }
+    return {
+      ok: true,
+      effect: { effect: "run-workflow", workflow: "chamber-lens", args: value },
     };
   }
   return { ok: false, error: `unknown command: ${name}` };
@@ -455,7 +473,10 @@ const rib: Rib = {
     // Lenses publish through the snapshot manager alone, so the slot pool and its
     // emit tool wire up whenever it is present — independent of the room's C1
     // agent-turn seam (the room tools below additionally require runAgentTurn).
-    const lensTools = sm ? [makeLensTool(createLensRegistry(sm))] : [];
+    // Created once (a module singleton, like the room driver); reused on a later
+    // registerTools so its keys aren't registered twice.
+    if (sm && !lensRegistry) lensRegistry = createLensRegistry(sm);
+    const lensTools = sm && lensRegistry ? [makeLensTool(lensRegistry)] : [];
     if (sm && run) {
       // Seed a valid empty board so a client subscribing before the first turn
       // gets a well-formed view; every publish replaces it with the live board.
@@ -533,6 +554,8 @@ const rib: Rib = {
     activeSlug = undefined;
     lastSlug = undefined;
     invalidateRoster();
+    lensRegistry?.dispose();
+    lensRegistry = undefined;
     await driver?.dispose();
   },
 };
@@ -1066,11 +1089,11 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         emitResult(ctx, `chamber_emit_lens: ${parsed.error.message}`, true);
         return;
       }
-      const id = parsed.data.id.trim();
-      if (!id) {
-        emitResult(ctx, "chamber_emit_lens: id must not be blank", true);
-        return;
-      }
+      // Canonicalize the id: the prompt asks for kebab-case, but a model may send
+      // "Release Risks" — slugify so the same subject maps to the same slot and
+      // re-authoring updates in place instead of evicting (slugify never returns
+      // empty: a non-empty input always yields a non-empty slug).
+      const id = slugify(parsed.data.id);
       try {
         const { slot } = await registry.publish(id, parsed.data.board);
         emitResult(ctx, JSON.stringify({ ok: true, slot, key: lensKey(slot) }));

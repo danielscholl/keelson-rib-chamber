@@ -189,6 +189,22 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(true);
   });
 
+  it("chamber_emit_lens canonicalizes the id so one subject maps to one slot", async () => {
+    const spaced = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "Release Risks", board: { view: "board", title: "R1", sections: [] } },
+      spaced.ctx,
+    );
+    const kebab = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "release-risks", board: { view: "board", title: "R2", sections: [] } },
+      kebab.ctx,
+    );
+    const slotA = (JSON.parse(spaced.out()) as { slot: number }).slot;
+    const slotB = (JSON.parse(kebab.out()) as { slot: number }).slot;
+    expect(slotA).toBe(slotB); // "Release Risks" and "release-risks" slugify to one slot
+  });
+
   it("advertises start/say/stop as state-changing and start as requiring confirmation", () => {
     expect(tool("chamber_room_status").state_changing ?? false).toBe(false);
     expect(tool("chamber_room_start").state_changing).toBe(true);

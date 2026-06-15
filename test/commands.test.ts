@@ -38,9 +38,9 @@ afterAll(async () => {
 });
 
 describe("listCommands", () => {
-  it("declares /mind and /genesis", async () => {
+  it("declares /mind, /genesis, and /lens", async () => {
     const names = ((await rib.listCommands?.(ctx)) ?? []).map((c) => c.name);
-    expect(names).toEqual(["mind", "genesis"]);
+    expect(names).toEqual(["mind", "genesis", "lens"]);
   });
 });
 
@@ -123,6 +123,18 @@ describe("invokeCommand", () => {
 
   it("/genesis with no brief fails", async () => {
     const res = await rib.invokeCommand?.("genesis", "  ", ctx);
+    expect(res?.ok).toBe(false);
+  });
+
+  it("/lens <subject> resolves to a run-workflow effect", async () => {
+    expect(await rib.invokeCommand?.("lens", "release risks", ctx)).toEqual({
+      ok: true,
+      effect: { effect: "run-workflow", workflow: "chamber-lens", args: "release risks" },
+    });
+  });
+
+  it("/lens with no subject fails", async () => {
+    const res = await rib.invokeCommand?.("lens", "  ", ctx);
     expect(res?.ok).toBe(false);
   });
 });

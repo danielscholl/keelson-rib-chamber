@@ -1,4 +1,4 @@
-import type { CanvasView, SnapshotManager } from "@keelson/shared";
+import type { CanvasBoardView, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
@@ -21,7 +21,7 @@ export const LENS_KEYS: readonly string[] = Array.from({ length: LENS_SLOT_COUNT
 // The seed a slot renders before any Mind authors into it: a valid, titled board
 // with one hint row, so an empty slot reads as an empty panel rather than a
 // loading skeleton. The authored board (with its own title) replaces it on publish.
-export function emptyLensBoard(): CanvasView {
+export function emptyLensBoard(): CanvasBoardView {
   return {
     view: "board",
     title: "Lens",
@@ -90,22 +90,29 @@ export function createSlotAllocator(count: number): SlotAllocator {
 // fail-closed via expectView), then routes a board to the id's slot and broadcasts
 // a live frame. Holds the allocator, so re-authoring an id refreshes the same panel.
 export interface LensRegistry {
-  publish(id: string, board: CanvasView): Promise<{ slot: number }>;
+  publish(id: string, board: CanvasBoardView): Promise<{ slot: number }>;
+  // Releases the slot keys' snapshot registrations. Called from the rib's dispose so
+  // a re-bootstrap can re-register without the manager rejecting duplicate keys.
+  dispose(): void;
 }
 
 export function createLensRegistry(sm: SnapshotManager): LensRegistry {
   const allocator = createSlotAllocator(LENS_SLOT_COUNT);
+  const unregisters: (() => void)[] = [];
   const publishers = LENS_KEYS.map((key) => {
     const { publisher, latest } = createCoalescingPublisher(
       () => sm.recompose(key),
       emptyLensBoard(),
     );
-    sm.register(key, latest, { validate: expectView(key, "board") });
+    unregisters.push(sm.register(key, latest, { validate: expectView(key, "board") }));
     return publisher;
   });
   // Prime each slot so a client subscribing before any lens is authored gets the
-  // seeded board, not a loading skeleton (the GET path doesn't lazy-compose).
-  for (const key of LENS_KEYS) void sm.recompose(key);
+  // seeded board, not a loading skeleton (the GET path doesn't lazy-compose). Capture
+  // the priming so publish can await it: the manager coalesces concurrent recomposes
+  // per key, so a publish that raced an in-flight priming recompose would settle onto
+  // it and broadcast only the seed.
+  const primed = Promise.allSettled(LENS_KEYS.map((key) => sm.recompose(key)));
   return {
     async publish(id, board) {
       // The manager swallows a validate throw at recompose (keeps the prior frame,
@@ -114,11 +121,16 @@ export function createLensRegistry(sm: SnapshotManager): LensRegistry {
       // gate here, and BEFORE allocating, so a board we can't render fails closed
       // loudly and never evicts a live lens for nothing.
       expectView("rib:chamber:lens", "board")(board);
+      await primed;
       const slot = allocator.allocate(id);
       const publisher = publishers[slot];
       if (!publisher) throw new Error(`lens slot ${slot} has no publisher`);
       await publisher.publish(board);
       return { slot };
+    },
+    dispose() {
+      for (const unregister of unregisters) unregister();
+      unregisters.length = 0;
     },
   };
 }

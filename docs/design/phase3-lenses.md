@@ -44,12 +44,14 @@ manifest re-fetch.
   `emptyLensBoard()` and guarded fail-closed by `expectView(key, "board")`. Its
   `publish(id, board)` routes the board to the `id`'s slot and broadcasts.
 - **`chamber_emit_lens` tool** (`src/index.ts`) — input `{ id, board }`, the board
-  typed by `canvasBoardViewSchema`. Registered whenever the snapshot-manager seam is
-  present (independent of the room's `runAgentTurn` seam). Mirrors the
-  `chamber_emit_genesis` write-seam shape.
-- **`chamber-lens` workflow** — one prompt turn composes a board for `$ARGUMENTS`
-  and calls `chamber_emit_lens` (the genesis pattern: `allowed_tools` +
-  `fail_on_tool_error`). `/workflow run chamber-lens <subject>` is the entry point.
+  typed by `canvasBoardViewSchema`. The `id` is slugified (`Release Risks` →
+  `release-risks`) so the same subject maps to one slot and re-authoring updates in
+  place. Registered whenever the snapshot-manager seam is present (independent of the
+  room's `runAgentTurn` seam). Mirrors the `chamber_emit_genesis` write-seam shape.
+- **`chamber-lens` workflow + `/lens` command** — one prompt turn composes a board
+  for `$ARGUMENTS` and calls `chamber_emit_lens` (the genesis pattern: `allowed_tools`
+  + `fail_on_tool_error`). `/workflow run chamber-lens <subject>`, or the `/lens
+  <subject>` slash command that mirrors `/genesis`, is the entry point.
 
 ## Decisions
 
@@ -70,7 +72,11 @@ manifest re-fetch.
   board from evicting a live lens for nothing.
 - **`id` is a routing key, not a path.** Lenses publish to fixed slot keys, never an
   `id`-named key on disk, so `id` needs no filesystem-safety guard (unlike Mind
-  slugs).
+  slugs) — but it is slugified for stable slot reuse.
+- **Singleton lifecycle.** The slot pool is a module singleton created once in
+  `registerTools` and disposed in `rib.dispose()` (the room-driver pattern). It owns
+  the slot keys' snapshot registrations, so disposing releases them and a
+  re-bootstrap re-registers without the manager rejecting duplicate keys.
 
 ## Deferred (still base-gated)
 
