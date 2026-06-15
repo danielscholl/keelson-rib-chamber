@@ -78,15 +78,29 @@ describe("rib-chamber", () => {
     expect(names).toContain("chamber-lens");
   });
 
-  it("registers chamber_emit_lens with a snapshot manager but no agent-turn or registerRegion seam", () => {
-    // No registerRegion on the ctx: registerTools must still wire the lens tool
-    // (the registry degrades to publishing without a panel), not throw.
+  it("withholds chamber_emit_lens when the registerRegion seam is absent (fail closed)", () => {
+    // Lenses render via registerRegion; without it the tool is withheld rather than
+    // publishing invisible, unbounded keys. The genesis write seam is unaffected.
     const ctx = {
       getExec: () => ({
         runJSON: async () => ({ ok: true as const, data: undefined }),
         runText: async () => ({ ok: true as const, data: "" }),
       }),
       getSnapshotManager: () => fakeSnapshotManager(),
+    } as unknown as RibContext;
+    const names = (rib.registerTools?.(ctx) ?? []).map((t) => t.name);
+    expect(names).not.toContain("chamber_emit_lens");
+    expect(names).toContain("chamber_emit_genesis");
+  });
+
+  it("registers chamber_emit_lens with the snapshot + registerRegion seams but no agent-turn seam", () => {
+    const ctx = {
+      getExec: () => ({
+        runJSON: async () => ({ ok: true as const, data: undefined }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+      getSnapshotManager: () => fakeSnapshotManager(),
+      registerRegion: () => () => {},
     } as unknown as RibContext;
     const names = (rib.registerTools?.(ctx) ?? []).map((t) => t.name);
     expect(names).toContain("chamber_emit_lens");

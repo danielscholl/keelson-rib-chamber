@@ -153,12 +153,21 @@ describe("lens registry", () => {
     await expect(reg2.publish("a", board("A"))).resolves.toEqual({ key: lensKey("a") });
   });
 
-  test("publishes without a panel when the registerRegion seam is absent", async () => {
-    const { sm, broadcasts, keys } = fakeSnapshotManager();
-    const reg = createLensRegistry(sm); // older harness: no registerRegion
-    await expect(reg.publish("x", board("X"))).resolves.toEqual({ key: lensKey("x") });
-    expect(keys()).toEqual([lensKey("x")]);
-    expect(broadcasts.at(-1)).toEqual({ key: lensKey("x"), view: board("X") });
+  test("concurrent publishes of the same new id register the key once, both resolving", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register);
+    // Two racing authors of the same not-yet-registered subject (the tool is both a
+    // workflow seam and a room turn-tool) must not both reach sm.register and trip its
+    // duplicate-key guard — the second finds the entry and just republishes.
+    const [a, b] = await Promise.all([
+      reg.publish("dup", board("A")),
+      reg.publish("dup", board("B")),
+    ]);
+    expect(a.key).toBe(lensKey("dup"));
+    expect(b.key).toBe(lensKey("dup"));
+    expect(keys()).toEqual([lensKey("dup")]); // registered exactly once
+    expect(region.calls).toHaveLength(1);
   });
 
   test("releases the snapshot registration if registerRegion throws", async () => {

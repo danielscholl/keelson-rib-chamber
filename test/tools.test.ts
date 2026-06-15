@@ -45,7 +45,9 @@ function makeCtx(run?: RunAgentTurn, sm?: SnapshotManager): RibContext {
       runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
       runText: async () => ({ ok: true as const, data: "" }),
     }),
-    ...(sm ? { getSnapshotManager: () => sm } : {}),
+    // Lenses need both the snapshot manager and the registerRegion seam; supply a
+    // no-op region registrar alongside the manager so the lens tool wires up.
+    ...(sm ? { getSnapshotManager: () => sm, registerRegion: () => () => {} } : {}),
     ...(run ? { runAgentTurn: run } : {}),
   } as RibContext;
 }

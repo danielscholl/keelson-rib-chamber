@@ -472,25 +472,25 @@ const rib: Rib = {
     // seams, so they only appear when those are present.
     const genesisTool = makeGenesisTool();
     const sm = ctx.getSnapshotManager?.();
+    const registerRegion = ctx.registerRegion;
     const run = ctx.runAgentTurn;
-    // Lenses publish through the snapshot manager alone, so the registry and its
-    // emit tool wire up whenever it is present — independent of the room's C1
-    // agent-turn seam (the room tools below additionally require runAgentTurn). It
-    // takes the registerRegion seam so each authored lens adds its own panel; when
-    // the harness lacks it the lens still publishes, it just renders no panel.
-    // Created once (a module singleton, like the room driver) and reused on a later
-    // registerTools so its keys aren't registered twice. If a different manager
-    // arrives (a re-bootstrap without an intervening dispose), rebuild against it
-    // rather than publishing through the stale manager. Build the replacement BEFORE
-    // disposing the old one, so a failed rebuild leaves the existing registry and
-    // lensSm consistent (never a disposed registry still marked current).
-    if (sm && sm !== lensSm) {
-      const next = createLensRegistry(sm, ctx.registerRegion);
+    // Lenses render via the registerRegion seam, so the registry and its emit tool
+    // wire up only when BOTH the snapshot manager and registerRegion are present —
+    // independent of the room's C1 agent-turn seam (the room tools below additionally
+    // require runAgentTurn). Without registerRegion the tool is withheld (fail closed)
+    // rather than publishing invisible, unbounded keys that never render. Created once
+    // (a module singleton, like the room driver) and reused on a later registerTools so
+    // its keys aren't registered twice. If a different manager arrives (a re-bootstrap
+    // without an intervening dispose), rebuild against it rather than publishing through
+    // the stale manager. Build the replacement BEFORE disposing the old one, so a failed
+    // rebuild leaves the existing registry and lensSm consistent.
+    if (sm && registerRegion && sm !== lensSm) {
+      const next = createLensRegistry(sm, registerRegion);
       lensRegistry?.dispose();
       lensRegistry = next;
       lensSm = sm;
     }
-    const lensTools = sm && lensRegistry ? [makeLensTool(lensRegistry)] : [];
+    const lensTools = sm && registerRegion && lensRegistry ? [makeLensTool(lensRegistry)] : [];
     if (sm && run) {
       // Seed a valid empty board so a client subscribing before the first turn
       // gets a well-formed view; every publish replaces it with the live board.

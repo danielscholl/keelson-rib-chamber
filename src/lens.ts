@@ -6,8 +6,8 @@ import { createCoalescingPublisher } from "./room-publisher.ts";
 // (rib:chamber:lens:<id>). The registry registers that snapshot key AND adds a
 // surface region for it through the harness `registerRegion` seam, so each new
 // subject appears as its own panel — unbounded, no fixed pool, no eviction. The
-// seam is optional: without it (an older harness) the board still publishes and is
-// reachable by key, it just renders no panel.
+// rib withholds the lens tool entirely when that seam is absent (see index.ts), so
+// the registry requires it rather than publish invisible, unrendered keys.
 
 // The id of the Chamber surface lens panels attach to. Shared with the surface
 // declaration in index.ts so the registerRegion target can't drift from it.
@@ -76,9 +76,41 @@ interface LensEntry {
 
 export function createLensRegistry(
   sm: SnapshotManager,
-  registerRegion?: RegisterRegion,
+  registerRegion: RegisterRegion,
 ): LensRegistry {
   const entries = new Map<string, LensEntry>();
+
+  // Register a new subject's snapshot key and surface region. Fully synchronous
+  // (no await between the entries.get miss in publish and this entries.set), so
+  // two concurrent publishes of the same new id — the tool is both a workflow seam
+  // and a room turn-tool — can't both reach sm.register and trip its duplicate-key
+  // guard; the second finds the entry and just republishes.
+  function register(id: string): LensEntry {
+    const key = lensKey(id);
+    const { publisher, latest } = createCoalescingPublisher(
+      () => sm.recompose(key),
+      emptyLensBoard(),
+    );
+    const unregisterSnapshot = sm.register(key, latest, { validate: expectView(key, "board") });
+    let unregisterRegion: () => void;
+    try {
+      unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, {
+        key,
+        title: id,
+        glyph: { char: "✦", tone: "accent" },
+        group: "lens",
+      });
+    } catch (e) {
+      // A failed region add (e.g. the harness per-surface ceiling) must not leak
+      // the snapshot registration we already made.
+      unregisterSnapshot();
+      throw e;
+    }
+    const entry: LensEntry = { key, publisher, unregisterSnapshot, unregisterRegion };
+    entries.set(id, entry);
+    return entry;
+  }
+
   return {
     async publish(id, board) {
       // Validate the board BEFORE registering anything, so a board we can't render
@@ -86,34 +118,11 @@ export function createLensRegistry(
       expectView(lensKey(id), "board")(board);
       let entry = entries.get(id);
       if (!entry) {
-        const key = lensKey(id);
-        const { publisher, latest } = createCoalescingPublisher(
-          () => sm.recompose(key),
-          emptyLensBoard(),
-        );
-        const unregisterSnapshot = sm.register(key, latest, {
-          validate: expectView(key, "board"),
-        });
-        let unregisterRegion: () => void;
-        try {
-          // Seed the cache so a client subscribing the instant the panel appears gets
-          // the seed board, not a 204 (the GET path doesn't lazy-compose).
-          await sm.recompose(key);
-          unregisterRegion =
-            registerRegion?.(CHAMBER_SURFACE_ID, {
-              key,
-              title: id,
-              glyph: { char: "✦", tone: "accent" },
-              group: "lens",
-            }) ?? (() => {});
-        } catch (e) {
-          // A failed region add (e.g. the harness per-surface ceiling) must not leak
-          // the snapshot registration we already made.
-          unregisterSnapshot();
-          throw e;
-        }
-        entry = { key, publisher, unregisterSnapshot, unregisterRegion };
-        entries.set(id, entry);
+        entry = register(id);
+        // Seed the cache so a client subscribing the instant the panel appears gets
+        // the seed board, not a 204 (the GET path doesn't lazy-compose). The entry is
+        // already mapped, so this await can't reopen the duplicate-register race.
+        await sm.recompose(entry.key);
       }
       await entry.publisher.publish(board);
       return { key: entry.key };

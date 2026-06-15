@@ -73,7 +73,9 @@ function makeCtx(opts: { run?: RunAgentTurn; sm?: SnapshotManager } = {}): RibCo
       runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
       runText: async () => ({ ok: true as const, data: "" }),
     }),
-    ...(opts.sm ? { getSnapshotManager: () => opts.sm } : {}),
+    // Lenses need both the snapshot manager and registerRegion; supply a no-op
+    // registrar with the manager so the lens tool wires up.
+    ...(opts.sm ? { getSnapshotManager: () => opts.sm, registerRegion: () => () => {} } : {}),
     ...(opts.run ? { runAgentTurn: opts.run } : {}),
   } as RibContext;
 }
@@ -152,8 +154,9 @@ afterAll(async () => {
 describe("room adapter — fails closed without the seams", () => {
   it("does not register the room snapshot or build the driver when runAgentTurn is absent", async () => {
     const { sm, registered } = fakeSnapshotManager();
-    // The driver-free seams — genesis (write) and lens (publish) — register with a
-    // snapshot manager alone; the room-control tools additionally need runAgentTurn.
+    // The driver-free seams — genesis (write) and lens (publish, given the snapshot +
+    // registerRegion seams makeCtx supplies) — wire up without runAgentTurn; the
+    // room-control tools additionally need it.
     expect(registerTools(makeCtx({ sm })).map((t) => t.name)).toEqual([
       "chamber_emit_genesis",
       "chamber_emit_lens",
