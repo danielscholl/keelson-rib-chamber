@@ -484,12 +484,14 @@ const rib: Rib = {
     // agent-turn seam (the room tools below additionally require runAgentTurn).
     // Created once (a module singleton, like the room driver) and reused on a later
     // registerTools so its keys aren't registered twice. If a different manager
-    // arrives (a re-bootstrap without an intervening dispose), release the old
-    // registrations and rebuild against the new one rather than publishing through
-    // the stale manager.
+    // arrives (a re-bootstrap without an intervening dispose), rebuild against it
+    // rather than publishing through the stale manager. Build the replacement BEFORE
+    // disposing the old one, so a failed rebuild leaves the existing registry and
+    // lensSm consistent (never a disposed registry still marked current).
     if (sm && sm !== lensSm) {
+      const next = createLensRegistry(sm);
       lensRegistry?.dispose();
-      lensRegistry = createLensRegistry(sm);
+      lensRegistry = next;
       lensSm = sm;
     }
     const lensTools = sm && lensRegistry ? [makeLensTool(lensRegistry)] : [];
