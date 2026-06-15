@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { CanvasBoardView, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
 import {
+  canonicalLensId,
   createLensRegistry,
   createSlotAllocator,
   emptyLensBoard,
@@ -21,6 +22,23 @@ describe("lens keys + placeholder", () => {
 
   test("emptyLensBoard is a renderable board view", () => {
     expect(() => expectView(lensKey(0), "board")(emptyLensBoard())).not.toThrow();
+  });
+});
+
+describe("canonicalLensId", () => {
+  test("lowercases and hyphenates so a subject maps to one id", () => {
+    expect(canonicalLensId("Release Risks")).toBe("release-risks");
+    expect(canonicalLensId("  release---risks  ")).toBe("release-risks");
+  });
+
+  test("does not cap below the 64-char id limit (distinct long subjects stay distinct)", () => {
+    const a = `${"x".repeat(50)}-a`;
+    const b = `${"x".repeat(50)}-b`;
+    expect(canonicalLensId(a)).not.toBe(canonicalLensId(b));
+  });
+
+  test("returns empty for an id with no usable characters", () => {
+    expect(canonicalLensId("!!!")).toBe("");
   });
 });
 
@@ -164,5 +182,25 @@ describe("lens registry", () => {
     // After dispose the keys are free and a fresh pool registers cleanly.
     first.dispose();
     expect(() => createLensRegistry(sm)).not.toThrow();
+  });
+
+  test("rolls back earlier registrations if a later register throws", () => {
+    const composers = new Map<string, () => unknown>();
+    let calls = 0;
+    const sm = {
+      register(key: string, compose: () => unknown) {
+        calls += 1;
+        if (calls === 2) throw new Error("boom on the 2nd key");
+        composers.set(key, compose);
+        return () => composers.delete(key);
+      },
+      recompose: async () => undefined,
+      latest: () => undefined,
+      keys: () => [...composers.keys()],
+      dispose: async () => {},
+    } as unknown as SnapshotManager;
+    expect(() => createLensRegistry(sm)).toThrow("boom");
+    // The first key's registration was rolled back — nothing leaked.
+    expect(composers.size).toBe(0);
   });
 });

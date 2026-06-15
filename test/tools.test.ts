@@ -202,7 +202,16 @@ describe("chamber room-control chat tools", () => {
     );
     const slotA = (JSON.parse(spaced.out()) as { slot: number }).slot;
     const slotB = (JSON.parse(kebab.out()) as { slot: number }).slot;
-    expect(slotA).toBe(slotB); // "Release Risks" and "release-risks" slugify to one slot
+    expect(slotA).toBe(slotB); // "Release Risks" and "release-risks" canonicalize to one slot
+  });
+
+  it("chamber_emit_lens rejects an id with no usable characters", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "!!!", board: { view: "board", title: "X", sections: [] } },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
   });
 
   it("advertises start/say/stop as state-changing and start as requiring confirmation", () => {

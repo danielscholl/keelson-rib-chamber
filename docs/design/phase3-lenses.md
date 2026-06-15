@@ -44,9 +44,10 @@ manifest re-fetch.
   `emptyLensBoard()` and guarded fail-closed by `expectView(key, "board")`. Its
   `publish(id, board)` routes the board to the `id`'s slot and broadcasts.
 - **`chamber_emit_lens` tool** (`src/index.ts`) — input `{ id, board }`, the board
-  typed by `canvasBoardViewSchema`. The `id` is slugified (`Release Risks` →
-  `release-risks`) so the same subject maps to one slot and re-authoring updates in
-  place. Registered whenever the snapshot-manager seam is present (independent of the
+  typed by `canvasBoardViewSchema`. The `id` is canonicalized (`Release Risks` →
+  `release-risks`) by a lens-specific normalizer (not the Mind slugifier, whose
+  48-char cap could collide distinct long subjects) so the same subject maps to one
+  slot and re-authoring updates in place. Registered whenever the snapshot-manager seam is present (independent of the
   room's `runAgentTurn` seam). Mirrors the `chamber_emit_genesis` write-seam shape.
 - **`chamber-lens` workflow + `/lens` command** — one prompt turn composes a board
   for `$ARGUMENTS` and calls `chamber_emit_lens` (the genesis pattern: `allowed_tools`
@@ -72,7 +73,7 @@ manifest re-fetch.
   board from evicting a live lens for nothing.
 - **`id` is a routing key, not a path.** Lenses publish to fixed slot keys, never an
   `id`-named key on disk, so `id` needs no filesystem-safety guard (unlike Mind
-  slugs) — but it is slugified for stable slot reuse.
+  slugs) — but it is canonicalized (a lens-specific normalizer) for stable slot reuse.
 - **Singleton lifecycle.** The slot pool is a module singleton created once in
   `registerTools` and disposed in `rib.dispose()` (the room-driver pattern). It owns
   the slot keys' snapshot registrations, so disposing releases them and a

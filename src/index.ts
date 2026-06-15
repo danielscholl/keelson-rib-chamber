@@ -7,6 +7,7 @@ import type {
   RibActionResult,
   RibCommandDescriptor,
   RibContext,
+  SnapshotManager,
   ToolContext,
   ToolDefinition,
 } from "@keelson/shared";
@@ -21,7 +22,13 @@ import {
 import { listAgents, resolveAgent } from "./agents.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
-import { createLensRegistry, LENS_KEYS, type LensRegistry, lensKey } from "./lens.ts";
+import {
+  canonicalLensId,
+  createLensRegistry,
+  LENS_KEYS,
+  type LensRegistry,
+  lensKey,
+} from "./lens.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomStore } from "./ports.ts";
@@ -53,8 +60,10 @@ const DEFAULT_ROOM_TURN_BUDGET = 8;
 let driver: RoomDriver | undefined;
 // The lens slot pool is a boot-time singleton too: it owns the snapshot
 // registrations for the fixed lens keys, created once in registerTools and disposed
-// in dispose() so a re-register doesn't duplicate-register its keys.
+// in dispose() so a re-register doesn't duplicate-register its keys. lensSm tracks the
+// manager it was built against, so a re-bootstrap with a different one rebinds it.
 let lensRegistry: LensRegistry | undefined;
+let lensSm: SnapshotManager | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -473,9 +482,16 @@ const rib: Rib = {
     // Lenses publish through the snapshot manager alone, so the slot pool and its
     // emit tool wire up whenever it is present — independent of the room's C1
     // agent-turn seam (the room tools below additionally require runAgentTurn).
-    // Created once (a module singleton, like the room driver); reused on a later
-    // registerTools so its keys aren't registered twice.
-    if (sm && !lensRegistry) lensRegistry = createLensRegistry(sm);
+    // Created once (a module singleton, like the room driver) and reused on a later
+    // registerTools so its keys aren't registered twice. If a different manager
+    // arrives (a re-bootstrap without an intervening dispose), release the old
+    // registrations and rebuild against the new one rather than publishing through
+    // the stale manager.
+    if (sm && sm !== lensSm) {
+      lensRegistry?.dispose();
+      lensRegistry = createLensRegistry(sm);
+      lensSm = sm;
+    }
     const lensTools = sm && lensRegistry ? [makeLensTool(lensRegistry)] : [];
     if (sm && run) {
       // Seed a valid empty board so a client subscribing before the first turn
@@ -556,6 +572,7 @@ const rib: Rib = {
     invalidateRoster();
     lensRegistry?.dispose();
     lensRegistry = undefined;
+    lensSm = undefined;
     await driver?.dispose();
   },
 };
@@ -1089,11 +1106,15 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         emitResult(ctx, `chamber_emit_lens: ${parsed.error.message}`, true);
         return;
       }
-      // Canonicalize the id: the prompt asks for kebab-case, but a model may send
-      // "Release Risks" — slugify so the same subject maps to the same slot and
-      // re-authoring updates in place instead of evicting (slugify never returns
-      // empty: a non-empty input always yields a non-empty slug).
-      const id = slugify(parsed.data.id);
+      // Canonicalize the id into a stable routing key (the prompt asks for kebab-case,
+      // but a model may send "Release Risks"). A lens-specific normalizer, NOT the
+      // Mind slugifier: no 48-char cap (which would collide distinct long subjects)
+      // and no synthetic fallback — an id with no usable characters is rejected.
+      const id = canonicalLensId(parsed.data.id);
+      if (!id) {
+        emitResult(ctx, "chamber_emit_lens: id has no usable characters", true);
+        return;
+      }
       try {
         const { slot } = await registry.publish(id, parsed.data.board);
         emitResult(ctx, JSON.stringify({ ok: true, slot, key: lensKey(slot) }));

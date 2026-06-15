@@ -39,6 +39,19 @@ export function emptyLensBoard(): CanvasBoardView {
   };
 }
 
+// Canonicalize a lens id into a stable routing key: lowercase, runs of non-alphanumeric
+// collapse to a single hyphen, ends trimmed. Distinct from the Mind slugifier — no
+// length cap below the id's own 64 (so two long subjects can't collide on a shared
+// prefix) and no synthetic fallback (an id with no usable characters returns "", which
+// the caller rejects).
+export function canonicalLensId(raw: string): string {
+  return raw
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 // Maps a logical lens id to a fixed slot, LRU. Re-authoring the same id reuses its
 // slot (the panel updates in place); a new id takes the next free slot, then evicts
 // the least-recently-authored once the pool is full. Pure and deterministic, so the
@@ -99,14 +112,23 @@ export interface LensRegistry {
 export function createLensRegistry(sm: SnapshotManager): LensRegistry {
   const allocator = createSlotAllocator(LENS_SLOT_COUNT);
   const unregisters: (() => void)[] = [];
-  const publishers = LENS_KEYS.map((key) => {
-    const { publisher, latest } = createCoalescingPublisher(
-      () => sm.recompose(key),
-      emptyLensBoard(),
-    );
-    unregisters.push(sm.register(key, latest, { validate: expectView(key, "board") }));
-    return publisher;
-  });
+  let publishers: { publish(board: CanvasBoardView): Promise<void> }[];
+  try {
+    publishers = LENS_KEYS.map((key) => {
+      const { publisher, latest } = createCoalescingPublisher(
+        () => sm.recompose(key),
+        emptyLensBoard(),
+      );
+      unregisters.push(sm.register(key, latest, { validate: expectView(key, "board") }));
+      return publisher;
+    });
+  } catch (e) {
+    // A mid-loop register failure (e.g. a duplicate key) would otherwise leak the
+    // handles already collected — no caller holds dispose() for a throwing
+    // constructor. Release them, then rethrow.
+    for (const unregister of unregisters) unregister();
+    throw e;
+  }
   // Prime each slot so a client subscribing before any lens is authored gets the
   // seeded board, not a loading skeleton (the GET path doesn't lazy-compose). Capture
   // the priming so publish can await it: the manager coalesces concurrent recomposes
