@@ -20,6 +20,7 @@ import {
   z,
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
+import { capabilityVocabulary, KNOWN_CAPABILITY_SLUGS } from "./capabilities.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import {
@@ -190,8 +191,9 @@ Compose:
     ## Mission  — what it exists to do
     ## Voice    — how it speaks (tone, length, habits)
 - tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
+- tools: an OPTIONAL array of capability slugs the Mind may use inside a room — choose ONLY from this set: ${capabilityVocabulary()}. Include a slug only when the role genuinely calls for it; omit it (or use []) for a conversation-only Mind, and never invent a slug outside this set.
 
-Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
+Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline, tools } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
 
 // The lens authoring prompt (the chamber-brief sibling): one agent turn composes a
 // canvas board on a subject and calls chamber_emit_lens to publish it. Unlike brief
@@ -1103,13 +1105,16 @@ const genesisEmitSchema = z.object({
   voice: z.string().min(1),
   soul: z.string().min(1),
   tagline: z.string().min(1),
+  // Capability slugs the Mind may invoke in a room (see CAPABILITY_TOOLS).
+  // Unknown slugs are dropped at persist; omitted/empty keeps the Mind text-only.
+  tools: z.array(z.string()).optional(),
 });
 
 function makeGenesisTool(): ToolDefinition {
   return {
     name: "chamber_emit_genesis",
     description:
-      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
+      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline, optional capability tools }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
     inputSchema: genesisEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -1118,8 +1123,11 @@ function makeGenesisTool(): ToolDefinition {
         emitResult(ctx, `chamber_emit_genesis: ${parsed.error.message}`, true);
         return;
       }
-      const { name, role, voice, soul, tagline } = parsed.data;
+      const { name, role, voice, soul, tagline, tools } = parsed.data;
       try {
+        const knownTools = tools
+          ? [...new Set(tools.filter((s) => KNOWN_CAPABILITY_SLUGS.has(s)))]
+          : [];
         const record: MindRecord = {
           slug: slugify(name),
           name,
@@ -1129,6 +1137,7 @@ function makeGenesisTool(): ToolDefinition {
           // authored tagline trimmed, not hard-cut.
           persona: tagline.trim(),
           createdAt: new Date().toISOString(),
+          ...(knownTools.length > 0 ? { tools: knownTools } : {}),
         };
         await scaffoldMind(mindsDir(), record, soul);
         invalidateRoster();

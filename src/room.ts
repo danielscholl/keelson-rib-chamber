@@ -1,4 +1,5 @@
 import { buildRoomBoard } from "./boards/room.ts";
+import { resolveMindTools } from "./capabilities.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
 import {
   allHeardInCycle,
@@ -465,18 +466,18 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       text = "";
       aborted = true;
     } else {
-      // turnTools (when configured) let a Mind call the rib's own tools mid-turn —
-      // today the lens write seam; omitted keeps the turn text-only. Per-Mind
-      // Mind.tools mapping is still deferred. The Mind's model/provider pin is
-      // honoured (provider alongside model so a cross-provider pin resolves
-      // coherently here, the same as a direct /mind chat — not just against the
-      // default provider).
+      // A speaker's declared capability slugs (mind.tools) map onto the turn's
+      // tool rail, intersected with the room-safe pool; no declaration stays
+      // text-only. The Mind's model/provider pin is honoured (provider alongside
+      // model so a cross-provider pin resolves coherently here, the same as a
+      // direct /mind chat — not just against the default provider).
+      const tools = resolveMindTools(mind, deps.turnTools);
       const turn = deps.runAgentTurn({
         system,
         prompt,
         abortSignal: controller.signal,
         ...(deps.turnCwd ? { cwd: deps.turnCwd } : {}),
-        ...(deps.turnTools && deps.turnTools.length > 0 ? { tools: deps.turnTools } : {}),
+        ...(tools.length > 0 ? { tools } : {}),
         ...(mind.model ? { model: mind.model } : {}),
         ...(mind.provider ? { provider: mind.provider } : {}),
       });
