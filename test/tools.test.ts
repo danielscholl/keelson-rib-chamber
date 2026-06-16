@@ -119,6 +119,48 @@ beforeAll(async () => {
     },
     "Mod's soul.",
   );
+  // Provider-pinned Minds for the cross-vendor `review` strategy: scribe (claude)
+  // and critic (codex) are a valid cross-vendor pair; twin (claude) makes a
+  // same-vendor pair with scribe; alice/bob carry no provider pin.
+  await scaffoldMind(
+    mindsDir(),
+    {
+      slug: "scribe",
+      name: "Scribe",
+      role: "author",
+      voice: "plain",
+      persona: "You are Scribe.",
+      provider: "claude",
+      createdAt: at,
+    },
+    "Scribe's soul.",
+  );
+  await scaffoldMind(
+    mindsDir(),
+    {
+      slug: "critic",
+      name: "Critic",
+      role: "reviewer",
+      voice: "sharp",
+      persona: "You are Critic.",
+      provider: "codex",
+      createdAt: at,
+    },
+    "Critic's soul.",
+  );
+  await scaffoldMind(
+    mindsDir(),
+    {
+      slug: "twin",
+      name: "Twin",
+      role: "author",
+      voice: "plain",
+      persona: "You are Twin.",
+      provider: "claude",
+      createdAt: at,
+    },
+    "Twin's soul.",
+  );
   // An abort-aware turn holds the first turn in flight (it resolves only on abort),
   // so a started room stays active for the status/say assertions until stop.
   abort = abortableRunAgentTurn();
@@ -328,6 +370,46 @@ describe("chamber room-control chat tools", () => {
     );
     expect(withSynth.errored()).toBe(true);
     expect(withSynth.out()).toContain("synthesizer");
+  });
+
+  it("review dry-runs a cross-vendor pair and labels the author/reviewer roles", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["scribe", "critic"], strategy: "review", topic: "Draft an API" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("review: scribe reviewed by critic");
+  });
+
+  it("review rejects a same-vendor author/reviewer pair", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["scribe", "twin"], strategy: "review", confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("cross-vendor");
+  });
+
+  it("review rejects a pair where a Mind has no provider pin", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "scribe"], strategy: "review", confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("cross-vendor");
+  });
+
+  it("review rejects more than two participants", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["scribe", "critic", "twin"], strategy: "review", confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("exactly 2");
   });
 
   it("rejects a prototype-chain string as a strategy", async () => {

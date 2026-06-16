@@ -131,6 +131,33 @@ export function buildSynthesisPrompt(input: {
   return parts.join("\n\n");
 }
 
+// The reviewer's prompt for a `review` turn: the contract (if any) and ONLY the
+// author's artifact — deliberately NOT the windowed transcript, so the reviewer
+// judges the deliverable on its own terms, cross-vendor, without the author's
+// working context. Always non-empty.
+export function buildReviewPrompt(input: {
+  contract?: string;
+  artifact: string;
+  author?: MindSlug;
+  directionInjection?: string;
+}): string {
+  const parts: string[] = [];
+  const contract = input.contract?.trim();
+  if (contract) parts.push(`Contract / acceptance criteria:\n\n${contract}`);
+  const who = input.author ? ` from ${input.author}` : "";
+  const artifact = input.artifact.trim();
+  parts.push(
+    artifact.length > 0
+      ? `Artifact to review${who}:\n\n${artifact}`
+      : `The author${who} produced no artifact to review.`,
+  );
+  if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
+  parts.push(
+    "You are the reviewer, from a different vendor than the author. Review ONLY the artifact above against the contract — correctness, gaps, and risks — and give a clear verdict (approve or request changes). Do not rewrite it; report your findings concisely, in character.",
+  );
+  return parts.join("\n\n");
+}
+
 export interface BuildTurnEntryInput {
   roomSlug: MindSlug;
   turnIndex: number;

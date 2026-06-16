@@ -2,17 +2,20 @@ import type { RoomStrategyName, Strategy } from "../types.ts";
 import { concurrent } from "./concurrent.ts";
 import { groupChat } from "./group-chat.ts";
 import { openFloor } from "./open-floor.ts";
+import { review } from "./review.ts";
 import { sequential } from "./sequential.ts";
 
 // sequential rotates one speaker per turn by turnIndex; concurrent fans all
 // participants out in one parallel round (the driver runs the round's turns at
 // once). group-chat is the moderator-routed Phase 3 strategy; open-floor is the
 // unmoderated one (each speaker nominates the next, the driver does the routing).
+// review is the two-Mind, single-pass cross-vendor review (author then reviewer).
 export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
   sequential,
   concurrent,
   "group-chat": groupChat,
   "open-floor": openFloor,
+  review,
 };
 
 export function getStrategy(name: RoomStrategyName): Strategy {
@@ -24,4 +27,4 @@ export function getStrategy(name: RoomStrategyName): Strategy {
   return strategy;
 }
 
-export { concurrent, groupChat, openFloor, sequential };
+export { concurrent, groupChat, openFloor, review, sequential };

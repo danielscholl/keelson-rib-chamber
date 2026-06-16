@@ -4,6 +4,7 @@ import {
   getStrategy,
   groupChat,
   openFloor,
+  review,
   sequential,
 } from "../../src/strategies/index.ts";
 
@@ -23,6 +24,10 @@ describe("strategy registry", () => {
 
   test("resolves open-floor", () => {
     expect(getStrategy("open-floor")).toBe(openFloor);
+  });
+
+  test("resolves review", () => {
+    expect(getStrategy("review")).toBe(review);
   });
 
   test("does not resolve inherited Object members as strategies", () => {
