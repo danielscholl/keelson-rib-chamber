@@ -35,7 +35,7 @@ export interface TurnEntry {
   at: string;
 }
 
-export type RoomStrategyName = "sequential" | "concurrent" | "group-chat" | "open-floor";
+export type RoomStrategyName = "sequential" | "concurrent" | "group-chat" | "open-floor" | "review";
 
 export interface RoomConfig {
   moderator?: MindSlug;

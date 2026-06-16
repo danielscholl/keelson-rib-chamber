@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildModeratorPrompt,
   buildOpenFloorPrompt,
+  buildReviewPrompt,
   buildSynthesisPrompt,
   buildTurnEntry,
   buildTurnPrompt,
@@ -169,6 +170,37 @@ describe("buildSynthesisPrompt", () => {
     });
     expect(p).toContain("Room topic: T");
     expect(p).toContain("a: point");
+  });
+});
+
+describe("buildReviewPrompt", () => {
+  test("carries the contract, the attributed artifact, and the review instruction", () => {
+    const p = buildReviewPrompt({
+      contract: "Ship a parser",
+      artifact: "here is my parser",
+      author: "scribe",
+    });
+    expect(p).toContain("Ship a parser");
+    expect(p).toContain("here is my parser");
+    expect(p).toContain("from scribe");
+    expect(p.toLowerCase()).toContain("review");
+    expect(p.toLowerCase()).toContain("different vendor");
+  });
+
+  test("is artifact-only — never renders the windowed transcript framing", () => {
+    const p = buildReviewPrompt({ contract: "c", artifact: "the artifact" });
+    expect(p).not.toContain("Conversation so far");
+  });
+
+  test("is non-empty with no contract and an empty artifact", () => {
+    const p = buildReviewPrompt({ artifact: "" });
+    expect(p.trim().length).toBeGreaterThan(0);
+    expect(p).toContain("no artifact to review");
+  });
+
+  test("omits the contract line when none is given", () => {
+    const p = buildReviewPrompt({ artifact: "x" });
+    expect(p).not.toContain("Contract / acceptance criteria");
   });
 });
 

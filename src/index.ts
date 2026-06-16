@@ -679,7 +679,8 @@ async function validateStart(
   } catch {
     return { ok: false, error: `unknown strategy "${strategy}"` };
   }
-  const known = new Set((await resolveMinds()).map((m) => m.slug));
+  const minds = await resolveMinds();
+  const known = new Set(minds.map((m) => m.slug));
   const missing = deduped.filter((s) => !known.has(s));
   if (missing.length > 0) {
     return {
@@ -779,6 +780,59 @@ async function validateStart(
       endVoteThreshold: config.endVoteThreshold ?? DEFAULT_END_VOTE_THRESHOLD,
     };
     return { ok: true, participants: deduped, config: roomConfig };
+  }
+  // review is a two-Mind, single-pass cross-vendor critique: participants[0]
+  // authors the artifact, participants[1] reviews it. Roles are positional, so it
+  // needs no routing Mind and no config — but it DOES require the two Minds to run
+  // on different providers (the whole point), so a same-vendor or unpinned pair is
+  // rejected here rather than running a pointless same-model review.
+  if (strategy === "review") {
+    if (deduped.length !== 2) {
+      return {
+        ok: false,
+        error: "review needs exactly 2 participants: the author, then the reviewer",
+      };
+    }
+    if (turnBudget < 2) {
+      return {
+        ok: false,
+        error: "review needs a turnBudget of at least 2 (one author turn, one review turn)",
+      };
+    }
+    if (config.moderator) {
+      return {
+        ok: false,
+        error: "review has no moderator — the reviewer critiques the author's artifact directly",
+      };
+    }
+    if (config.synthesizer) {
+      return { ok: false, error: "review has no synthesizer — the reviewer's turn is the close" };
+    }
+    const authorSlug = deduped[0];
+    const reviewerSlug = deduped[1];
+    if (authorSlug === undefined || reviewerSlug === undefined) {
+      return {
+        ok: false,
+        error: "review needs exactly 2 participants: the author, then the reviewer",
+      };
+    }
+    const bySlug = new Map(minds.map((m) => [m.slug, m]));
+    const authorProvider = bySlug.get(authorSlug)?.provider;
+    const reviewerProvider = bySlug.get(reviewerSlug)?.provider;
+    if (!authorProvider || !reviewerProvider) {
+      return {
+        ok: false,
+        error:
+          "review must be cross-vendor: pin a provider on both the author and the reviewer Mind, set to different providers",
+      };
+    }
+    if (authorProvider === reviewerProvider) {
+      return {
+        ok: false,
+        error: `review must be cross-vendor: ${authorSlug} and ${reviewerSlug} both use "${authorProvider}" — pin them to different providers`,
+      };
+    }
+    return { ok: true, participants: deduped };
   }
   return { ok: true, participants: deduped };
 }
@@ -1152,7 +1206,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Rejected if a room is already active — stop it first. NOT for creating a Mind (that is the New agent / genesis action).',
+        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. For a cross-vendor review set strategy:"review" with exactly two participants pinned to different providers — the first authors an artifact, the second (a different vendor) reviews it. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Rejected if a room is already active — stop it first. NOT for creating a Mind (that is the New agent / genesis action).',
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,
@@ -1202,7 +1256,11 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const who = valid.participants.join(", ");
         const topicNote = topic ? ` on "${topic}"` : " (no topic set)";
         const modeNote =
-          strategy === "group-chat" && moderator ? ` (group-chat, moderated by ${moderator})` : "";
+          strategy === "group-chat" && moderator
+            ? ` (group-chat, moderated by ${moderator})`
+            : strategy === "review"
+              ? ` (review: ${valid.participants[0]} reviewed by ${valid.participants[1]})`
+              : "";
         if (!confirm) {
           emitResult(
             ctx,

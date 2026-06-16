@@ -18,6 +18,7 @@ import { openFloor } from "./strategies/open-floor.ts";
 import {
   buildModeratorPrompt,
   buildOpenFloorPrompt,
+  buildReviewPrompt,
   buildSynthesisPrompt,
   buildTurnEntry,
   buildTurnPrompt,
@@ -576,12 +577,30 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     room: Room,
     transcript: readonly TurnEntry[],
     directionInjection: string | undefined,
+    speaker?: MindSlug,
   ): string {
     if (room.strategy === "open-floor") {
       return buildOpenFloorPrompt({
         ...(room.topic ? { topic: room.topic } : {}),
         transcript,
         participants: room.participants,
+        ...(directionInjection ? { directionInjection } : {}),
+      });
+    }
+    // The reviewer (participants[1]) judges the author's artifact alone — the
+    // author's last turn — not the windowed transcript, so the handoff stays
+    // artifact-only and cross-vendor. The author (participants[0]) gets the plain
+    // turn prompt, framed by the topic-as-contract.
+    if (room.strategy === "review" && speaker !== undefined && speaker === room.participants[1]) {
+      const authorSlug = room.participants[0];
+      const authorEntry = [...transcript]
+        .reverse()
+        .find((e) => e.role === "agent" && e.from === authorSlug);
+      const artifact = authorEntry?.parts.map((p) => p.text).join("\n") ?? "";
+      return buildReviewPrompt({
+        ...(room.topic ? { contract: room.topic } : {}),
+        artifact,
+        ...(authorSlug ? { author: authorSlug } : {}),
         ...(directionInjection ? { directionInjection } : {}),
       });
     }
@@ -605,6 +624,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       room,
       await loadCachedTranscript(room.slug),
       directionInjection,
+      mindSlug,
     );
     const turn = await runOneTurn(mind, prompt, controller);
     if (turn === "disposed") return false;
