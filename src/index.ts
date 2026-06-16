@@ -1105,7 +1105,7 @@ const genesisEmitSchema = z.object({
   voice: z.string().min(1),
   soul: z.string().min(1),
   tagline: z.string().min(1),
-  // Capability slugs the Mind may invoke in a room (see CAPABILITY_TOOLS).
+  // Capability slugs the Mind may invoke in a room (see CAPABILITIES).
   // Unknown slugs are dropped at persist; omitted/empty keeps the Mind text-only.
   tools: z.array(z.string()).optional(),
 });
