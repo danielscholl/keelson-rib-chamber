@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.3.0...v0.4.0) (2026-06-16)
+
+
+### Added
+
+* **lens:** make agent-authored lenses unbounded via dynamic regions ([#61](https://github.com/danielscholl/keelson-rib-chamber/issues/61)) ([8210795](https://github.com/danielscholl/keelson-rib-chamber/commit/82107953987830f1e985645ff69a17ea9116124d))
+* **room:** add cross-vendor review strategy ([#63](https://github.com/danielscholl/keelson-rib-chamber/issues/63)) ([5c9edc0](https://github.com/danielscholl/keelson-rib-chamber/commit/5c9edc00c453d6d9b236c3222c7b11f2c7077dd6)), closes [#59](https://github.com/danielscholl/keelson-rib-chamber/issues/59)
+* **room:** implement per-mind tool rail scoping via capability slugs ([#64](https://github.com/danielscholl/keelson-rib-chamber/issues/64)) ([ced9493](https://github.com/danielscholl/keelson-rib-chamber/commit/ced9493f784ce72cd5b586ff2c83622d4c31faa9))
+
+
+### Documentation
+
+* **concepts:** add concepts tier with minds, rooms, and lenses pages ([#65](https://github.com/danielscholl/keelson-rib-chamber/issues/65)) ([27de93c](https://github.com/danielscholl/keelson-rib-chamber/commit/27de93cbae209ddaa334dcc8e4099660feef7b04))
+
 ## [0.3.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.2.0...v0.3.0) (2026-06-15)
 
 
