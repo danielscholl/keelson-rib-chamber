@@ -557,6 +557,42 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     expect(soul).toContain("## Persona");
   });
 
+  it("persists declared capability slugs, dropping unknown ones", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "Scout",
+        role: "researcher",
+        voice: "curious",
+        soul: "# Scout\n## Persona\nA researcher.",
+        tagline: "Finds things out.",
+        tools: ["lens", "bogus"],
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const scout = (await readMinds(mindsDir())).find((m) => m.slug === "scout");
+    expect(scout?.tools).toEqual(["lens"]);
+  });
+
+  it("omits tools when none are declared", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "Plain",
+        role: "writer",
+        voice: "plain",
+        soul: "# Plain\n## Persona\nA writer.",
+        tagline: "Writes plainly.",
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const plain = (await readMinds(mindsDir())).find((m) => m.slug === "plain");
+    expect(plain).toBeDefined();
+    expect(plain?.tools).toBeUndefined();
+  });
+
   it("fails closed on a slug collision (alice was seeded)", async () => {
     const t = makeToolCtx();
     await tool("chamber_emit_genesis").execute(

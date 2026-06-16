@@ -28,7 +28,10 @@ const START = {
   turnBudget: 4,
 };
 
-function harness(scripts: TurnScript[] = [{ text: "reply" }]) {
+function harness(
+  scripts: TurnScript[] = [{ text: "reply" }],
+  opts: { minds?: readonly Mind[]; turnTools?: readonly { name: string }[] } = {},
+) {
   const { store, rooms, transcripts } = makeFakeStore();
   const pub = makeFakePublisher();
   const turns = scriptedRunAgentTurn(scripts);
@@ -36,7 +39,8 @@ function harness(scripts: TurnScript[] = [{ text: "reply" }]) {
     store,
     publisher: pub.publisher,
     runAgentTurn: turns.run,
-    minds: () => MINDS,
+    minds: () => opts.minds ?? MINDS,
+    ...(opts.turnTools ? { turnTools: opts.turnTools } : {}),
     now: fixedClock(),
     newId: seqIds(),
   });
@@ -293,22 +297,42 @@ describe("room driver — concurrency & model", () => {
     expect(turns.requests[0]?.provider).toBe("claude");
   });
 
-  test("forwards turnTools as the turn request's tools (a Mind can author a lens mid-room)", async () => {
-    const { store } = makeFakeStore();
-    const pub = makeFakePublisher();
-    const turns = scriptedRunAgentTurn([{ text: "ok" }]);
-    const driver = createRoomDriver({
-      store,
-      publisher: pub.publisher,
-      runAgentTurn: turns.run,
-      minds: () => MINDS,
-      turnTools: [{ name: "chamber_emit_lens" }],
-      now: fixedClock(),
-      newId: seqIds(),
+  const TOOLED_MINDS: Mind[] = [
+    { slug: "a", name: "Ada", persona: "You are Ada.", tools: ["lens"] },
+    { slug: "b", name: "Bo", persona: "You are Bo." },
+  ];
+  const LENS_POOL = [{ name: "chamber_emit_lens" }];
+
+  test("maps a speaker's declared lens slug onto the turn's tools (a Mind can author a lens mid-room)", async () => {
+    const h = harness([{ text: "ok" }], { minds: TOOLED_MINDS, turnTools: LENS_POOL });
+    await h.driver.start(START);
+    await h.driver.step("demo"); // speaker a, declares lens
+    expect(h.turns.requests[0]?.tools).toEqual([{ name: "chamber_emit_lens" }]);
+  });
+
+  test("a Mind that declares no tools stays text-only even when the room pool is set", async () => {
+    const h = harness([{ text: "a" }, { text: "b" }], {
+      minds: TOOLED_MINDS,
+      turnTools: LENS_POOL,
     });
-    await driver.start(START);
-    await driver.step("demo");
-    expect(turns.requests[0]?.tools).toEqual([{ name: "chamber_emit_lens" }]);
+    await h.driver.start(START);
+    await h.driver.step("demo"); // a: declares lens
+    await h.driver.step("demo"); // b: declares nothing
+    expect(h.turns.requests[0]?.tools).toEqual([{ name: "chamber_emit_lens" }]);
+    expect(h.turns.requests[1]?.tools).toBeUndefined();
+  });
+
+  test("each parallel speaker gets its own tool rail by declaration", async () => {
+    const h = harness([{ text: "ada" }, { text: "bo" }], {
+      minds: TOOLED_MINDS,
+      turnTools: LENS_POOL,
+    });
+    await h.driver.start({ ...START, strategy: "concurrent", turnBudget: 4 });
+    await h.driver.step("demo"); // one parallel batch = a + b
+    const ada = h.turns.requests.find((r) => r.system === "You are Ada.");
+    const bo = h.turns.requests.find((r) => r.system === "You are Bo.");
+    expect(ada?.tools).toEqual([{ name: "chamber_emit_lens" }]);
+    expect(bo?.tools).toBeUndefined();
   });
 
   test("omits tools from the turn request when no turnTools configured (text-only default)", async () => {

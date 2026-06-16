@@ -82,11 +82,13 @@ interface Mind {
 ```
 
 `Mind.tools` are **capability slugs**, not C1 tool descriptors. At the call site
-the driver maps them onto C1's `runAgentTurn` tool-selection args (per C1's
-tool-resolution); **omitting `tools` yields a text-only turn — the room default**
-(no Bash/Edit between conversation turns). The driver never passes
-`tools: mind.tools` directly: `string[]` slugs are not the `{ name }[]` shape C1
-expects, and selecting nothing must mean text-only, not "all tools."
+the driver maps them onto C1's `runAgentTurn` tool rail (`resolveMindTools`),
+intersected with the room-safe pool (`RoomDriverDeps.turnTools`); **omitting
+`tools` yields a text-only turn — the room default** (no Bash/Edit between
+conversation turns). The driver never passes `tools: mind.tools` directly:
+`string[]` slugs are not the `{ name }[]` shape C1 expects, and selecting nothing
+must mean text-only, not "all tools." See [per-mind-tools.md](./per-mind-tools.md)
+for the vocabulary and the room-pool ceiling.
 
 **`TurnEntry`** — one line of `rooms/<slug>/transcript.jsonl` (`ARCHITECTURE.md`
 §8) and the unit the room board renders:
