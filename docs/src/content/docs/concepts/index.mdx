@@ -1,12 +1,77 @@
 ---
 title: Concepts
-description: The mental model for the Chamber rib.
+description: "The mental model for the Chamber rib: genesis, rooms, and lenses, and the one pipeline they share."
+sidebar:
+  label: Overview
+  order: 1
 ---
 
-The concept tier explains the shape of the rib: how a **mind** is authored on
-demand (genesis), how minds take turns in a **room** under a strategy, and how an
-agent authors a **lens** that renders through the Keelson canvas. It also covers
-the harness base the rib attaches to, linking out to keelson's concept tier for
-the generic rib contract rather than re-explaining it.
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Pages land here as the documentation grows.
+Chamber is a [Keelson](https://danielscholl.github.io/keelson/) **rib**: a
+package the harness discovers at runtime and attaches through one typed
+contract. It adds a multi-agent operating layer on top of the harness, and it
+ships no hand-coded UI. For what a rib is and how the harness loads one, see the
+keelson docs; this site assumes that and spends its words on what Chamber adds.
+
+## The mode Chamber adds
+
+Keelson runs agents in two modes. **Chat** is one agent, conversational.
+**Workflows** are a deterministic graph of agent steps, repeatable and authored
+in YAML. Chamber adds the mode between them: many persistent agents you author
+on demand, that talk to each other under a chosen turn strategy, and that render
+their own views of what they are doing.
+
+Rooms are emergent and non-deterministic, which is the point. They are the
+generative counterpart to workflows, not a replacement. Repeatable operations
+still belong in workflows; a room is where you want exploration, debate, or a
+second opinion. The two are complementary modes, and keelson already owns the
+deterministic half.
+
+## One pipeline underneath
+
+Everything Chamber renders shares a single path. An agent turn (a room turn or a
+lens turn) emits a generic canvas **board**, the rib publishes that board
+fail-closed to a snapshot key under `rib:chamber:*`, and the bound view renders
+it live in the SPA. There is no per-view React: a board is data, and the
+harness already knows how to draw one. The board shape and the canvas renderer
+are keelson's; Chamber only produces the payloads.
+
+That single pipeline is what makes the hero capability honest. When an agent
+authors a lens, it emits the same kind of board the room transcript and the
+briefing do, so its view renders through machinery that already exists.
+
+## Three capabilities
+
+<CardGrid>
+  <LinkCard
+    title="Minds and genesis"
+    href="minds/"
+    description="Author a persistent agent from a freeform brief. What a Mind is, where it lives on disk, and how one turn writes its soul."
+  />
+  <LinkCard
+    title="Rooms and strategies"
+    href="rooms/"
+    description="Put Minds in a room and let them take turns. The driver-as-router model and the five turn strategies."
+  />
+  <LinkCard
+    title="Lenses"
+    href="lenses/"
+    description="An agent authors its own canvas board. How a single turn renders a live panel with no hand-coded UI."
+  />
+</CardGrid>
+
+## Zero hand-coded UI
+
+The roster, the live room transcript, the briefing, and every agent-authored
+lens are boards published to `rib:chamber:*` keys and drawn by the canvas
+renderer. None of them is React shipped from the rib. This is the invariant the
+whole rib protects: the surface is produced by running agents and the harness
+canvas, not by view code.
+
+## Related
+
+- [Minds and genesis](minds/): the agents Chamber authors and runs.
+- [Rooms and strategies](rooms/): how Minds take turns together.
+- [Lenses](lenses/): how an agent renders its own view.
+- [Keelson documentation](https://danielscholl.github.io/keelson/): the harness, the rib contract, and the canvas board these pages build on.
