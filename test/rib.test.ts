@@ -27,11 +27,12 @@ describe("rib-chamber", () => {
     expect(rib.displayName).toBe("Chamber");
   });
 
-  it("declares the roster, room, and brief views", () => {
+  it("declares the roster and brief views; the room is a runtime per-slug region", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
     expect(keys).toContain("rib:chamber:roster");
-    expect(keys).toContain("rib:chamber:room");
     expect(keys).toContain("rib:chamber:brief");
+    // No static room view: each room registers its own per-slug key + region at start.
+    expect(keys).not.toContain("rib:chamber:room");
   });
 
   it("declares no static actions — every control is a workflow or a board action", () => {
@@ -42,9 +43,10 @@ describe("rib-chamber", () => {
     expect(Object.hasOwn(rib, "actions")).toBe(false);
   });
 
-  it("places the live room transcript in the surface row", () => {
-    const row = rib.surfaces?.[0]?.layout.rows[0];
-    expect(row?.columns[0]?.key).toBe("rib:chamber:room");
+  it("ships no static room column — room panels are registered per slug at start", () => {
+    const rows = rib.surfaces?.[0]?.layout.rows ?? [];
+    const cols = rows.flatMap((r) => r.columns.map((c) => c.key));
+    expect(cols).not.toContain("rib:chamber:room");
   });
 
   it("registers only the genesis write seam without the agent-turn + snapshot seams", () => {
@@ -65,10 +67,9 @@ describe("rib-chamber", () => {
     expect(keys.some((k) => k.startsWith("rib:chamber:lens:"))).toBe(false);
   });
 
-  it("declares no static lens row — the surface ships with just the room row", () => {
+  it("ships no static rows — room and lens panels are both runtime regions", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.columns.map((c) => c.key)).toEqual(["rib:chamber:room"]);
+    expect(rows).toHaveLength(0);
   });
 
   it("contributes the chamber-lens workflow", () => {

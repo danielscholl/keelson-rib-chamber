@@ -202,7 +202,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   async function persistAndPublish(room: Room): Promise<void> {
     await deps.store.saveRoom(room);
     const transcript = await loadCachedTranscript(room.slug);
-    await deps.publisher.publish(buildRoomBoard(room, transcript));
+    await deps.publisher.publish(room.slug, buildRoomBoard(room, transcript));
   }
 
   // Commit a still-active room, unless a newer generation has superseded this op.

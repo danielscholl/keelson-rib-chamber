@@ -36,7 +36,7 @@ import { chamberDataHome, isChamberDataHomeWritable, mindsDir, roomsDir } from "
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
-import { createCoalescingPublisher } from "./room-publisher.ts";
+import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
@@ -45,7 +45,6 @@ import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
-const ROOM_KEY = "rib:chamber:room";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -66,6 +65,12 @@ let driver: RoomDriver | undefined;
 // was built against, so a re-bootstrap with a different one rebinds it.
 let lensRegistry: LensRegistry | undefined;
 let lensSm: SnapshotManager | undefined;
+// The room region registry is a boot-time singleton like the lens one: it owns the
+// per-slug room snapshot keys + surface regions, built once in registerTools and
+// disposed in dispose(). roomSm tracks the manager it was built against so a
+// re-bootstrap with a different one rebinds it.
+let roomRegistry: RoomRegionRegistry | undefined;
+let roomSm: SnapshotManager | undefined;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -329,7 +334,6 @@ const rib: Rib = {
   // producers (the roster collector, the brief turn, the room driver) run.
   views: [
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
-    { key: ROOM_KEY, canvasKind: "view", title: "Room" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
@@ -338,12 +342,11 @@ const rib: Rib = {
   // needs a freeform brief); retire and the room controls (start/inject/stop) are
   // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
-  // The Chamber nav tab. The roster sits in the header (the Minds you genesis),
-  // the live room transcript fills the row, and the brief settles into the
-  // footer. The room region carries no workflow: it is push-fed — the driver
-  // recomposes ROOM_KEY on every turn (no collector, no cadence poll). Lens panels
-  // are not declared here: a Mind authors them at runtime (chamber_emit_lens),
-  // each registering its own region below the room row via the registerRegion seam.
+  // The Chamber nav tab. The roster sits in the header (the Minds you genesis) and
+  // the brief settles into the footer. No static rows: room and lens panels are both
+  // push-fed dynamic regions a producer registers at runtime — each room registers
+  // its own per-slug region (group "rooms") on start via room-region-registry, and a
+  // Mind authors lenses (chamber_emit_lens, group "lens"), all through registerRegion.
   surfaces: [
     {
       id: CHAMBER_SURFACE_ID,
@@ -360,9 +363,7 @@ const rib: Rib = {
           cadenceMs: 120_000,
           glyph: { char: "◇", tone: "brand" },
         },
-        rows: [
-          { columns: [{ key: ROOM_KEY, title: "Room", glyph: { char: "▦", tone: "brand" } }] },
-        ],
+        rows: [],
         footer: {
           key: BRIEF_KEY,
           workflow: "chamber-brief",
@@ -462,11 +463,11 @@ const rib: Rib = {
     },
   ],
 
-  // Boot-time wiring of the room loop. Registers the push-fed room snapshot and
-  // builds the driver against the real seams: runAgentTurn (C1) for the turns,
-  // the snapshot manager as the publisher (publish caches the board and
-  // recomposes ROOM_KEY — a live WS push, no collector), the FS data home as the
-  // store, and the roster as the minds resolver. Both seams are optional, so the
+  // Boot-time wiring of the room loop. Builds the driver against the real seams:
+  // runAgentTurn (C1) for the turns, the per-slug room region registry as the
+  // publisher (each room's board is cached and recomposed under its own
+  // rib:chamber:room:<slug> key — a live WS push, no collector), the FS data home as
+  // the store, and the roster as the minds resolver. The seams are optional, so the
   // driver stays undefined on a host without them and room actions fail closed.
   registerTools: (ctx: RibContext) => {
     // The genesis write seam is always available: genesis is a workflow whose
@@ -494,18 +495,22 @@ const rib: Rib = {
       lensSm = sm;
     }
     const lensTools = sm && registerRegion && lensRegistry ? [makeLensTool(lensRegistry)] : [];
-    if (sm && run) {
-      // Seed a valid empty board so a client subscribing before the first turn
-      // gets a well-formed view; every publish replaces it with the live board.
-      // The coalescing pump lives in createCoalescingPublisher so it is unit-
-      // tested apart from the rib boot — true concurrent depends on it to not
-      // lose a frame when a parallel round's commit and a director inject overlap.
-      const { publisher, latest } = createCoalescingPublisher(() => sm.recompose(ROOM_KEY));
-      sm.register(ROOM_KEY, latest, { validate: expectView(ROOM_KEY, "board") });
+    // The room publisher routes each room's board to a per-slug key + dynamic surface
+    // region, so it requires registerRegion. Rebuilt against a new manager on a
+    // re-bootstrap, reused otherwise; built before the old one is disposed so a failed
+    // rebuild leaves the existing registry and roomSm consistent.
+    if (sm && registerRegion && run) {
+      let registry = roomRegistry;
+      if (!registry || sm !== roomSm) {
+        registry = createRoomRegionRegistry(sm, registerRegion);
+        roomRegistry?.dispose();
+        roomRegistry = registry;
+        roomSm = sm;
+      }
       const roomStore = createFileRoomStore(roomsDir());
       driver = createRoomDriver({
         store: roomStore,
-        publisher,
+        publisher: registry,
         runAgentTurn: run,
         minds: resolveMinds,
         readSoul: (slug) => readSoul(mindsDir(), slug),
@@ -516,10 +521,6 @@ const rib: Rib = {
         ...(lensRegistry ? { turnTools: [{ name: LENS_TOOL_NAME }] } : {}),
       });
       queueRoomRetentionSweep();
-      // Prime the cache so a client subscribing before the first turn gets the
-      // seeded board, not a 204 / loading skeleton (the GET path doesn't
-      // lazy-compose).
-      void sm.recompose(ROOM_KEY);
       // Expose the room controls as chat tools (start / say / stop / status),
       // sharing the same driver + store this hook just built. Returned only when
       // the seams are present (no driver -> no tools), mirroring how the actions
@@ -585,7 +586,7 @@ const rib: Rib = {
     if (!ctx.registerRegion) {
       return {
         authenticated: false,
-        statusMessage: "region registration not available (lenses unavailable)",
+        statusMessage: "region registration not available (rooms & lenses unavailable)",
       };
     }
     return {
@@ -609,6 +610,9 @@ const rib: Rib = {
     lensRegistry?.dispose();
     lensRegistry = undefined;
     lensSm = undefined;
+    roomRegistry?.dispose();
+    roomRegistry = undefined;
+    roomSm = undefined;
     await driver?.dispose();
   },
 };
@@ -920,6 +924,10 @@ async function startRoom(
     });
     activeSlug = slug;
     lastSlug = slug;
+    // Single-active: drop every other room's panel so the surface shows just this one
+    // (current-or-last). driver.start already published this room's first board
+    // (creating its entry), so keep it and release the rest.
+    roomRegistry?.releaseExcept(slug);
     ensureLoop(slug);
     return { ok: true, data: { slug } };
   } catch (e) {
