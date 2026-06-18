@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -18,4 +19,15 @@ export function mindsDir(): string {
 
 export function roomsDir(): string {
   return join(chamberDataHome(), "rooms");
+}
+
+// Recursive mkdir doubles as a writability probe — idempotent if the dir exists
+// (genesis creates it anyway), and fails only when the path isn't writable.
+export async function isChamberDataHomeWritable(): Promise<boolean> {
+  try {
+    await mkdir(chamberDataHome(), { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
