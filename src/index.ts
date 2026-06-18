@@ -5,6 +5,7 @@ import type {
   Rib,
   RibAction,
   RibActionResult,
+  RibAuthStatus,
   RibCommandDescriptor,
   RibContext,
   SnapshotManager,
@@ -31,7 +32,7 @@ import {
   type LensRegistry,
 } from "./lens.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
-import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
+import { chamberDataHome, isChamberDataHomeWritable, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
@@ -561,6 +562,37 @@ const rib: Rib = {
   listCommands: () => CHAMBER_COMMANDS,
   completeCommand: (name, prefix) => completeChamberCommand(name, prefix),
   invokeCommand: (name, arg) => invokeChamberCommand(name, arg),
+
+  // A rib can't introspect provider availability (runAgentTurn resolves one at
+  // turn time), so this asserts only the seams + data home; a missing provider
+  // surfaces at the first room turn, not here.
+  authStatus: async (ctx: RibContext): Promise<RibAuthStatus> => {
+    if (!(await isChamberDataHomeWritable())) {
+      return {
+        authenticated: false,
+        statusMessage: `data home not writable: ${chamberDataHome()}`,
+      };
+    }
+    if (!ctx.getSnapshotManager) {
+      return { authenticated: false, statusMessage: "snapshot manager not available" };
+    }
+    if (!ctx.runAgentTurn) {
+      return {
+        authenticated: false,
+        statusMessage: "agent-turn seam not wired (rooms unavailable)",
+      };
+    }
+    if (!ctx.registerRegion) {
+      return {
+        authenticated: false,
+        statusMessage: "region registration not available (lenses unavailable)",
+      };
+    }
+    return {
+      authenticated: true,
+      statusMessage: "rooms & lenses wired; provider resolved at turn time",
+    };
+  },
 
   // Shutdown: stop the auto-advance loops and abort any in-flight turn so a CLI
   // child can't keep running (or publish) after teardown. driver.dispose() sets
