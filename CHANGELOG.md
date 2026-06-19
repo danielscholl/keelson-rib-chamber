@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.4.0...v0.5.0) (2026-06-19)
+
+
+### Added
+
+* add authStatus readiness probe ([#66](https://github.com/danielscholl/keelson-rib-chamber/issues/66)) ([f539633](https://github.com/danielscholl/keelson-rib-chamber/commit/f539633ff5de862dc8d81cce171cd5c1c2149f78))
+* **room:** per-slug room snapshot keys + dynamic surface regions ([#68](https://github.com/danielscholl/keelson-rib-chamber/issues/68)) ([ad99e1c](https://github.com/danielscholl/keelson-rib-chamber/commit/ad99e1cfad6d63f75ac65d673a55fa5c39fc2ece))
+
 ## [0.4.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.3.0...v0.4.0) (2026-06-16)
 
 
