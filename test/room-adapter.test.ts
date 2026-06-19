@@ -161,7 +161,7 @@ describe("room adapter — fails closed without the seams", () => {
       "chamber_emit_genesis",
       "chamber_emit_lens",
     ]);
-    expect(registered).not.toContain("rib:chamber:room");
+    expect(registered.some((k) => k.startsWith("rib:chamber:room"))).toBe(false);
     const res = await onAction(startPayload(), makeCtx({ sm }));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("require the C1 agent-turn seam");
@@ -176,10 +176,11 @@ describe("room adapter — live room", () => {
     registerTools(makeCtx({ run, sm: snap.sm }));
   });
 
-  it("registers and primes the push-fed room snapshot at boot", () => {
-    expect(snap.registered).toContain("rib:chamber:room");
-    // Primed once at registration so a subscriber gets the seed, not a skeleton.
-    expect(snap.recomposed).toContain("rib:chamber:room");
+  it("registers no room snapshot at boot — keys are per-slug, registered on start", () => {
+    // The room board moved from one fixed rib:chamber:room key to a per-slug key
+    // (rib:chamber:room:<slug>) registered the first time a room publishes, so nothing
+    // is registered until a room starts.
+    expect(snap.registered.some((k) => k.startsWith("rib:chamber:room"))).toBe(false);
   });
 
   it("auto-advances the room to done, streaming each turn to the canvas", async () => {
@@ -193,10 +194,11 @@ describe("room adapter — live room", () => {
     const transcript = await store.loadTranscript(slug);
     expect(transcript).toHaveLength(2);
     expect(transcript.map((e) => e.from)).toEqual(["alice", "bob"]);
-    // The loop published a valid board on start + each turn (live WS push).
-    expect(snap.recomposed.filter((k) => k === "rib:chamber:room").length).toBeGreaterThanOrEqual(
-      3,
-    );
+    // The room registered its per-slug key and published a valid board on start +
+    // each turn (live WS push).
+    const key = `rib:chamber:room:${slug}`;
+    expect(snap.registered).toContain(key);
+    expect(snap.recomposed.filter((k) => k === key).length).toBeGreaterThanOrEqual(3);
     expect(snap.lastBoard()?.view).toBe("board");
   });
 

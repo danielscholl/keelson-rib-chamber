@@ -263,6 +263,8 @@ No new section kinds. **C5 dynamic regions = N concurrent ROOMS, a different and
 
 ## 5. Single-active-room — **KEEP it for this slice**
 
+> **Update (2026-06-18).** This section's premise — "C5 dynamic surface regions confirmed absent" — is now stale. keelson **#214** shipped `RibContext.registerRegion` (the base seam the "record, don't build" list below called for), so **multiple concurrent rooms is no longer base-gated**. It is the next rib-side slice, tracked as chamber **#29**.
+
 **Keep.** The intent doc (A2A:146-153, 243) is explicit that lifting it requires per-room keys `rib:chamber:room:<slug>` + dynamic surface regions (C5), and **C5 is confirmed absent** (regions bind exactly one static `key`, frozen at boot — `surfaceRegionSchema`, `rib.ts:174-205; the SPA refetches the manifest only on restart). group-chat, open-floor, true concurrent, and N participants **all operate within one room** and need zero multi-room support. Lifting it now would be a large, base-gated detour orthogonal to the strategy work, and would force changing the invariant in all three places it's enforced (driver `room.ts:202-208`, rib module `index.ts:755-762`, the single literal `ROOM_KEY` `index.ts:23`).
 
 What a later "multiple rooms" epic needs (record, don't build): per-room snapshot keys registered/unregistered on start/terminal (the unregister handle from `register`, `snapshot-manager.ts:40-52`, since `register` throws on duplicate, `:34`); a per-key `{latest,composing,dirty}` map replacing the single closure (`index.ts:284`); base support for dynamic/multi-key surface regions (C5); and turning the driver's `activeSlug` single-reservation into a `Set`. The store is *already* per-slug (`room-store.ts:23-25`) and slugs are already unique per start (`index.ts:573-575`), so persistence is multi-room-ready — only publish/UI is single-key.
@@ -271,23 +273,27 @@ What a later "multiple rooms" epic needs (record, don't build): per-room snapsho
 
 ## 6. Agent-authored lenses (C2) — **OUT of this slice**
 
+> **Update (2026-06-18).** Superseded — lenses **shipped**. keelson #214's `registerRegion` provided a path the original scoping didn't anticipate (dynamic *regions*, not the assumed `registerView`), and chamber now authors `rib:chamber:lens:*` boards through it (`src/lens.ts`, unbounded via PR #61, covered by `test/lens.test.ts`). chamber **#28 closed**.
+
 **Out.** A lens is a solo-Mind turn authoring a `rib:chamber:lens:*` board (A2A:50-56, 265) — explicitly **not A2A** and a *different* execution path (closer to the existing `chamber-brief` workflow, `index.ts:224-241`, than to the room driver). It needs **dynamic view registration**, which is **confirmed absent** (C2: `views` is a static array read once at boot, no `registerView` seam — `rib.ts:278,304`; the manifest is frozen and the SPA only re-fetches on restart). Per the agent-vs-tool-surface invariant, a lens is an *output of a Mind's turn*, never an addressable peer — so it's orthogonal to the strategy work and shouldn't ride this driver. Defer to a separate Phase-3 lens epic that either pre-declares a fixed pool of lens keys or lands a base `registerView` seam first.
 
 ---
 
 ## 7. Base gaps: needed-now vs deferrable
 
+> **Update (2026-06-18).** The two "Absent" rows below are stale. keelson **#214** ("let ribs register surface regions at runtime", merged 2026-06-15) shipped `RibContext.registerRegion` — dynamic, multi-key surface regions, with the `group` field pre-added for #29's room panels. That lifted **both** base gates: agent-authored lenses (C2) are now **delivered** through that seam (chamber PR #61; #28 closed), and multiple concurrent rooms (C5, #29) is now a **pure rib-side** epic. Rows retained for history; status corrected inline.
+
 | Gap | Status | Needed for this slice? | Notes |
 |---|---|---|---|
 | **Coalescing pump on imperative path** | **Already present in the rib** (`index.ts:286-311`) | No base change | A2A doc lines 174-177 are STALE; code is authoritative. Unblocks true concurrent. Independent of #118. |
 | **Mid-stream cancellation** | **Provider-dependent, best-effort, predates #118** (`claude/provider.ts:113,136,201,207-217,225-234` + `chunk-queue.ts:32-50`) | Used, no change | Lets us rely on the per-room `AbortController` for *best-effort* teardown of moderate/synthesize/parallel turns. **NOT** via `iterator.return()` (that is the workflow path, `prompt.ts:297-318`) and **NOT** added by #118 (#118 = provider-registry routing only). Best-effort is *why* fresh-slug-per-start stays. |
-| **C2 dynamic view registration** | **Absent** (`rib.ts:278,304`; no `registerView`) | No (lenses are out, §6) | Deferred. |
-| **C5 dynamic surface regions** | **Absent** (`rib.ts:174-205`; one static key per region) | No (single-room kept, N-party renders on one key, §4–5) | Deferred. |
+| **C2 dynamic view registration** | ~~Absent~~ → **base seam shipped** (keelson #214: `RibContext.registerRegion`) | **Delivered** — lenses render via `registerRegion` (PR #61) | Scoped here as `registerView`; the base instead grew dynamic *regions*, which lenses use. chamber #28 closed. |
+| **C5 dynamic surface regions** | ~~Absent~~ → **shipped** (keelson #214: `registerRegion`, `group` pre-added for room panels) | **Unblocked** — pure rib-side now (chamber #29) | Base gate lifted; multi-room is no longer base-gated. |
 | **Board action `fields`** | **Shipped in base** (`canvasActionItemSchema.fields`, `canvas.ts:182+`) | Optional, nice-to-have | For a "Start group-chat" board form (topic + moderator + participants). Not blocking. |
 
 **Fresh-slug-per-start (`index.ts:573-575`) is NOT dropped.** The cancellation above is best-effort (the provider may not interrupt a settled turn; `interrupt()` is streaming-input-mode-only, `claude/provider.ts:225-227`), so a late append is still possible. The load-bearing reason is the **append-only `transcript.jsonl` slug-reuse hole** (`room.ts:230-242`, pinned by `driver.test.ts:580-611`): a stopped in-flight turn can drain to disk *after* stop, and a same-slug restart would pull that stale entry into the new room's board/prompt. **Keep fresh slugs.** (We *do* lean on the AbortController for best-effort prompt cancellation of multi-turn steps — that is the only thing the cancellation path relaxes, and it was always best-effort.)
 
-**No base change is required to ship slices 1–6.** A base `registerView` (for lenses) and C5 (for multi-room) are separate future epics.
+**No base change is required to ship slices 1–6.** ~~A base `registerView` (for lenses) and C5 (for multi-room) are separate future epics.~~ **Update (2026-06-18):** keelson #214 shipped `RibContext.registerRegion`, lifting both gates — lenses (C2) are delivered through it (#28 closed) and multiple concurrent rooms (C5, #29) is now a pure rib-side epic.
 
 ---
 

@@ -35,19 +35,28 @@ export function makeFakeStore() {
 }
 
 // Recording RoomPublisher. Every published view is asserted valid against
-// canvasViewSchema — the provider-free end-to-end proof.
+// canvasViewSchema — the provider-free end-to-end proof. Records the owning slug
+// alongside each board so a test can assert per-room routing.
 export function makeFakePublisher() {
   const views: CanvasView[] = [];
+  const published: { slug: string; view: CanvasView }[] = [];
   const publisher: RoomPublisher = {
-    async publish(view) {
+    async publish(slug, view) {
       const parsed = canvasViewSchema.safeParse(view);
       if (!parsed.success) {
         throw new Error(`published an invalid canvas view: ${parsed.error.message}`);
       }
       views.push(view);
+      published.push({ slug, view });
     },
   };
-  return { publisher, views, last: () => views[views.length - 1], all: () => views };
+  return {
+    publisher,
+    views,
+    published,
+    last: () => views[views.length - 1],
+    all: () => views,
+  };
 }
 
 export interface TurnScript {

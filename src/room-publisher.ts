@@ -1,5 +1,4 @@
 import type { CanvasView } from "@keelson/shared";
-import type { RoomPublisher } from "./ports.ts";
 
 // The room board's publish seam plus the coalescing pump that mirrors the base's
 // bound-workflow publish. `recompose` coalesces concurrent calls onto one
@@ -18,14 +17,14 @@ export function createCoalescingPublisher(
   recompose: () => Promise<unknown>,
   seed: CanvasView = { view: "board", title: "Room", sections: [] },
 ): {
-  publisher: RoomPublisher;
+  publisher: { publish(view: CanvasView): Promise<void> };
   latest: () => CanvasView;
 } {
   let latest: CanvasView = seed;
   let composing = false;
   let dirty = false;
-  const publisher: RoomPublisher = {
-    async publish(view) {
+  const publisher = {
+    async publish(view: CanvasView): Promise<void> {
       latest = view;
       if (composing) {
         dirty = true;
