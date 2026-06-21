@@ -19,9 +19,9 @@ type RegisterRegion = (surfaceId: string, region: RibSurfaceRegion) => () => voi
 
 // A RoomPublisher whose publish() routes each room's board to its own snapshot key
 // and surface region, lazily registering both the first time a slug publishes.
-// `releaseExcept` keeps a single panel under single-active; dispose() releases all.
+// `retainOnly` keeps the named rooms' panels and releases the rest; dispose() all.
 export interface RoomRegionRegistry extends RoomPublisher {
-  releaseExcept(keepSlug: MindSlug): void;
+  retainOnly(keep: Iterable<MindSlug>): void;
   dispose(): void;
 }
 
@@ -88,9 +88,10 @@ export function createRoomRegionRegistry(
       }
       await entry.publisher.publish(view);
     },
-    releaseExcept(keepSlug) {
+    retainOnly(keep) {
+      const keepSet = keep instanceof Set ? keep : new Set(keep);
       for (const slug of [...entries.keys()]) {
-        if (slug !== keepSlug) release(slug);
+        if (!keepSet.has(slug)) release(slug);
       }
     },
     dispose() {

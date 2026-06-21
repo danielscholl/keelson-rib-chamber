@@ -55,10 +55,37 @@ describe("room driver — lifecycle", () => {
     expect(h.pub.all()).toHaveLength(1);
   });
 
-  test("single active room: a second different active slug throws", async () => {
+  test("allows multiple concurrent active rooms (single-active lifted)", async () => {
     const h = harness();
     await h.driver.start(START);
-    await expect(h.driver.start({ ...START, slug: "other" })).rejects.toThrow();
+    await expect(h.driver.start({ ...START, slug: "other" })).resolves.toBeDefined();
+    expect((await h.store.loadRoom("demo"))?.status).toBe("active");
+    expect((await h.store.loadRoom("other"))?.status).toBe("active");
+  });
+
+  test("drives concurrent rooms independently, each on its own key", async () => {
+    const h = harness([{ text: "r" }]);
+    await h.driver.start({ ...START, slug: "alpha", turnBudget: 1 });
+    await h.driver.start({ ...START, slug: "beta", turnBudget: 1 });
+    // alpha runs to completion; beta is untouched by it.
+    expect(await h.driver.step("alpha")).toBe("ended");
+    expect((await h.store.loadRoom("alpha"))?.status).toBe("done");
+    expect((await h.store.loadRoom("beta"))?.status).toBe("active");
+    expect(await h.driver.step("beta")).toBe("ended");
+    expect((await h.store.loadRoom("beta"))?.status).toBe("done");
+    // Each room's boards were routed to its own slug.
+    expect(new Set(h.pub.published.map((p) => p.slug))).toEqual(new Set(["alpha", "beta"]));
+  });
+
+  test("stopping one concurrent room leaves the others active", async () => {
+    const h = harness([{ text: "r" }]);
+    await h.driver.start({ ...START, slug: "alpha", turnBudget: 4 });
+    await h.driver.start({ ...START, slug: "beta", turnBudget: 4 });
+    await h.driver.stop("alpha");
+    expect((await h.store.loadRoom("alpha"))?.status).toBe("stopped");
+    expect((await h.store.loadRoom("beta"))?.status).toBe("active");
+    // beta still advances after alpha stopped.
+    expect(await h.driver.step("beta")).toBe("advanced");
   });
 
   test("restarting the same slug resumes turnIndex", async () => {
@@ -591,17 +618,17 @@ describe("room driver — settle (I/O + reservation)", () => {
     expect(texts).toEqual(["director note", "agent reply"]);
   });
 
-  test("concurrent starts: synchronous reservation lets only one win", async () => {
+  test("concurrent starts of different slugs both open (no shared reservation)", async () => {
     const h = harness();
-    // Fire two starts without awaiting between them. The reservation in start()
-    // is synchronous, so the second sees the first's claim and rejects — no
-    // adapter-level start gate needed.
+    // Fire two starts without awaiting between them. Each reserves its own per-slug
+    // slot, so both open — there is no shared single-active reservation to contend.
     const settled = await Promise.allSettled([
       h.driver.start({ ...START, slug: "a" }),
       h.driver.start({ ...START, slug: "b" }),
     ]);
-    expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-    expect(settled.filter((r) => r.status === "rejected")).toHaveLength(1);
+    expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+    expect((await h.store.loadRoom("a"))?.status).toBe("active");
+    expect((await h.store.loadRoom("b"))?.status).toBe("active");
   });
 
   test("isDisposed reflects dispose()", async () => {

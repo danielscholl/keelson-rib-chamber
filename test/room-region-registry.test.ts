@@ -101,18 +101,33 @@ describe("room region registry", () => {
     expect(region.active.has(roomKey("room-b"))).toBe(true);
   });
 
-  test("releaseExcept keeps the named slug and unregisters the rest (single-active)", async () => {
+  test("retainOnly keeps the named slugs and unregisters the rest", async () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createRoomRegionRegistry(sm, region.register);
 
     await reg.publish("room-a", board("A"));
     await reg.publish("room-b", board("B"));
-    reg.releaseExcept("room-b");
+    await reg.publish("room-c", board("C"));
+    reg.retainOnly(["room-b", "room-c"]);
 
-    expect(keys()).toEqual([roomKey("room-b")]);
+    expect(keys()).toEqual(expect.arrayContaining([roomKey("room-b"), roomKey("room-c")]));
+    expect(keys()).not.toContain(roomKey("room-a"));
     expect(region.active.has(roomKey("room-a"))).toBe(false);
     expect(region.active.has(roomKey("room-b"))).toBe(true);
+    expect(region.active.has(roomKey("room-c"))).toBe(true);
+  });
+
+  test("retainOnly([]) releases every room panel", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createRoomRegionRegistry(sm, region.register);
+
+    await reg.publish("room-a", board("A"));
+    reg.retainOnly([]);
+
+    expect(keys()).toEqual([]);
+    expect(region.active.size).toBe(0);
   });
 
   test("dispose releases every room's snapshot key and region", async () => {
