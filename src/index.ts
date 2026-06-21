@@ -75,14 +75,21 @@ let roomSm: SnapshotManager | undefined;
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
 let roomSeq = 0;
-// The slug of the currently-active room (at most one, per the single-active
-// invariant). Set when a room opens, cleared when it stops or its loop ends — so
-// the chat tools can target "the room" without the server-assigned slug.
-let activeSlug: string | undefined;
-// The most-recent room, active or finished. Unlike activeSlug it survives the
-// room ending, so chamber_room_status can still show a just-finished transcript.
-// Cleared only on dispose.
+// Rooms currently active. Multiple run concurrently — each on its own per-slug
+// snapshot key + surface region — so a room is added when it opens and removed when
+// it stops or its loop ends. Set iteration is insertion-ordered, so the last entry
+// is the most-recently-started active room: the default target when a chat tool
+// omits an explicit slug.
+const activeRooms = new Set<string>();
+// The most-recent room, active or finished. Unlike activeRooms it survives the room
+// ending, so chamber_room_status (and the surface's retained panel) can still show a
+// just-finished transcript. Cleared only on dispose.
 let lastSlug: string | undefined;
+// Cap on concurrently-active rooms. Each runs its own loop of paid agent turns, so an
+// unbounded fan-out would burn cost without an operator noticing. A small soft cap
+// keeps "multiple rooms" useful while bounding the spend; it also sits far under the
+// harness per-surface region ceiling, so a start never fails for lack of a panel slot.
+export const MAX_ACTIVE_ROOMS = 6;
 let roomRetentionSweep = Promise.resolve();
 
 // The roster the driver resolves a speaker's persona from each turn. Cached
@@ -120,6 +127,46 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
   } catch (e) {
     console.error(`[rib-chamber] room retention sweep failed: ${errText(e)}`);
   }
+}
+
+// The room surface shows a panel for every active room plus the most-recent room's,
+// so a just-finished room's final board lingers until a newer room supersedes it.
+// Recomputed after any room lifecycle change; retainOnly drops the panels of rooms
+// that are neither active nor the most-recent.
+function reconcileRoomPanels(): void {
+  const keep = new Set(activeRooms);
+  if (lastSlug) keep.add(lastSlug);
+  roomRegistry?.retainOnly(keep);
+}
+
+// The most-recently-started active room, or undefined when none is active. Set
+// iteration is insertion-ordered, so the last entry is the newest active room.
+function mostRecentActiveSlug(): string | undefined {
+  return [...activeRooms].at(-1);
+}
+
+// Resolve the room a say/stop targets: an explicit (active) slug, else the most-
+// recent active room. Returns an error when the named room isn't active or none is —
+// so a steer never silently targets a finished or wrong room.
+function resolveSteerTarget(roomArg?: string): { slug: string } | { error: string } {
+  const explicit = (roomArg ?? "").trim();
+  if (explicit) {
+    if (!isSafeSlug(explicit)) return { error: `unsafe room slug: ${JSON.stringify(explicit)}` };
+    if (!activeRooms.has(explicit)) {
+      return { error: `Chamber room "${explicit}" is not active — check chamber_room_status.` };
+    }
+    return { slug: explicit };
+  }
+  const slug = mostRecentActiveSlug();
+  if (!slug) return { error: "No active Chamber room. Start one with chamber_room_start." };
+  return { slug };
+}
+
+// A say/stop reply names which room it hit when several are active (the default
+// target is otherwise implicit); with one room the slug is just noise. One helper so
+// say and stop can't drift on the threshold or the format.
+function roomNote(slug: string): string {
+  return activeRooms.size > 1 ? ` (${slug})` : "";
 }
 
 // Absolute path to the roster collector, resolved at module load so the workflow
@@ -604,7 +651,7 @@ const rib: Rib = {
   // cache too, so a re-boot re-reads minds.
   dispose: async () => {
     loops.clear();
-    activeSlug = undefined;
+    activeRooms.clear();
     lastSlug = undefined;
     invalidateRoster();
     lensRegistry?.dispose();
@@ -643,10 +690,10 @@ function ensureLoop(slug: string): void {
       }
     } catch (e) {
       console.error(`[rib-chamber] room loop '${slug}' failed: ${errText(e)}`);
-      // The loop died mid-room: the driver still holds this slug as its active
+      // The loop died mid-room: the driver still holds this slug as an active
       // room and room.json is still "active". Force-stop so the driver and disk
-      // agree with the cleared module activeSlug below — otherwise the room is
-      // invisible to the tools yet blocks every restart ("a room is already active").
+      // agree with the active-set cleanup below — otherwise the room lingers as a
+      // wedged active room nothing ever clears.
       try {
         await activeDriver.stop(slug);
       } catch (stopErr) {
@@ -654,8 +701,10 @@ function ensureLoop(slug: string): void {
       }
     } finally {
       loops.delete(slug);
-      // The room left "active" — drop it as the chat tools' target.
-      if (activeSlug === slug) activeSlug = undefined;
+      // The room left "active" — drop it from the active set and reconcile the
+      // surface so its panel is released unless it is still the most-recent room.
+      activeRooms.delete(slug);
+      reconcileRoomPanels();
       queueRoomRetentionSweep();
     }
   })();
@@ -877,8 +926,8 @@ async function validateStart(
 
 // Open a fresh-slug room and kick its auto-advance loop. The shared core behind
 // both the board's room-start action and the chamber_room_start chat tool, so
-// validation, the single-active reservation, and the fresh-slug discipline live
-// in one place. Each start opens a brand-new room under a unique slug: the CLI
+// validation, the concurrency cap, and the fresh-slug discipline live in one
+// place. Each start opens a brand-new room under a unique slug: the CLI
 // MVP can't cancel an in-flight turn, so a turn still draining from a stopped
 // room must land in its own old dir, never a reused one. Past closed rooms remain
 // as bounded history under rooms/ via the retention sweep.
@@ -909,10 +958,20 @@ async function startRoom(
   // store a trimmed topic or none — a whitespace-only topic becomes no topic.
   const topic = (input.topic ?? "").trim();
   const slug = freshRoomSlug();
+  // Concurrency cap + reservation in one synchronous tick (no await between the size
+  // check and the add): two concurrent starts can neither overshoot MAX_ACTIVE_ROOMS
+  // nor have a racing reconcileRoomPanels (a finishing room's loop) drop this room's
+  // panel mid-driver.start — the slug is in activeRooms before that await, so it is
+  // always in the keep-set. Both entry points (chat tool, board action) route here.
+  if (activeRooms.size >= MAX_ACTIVE_ROOMS) {
+    return {
+      ok: false,
+      error: `${MAX_ACTIVE_ROOMS} Chamber rooms are already active (the concurrent cap) — stop one before starting another.`,
+    };
+  }
+  activeRooms.add(slug);
   const activeDriver = driver;
   try {
-    // driver.start reserves the single active slot synchronously (before any
-    // await), so concurrent starts can't both pass — the second rejects here.
     await activeDriver.start({
       slug,
       name,
@@ -922,15 +981,16 @@ async function startRoom(
       ...(topic ? { topic } : {}),
       ...(valid.config ? { config: valid.config } : {}),
     });
-    activeSlug = slug;
     lastSlug = slug;
-    // Single-active: drop every other room's panel so the surface shows just this one
-    // (current-or-last). driver.start already published this room's first board
-    // (creating its entry), so keep it and release the rest.
-    roomRegistry?.releaseExcept(slug);
+    // driver.start published this room's first board (registering its per-slug
+    // region); reconcile so the surface keeps every active room plus the most-recent.
+    reconcileRoomPanels();
     ensureLoop(slug);
     return { ok: true, data: { slug } };
   } catch (e) {
+    // The reserved slot never opened — release it and drop any partial panel.
+    activeRooms.delete(slug);
+    reconcileRoomPanels();
     return { ok: false, error: errText(e) };
   }
 }
@@ -966,7 +1026,8 @@ async function stopRoom(slug: string): Promise<RibActionResult> {
   if (!isSafeSlug(slug)) return { ok: false, error: `unsafe room slug: ${JSON.stringify(slug)}` };
   try {
     await driver.stop(slug);
-    if (activeSlug === slug) activeSlug = undefined;
+    activeRooms.delete(slug);
+    reconcileRoomPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -1108,6 +1169,8 @@ const roomStartSchema = z.object({
 });
 const roomSaySchema = z
   .object({
+    // Target a specific room; omit to steer the most-recent active room.
+    room: z.string().optional(),
     direction: z.string().optional(),
     callOn: z.string().optional(),
     text: z.string().optional(),
@@ -1115,24 +1178,44 @@ const roomSaySchema = z
   .refine((v) => Boolean(v.direction || v.callOn || v.text), {
     message: "provide at least one of: direction, callOn, text",
   });
-const emptyToolSchema = z.object({});
+// status/stop take an optional room slug (default: the most-recent room).
+const roomTargetSchema = z.object({ room: z.string().optional() });
 
-// Render the active room + its transcript as chat-legible text. Reads through the
-// same store the driver writes, so it reflects the latest committed turn.
-async function renderRoomStatus(store: RoomStore): Promise<string> {
-  // Capture once: the auto-advance loop can clear activeSlug between awaits. Fall
-  // back to lastSlug so a just-finished/stopped room is still readable (its
-  // room.json + transcript persist); the header reports the status either way.
-  const slug = activeSlug ?? lastSlug;
+// Render a room + its transcript as chat-legible text. Targets an explicit slug, or
+// the most-recent active room — falling back to the most-recent finished room only
+// when none is active, so a bare call headlines a live room when one exists. Reads
+// through the same store the driver writes, so it reflects the latest committed turn.
+// When several rooms are active and no slug was named, appends a one-line index of
+// the others so multiple concurrent rooms are discoverable from a bare status call.
+async function renderRoomStatus(store: RoomStore, target?: string): Promise<string> {
+  const explicit = (target ?? "").trim();
+  const slug = explicit || mostRecentActiveSlug() || lastSlug;
   if (!slug) return "No Chamber room yet. Start one with chamber_room_start.";
   const room = await store.loadRoom(slug);
-  if (!room) return "No Chamber room yet. Start one with chamber_room_start.";
+  if (!room) {
+    return explicit
+      ? `No Chamber room "${slug}".`
+      : "No Chamber room yet. Start one with chamber_room_start.";
+  }
   const transcript = await store.loadTranscript(slug);
   const head =
     `Room "${room.name}" (${slug}) — ${room.status}, turn ${room.turnIndex}/${room.turnBudget}; ` +
     `participants: ${room.participants.join(", ")}.`;
   const body = transcript.length > 0 ? renderTranscript(transcript) : "(no turns yet)";
-  return boundedText(`${head}\n\n${body}`);
+  let index = "";
+  if (!explicit && activeRooms.size > 1) {
+    const others = [...activeRooms].filter((s) => s !== slug);
+    const lines = await Promise.all(
+      others.map(async (s) => {
+        const r = await store.loadRoom(s);
+        return r
+          ? `  • ${r.name} (${s}) — ${r.status}, turn ${r.turnIndex}/${r.turnBudget}`
+          : `  • ${s}`;
+      }),
+    );
+    index = `\n\n${activeRooms.size} rooms active — pass room:<slug> to read another:\n${lines.join("\n")}`;
+  }
+  return boundedText(`${head}\n\n${body}${index}`);
 }
 
 // Genesis write seam: the chamber-genesis workflow's prompt node authors the soul
@@ -1232,21 +1315,23 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
 
 // The room controls as chat tools — the second `step()` consumer the StepOutcome
 // soundness (#10/#13) was built for. Fire-and-return: start kicks the existing
-// auto-advance loop; status reads progress; say/stop steer the single active room
-// (its slug resolved from module state, since the server assigns it). start
-// self-gates on an in-tool `confirm` flag because each turn is a paid agent call
-// (keelson chat has no pause-and-confirm gate yet — the OSDU lifecycle pattern).
+// auto-advance loop; status reads progress; say/stop steer a room — an explicit
+// `room` slug, or by default the most-recent active one (the server assigns slugs).
+// start self-gates on an in-tool `confirm` flag because each turn is a paid agent
+// call (keelson chat has no pause-and-confirm gate yet — the OSDU lifecycle pattern).
 function roomControlTools(store: RoomStore): ToolDefinition[] {
   return [
     {
       name: "chamber_room_status",
       description:
-        'Use when the user asks what is happening in the Chamber room — "what are they saying", "show the room", "room status". Returns the active room\'s participants, status, turn count, and the conversation so far. Read-only. NOT for starting or stopping a room.',
-      inputSchema: emptyToolSchema,
+        'Use when the user asks what is happening in a Chamber room — "what are they saying", "show the room", "room status". Returns a room\'s participants, status, turn count, and the conversation so far. Defaults to the most-recent room; pass `room` (a slug) to read a specific one — a bare call also indexes the other active rooms when several run at once. Read-only. NOT for starting or stopping a room.',
+      inputSchema: roomTargetSchema,
       state_changing: false,
-      async execute(_input, ctx) {
+      async execute(input, ctx) {
         try {
-          emitResult(ctx, await renderRoomStatus(store));
+          const parsed = roomTargetSchema.safeParse(input);
+          const target = parsed.success ? parsed.data.room : undefined;
+          emitResult(ctx, await renderRoomStatus(store, target));
         } catch (e) {
           emitResult(ctx, `chamber_room_status failed: ${errText(e)}`, true);
         }
@@ -1255,7 +1340,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. For a cross-vendor review set strategy:"review" with exactly two participants pinned to different providers — the first authors an artifact, the second (a different vendor) reviews it. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Rejected if a room is already active — stop it first. NOT for creating a Mind (that is the New agent / genesis action).',
+        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. For a cross-vendor review set strategy:"review" with exactly two participants pinned to different providers — the first authors an artifact, the second (a different vendor) reviews it. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).',
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,
@@ -1292,12 +1377,13 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           emitResult(ctx, `chamber_room_start: ${valid.error}`, true);
           return;
         }
-        // A room is already active: both the dry-run and the confirmed start would
-        // fail driver.start's single-active reservation, so reject before prompting.
-        if (activeSlug) {
+        // Concurrency cap: refuse before the dry-run prompt so the tool never
+        // advertises a start the confirm path would reject (startRoom enforces the
+        // same cap authoritatively).
+        if (activeRooms.size >= MAX_ACTIVE_ROOMS) {
           emitResult(
             ctx,
-            "chamber_room_start: a room is already active — stop it first with chamber_room_stop.",
+            `chamber_room_start: ${MAX_ACTIVE_ROOMS} rooms are already active (the concurrent cap) — stop one with chamber_room_stop first.`,
             true,
           );
           return;
@@ -1345,7 +1431,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_say",
       description:
-        'Steer the active Chamber room: `direction` sets guidance for the next speaker, `callOn` nominates a specific Mind to go next, `text` drops a director message into the transcript. Use when the user wants to nudge the conversation ("tell them to wrap up", "let Alice answer"). At least one field required. NOT for starting or stopping the room.',
+        'Steer a Chamber room: `direction` sets guidance for the next speaker, `callOn` nominates a specific Mind to go next, `text` drops a director message into the transcript. Defaults to the most-recent active room; pass `room` (a slug) to steer a specific one when several run at once. Use when the user wants to nudge the conversation ("tell them to wrap up", "let Alice answer"). At least one of direction/callOn/text required. NOT for starting or stopping the room.',
       inputSchema: roomSaySchema,
       state_changing: true,
       async execute(input, ctx) {
@@ -1354,15 +1440,12 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           emitResult(ctx, `chamber_room_say: ${parsed.error.message}`, true);
           return;
         }
-        const slug = activeSlug;
-        if (!slug) {
-          emitResult(
-            ctx,
-            "No active Chamber room to steer. Start one with chamber_room_start.",
-            true,
-          );
+        const target = resolveSteerTarget(parsed.data.room);
+        if ("error" in target) {
+          emitResult(ctx, target.error, true);
           return;
         }
+        const slug = target.slug;
         const { direction, callOn, text } = parsed.data;
         // The driver only honors nextSpeaker when it exactly matches an active
         // participant slug — otherwise step() silently drops it and falls back to
@@ -1385,9 +1468,10 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           nextSpeaker: callOn,
           text,
         });
+        const note = roomNote(slug);
         emitResult(
           ctx,
-          res.ok ? "Sent to the room." : `chamber_room_say failed: ${res.error}`,
+          res.ok ? `Sent to the room${note}.` : `chamber_room_say failed: ${res.error}`,
           !res.ok,
         );
       },
@@ -1395,19 +1479,22 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_stop",
       description:
-        'Stop the active Chamber room (halts its turns). Use when the user says "stop the room", "end it". Reversible — a new room can be started afterward. NOT for retiring a Mind.',
-      inputSchema: emptyToolSchema,
+        'Stop a Chamber room (halts its turns). Defaults to the most-recent active room; pass `room` (a slug) to stop a specific one when several run at once. Use when the user says "stop the room", "end it". Reversible — a new room can be started afterward. NOT for retiring a Mind.',
+      inputSchema: roomTargetSchema,
       state_changing: true,
-      async execute(_input, ctx) {
-        const slug = activeSlug;
-        if (!slug) {
-          emitResult(ctx, "No active Chamber room to stop.", true);
+      async execute(input, ctx) {
+        const parsed = roomTargetSchema.safeParse(input);
+        const target = resolveSteerTarget(parsed.success ? parsed.data.room : undefined);
+        if ("error" in target) {
+          emitResult(ctx, target.error, true);
           return;
         }
-        const res = await stopRoom(slug);
+        // Compute the note before stopRoom drops the slug from the active set.
+        const note = roomNote(target.slug);
+        const res = await stopRoom(target.slug);
         emitResult(
           ctx,
-          res.ok ? "Stopped the room." : `chamber_room_stop failed: ${res.error}`,
+          res.ok ? `Stopped the room${note}.` : `chamber_room_stop failed: ${res.error}`,
           !res.ok,
         );
       },

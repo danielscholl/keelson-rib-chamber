@@ -107,10 +107,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   const inFlight = new Set<MindSlug>();
   const now = deps.now ?? (() => new Date());
   const newId = deps.newId ?? defaultNewId();
-  // The single-active-room invariant (one fixed rib:chamber:room key, C1): in the
-  // wired rib this is enforced by the snapshot key's register-once discipline;
-  // here the driver tracks it directly and reserves it synchronously in start().
-  let activeSlug: MindSlug | undefined;
+  // Rooms currently driving. Multiple run concurrently — each owns its own per-slug
+  // snapshot key + surface region (room-region-registry), so there is no shared
+  // single-key contention. Tracked so releaseSlugState never GCs a live room's
+  // in-memory state; a fresh slug per start means starts never contend for a slot.
+  const activeRooms = new Set<MindSlug>();
   // Set by dispose(). The CLI MVP can't cancel an in-flight child, so a turn can
   // settle after teardown; once disposed, a late turn drops its append/commit so
   // nothing is written or published after the rib is gone. The adapter observes
@@ -125,7 +126,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   const transcripts = new Map<MindSlug, TurnEntry[]>();
 
   function clearActive(slug: MindSlug): void {
-    if (activeSlug === slug) activeSlug = undefined;
+    activeRooms.delete(slug);
     controllers.delete(slug);
   }
 
@@ -147,7 +148,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   // because the rib mints a unique slug per start (freshRoomSlug) — a slug is
   // never reused, so a new lifetime can't realign with a stale generation.
   function releaseSlugState(slug: MindSlug): void {
-    if (inFlight.has(slug) || activeSlug === slug) return;
+    if (inFlight.has(slug) || activeRooms.has(slug)) return;
     controllers.delete(slug);
     transcripts.delete(slug);
     generations.delete(slug);
@@ -232,21 +233,17 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
   async function start(config: RoomStartConfig): Promise<Room> {
     // Reject a strategy the registry cannot execute before reserving — otherwise
-    // the room would occupy the single active slot with no way for step() to
-    // advance it. Runs before the reservation so a bad strategy leaks no slot.
+    // the room would reserve a slot with no way for step() to advance it. Runs
+    // before the reservation so a bad strategy leaks no slot.
     getStrategy(config.strategy);
 
-    // Single-active reservation, synchronous: there is no await between reading
-    // and claiming activeSlug, so two concurrent starts cannot both pass — the
-    // second sees the first's reservation and rejects. This owns the invariant
-    // the adapter used to guard with a process-wide start gate.
-    if (activeSlug !== undefined && activeSlug !== config.slug) {
-      throw new Error(
-        `a room is already active (${activeSlug}); stop it before starting "${config.slug}"`,
-      );
-    }
-    const claimed = activeSlug === undefined;
-    activeSlug = config.slug;
+    // Reserve THIS slug's slot. Rooms run concurrently — each on its own per-slug
+    // key — and a fresh slug per start (the rib mints freshRoomSlug) means two starts
+    // never contend for one slot. `claimed` records whether this call added the slug,
+    // so a failed start below unreserves only what it added (a resume that found the
+    // slug already active must not unreserve it).
+    const claimed = !activeRooms.has(config.slug);
+    activeRooms.add(config.slug);
 
     try {
       const existing = await deps.store.loadRoom(config.slug);
@@ -302,7 +299,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // Release the slot we just claimed so a failed start doesn't wedge the
       // driver (only if we claimed it — a failed resume must not unreserve the
       // still-active room).
-      if (claimed && activeSlug === config.slug) activeSlug = undefined;
+      if (claimed) activeRooms.delete(config.slug);
       throw e;
     }
   }
@@ -995,7 +992,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     ]);
     for (const controller of controllers.values()) controller.abort();
     controllers.clear();
-    activeSlug = undefined;
+    activeRooms.clear();
     for (const slug of slugs) releaseSlugState(slug);
   }
 

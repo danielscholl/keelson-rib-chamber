@@ -10,7 +10,7 @@ import type {
   ToolDefinition,
 } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
-import rib from "../src/index.ts";
+import rib, { MAX_ACTIVE_ROOMS } from "../src/index.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, roomsDir } from "../src/paths.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
@@ -471,14 +471,17 @@ describe("chamber room-control chat tools", () => {
     expect(s.out()).toContain("active");
   });
 
-  it("refuses a second start while a room is active", async () => {
+  it("no longer refuses a second start while a room is active (single-active lifted)", async () => {
+    // A second start is now allowed; the dry-run (no confirm) proves the guard is
+    // gone without opening a second room, keeping this stateful suite single-room.
     const t = makeToolCtx();
     await tool("chamber_room_start").execute(
-      { participants: ["alice", "bob"], confirm: true },
+      { participants: ["alice", "bob"], turnBudget: 2 },
       t.ctx,
     );
-    expect(t.errored()).toBe(true);
-    expect(t.out()).toContain("already active");
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("Would open a room");
+    expect(t.out()).not.toContain("already active");
   });
 
   it("chamber_room_say injects a director direction into the active room", async () => {
@@ -502,6 +505,29 @@ describe("chamber room-control chat tools", () => {
     const t = makeToolCtx();
     await tool("chamber_room_say").execute({}, t.ctx);
     expect(t.errored()).toBe(true);
+  });
+
+  it("chamber_room_say targets an explicit room slug", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_say").execute({ room: openedSlug, direction: "focus" }, t.ctx);
+    expect(t.errored()).toBe(false);
+    const room = await createFileRoomStore(roomsDir()).loadRoom(openedSlug);
+    expect(room?.pending?.directionInjection).toBe("focus");
+  });
+
+  it("chamber_room_say rejects an inactive/unknown room slug", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_say").execute({ room: "room-ghost", direction: "x" }, t.ctx);
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("not active");
+  });
+
+  it("chamber_room_status targets an explicit room slug", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_status").execute({ room: openedSlug }, t.ctx);
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain(openedSlug);
+    expect(t.out()).toContain("alice");
   });
 
   it("chamber_room_stop stops the room; status still shows the finished room", async () => {
@@ -611,5 +637,59 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     );
     expect(t.errored()).toBe(true);
     expect((await readMinds(mindsDir())).some((m) => m.slug === "ghost")).toBe(false);
+  });
+});
+
+describe("chamber room concurrency cap", () => {
+  beforeAll(async () => {
+    // Fresh driver + abort so this block's rooms don't inherit prior state; the abort
+    // fake holds each room's first turn in flight, keeping them active so the cap is hit.
+    await rib.dispose?.();
+    abort = abortableRunAgentTurn();
+    tools = registerTools(makeCtx(abort.run, sm));
+  });
+
+  it("opens rooms up to the cap, then refuses the next", async () => {
+    for (let i = 0; i < MAX_ACTIVE_ROOMS; i++) {
+      const t = makeToolCtx();
+      await tool("chamber_room_start").execute(
+        { participants: ["alice", "bob"], turnBudget: 2, confirm: true },
+        t.ctx,
+      );
+      expect(t.errored()).toBe(false);
+      expect(t.out()).toContain("Opened room");
+    }
+    const over = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], turnBudget: 2, confirm: true },
+      over.ctx,
+    );
+    expect(over.errored()).toBe(true);
+    expect(over.out()).toContain("concurrent cap");
+  });
+});
+
+describe("chamber room cap is atomic under concurrent starts", () => {
+  beforeAll(async () => {
+    await rib.dispose?.();
+    abort = abortableRunAgentTurn();
+    tools = registerTools(makeCtx(abort.run, sm));
+  });
+
+  it("a concurrent burst of starts opens at most the cap", async () => {
+    // Fire more starts than the cap at once. startRoom reserves its slot in the same
+    // synchronous tick it checks the cap (no await between), so exactly MAX open —
+    // the add-after-await ordering this guards against would let them all overshoot.
+    const ctxs = Array.from({ length: MAX_ACTIVE_ROOMS + 3 }, () => makeToolCtx());
+    await Promise.all(
+      ctxs.map((t) =>
+        tool("chamber_room_start").execute(
+          { participants: ["alice", "bob"], turnBudget: 2, confirm: true },
+          t.ctx,
+        ),
+      ),
+    );
+    const opened = ctxs.filter((t) => t.out().includes("Opened room")).length;
+    expect(opened).toBe(MAX_ACTIVE_ROOMS);
   });
 });

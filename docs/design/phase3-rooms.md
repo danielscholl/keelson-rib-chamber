@@ -261,7 +261,9 @@ No new section kinds. **C5 dynamic regions = N concurrent ROOMS, a different and
 
 ---
 
-## 5. Single-active-room — **KEEP it for this slice**
+## 5. Single-active-room — **LIFTED (#29 Slice B)**
+
+> **Update (2026-06-21): shipped — single-active lifted (#29 Slice B).** The driver's `activeSlug` reservation is now a `Set` (`activeRooms`); `start()` no longer rejects a second room, and the three enforcement points named below collapsed to one (the `ROOM_KEY` literal and the rib single-active guard were already gone after Slice A). The rib retains every active room's panel plus the most-recent one via `room-region-registry.retainOnly` — the multi-room generalization of Slice A's `releaseExcept`. The chat tools (`say`/`stop`/`status`) take an optional `room` slug, defaulting to the most-recent active room, and a `MAX_ACTIVE_ROOMS` cap bounds the concurrent fan-out (and keeps a start from hitting the harness region ceiling). Fresh-slug-per-start (§7) is kept. The text below is retained for history.
 
 > **Update (2026-06-18).** This section's premise — "C5 dynamic surface regions confirmed absent" — is now stale. keelson **#214** shipped `RibContext.registerRegion` (the base seam the "record, don't build" list below called for), so **multiple concurrent rooms is no longer base-gated**. It is the next rib-side slice, tracked as chamber **#29**.
 
