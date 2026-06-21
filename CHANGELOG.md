@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.5.0...v0.6.0) (2026-06-21)
+
+
+### Added
+
+* **room:** lift single-active-room constraint for concurrent rooms ([#70](https://github.com/danielscholl/keelson-rib-chamber/issues/70)) ([6fc2203](https://github.com/danielscholl/keelson-rib-chamber/commit/6fc2203c5dd92207cc2e406eb169965c1fac5e86))
+
 ## [0.5.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.4.0...v0.5.0) (2026-06-19)
 
 
