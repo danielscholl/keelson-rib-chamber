@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout rib
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -38,7 +38,7 @@ jobs:
       # breaks this rib turns CI red here. Nested under node_modules so biome and
       # tsc (which both ignore node_modules) never scan the whole harness.
       - name: Checkout keelson (provides @keelson/shared)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: danielscholl/keelson
           path: node_modules/.keelson-src
