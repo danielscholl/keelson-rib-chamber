@@ -11,9 +11,14 @@ import { readMinds } from "../src/minds-store.ts";
 import { mindsDir } from "../src/paths.ts";
 
 async function main() {
+  // The chamber-roster bash node bakes the resolved minds dir in as argv[2] (the
+  // keelson-home-rooted path the in-process rib captured), so this out-of-process
+  // collector reads the same dir without resolving the home itself. Fall back to
+  // mindsDir() for a manual/standalone run.
+  const dir = process.argv[2]?.trim() || mindsDir();
   let minds: Awaited<ReturnType<typeof readMinds>> = [];
   try {
-    minds = await readMinds(mindsDir());
+    minds = await readMinds(dir);
   } catch {
     minds = [];
   }

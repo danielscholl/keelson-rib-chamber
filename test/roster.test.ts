@@ -9,6 +9,7 @@ import {
 } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
+import { setChamberDataHome } from "../src/paths.ts";
 
 // onAction's contract passes a RibContext, but the chamber rib ignores it for
 // retire/unknown (only OSDU-style actions read it). A getExec-only stub satisfies
@@ -82,21 +83,18 @@ describe("Chamber surface (Phase 1)", () => {
 
 describe("retire action", () => {
   let workspace: string;
-  let priorWorkspace: string | undefined;
 
   beforeEach(async () => {
     workspace = await mkdtemp(join(tmpdir(), "chamber-ws-"));
-    priorWorkspace = process.env.KEELSON_WORKSPACE;
-    process.env.KEELSON_WORKSPACE = workspace;
+    setChamberDataHome(join(workspace, "chamber"));
   });
 
   afterEach(async () => {
-    if (priorWorkspace === undefined) delete process.env.KEELSON_WORKSPACE;
-    else process.env.KEELSON_WORKSPACE = priorWorkspace;
+    setChamberDataHome(undefined);
     await rm(workspace, { recursive: true, force: true });
   });
 
-  const mindsRoot = () => join(workspace, ".keelson", "chamber", "minds");
+  const mindsRoot = () => join(workspace, "chamber", "minds");
 
   async function seedScout(): Promise<void> {
     await scaffoldMind(

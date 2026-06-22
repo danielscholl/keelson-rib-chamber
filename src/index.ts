@@ -32,7 +32,13 @@ import {
   type LensRegistry,
 } from "./lens.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
-import { chamberDataHome, isChamberDataHomeWritable, mindsDir, roomsDir } from "./paths.ts";
+import {
+  chamberDataHome,
+  isChamberDataHomeWritable,
+  mindsDir,
+  roomsDir,
+  setChamberDataHome,
+} from "./paths.ts";
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
@@ -174,6 +180,13 @@ function roomNote(slug: string): string {
 // (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
 // it is shell-quoted where interpolated into the bash node below.
 const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
+
+// POSIX single-quote: wrap a value and escape any embedded quote so a path
+// (spaces, `$`, backticks, backslashes) reaches `bash -c` literally — never
+// word-split or expanded.
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
 
 // The brief's JSON-Schema shape, used twice. As `output_format` it's the
 // structured-output directive appended to the prompt (and flips the node to a
@@ -437,7 +450,10 @@ const rib: Rib = {
         nodes: [
           {
             id: "collect",
-            bash: `bun ${JSON.stringify(ROSTER_COLLECTOR)}`,
+            // The collector runs out-of-process (a bash node) and can't call
+            // ctx.getDataDir, so bake the resolved minds dir in — captured in
+            // registerTools, which runs before this — so both sides read one path.
+            bash: `bun ${shQuote(ROSTER_COLLECTOR)} ${shQuote(mindsDir())}`,
             output_schema: { type: "object", required: ["view", "sections"] },
           },
         ],
@@ -517,6 +533,12 @@ const rib: Rib = {
   // the store, and the roster as the minds resolver. The seams are optional, so the
   // driver stays undefined on a host without them and room actions fail closed.
   registerTools: (ctx: RibContext) => {
+    // Capture the data home from the blessed ctx.getDataDir seam once, before any
+    // store/driver/region is built from it — and before contributeWorkflows bakes
+    // the path into the roster bash node. When the seam is absent (older harness),
+    // leave it uncaptured: chamberDataHome() lazily resolves ribDataDir("chamber").
+    const dataDir = ctx.getDataDir?.();
+    if (dataDir) setChamberDataHome(dataDir);
     // The genesis write seam is always available: genesis is a workflow whose
     // prompt node calls chamber_emit_genesis, and the write needs no room driver.
     // The room-control tools (and the driver) require the C1 agent-turn + snapshot

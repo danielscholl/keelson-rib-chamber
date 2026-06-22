@@ -12,7 +12,7 @@ import type {
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib, { MAX_ACTIVE_ROOMS } from "../src/index.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
-import { mindsDir, roomsDir } from "../src/paths.ts";
+import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
 import { abortableRunAgentTurn } from "./helpers/fakes.ts";
 
@@ -77,11 +77,9 @@ function tool(name: string): ToolDefinition {
 }
 
 let workspace: string;
-let prevWorkspace: string | undefined;
 beforeAll(async () => {
   workspace = await mkdtemp(join(tmpdir(), "chamber-tools-"));
-  prevWorkspace = process.env.KEELSON_WORKSPACE;
-  process.env.KEELSON_WORKSPACE = workspace;
+  setChamberDataHome(join(workspace, "chamber"));
   const at = "2026-01-01T00:00:00.000Z";
   await scaffoldMind(
     mindsDir(),
@@ -171,8 +169,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await rib.dispose?.();
-  if (prevWorkspace === undefined) delete process.env.KEELSON_WORKSPACE;
-  else process.env.KEELSON_WORKSPACE = prevWorkspace;
+  setChamberDataHome(undefined);
   await rm(workspace, { recursive: true, force: true });
 });
 
