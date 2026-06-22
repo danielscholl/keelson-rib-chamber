@@ -11,6 +11,9 @@ export type ReservedAuthority = "director" | "system";
 export interface Mind {
   slug: MindSlug;
   name: string;
+  // The Mind's role, carried into the roster card's pill. `readMinds` supplies an
+  // empty fallback for a drifted record so the board can render a placeholder.
+  role: string;
   persona: string;
   model?: string;
   // The provider that serves `model`. Pin it alongside `model` so entering the

@@ -16,8 +16,8 @@ import {
 } from "../helpers/fakes.ts";
 
 const MINDS: Mind[] = [
-  { slug: "a", name: "Ada", persona: "You are Ada." },
-  { slug: "b", name: "Bo", persona: "You are Bo." },
+  { slug: "a", name: "Ada", role: "agent", persona: "You are Ada." },
+  { slug: "b", name: "Bo", role: "agent", persona: "You are Bo." },
 ];
 
 const START = {
@@ -313,7 +313,14 @@ describe("room driver — concurrency & model", () => {
       publisher: pub.publisher,
       runAgentTurn: turns.run,
       minds: () => [
-        { slug: "a", name: "Ada", persona: "You are Ada.", model: "claude-x", provider: "claude" },
+        {
+          slug: "a",
+          name: "Ada",
+          role: "agent",
+          persona: "You are Ada.",
+          model: "claude-x",
+          provider: "claude",
+        },
       ],
       now: fixedClock(),
       newId: seqIds(),
@@ -325,8 +332,8 @@ describe("room driver — concurrency & model", () => {
   });
 
   const TOOLED_MINDS: Mind[] = [
-    { slug: "a", name: "Ada", persona: "You are Ada.", tools: ["lens"] },
-    { slug: "b", name: "Bo", persona: "You are Bo." },
+    { slug: "a", name: "Ada", role: "agent", persona: "You are Ada.", tools: ["lens"] },
+    { slug: "b", name: "Bo", role: "agent", persona: "You are Bo." },
   ];
   const LENS_POOL = [{ name: "chamber_emit_lens" }];
 
@@ -767,8 +774,8 @@ describe("room driver — driver-API soundness", () => {
 // tagline-instead-of-soul system, and the missing cwd all shipped unseen.
 describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () => {
   const MINDS2: Mind[] = [
-    { slug: "a", name: "Ada", persona: "Ada — the tagline." },
-    { slug: "b", name: "Bo", persona: "Bo — the tagline." },
+    { slug: "a", name: "Ada", role: "agent", persona: "Ada — the tagline." },
+    { slug: "b", name: "Bo", role: "agent", persona: "Bo — the tagline." },
   ];
 
   const START2 = {
@@ -881,10 +888,10 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
 // real getStrategy("group-chat").
 describe("room driver — group-chat moderate", () => {
   const MINDS_GC: Mind[] = [
-    { slug: "a", name: "Ada", persona: "You are Ada." },
-    { slug: "b", name: "Bo", persona: "You are Bo." },
-    { slug: "m", name: "Mod", persona: "You are Mod." },
-    { slug: "s", name: "Synth", persona: "You are Synth." },
+    { slug: "a", name: "Ada", role: "agent", persona: "You are Ada." },
+    { slug: "b", name: "Bo", role: "agent", persona: "You are Bo." },
+    { slug: "m", name: "Mod", role: "agent", persona: "You are Mod." },
+    { slug: "s", name: "Synth", role: "agent", persona: "You are Synth." },
   ];
 
   function gcHarness(scripts: TurnScript[], minds: Mind[] = MINDS_GC) {
@@ -1260,9 +1267,9 @@ describe("room driver — group-chat moderate", () => {
 // the real getStrategy("open-floor"). Precedence: director > nomination > seed.
 describe("room driver — open-floor", () => {
   const MINDS_OF: Mind[] = [
-    { slug: "a", name: "Ada", persona: "You are Ada." },
-    { slug: "b", name: "Bo", persona: "You are Bo." },
-    { slug: "c", name: "Cy", persona: "You are Cy." },
+    { slug: "a", name: "Ada", role: "agent", persona: "You are Ada." },
+    { slug: "b", name: "Bo", role: "agent", persona: "You are Bo." },
+    { slug: "c", name: "Cy", role: "agent", persona: "You are Cy." },
   ];
 
   function ofHarness(scripts: TurnScript[], minds: Mind[] = MINDS_OF) {

@@ -78,6 +78,7 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
       records.push({
         slug,
         name: rec.name,
+        role: typeof rec.role === "string" && rec.role ? rec.role : "",
         persona: rec.persona,
         createdAt: typeof rec.createdAt === "string" ? rec.createdAt : "",
         ...(typeof rec.model === "string" && rec.model ? { model: rec.model } : {}),
@@ -95,6 +96,7 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
   return records.map((r) => ({
     slug: r.slug,
     name: r.name,
+    role: r.role,
     persona: r.persona,
     ...(r.model ? { model: r.model } : {}),
     ...(r.provider ? { provider: r.provider } : {}),

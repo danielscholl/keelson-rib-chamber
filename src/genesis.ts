@@ -23,7 +23,7 @@ export function slugify(name: string): string {
   return ascii || `mind-${stableHash(name)}`;
 }
 
-function stableHash(s: string): string {
+export function stableHash(s: string): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
   return Math.abs(h).toString(36);

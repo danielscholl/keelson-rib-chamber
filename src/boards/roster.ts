@@ -1,4 +1,5 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import { stableHash } from "../genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import type { Mind } from "../types.ts";
 
@@ -7,56 +8,55 @@ import type { Mind } from "../types.ts";
 // simple.
 const DEFAULT_ROOM_TURN_BUDGET = 6;
 
-// Pure: a roster of Minds -> a canvas `board` of cards (one per Mind). Validated
-// against canvasViewSchema in tests; the producer never parses (validation lives
-// at the binding edge, like the Phase 0 brief).
-export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
-  const items = minds.map((mind) => {
-    const fields: { label: string; value: string }[] = [
-      { label: "persona", value: truncate(mind.persona) },
-    ];
-    if (mind.model) fields.push({ label: "model", value: mind.model });
-    const footnote =
-      mind.tools && mind.tools.length > 0 ? `tools: ${mind.tools.join(", ")}` : undefined;
-    return {
-      title: mind.name,
-      pill: { label: mind.slug, tone: "neutral" as CanvasTone },
-      fields,
-      ...(footnote ? { footnote } : {}),
-    };
-  });
+// The full canvas tone ramp, used to give each Mind a deterministic identity dot
+// hashed from its slug — a stable per-Mind hue, not a status.
+const DOT_TONES = [
+  "ok",
+  "warn",
+  "error",
+  "info",
+  "caution",
+  "brand",
+  "accent",
+  "neutral",
+] as const satisfies readonly CanvasTone[];
 
-  // An empty roster is a new operator's first screen; genesis can't be a baked
-  // button (it needs a freeform brief), so point them at the path that authors
-  // Minds — asking the agent in Chat — and offer the starter archetypes as a
-  // ready-made first move (the agent authors each from model-local knowledge).
+// stableHash returns a base-36 string; parsing it back at radix 36 recovers the
+// integer to mod across the ramp, so distinct slugs spread across the tones.
+function dotFor(slug: string): CanvasTone {
+  return DOT_TONES[Number.parseInt(stableHash(slug), 36) % DOT_TONES.length]!;
+}
+
+// Pure: a roster of Minds -> a canvas `board`. Zero Minds renders a cold-start
+// launchpad (author the first Mind); >=1 renders one card per Mind plus the
+// Enter/Convene fallback action sections. Validated against canvasViewSchema in
+// tests; the producer never parses (validation lives at the binding edge).
+export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
   const sections: CanvasBoardView["sections"] =
-    minds.length === 0
-      ? [
-          {
-            kind: "rows",
-            title: "Get started",
-            items: [
-              {
-                glyph: "brand",
-                text: "No Minds yet. Open Chat and ask the agent to convene a roster — describe the minds you want, or start with a preset below (e.g. “convene Moneypenny”).",
-              },
-              ...GENESIS_STARTERS.map((s) => ({
-                glyph: "info" as const,
-                text: `${s.name} — ${s.tagline}`,
-                trailing: `convene ${s.slug}`,
-              })),
-            ],
-          },
-        ]
-      : [{ kind: "cards", items }];
+    minds.length === 0 ? coldStartSections() : [{ kind: "cards", items: minds.map(cardFor) }];
+
+  // Enter is the primary, non-destructive verb. The canvas drops non-destructive
+  // card actions today (host #283), so it ships as a separate button-list until
+  // that lands; each button carries its Mind's slug to onAction.
+  if (minds.length > 0) {
+    sections.push({
+      kind: "actions",
+      title: "Enter",
+      items: minds.map((mind) => ({
+        type: "enter-mind",
+        label: `Enter ${mind.name}`,
+        glyph: "→",
+        payload: { slug: mind.slug },
+      })),
+    });
+  }
   // A room needs at least two Minds to be a conversation; bake the participants
   // (all current Minds) into the start action so the payload-required control
   // works from the canvas, not just the API.
   if (minds.length >= 2) {
     sections.push({
       kind: "actions",
-      title: "Room",
+      title: "Convene a room",
       items: [
         {
           type: "room-start",
@@ -83,39 +83,6 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
       ],
     });
   }
-  // Enter a Mind for a direct 1:1 chat — the primary, non-destructive verb. The
-  // action returns an open-chat directive (its soul seeded as the system prompt)
-  // the harness turns into a fresh seeded conversation.
-  if (minds.length > 0) {
-    sections.push({
-      kind: "actions",
-      title: "Enter",
-      items: minds.map((mind) => ({
-        type: "enter-mind",
-        label: `Enter ${mind.name}`,
-        glyph: "→",
-        payload: { slug: mind.slug },
-      })),
-    });
-  }
-  // One destructive Retire button per Mind — the slug to remove is on the card, so
-  // it rides as the action payload (the room-control pattern), reaching onAction.
-  // Genesis (the inverse) is the chamber-genesis workflow instead: authoring a soul
-  // needs a freeform brief a payload-less button can't carry.
-  if (minds.length > 0) {
-    sections.push({
-      kind: "actions",
-      title: "Retire",
-      items: minds.map((mind) => ({
-        type: "retire",
-        label: `Retire ${mind.name}`,
-        glyph: "✕",
-        tone: "warn" as CanvasTone,
-        destructive: true,
-        payload: { slug: mind.slug },
-      })),
-    });
-  }
 
   return {
     view: "board",
@@ -129,6 +96,94 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
     },
     sections,
   };
+}
+
+// One Mind -> one card: a hashed identity dot, the role in a single pill, persona
+// (and model when set) as fields, and Retire as a destructive overflow action with
+// a typed irreversible confirm gate. The slug rides the retire payload + dot hash.
+function cardFor(mind: Mind) {
+  const fields: { label: string; value: string }[] = [
+    { label: "persona", value: truncate(mind.persona) },
+  ];
+  if (mind.model) fields.push({ label: "model", value: mind.model });
+  return {
+    title: mind.name,
+    dot: dotFor(mind.slug),
+    pill: { label: mind.role.trim() || "Mind" },
+    fields,
+    actions: [
+      {
+        type: "retire",
+        label: "Retire Mind…",
+        glyph: "✕",
+        tone: "warn" as CanvasTone,
+        destructive: true,
+        payload: { slug: mind.slug },
+        confirm: {
+          irreversible: true,
+          subject: mind.slug,
+          title: "Retire Mind",
+          body: `Retire ${mind.name}? This permanently deletes the Mind and its SOUL.`,
+          confirmLabel: "Retire",
+          cancelLabel: "Cancel",
+        },
+      },
+    ],
+  };
+}
+
+// The cold-start launchpad: an anchor sentence, an "Author a Mind" section (the
+// three starter archetypes + a describe-your-own brief), and a "what's next" line.
+// No locked Rooms/Lenses panels; no "convene <slug>" — the only "convene" is the
+// next-step sentence.
+function coldStartSections(): CanvasBoardView["sections"] {
+  return [
+    {
+      kind: "rows",
+      items: [
+        {
+          glyph: "brand",
+          text: "A Chamber is a team of persistent Minds you author — they chat with you, meet each other in Rooms, and keep Lenses for ongoing work. Author your first Mind to start the Chamber.",
+        },
+      ],
+    },
+    {
+      kind: "actions",
+      title: "Author a Mind",
+      items: [
+        ...GENESIS_STARTERS.map((s) => ({
+          type: "author-archetype",
+          label: `${s.name} — ${s.tagline}`,
+          glyph: "✦",
+          payload: { slug: s.slug },
+        })),
+        {
+          type: "describe-own",
+          label: "Describe & author",
+          glyph: "✎",
+          fields: [
+            {
+              name: "brief",
+              label: "Or describe your own",
+              placeholder:
+                'Who should this feel like? e.g. "Athena — a skeptical staff engineer who guards the architecture"',
+              multiline: true,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      kind: "rows",
+      items: [
+        {
+          glyph: "neutral",
+          text: "Next: with two Minds you can convene a Room; any Mind can keep a Lens. Each appears as its own panel here once it exists.",
+          trailing: "what's next",
+        },
+      ],
+    },
+  ];
 }
 
 function truncate(text: string, max = 120): string {
