@@ -7,14 +7,14 @@ describe("chamber data home", () => {
   afterEach(() => setChamberDataHome(undefined));
 
   test("a captured home wins; minds/ and rooms/ derive from it", () => {
-    setChamberDataHome("/srv/.keelson/chamber");
-    expect(chamberDataHome()).toBe("/srv/.keelson/chamber");
-    expect(mindsDir()).toBe(join("/srv/.keelson/chamber", "minds"));
-    expect(roomsDir()).toBe(join("/srv/.keelson/chamber", "rooms"));
+    setChamberDataHome("/srv/.keelson/rib-chamber");
+    expect(chamberDataHome()).toBe("/srv/.keelson/rib-chamber");
+    expect(mindsDir()).toBe(join("/srv/.keelson/rib-chamber", "minds"));
+    expect(roomsDir()).toBe(join("/srv/.keelson/rib-chamber", "rooms"));
   });
 
-  test("falls back to <keelson-home>/chamber when nothing is captured", () => {
+  test("falls back to <keelson-home>/rib-chamber when nothing is captured", () => {
     setChamberDataHome(undefined);
-    expect(chamberDataHome()).toBe(join(resolveKeelsonHome(), "chamber"));
+    expect(chamberDataHome()).toBe(join(resolveKeelsonHome(), "rib-chamber"));
   });
 });

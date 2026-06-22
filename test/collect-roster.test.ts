@@ -13,7 +13,7 @@ const COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.
 describe("collect-roster", () => {
   test("reads the minds dir from argv[2] and emits a roster board of that dir's Minds", async () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-collect-"));
-    const minds = join(home, "chamber", "minds");
+    const minds = join(home, "rib-chamber", "minds");
     try {
       await scaffoldMind(
         minds,

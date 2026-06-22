@@ -13,7 +13,7 @@ the agent emits a generic **canvas `board`** payload, the rib's **snapshot
 binding** publishes it fail-closed to a `rib:chamber:*` key, and the bound
 **view** renders it live in the SPA — no per-view React.
 
-```
+```text
 {name, role, voice}  or  room turn prompt
    │  runs an agent turn (provider / coding-agent CLI)
 agent writes a Mind  OR  emits a board JSON payload
@@ -141,10 +141,10 @@ the authoring turn through the provider abstraction instead of a shelled CLI.
 ## 8. Persistence model
 
 Minds and room transcripts live under the rib's data home — a per-rib directory
-rooted at the keelson home (the same root as `keelson.db`), namespaced by rib id:
+rooted at the keelson home (the same root as `keelson.db`), named `rib-<id>`:
 
-```
-<keelson-home>/chamber/
+```text
+<keelson-home>/rib-chamber/
   minds/<slug>/{SOUL.md, memory.md, rules.md, log.md, AGENT.md}
   rooms/<slug>/{room.json, transcript.jsonl}
 ```
@@ -205,7 +205,7 @@ static — there is no way to surface a new panel after boot.
 ### C3 — Rib persistent data home — **landed**
 Minds/transcripts need a blessed writable location.
 - **Resolved:** `ctx.getDataDir()` on `RibContext` returns a per-rib directory
-  under the keelson home (`<keelson-home>/<rib-id>`). Chamber captures it at
+  under the keelson home (`<keelson-home>/rib-<rib-id>`). Chamber captures it at
   activation and no longer self-resolves via `KEELSON_WORKSPACE`.
 
 ### C4 — Streaming / partial board frames *(verify first)*
@@ -237,7 +237,7 @@ MVP), so Phase 2 is unblocked and wired.
 - **Phase 1 wired.** Genesis authors a Mind via the `chamber-genesis` workflow: a
   `prompt` node reads a brief, authors the soul, and calls `chamber_emit_genesis`
   to persist `mind.json` + `SOUL.md` + seeded working-memory docs under the rib
-  data home (`<keelson-home>/chamber/minds/<slug>/`, via `ctx.getDataDir`). A
+  data home (`<keelson-home>/rib-chamber/minds/<slug>/`, via `ctx.getDataDir`). A
   `chamber-roster` collector reads those Minds back into a `board` of cards on
   `rib:chamber:roster`; a per-Mind board `retire` action removes one. The
   **Chamber** surface lands the roster in the header and settles the brief into the
