@@ -13,7 +13,7 @@ for a direct chat or drop several into a room together.
 ## What a Mind is on disk
 
 Each Mind is a directory under the rib's data home,
-`.keelson/chamber/minds/<slug>/`:
+`<keelson-home>/rib-chamber/minds/<slug>/`:
 
 - `SOUL.md` is the founding identity document, authored by an agent at genesis.
   It has a Persona, a Mission, and a Voice. It is the system prompt the Mind runs
