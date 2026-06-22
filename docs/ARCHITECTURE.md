@@ -13,7 +13,7 @@ the agent emits a generic **canvas `board`** payload, the rib's **snapshot
 binding** publishes it fail-closed to a `rib:chamber:*` key, and the bound
 **view** renders it live in the SPA — no per-view React.
 
-```
+```text
 {name, role, voice}  or  room turn prompt
    │  runs an agent turn (provider / coding-agent CLI)
 agent writes a Mind  OR  emits a board JSON payload
@@ -143,7 +143,7 @@ the authoring turn through the provider abstraction instead of a shelled CLI.
 Minds and room transcripts live under the rib's data home — a per-rib directory
 rooted at the keelson home (the same root as `keelson.db`), named `rib-<id>`:
 
-```
+```text
 <keelson-home>/rib-chamber/
   minds/<slug>/{SOUL.md, memory.md, rules.md, log.md, AGENT.md}
   rooms/<slug>/{room.json, transcript.jsonl}
