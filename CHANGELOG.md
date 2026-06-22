@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.6.0...v0.7.0) (2026-06-22)
+
+
+### Added
+
+* root Mind/room data at the keelson home ([#72](https://github.com/danielscholl/keelson-rib-chamber/issues/72)) ([8e591ab](https://github.com/danielscholl/keelson-rib-chamber/commit/8e591abfbafedbd31f93aa3401e3decbed2f50b2))
+
 ## [0.6.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.5.0...v0.6.0) (2026-06-21)
 
 
