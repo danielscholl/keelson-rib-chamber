@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RibContext } from "@keelson/shared";
 import rib from "../src/index.ts";
+import { setChamberDataHome } from "../src/paths.ts";
 
 // The probe only checks seam presence + data-home writability, so trivial stubs
 // suffice. Omitting a key models a harness that didn't wire that seam.
@@ -18,17 +19,14 @@ function ctxWith(omit?: "snapshot" | "agentTurn" | "region"): RibContext {
 }
 
 let workspace: string;
-let prev: string | undefined;
 
 beforeAll(async () => {
   workspace = await mkdtemp(join(tmpdir(), "chamber-auth-"));
-  prev = process.env.KEELSON_WORKSPACE;
-  process.env.KEELSON_WORKSPACE = workspace;
+  setChamberDataHome(join(workspace, "chamber"));
 });
 
 afterAll(async () => {
-  if (prev === undefined) delete process.env.KEELSON_WORKSPACE;
-  else process.env.KEELSON_WORKSPACE = prev;
+  setChamberDataHome(undefined);
   await rm(workspace, { recursive: true, force: true });
 });
 

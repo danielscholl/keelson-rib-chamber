@@ -1,16 +1,22 @@
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { ribDataDir } from "@keelson/shared/paths";
 
-// Resolve the Chamber data home cwd-independently. The in-process genesis
-// handler (server cwd) and the out-of-process roster collector (a workflow bash
-// node whose refresh cwd is nominal) must agree on this path; both read the
-// same inherited KEELSON_WORKSPACE, so both compute the same home. Mirrors the
-// base server's workspace root (apps/server/src/index.ts). This is the C3 MVP —
-// it collapses to a blessed ctx.getDataDir() once that base seam lands.
+// The Chamber data home — the rib's data directory under the keelson home,
+// captured once at activation from ctx.getDataDir() (setChamberDataHome) so every
+// in-process reader (genesis write, room store, soul reads, auth probe) and the
+// baked-in roster bash node resolve the identical path, cwd-independently. The
+// fallback, ribDataDir("chamber"), is the same per-rib path the host's getDataDir
+// seam returns, covering a harness predating the seam or an out-of-process caller
+// with no captured value.
+let dataHome: string | undefined;
+
+export function setChamberDataHome(dir: string | undefined): void {
+  dataHome = dir;
+}
+
 export function chamberDataHome(): string {
-  const workspace = resolve(process.env.KEELSON_WORKSPACE?.trim() || join(homedir(), "keelson"));
-  return join(workspace, ".keelson", "chamber");
+  return dataHome ?? ribDataDir("chamber");
 }
 
 export function mindsDir(): string {

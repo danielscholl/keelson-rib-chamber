@@ -12,7 +12,7 @@ import type {
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
-import { mindsDir, roomsDir } from "../src/paths.ts";
+import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 import { scriptedRunAgentTurn } from "./helpers/fakes.ts";
@@ -100,11 +100,9 @@ function slugOf(res: RibActionResult): string {
 }
 
 let workspace: string;
-let prevWorkspace: string | undefined;
 beforeAll(async () => {
   workspace = await mkdtemp(join(tmpdir(), "chamber-ws-"));
-  prevWorkspace = process.env.KEELSON_WORKSPACE;
-  process.env.KEELSON_WORKSPACE = workspace;
+  setChamberDataHome(join(workspace, "chamber"));
   const at = "2026-01-01T00:00:00.000Z";
   await scaffoldMind(
     mindsDir(),
@@ -145,8 +143,7 @@ beforeAll(async () => {
   );
 });
 afterAll(async () => {
-  if (prevWorkspace === undefined) delete process.env.KEELSON_WORKSPACE;
-  else process.env.KEELSON_WORKSPACE = prevWorkspace;
+  setChamberDataHome(undefined);
   await rm(workspace, { recursive: true, force: true });
 });
 

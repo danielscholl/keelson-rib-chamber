@@ -80,7 +80,7 @@ imperatively), `getCredential()` (namespace-scoped secrets).
 | Director controls (`/next`, `/inject`) | `onAction` round-trip | ✅ shipped (OSDU `G3`) |
 | `room/strategies/*` (pure) | ported behind a Keelson orchestration context | ✅ wired (driver + `sequential`) |
 | **Run an agent turn from rib code** | `ctx.runAgentTurn` (CLI MVP behind the seam) | ✅ wired (`C1`) |
-| Mind storage (`SOUL.md`, memory…) | a blessed rib data home | ↔ MVP self-resolved (`C3` real fix deferred) |
+| Mind storage (`SOUL.md`, memory…) | a blessed rib data home | ✅ wired (`C3` — `ctx.getDataDir`) |
 | Agent-authored lens at runtime | dynamic view registration | ❌ **gap `C2`** |
 | Streaming a turn into a board | partial/streamed snapshot frames | ↔ whole-frame MVP (`C4` partial deferred) |
 | Room with N participants | dynamic surface regions | ❌ **gap `C5`** |
@@ -140,16 +140,19 @@ the authoring turn through the provider abstraction instead of a shelled CLI.
 
 ## 8. Persistence model
 
-Minds and room transcripts live under a per-rib data home:
+Minds and room transcripts live under the rib's data home — a per-rib directory
+rooted at the keelson home (the same root as `keelson.db`), namespaced by rib id:
 
 ```
-.keelson/chamber/
+<keelson-home>/chamber/
   minds/<slug>/{SOUL.md, memory.md, rules.md, log.md, AGENT.md}
   rooms/<slug>/{room.json, transcript.jsonl}
 ```
 
-At MVP the rib resolves this path itself (it knows `KEELSON_WORKSPACE` /
-`.keelson/`); the blessed form is a `ctx.getDataDir()` on `RibContext` (`C3`).
+The rib resolves this from the blessed `ctx.getDataDir()` seam on `RibContext`,
+captured once at activation (`setChamberDataHome`). The out-of-process roster
+collector reads the same path baked into its workflow bash node, so the two
+processes agree without a shared `KEELSON_WORKSPACE`.
 
 Closed rooms are retained, not unbounded. Because every room start mints a fresh
 unique slug, `rooms/` would otherwise grow forever; `sweepClosedRooms()`
@@ -199,11 +202,11 @@ static — there is no way to surface a new panel after boot.
   (and notify the SPA), so a Mind-authored `rib:chamber:lens:*` key becomes a
   live panel. This is the literal "agents create their own lenses" feature.
 
-### C3 — Rib persistent data home
-Minds/transcripts need a blessed writable location. Today a rib reaches into the
-filesystem itself (works, unblessed).
-- **Real fix:** `ctx.getDataDir()` (a per-rib directory under `.keelson/`), or a
-  scoped store handle.
+### C3 — Rib persistent data home — **landed**
+Minds/transcripts need a blessed writable location.
+- **Resolved:** `ctx.getDataDir()` on `RibContext` returns a per-rib directory
+  under the keelson home (`<keelson-home>/<rib-id>`). Chamber captures it at
+  activation and no longer self-resolves via `KEELSON_WORKSPACE`.
 
 ### C4 — Streaming / partial board frames *(verify first)*
 A turn that streams tokens into a board region needs incremental frame updates,
@@ -233,8 +236,8 @@ MVP), so Phase 2 is unblocked and wired.
   `rib:chamber:brief`. A `views[]` descriptor renders it.
 - **Phase 1 wired.** Genesis authors a Mind via the `chamber-genesis` workflow: a
   `prompt` node reads a brief, authors the soul, and calls `chamber_emit_genesis`
-  to persist `mind.json` + `SOUL.md` + seeded working-memory docs under a
-  self-resolved `<workspace>/.keelson/chamber/minds/<slug>/` (the `C3` MVP). A
+  to persist `mind.json` + `SOUL.md` + seeded working-memory docs under the rib
+  data home (`<keelson-home>/chamber/minds/<slug>/`, via `ctx.getDataDir`). A
   `chamber-roster` collector reads those Minds back into a `board` of cards on
   `rib:chamber:roster`; a per-Mind board `retire` action removes one. The
   **Chamber** surface lands the roster in the header and settles the brief into the
@@ -275,8 +278,6 @@ is **Phase 3 + base hardening**:
 - **`C1` real fix** — swap the CLI MVP behind `ctx.runAgentTurn` for the
   registry-routed provider (provider pinning, redaction, credentials) with **zero
   room-loop change** (the seam is the boundary).
-- **`C3` real fix** (a blessed `ctx.getDataDir()`): the self-resolved data home
-  (`minds/` + `rooms/`) swaps to it with no rib-logic change.
 - **`C4`** — partial/streamed board frames if a turn should paint tokens as they
   arrive; the room loop already drains the turn stream (today it publishes
   whole-frame on completion).

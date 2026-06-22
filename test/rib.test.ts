@@ -1,6 +1,11 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import type { RibContext, SnapshotManager } from "@keelson/shared";
 import rib from "../src/index.ts";
+import { setChamberDataHome } from "../src/paths.ts";
+
+// registerTools (exercised below) captures the data home into a module global;
+// clear it after this file so the bootstrap doesn't leak a home into the next.
+afterAll(() => setChamberDataHome(undefined));
 
 // A minimal SnapshotManager double — the lens registry and room wiring only need
 // register/recompose not to throw.

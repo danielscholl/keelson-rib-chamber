@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { RibContext } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
-import { mindsDir } from "../src/paths.ts";
+import { mindsDir, setChamberDataHome } from "../src/paths.ts";
 
 const onAction = rib.onAction;
 if (!onAction) throw new Error("rib is missing onAction");
@@ -18,13 +18,11 @@ const ctx = {
 } as unknown as RibContext;
 
 let workspace: string;
-let prev: string | undefined;
 
 beforeAll(async () => {
   workspace = await mkdtemp(join(tmpdir(), "chamber-enter-"));
-  prev = process.env.KEELSON_WORKSPACE;
-  process.env.KEELSON_WORKSPACE = workspace;
-  // Reset the module-global roster cache so resolveMinds() reads this workspace.
+  setChamberDataHome(join(workspace, "chamber"));
+  // Reset the module-global roster cache so resolveMinds() reads this data home.
   await rib.dispose?.();
   await scaffoldMind(
     mindsDir(),
@@ -42,8 +40,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rib.dispose?.();
-  if (prev === undefined) delete process.env.KEELSON_WORKSPACE;
-  else process.env.KEELSON_WORKSPACE = prev;
+  setChamberDataHome(undefined);
   await rm(workspace, { recursive: true, force: true });
 });
 

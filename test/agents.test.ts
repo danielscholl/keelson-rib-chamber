@@ -4,15 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listAgents, resolveAgent } from "../src/agents.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
-import { mindsDir } from "../src/paths.ts";
+import { mindsDir, setChamberDataHome } from "../src/paths.ts";
 
 let workspace: string;
-let prev: string | undefined;
 
 beforeAll(async () => {
   workspace = await mkdtemp(join(tmpdir(), "chamber-agents-"));
-  prev = process.env.KEELSON_WORKSPACE;
-  process.env.KEELSON_WORKSPACE = workspace;
+  setChamberDataHome(join(workspace, "chamber"));
   await scaffoldMind(
     mindsDir(),
     {
@@ -40,8 +38,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (prev === undefined) delete process.env.KEELSON_WORKSPACE;
-  else process.env.KEELSON_WORKSPACE = prev;
+  setChamberDataHome(undefined);
   await rm(workspace, { recursive: true, force: true });
 });
 

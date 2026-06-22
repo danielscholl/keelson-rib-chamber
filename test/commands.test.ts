@@ -5,18 +5,16 @@ import { join } from "node:path";
 import type { RibContext } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
-import { mindsDir } from "../src/paths.ts";
+import { mindsDir, setChamberDataHome } from "../src/paths.ts";
 
-// The command hooks ignore ctx (they read the data home via KEELSON_WORKSPACE),
-// so a bare cast is enough to exercise the rib wiring end to end.
+// The command hooks ignore ctx (they read the captured chamber data home), so a
+// bare cast is enough to exercise the rib wiring end to end.
 const ctx = {} as RibContext;
 let workspace: string;
-let prev: string | undefined;
 
 beforeAll(async () => {
   workspace = await mkdtemp(join(tmpdir(), "chamber-commands-"));
-  prev = process.env.KEELSON_WORKSPACE;
-  process.env.KEELSON_WORKSPACE = workspace;
+  setChamberDataHome(join(workspace, "chamber"));
   await scaffoldMind(
     mindsDir(),
     {
@@ -32,8 +30,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (prev === undefined) delete process.env.KEELSON_WORKSPACE;
-  else process.env.KEELSON_WORKSPACE = prev;
+  setChamberDataHome(undefined);
   await rm(workspace, { recursive: true, force: true });
 });
 
@@ -78,8 +75,7 @@ describe("invokeCommand", () => {
 
   it("/mind no-arg list stays under the shared 8000-char message cap for a large roster", async () => {
     const ws = await mkdtemp(join(tmpdir(), "chamber-bigmind-"));
-    const saved = process.env.KEELSON_WORKSPACE;
-    process.env.KEELSON_WORKSPACE = ws;
+    setChamberDataHome(join(ws, "chamber"));
     try {
       for (let i = 0; i < 40; i++) {
         await scaffoldMind(
@@ -101,8 +97,7 @@ describe("invokeCommand", () => {
       expect(text.length).toBeLessThanOrEqual(8000);
       expect(text).toContain("more (type a slug to filter)");
     } finally {
-      if (saved === undefined) delete process.env.KEELSON_WORKSPACE;
-      else process.env.KEELSON_WORKSPACE = saved;
+      setChamberDataHome(join(workspace, "chamber"));
       await rm(ws, { recursive: true, force: true });
     }
   });
