@@ -26,6 +26,7 @@ const record = (over: Partial<MindRecord> = {}): MindRecord => ({
 const mind = (over: Partial<Mind> = {}): Mind => ({
   slug: "scout",
   name: "Scout",
+  role: "researcher",
   persona: "Digs up facts.",
   ...over,
 });

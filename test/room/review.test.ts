@@ -14,8 +14,14 @@ import {
 // cross-vendor pairing the rib's validateStart enforces. The driver honours the
 // pins and builds the reviewer's artifact-only prompt.
 const MINDS_REV: Mind[] = [
-  { slug: "author", name: "Author", persona: "You are Author.", provider: "claude" },
-  { slug: "reviewer", name: "Reviewer", persona: "You are Reviewer.", provider: "codex" },
+  { slug: "author", name: "Author", role: "agent", persona: "You are Author.", provider: "claude" },
+  {
+    slug: "reviewer",
+    name: "Reviewer",
+    role: "agent",
+    persona: "You are Reviewer.",
+    provider: "codex",
+  },
 ];
 
 const START_REV = {

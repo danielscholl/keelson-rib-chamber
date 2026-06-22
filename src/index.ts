@@ -45,6 +45,7 @@ import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
+import { GENESIS_STARTERS } from "./starters.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
 import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
@@ -607,6 +608,10 @@ const rib: Rib = {
     switch (action.type) {
       case "enter-mind":
         return enterMindAction(action);
+      case "author-archetype":
+        return authorArchetypeAction(action);
+      case "describe-own":
+        return describeOwnAction(action);
       case "retire":
         return retireAction(action);
       case "room-start":
@@ -1142,6 +1147,48 @@ async function enterMindAction(action: RibAction): Promise<RibActionResult> {
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
+}
+
+// The system prompt for a genesis-author chat (the cold-start Author buttons).
+// A board action can only ask the SPA for an `open-chat` effect, and there is no
+// pre-genesis seed for an archetype with no SOUL.md on disk yet — so authoring
+// happens through a seeded chat turn that runs chamber-genesis, not a one-click
+// board write. This constant is fixed and well under openChatSeedSchema's 8000
+// systemPrompt cap.
+const GENESIS_AUTHOR_SYSTEM_PROMPT =
+  "You help the operator author a new persistent agent — a \"Mind\" — for Keelson's Chamber. From the brief, decide the Mind's name, role, and voice, then write an honest founding identity (do not invent tools or capabilities it lacks). When you have the name, role, voice, soul, and a one-line tagline, run the chamber-genesis workflow (or call chamber_emit_genesis) exactly once to persist the Mind, then confirm in a short line.";
+
+// Author one of the starter archetypes: open a seeded chat whose opening prompt
+// drives the agent to author that Mind from its brief and run chamber-genesis.
+async function authorArchetypeAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const slug = asNonEmptyString(payload.slug);
+  const starter = GENESIS_STARTERS.find((s) => s.slug === slug);
+  if (!starter) return { ok: false, error: `unknown archetype: ${slug || "(none)"}` };
+  const seed = {
+    systemPrompt: GENESIS_AUTHOR_SYSTEM_PROMPT,
+    name: `Author ${starter.name}`,
+    openingPrompt: `Author a Mind in this Chamber from this brief: ${starter.voiceDescription} When you have the name, role, voice, soul, and a one-line tagline, run the chamber-genesis workflow (or call chamber_emit_genesis) once to persist it.`,
+  };
+  return { ok: true, data: { effect: "open-chat", seed } };
+}
+
+// The operator-typed brief is the only unbounded, user-controlled input here;
+// openChatSeedSchema caps systemPrompt/name but not openingPrompt, so clamp it
+// before it rides into a billed opening turn.
+const MAX_BRIEF_CHARS = 2000;
+
+// Author from a freeform brief: open a seeded chat. With a typed brief the opening
+// prompt folds it in; without one it prompts the operator to describe the Mind in
+// chat (no board text-capture exists for a freeform genesis brief).
+async function describeOwnAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const brief = asNonEmptyString(payload.brief);
+  const openingPrompt = brief
+    ? `Author a Mind in this Chamber from this brief: ${brief.slice(0, MAX_BRIEF_CHARS)}. When you have the name, role, voice, soul, and a one-line tagline, run the chamber-genesis workflow (or call chamber_emit_genesis) once to persist it.`
+    : "Let's author a new Mind for this Chamber. Describe who it should feel like — its name, role, and voice — and I'll author its soul and persist it.";
+  const seed = { systemPrompt: GENESIS_AUTHOR_SYSTEM_PROMPT, name: "Author a Mind", openingPrompt };
+  return { ok: true, data: { effect: "open-chat", seed } };
 }
 
 async function retireAction(action: RibAction): Promise<RibActionResult> {

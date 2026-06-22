@@ -133,3 +133,51 @@ describe("retire action", () => {
     expect(res?.ok).toBe(false);
   });
 });
+
+describe("cold-start author actions", () => {
+  test("author-archetype opens a seeded chat to author that Mind", async () => {
+    const res = await rib.onAction?.(
+      { type: "author-archetype", payload: { slug: "moneypenny" } },
+      stubCtx,
+    );
+    expect(res?.ok).toBe(true);
+    const data = (
+      res as { data: { effect: string; seed: { systemPrompt: string; openingPrompt: string } } }
+    ).data;
+    expect(data.effect).toBe("open-chat");
+    expect(data.seed.systemPrompt.length).toBeGreaterThan(0);
+    expect(data.seed.openingPrompt).toMatch(/genesis|author/i);
+  });
+
+  test("author-archetype with an unknown slug fails closed", async () => {
+    const res = await rib.onAction?.(
+      { type: "author-archetype", payload: { slug: "nope" } },
+      stubCtx,
+    );
+    expect(res?.ok).toBe(false);
+  });
+
+  test("describe-own folds a typed brief into the opening prompt", async () => {
+    const res = await rib.onAction?.(
+      { type: "describe-own", payload: { brief: "a skeptical SRE" } },
+      stubCtx,
+    );
+    expect(res?.ok).toBe(true);
+    const data = (
+      res as { data: { effect: string; seed: { systemPrompt: string; openingPrompt: string } } }
+    ).data;
+    expect(data.effect).toBe("open-chat");
+    expect(data.seed.openingPrompt).toContain("a skeptical SRE");
+  });
+
+  test("describe-own with no brief still opens a chat that prompts for one", async () => {
+    const res = await rib.onAction?.({ type: "describe-own", payload: {} }, stubCtx);
+    expect(res?.ok).toBe(true);
+    const data = (
+      res as { data: { effect: string; seed: { systemPrompt: string; openingPrompt: string } } }
+    ).data;
+    expect(data.effect).toBe("open-chat");
+    expect(data.seed.openingPrompt.length).toBeGreaterThan(0);
+    expect(data.seed.openingPrompt.toLowerCase()).toMatch(/describe/);
+  });
+});

@@ -76,6 +76,7 @@ describe("readMinds", () => {
     const [mind] = await readMinds(root);
     expect(mind?.model).toBe("claude-x");
     expect(mind?.tools).toEqual(["web"]);
+    expect(mind?.role).toBe("researcher");
   });
 
   test("an empty / missing data home yields an empty roster", async () => {
@@ -112,6 +113,25 @@ describe("readMinds", () => {
     await Bun.write(join(root, "realdir", "mind.json"), JSON.stringify(record({ slug: "ghost" })));
     const [mind] = await readMinds(root);
     expect(mind?.slug).toBe("realdir"); // not "ghost" — retire keys off the dir name
+  });
+
+  test("a record with a missing or non-string role reads back as an empty role", async () => {
+    await Bun.write(
+      join(root, "nora", "mind.json"),
+      JSON.stringify({ name: "Nora", persona: "Notes.", createdAt: "2026-04-01T00:00:00.000Z" }),
+    );
+    await Bun.write(
+      join(root, "numr", "mind.json"),
+      JSON.stringify({
+        name: "Numr",
+        role: 7,
+        persona: "Counts.",
+        createdAt: "2026-04-02T00:00:00.000Z",
+      }),
+    );
+    const minds = await readMinds(root);
+    expect(minds.find((m) => m.slug === "nora")?.role).toBe("");
+    expect(minds.find((m) => m.slug === "numr")?.role).toBe("");
   });
 
   test("the read-back minds build a valid roster board", async () => {
