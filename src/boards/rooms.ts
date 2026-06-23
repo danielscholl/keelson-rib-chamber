@@ -1,27 +1,28 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { Room } from "../types.ts";
 
-// Pure: the persisted rooms -> a canvas `board` that is the HISTORY of ENDED
-// rooms. Active rooms keep their live inline per-slug panels (reconcileRoomPanels)
-// and never appear here, so the index filters to closed (done/stopped) rooms only.
-// No closed rooms renders a cold/empty state; otherwise one card per closed room,
-// newest-first, each with an Open (→ the room in the canvas drawer) and a destructive
-// Delete. Validated against canvasViewSchema in tests; the producer never parses
-// (validation lives at the binding edge).
+// Pure: the persisted rooms -> a canvas `board`. Active rooms come first (most
+// relevant), then closed (done/stopped) history; listRooms is already newest-first
+// so order is preserved within each group. An active room ALSO keeps its live inline
+// per-slug panel (reconcileRoomPanels), so its index card is additive and status-only
+// (no actions). A closed card offers Open (-> the room in the canvas drawer) and a
+// destructive Delete. No rooms at all renders a cold/empty state. Validated against
+// canvasViewSchema in tests; the producer never parses (validation lives at the
+// binding edge).
 export function buildRoomsIndexBoard(rooms: readonly Room[]): CanvasBoardView {
-  // Closed = done/stopped. listRooms is already newest-first, so this preserves
-  // that order. A live room is surfaced by its own inline panel, not as a card.
+  const active = rooms.filter((r) => r.status === "active");
   const closed = rooms.filter((r) => r.status !== "active");
+  const ordered = [...active, ...closed];
 
   const sections: CanvasBoardView["sections"] =
-    closed.length === 0 ? emptySections() : [{ kind: "cards", items: closed.map(cardFor) }];
+    ordered.length === 0 ? emptySections() : [{ kind: "cards", items: ordered.map(cardFor) }];
 
   return {
     view: "board",
     title: "Rooms",
     header: {
       status: {
-        label: `${closed.length} ${closed.length === 1 ? "session" : "sessions"}`,
+        label: `${ordered.length} ${ordered.length === 1 ? "session" : "sessions"}`,
         tone: "brand" as CanvasTone,
       },
       chip: "sessions",
@@ -30,13 +31,15 @@ export function buildRoomsIndexBoard(rooms: readonly Room[]): CanvasBoardView {
   };
 }
 
-// One closed room -> one card: an identity dot toned by status, the
-// `<status> · <turnIndex>/<turnBudget>` progress in a status-toned pill,
-// participants and the started-relative time as fields, an inline Open (focuses the
-// room's transcript in the canvas drawer) and a destructive Delete (an overflow
-// action with a typed irreversible confirm). The slug rides both action payloads.
+// One room -> one card: an identity dot toned by status, the
+// `<status> · <turnIndex>/<turnBudget>` progress in a status-toned pill, and
+// participants + the started-relative time as fields. A CLOSED room adds an Open
+// (focuses its transcript in the canvas drawer) and a destructive Delete (overflow,
+// typed-irreversible confirm). An ACTIVE room is status-only: it is already live in
+// its inline panel, so a frozen drawer snapshot would just go stale beside it (and
+// the delete handler refuses a live room anyway).
 function cardFor(room: Room) {
-  return {
+  const card = {
     title: room.name,
     dot: statusTone(room.status),
     pill: {
@@ -49,35 +52,42 @@ function cardFor(room: Room) {
       // honest "started <relative> ago", not an invented "ended" timestamp.
       { label: "started", value: `${relativeAgo(room.createdAt)} ago` },
     ],
-    actions: [
-      {
-        type: "room-open",
-        label: "Open",
-        glyph: "↗",
-        payload: { slug: room.slug },
-      },
-      {
-        type: "room-delete",
-        label: "Delete room…",
-        glyph: "✕",
-        tone: "warn" as CanvasTone,
-        destructive: true,
-        payload: { slug: room.slug },
-        confirm: {
-          irreversible: true,
-          subject: room.slug,
-          title: "Delete room",
-          body: `Delete ${room.name}? This permanently removes the session and its transcript.`,
-          confirmLabel: "Delete",
-          cancelLabel: "Cancel",
-        },
-      },
-    ],
+  };
+  return room.status === "active"
+    ? card
+    : { ...card, actions: [openAction(room), deleteAction(room)] };
+}
+
+function openAction(room: Room) {
+  return {
+    type: "room-open",
+    label: "Open",
+    glyph: "↗",
+    payload: { slug: room.slug },
+  };
+}
+
+function deleteAction(room: Room) {
+  return {
+    type: "room-delete",
+    label: "Delete room…",
+    glyph: "✕",
+    tone: "warn" as CanvasTone,
+    destructive: true,
+    payload: { slug: room.slug },
+    confirm: {
+      irreversible: true,
+      subject: room.slug,
+      title: "Delete room",
+      body: `Delete ${room.name}? This permanently removes the session and its transcript.`,
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+    },
   };
 }
 
 // The empty/cold state: a single rows hint, so the region is a valid board even
-// with no ended sessions yet (a fresh Chamber, or only live rooms running).
+// with no rooms yet (a fresh Chamber).
 function emptySections(): CanvasBoardView["sections"] {
   return [
     {
@@ -85,15 +95,14 @@ function emptySections(): CanvasBoardView["sections"] {
       items: [
         {
           glyph: "neutral",
-          text: "No past sessions yet. Convene a Room from the Roster; once it ends it lands here, where you can delete it.",
+          text: "No sessions yet. Convene a Room from the Roster; it appears here while live, and stays as history once it ends.",
         },
       ],
     },
   ];
 }
 
-// A closed room reads ok (done) or warn (stopped); active never appears here but
-// is mapped for exhaustiveness (info, matching boards/room.ts's statusTone).
+// active reads info (live), stopped warn, done ok — matching boards/room.ts.
 function statusTone(status: Room["status"]): CanvasTone {
   switch (status) {
     case "active":

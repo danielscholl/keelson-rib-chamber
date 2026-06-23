@@ -15,6 +15,25 @@ import type { MindSlug, Room, TurnEntry } from "./types.ts";
 
 export const DEFAULT_CLOSED_ROOM_RETENTION = 25;
 
+const ROOM_NAME_TOPIC_CAP = 60;
+
+// Derive a meaningful room name from what a convene/start has on hand: the topic
+// wins (trimmed, capped — a long opening prompt shouldn't become the whole name);
+// otherwise the participants read as a roster ("alice & bob", "alice, bob +2");
+// only a topic-less, participant-less room falls back to the bare "Room". Callers
+// pass readable display names when they have them (the Mind record's name), else
+// slugs — the helper doesn't care which.
+export function deriveRoomName(topic: string | undefined, participants: readonly string[]): string {
+  const trimmedTopic = (topic ?? "").trim();
+  if (trimmedTopic) return trimmedTopic.slice(0, ROOM_NAME_TOPIC_CAP);
+
+  const names = participants.map((p) => p.trim()).filter((p) => p.length > 0);
+  if (names.length === 0) return "Room";
+  if (names.length === 1) return names[0] as string;
+  if (names.length === 2) return `${names[0]} & ${names[1]}`;
+  return `${names[0]}, ${names[1]} +${names.length - 2}`;
+}
+
 export interface SweepClosedRoomsOptions {
   keep?: number;
 }
