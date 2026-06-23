@@ -1,0 +1,293 @@
+---
+title: Many minds, one plan
+description: Take the plan a solo workflow wrote for the Cosmos app, convene a room to red-team it, and ship a contract the linear pipeline would have implemented cleanly and shipped broken.
+sidebar:
+  order: 4
+---
+
+import { Image } from "astro:assets";
+import rosterShot from "../../../assets/screenshots/cosmos-roster.png";
+
+The keelson tutorial
+[One workflow, many models](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/)
+builds a real app, Cosmos, with a workflow that routes each phase to a different
+model and hands off through markdown artifacts. Its advice for reading the result
+is "open `plan.md` first," because that file is the contract every later phase
+builds from. One model writes the plan. The build implements it. The validation
+step checks the build against it. That handoff is what makes the pipeline work.
+
+It is also its blind spot. Nothing in a linear pipeline ever reviews the contract
+itself. A wrong assumption in the plan is not caught downstream, it is implemented
+faithfully and validated against itself, and the whole run finishes green while
+the app is quietly wrong. This tutorial puts a room on the plan before the build,
+and watches it catch what the pipeline cannot.
+
+By the end you will have taken a real `plan.md`, convened a room of Minds to
+red-team its data contract, and produced a hardened contract plus a decision log:
+a before and after you can diff, and a record of which Mind forced each change.
+
+:::note[Before you start]
+A running keelson server with the Copilot provider signed in, Chamber installed,
+and the two earlier room tutorials behind you ([your first room](../your-first-room/)
+and [a moderated room](../a-moderated-room/)). You also need a `plan.md` to review:
+the keelson
+[frontend-mix tutorial](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/)
+produces one. Every room turn here is a paid agent call, so expect to spend real
+tokens.
+:::
+
+## The plan is a contract no one reviews
+
+`frontend-mix` plans once. A single model writes `plan.md` with three sections,
+and SECTION B is the data and API contract: the database tables, the endpoints,
+the rules. The build implements exactly what SECTION B says, and the validation
+step checks the build against that same plan. So every later phase agrees with the
+plan, and none of them questions it.
+
+Here is the Cosmos contract one real `frontend-mix` run wrote, trimmed to its data
+shape:
+
+```text
+TABLES
+  objects(id, slug, name, category, tagline, description, stats, facts, sort_order)
+    sort_order is 1..12.
+  reactions(id, object_id, count)            one row per object, seeded at 0.
+  reaction_log(id, object_id, ip_hash, reacted_at)   reacted_at is unix seconds.
+
+RULES
+  Rate limit: one reaction per (object_id, ip_hash) per UTC calendar day.
+    Check reaction_log, then increment reactions.count.
+  Seed: the 12 canonical objects. facts and stats are canonical; prose may be rewritten.
+
+ENDPOINTS (Next.js 15 App Router, public, no auth)
+  GET  /api/object-of-day
+    dayIndex = Math.floor(Date.now() / 86400000) % 12; pick objects-by-sort_order[dayIndex]
+  POST /api/objects/[slug]/react   increment count; 429 if already reacted today
+    IP from x-forwarded-for, SHA-256 hashed
+  GET  /api/objects/[slug]/react   returns reactionCount and alreadyReacted
+```
+
+Read it the way the pipeline does and it is fine. Every endpoint maps to a table,
+the rate limit references the log table, the seed rule is explicit. That coherence
+is the trap. The room's moderator named it on the first turn:
+
+> This contract is internally tidy, every endpoint maps to a table, the rate-limit
+> rule references `reaction_log` cleanly. That coherence is exactly the trap: a
+> linear pipeline will implement it faithfully and ship the defects baked into the
+> agreement itself.
+
+## Author a review panel
+
+A contract review wants a few different kinds of attention: someone who defends the
+plan, someone who breaks it, and someone who owns what happens when it meets a
+database and a real user. Author three Minds with [genesis](../../concepts/minds/),
+one for each:
+
+```text
+/genesis A spec-first build planner who defends the plan and concedes only real, spec-grounded defects.
+/genesis An adversarial contract skeptic who stress-tests API and data contracts against real-world timing, load, and failure.
+/genesis A backend realist who owns persistence, idempotency, and what survives a restart.
+```
+
+You also need a moderator to route the discussion and close it, the way
+[a moderated room](../a-moderated-room/) does. Author one more Mind for that, or
+reuse one you have. Genesis named mine **stoneplan**, **faultline**, and
+**ledger**, with **avery-slate** moderating. Yours will get their own names.
+
+A room is most useful when its Minds do not all think alike. Each Mind can pin its
+own model in `mind.json`, so the panel reasons with genuinely different engines.
+Mine ran on three vendors at once:
+
+<figure>
+  <Image src={rosterShot} alt="The Chamber roster showing the review panel: Ledger (Backend Realist) on gemini-3.1-pro-preview, Faultline (Contract Skeptic) on gpt-5.5, and Stoneplan (Build Planner) on claude-opus-4.8, each card showing its persona and pinned model." />
+  <figcaption>Figure 1. The review panel on the Chamber roster. Each Mind shows its persona and its pinned model, so the same contract is read by three different reasoning engines at once.</figcaption>
+</figure>
+
+To pin a model, set `provider` and `model` in the Mind's `mind.json` under
+`<keelson-home>/rib-chamber/minds/<slug>/`:
+
+```json
+{ "provider": "copilot", "model": "gpt-5.5" }
+```
+
+The pin is optional. The room works with every Mind on one model; different models
+just buy more independent reading.
+
+## Convene the room on the contract
+
+Put the three reviewers in a [group-chat](../a-moderated-room/) room with the
+moderator, and hand them the contract as the topic. In chat:
+
+```text
+Start a group-chat room with stoneplan, faultline, and ledger, moderated by
+avery-slate. Topic: red-team this Cosmos data contract before any code is written.
+Find defects that are internally consistent but externally wrong, tie each to a
+field or rule, and converge on a concrete list of changes.
+
+<paste the contract here>
+```
+
+Starting a room from chat is a dry run until you confirm, because every turn is
+billed. Confirm, and the room opens and runs itself, one Mind per turn, the
+moderator routing and closing when the discussion is done.
+
+## Read the catch
+
+The transcript is the tutorial. Read it top to bottom and watch a clean contract
+come apart at the seams a single pass never revisits.
+
+**faultline goes first and ties every break to a field.** The one that lands
+hardest is the daily featured object:
+
+> Rotation flips at UTC midnight, not the user's local day. A user in US Central
+> sees the "daily" object change at 7pm. A user in Tokyo sees it change at 9am.
+
+It also catches that `sort_order 1..12` is read by `object-of-day` as an index but
+never constrained to be unique or dense, so the featured object "can repeat, skip,
+or become nondeterministic while still satisfying the written schema."
+
+**stoneplan does not just agree.** It concedes what is real and refuses to pad the
+list:
+
+> Reject "prevent all spam," concede "the XFF source needs a defined canonical
+> hop." One change, not a security project.
+
+That discipline is half the value. A room that only attacks produces a wish list.
+A room with a defender produces a change list.
+
+**ledger finds a defect neither of the others saw,** because it only appears when
+the contract meets a running database:
+
+> "Check before incrementing" is a classic TOCTOU race. Two concurrent POSTs both
+> read `reaction_log`, both see no entry for today, both insert, both increment
+> `reactions.count`. The limit is bypassed.
+
+> You cannot fold concurrency control into a timestamp format.
+
+A different Mind, on a different model, reading the same contract through a
+different lens, surfaced the crack the others walked past.
+
+**The moderator then does two things a single pass never does.** First it catches
+that two of the proposed changes are really one column, so the build does not
+implement the same bucket logic twice. Then it runs a verification pass on the
+fixes themselves, and faultline catches that the planner's first fix for the
+daily-object bug was itself broken:
+
+> `+ TZ_OFFSET_MS` does not make "daily" true for non-UTC users; it only moves the
+> wrong-midnight experience to a different population. Fixed offsets also break DST.
+
+The moderator's read of that moment is the whole tutorial in one line:
+
+> That's the room's whole thesis in miniature: a clean-looking fix hiding the same
+> defect.
+
+## Apply the changes and diff
+
+The room reasons; you commit. The Minds are text-only, so they do not touch your
+files. You read the converged ruling and apply it. Copy the contract, make the five
+changes, and diff:
+
+```sh
+cp cosmos-contract.md cosmos-contract.v2.md
+# apply the room's five changes to v2, then:
+diff -u cosmos-contract.md cosmos-contract.v2.md
+```
+
+```diff
+   objects(id, slug, name, category, tagline, description, stats, facts, sort_order)
+-    sort_order is 1..12.
++    sort_order INTEGER NOT NULL UNIQUE; exactly 12 active rows, dense over 1..12.
+   reactions(id, object_id, count) one row per object, seeded at 0.
+-  reaction_log(id, object_id, ip_hash, reacted_at) reacted_at is unix seconds.
++  reaction_log(id, object_id, ip_hash, reacted_at, utc_day) reacted_at is unix seconds.
++    utc_day = floor(reacted_at / 86400), materialized at write time.
++    UNIQUE(object_id, ip_hash, utc_day). reaction_log is retained as the source of truth.
+
+-  Rate limit: one reaction per (object_id, ip_hash) per UTC calendar day.
+-    Check reaction_log, then increment reactions.count.
++  Rate limit: one reaction per (object_id, ip_hash, utc_day).
++    Insert the log row and increment reactions.count in ONE transaction; the second
++    concurrent write aborts on the UNIQUE constraint. No check-then-increment.
+
+   GET  /api/object-of-day
+-    dayIndex = Math.floor(Date.now() / 86400000) % 12; pick objects-by-sort_order[dayIndex]
++    One GLOBAL featured object per configured IANA-timezone calendar day (default UTC),
++    computed by calendar date, not fixed offset. Not per-visitor. Order by sort_order, id.
+   POST /api/objects/[slug]/react   increment count; 429 if already reacted today
+-    IP from x-forwarded-for, SHA-256 hashed
++    Client IP parsed only from the configured trusted-proxy hop; untrusted
++    x-forwarded-for text ignored; absent-header fallback defined; then SHA-256 hashed
+   GET  /api/objects/[slug]/react   returns reactionCount and alreadyReacted
++    Computed from the same utc_day column and canonical identity as POST
+```
+
+The diff shows what changed. The decision log shows why, and which Mind forced it.
+Write `decisions.md` from the transcript:
+
+```markdown
+# Contract decisions
+
+Five changes. Each is a defect the linear pipeline would have implemented cleanly
+and shipped broken, because each lives in the gap between a rule and the storage or
+runtime that serves it.
+
+1. object-of-day is a GLOBAL daily, not a per-visitor one.
+   `Date.now()/86400000 % 12` rolls at UTC midnight, so "daily" flips mid-evening
+   in the US and after breakfast in Tokyo. The first proposed fix (`+ TZ_OFFSET_MS`)
+   was itself wrong: it just moves which users get the wrong midnight, and breaks on
+   DST. The honest fix is a product decision stated out loud.
+   Forced by: faultline (break), faultline again (the fix was defective), avery (ruling).
+
+2. sort_order is a uniqueness-and-density constraint, not a value range.
+   object-of-day indexes into the sorted set; the schema only constrained a range,
+   so duplicates or gaps make the featured object repeat or skip while still valid.
+   Forced by: faultline (break), stoneplan ("Conceded.").
+
+3. One materialized utc_day column carries the date bucket AND the atomicity.
+   "Check then increment" is a TOCTOU race; the day bucket was never stored. One
+   UNIQUE(object_id, ip_hash, utc_day) column, written in one transaction, fixes both.
+   Forced by: ledger (the fifth change), avery (the convergence onto one column).
+
+4. Trust the proxy, not the header.
+   x-forwarded-for is client-suppliable, so the rate limit was bypassable. Parse the
+   IP only from the configured trusted-proxy hop; define the absent-header case.
+   Forced by: faultline (break), stoneplan (scoped it to one change).
+
+5. GET and POST must agree.
+   Both compute alreadyReacted from the same utc_day column and identity, or the UI
+   says "you can react" and the POST returns 429.
+   Forced by: faultline (rider), avery (ruling).
+
+Carried, not fixed: many users behind one NAT/CGNAT IP still block each other. An
+accepted limitation of no-login IP identity, stated out loud rather than pretended away.
+```
+
+This is the page you keep. Long after Cosmos fades, the line you carry to your own
+contract is the one the room kept proving: no solo phase was ever asked to defend
+the meaning of a field.
+
+You now hold a hardened contract. Paste it back as `plan.md` SECTION B and re-run
+the build, or run the build from both contracts the way the keelson tutorial diffs
+two models. Same pipeline, a reviewed contract instead of an unreviewed one.
+
+## What you proved
+
+A linear pipeline can be fully consistent and still ship a lie. The plan was the
+contract that let a chain of models hand off cleanly, and that is exactly why none
+of them questioned it. A room questioned it: a skeptic broke it, a planner kept the fixes
+honest, a realist caught the race only a database exposes, and a moderator made the
+room review its own fix. As the moderator closed:
+
+> Each defect is one a linear pass implements cleanly and ships broken, because each
+> lives in the gap between a rule and the storage or runtime that serves it, exactly
+> where no single forward pass ever looks back.
+
+Five changes, none of which a single planning model wrote, all of which it would
+have needed.
+
+## Related
+
+- [When to convene a room](../../concepts/when-to-convene-a-room/): the why behind this exercise.
+- [Convene a moderated room](../a-moderated-room/): the strategy this tutorial runs.
+- [Run a room](../../guides/run-a-room/): the operator how-to once you know the shape.
+- [One workflow, many models](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/): the keelson pipeline this page reviews.
