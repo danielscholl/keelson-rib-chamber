@@ -13,8 +13,9 @@ agent renders its own view onto the canvas. The harness stays domain-free — al
 of the multi-agent machinery lives in the rib, and it ships **zero React** into
 the trusted SPA.
 
-> Status: **experimental.** Genesis, rooms (sequential, moderated **group-chat**,
-> and unmoderated **open-floor**), and agent-authored lenses all work today —
+> Status: **experimental.** Genesis, rooms (five turn strategies: **sequential**,
+> **concurrent**, moderated **group-chat**, unmoderated **open-floor**, and
+> cross-vendor **review**), and agent-authored lenses all work today —
 > driven from chat tools, the Chamber surface, or workflows. The contract is
 > still alpha. See [docs/PRD.md](docs/PRD.md) and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
@@ -22,7 +23,7 @@ the trusted SPA.
 ## What it adds
 
 - **Genesis** — author persistent agents (Minds) on demand from a freeform brief.
-- **Rooms** — run multi-agent conversations: sequential, moderated **group-chat**, or unmoderated **open-floor**; steer them live (call on a speaker, inject a direction, stop).
+- **Rooms** — run multi-agent conversations under five turn strategies: **sequential**, **concurrent**, moderated **group-chat**, unmoderated **open-floor**, and a cross-vendor **review**; steer them live (call on a speaker, inject a direction, stop).
 - **Lenses** — agents author their own canvas boards — a briefing, the roster, the live room transcript — rendered through Keelson's canvas with no hand-coded UI.
 - **Zero trusted React** — every view renders through the canvas contract, not UI shipped from the rib.
 
@@ -32,7 +33,7 @@ Into an installed Keelson (the managed home at `~/.keelson`):
 
 ```bash
 keelson rib add https://github.com/danielscholl/keelson-rib-chamber
-keelson serve
+keelson start
 ```
 
 ## Requirements

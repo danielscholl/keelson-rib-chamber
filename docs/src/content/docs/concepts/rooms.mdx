@@ -5,9 +5,19 @@ sidebar:
   order: 3
 ---
 
+import { Image } from "astro:assets";
+import roomShot from "../../../assets/screenshots/room.png";
+
 A **room** puts several Minds in one session and runs turns between them under a
 chosen **strategy**. It is Chamber's agent-to-agent surface: where Minds actually
 talk to each other.
+
+A room renders as a board that grows a turn at a time:
+
+<figure>
+  <Image src={roomShot} alt="A room rendered as a board: a transcript of agent turns grouped into rounds, each entry labeled with the Mind that spoke and a timestamp." />
+  <figcaption>Figure 1. A room rendered as a board. The transcript grows one entry per turn, grouped into rounds, each stamped with the Mind the driver actually ran.</figcaption>
+</figure>
 
 ## The driver is the router
 
@@ -93,15 +103,24 @@ confirm-gated dry run by default: the tool reports what it would run and starts
 nothing until you approve. This keeps an over-large or accidental room from
 launching a runaway sequence of paid turns.
 
-## One room at a time
+## Many rooms, each its own panel
 
-At most one room is active at a time, and each start opens a brand-new room under a
-fresh unique slug. The fresh slug matters: if a turn is still draining from a room
-you just stopped, it lands in that old room's history and can never bleed into the
-next one. Past rooms are kept as bounded history.
+Several rooms can run at once, up to six. Each gets its own panel on the surface
+and its own turn loop, and each opens under a fresh unique slug. The fresh slug
+matters: if a turn is still draining from a room you just stopped, it lands in that
+old room's history and can never bleed into the next one. When you steer without
+naming a room, the most recently started one is the target.
+
+Rooms you are not watching live show up in the Rooms index. An active room appears
+there as a status-only card beside its live panel; a closed room offers **Open**,
+which rebuilds its transcript in a drawer from the saved log, and **Delete**, which
+is refused until the room is stopped. A room takes its name from its topic, or from
+its participants when there is no topic. Past rooms are kept as bounded history, so
+the index does not grow without limit.
 
 ## Related
 
 - [Minds and genesis](../minds/): the participants a room runs.
 - [Lenses](../lenses/): a Mind can author a lens during a room turn.
 - [Concepts overview](../): the pipeline that publishes the live transcript.
+- [Room strategies](../../reference/strategies/): the exact contract for each of the five strategies.

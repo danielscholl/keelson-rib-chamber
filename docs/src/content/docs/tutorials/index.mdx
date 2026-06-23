@@ -1,10 +1,26 @@
 ---
 title: Tutorials
-description: A problem-first learning rail for the Chamber rib.
+description: A problem-first learning rail for the Chamber rib, ending in authoring a room strategy
+sidebar:
+  label: Overview
+  order: 1
 ---
 
-The tutorial tier is a problem-first learning rail, each page handing off to the
-next. The capstone is authoring a new room strategy: a pure orchestration policy
-that the rib drives through the `Rib` contract.
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Pages land here as the documentation grows.
+The tutorials are a learning rail: each one builds on the last, and you can follow
+them in order from an empty workspace to writing rib code. They are warmer and more
+hands-on than the [guides](../guides/), which are recipes you reach for once you
+know the shape.
+
+<CardGrid>
+  <LinkCard title="Your first room" href="your-first-room/" description="Author two Minds, run a sequential room between them, and read the transcript." />
+  <LinkCard title="Convene a moderated room" href="a-moderated-room/" description="Run the moderated and unmoderated strategies, then steer a live room as the director." />
+  <LinkCard title="Author a room strategy" href="author-a-room-strategy/" description="The capstone: write a pure strategy, register it, and unit-test it." />
+</CardGrid>
+
+## Related
+
+- [Run a room](../guides/run-a-room/): the operator how-to once you know the shape.
+- [Room strategies](../reference/strategies/): the contract the capstone builds against.
+- [Rooms and strategies](../concepts/rooms/): why a room works the way it does.
