@@ -41,6 +41,20 @@ keelson start
 - A configured Keelson with a provider (Copilot or Claude) — or `KEELSON_PROVIDERS=stub` to try the wiring offline.
 - No external CLIs. `@keelson/shared` comes from the harness as a peer dependency (one copy shared across the harness and every rib).
 
+## Compatibility
+
+| | |
+|---|---|
+| Chamber | `0.8.x` |
+| Keelson shared contract | `@keelson/shared >= 0.12.0` (peer dependency) |
+| Tested against | Keelson `main` (CI tracks the latest harness) |
+| Status | Experimental — the `Rib` contract it builds on is still pre-1.0 |
+
+`@keelson/shared` resolves from the harness, so an up-to-date `keelson` satisfies
+the floor and `keelson update` keeps it current. The contract may still make
+breaking changes before 1.0; pin a Chamber version against a known-good Keelson
+if you need stability.
+
 ## Try it
 
 Open `http://127.0.0.1:7878` → the **Chamber** surface, then:
