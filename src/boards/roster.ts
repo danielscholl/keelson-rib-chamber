@@ -1,12 +1,7 @@
-import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { stableHash } from "../genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import type { Mind } from "../types.ts";
-
-// Default room length when starting from the roster (turns, not rounds). The
-// director can run a different budget via the API; the baked button keeps it
-// simple.
-const DEFAULT_ROOM_TURN_BUDGET = 6;
 
 // The full canvas tone ramp, used to give each Mind a deterministic identity dot
 // hashed from its slug — a stable per-Mind hue, not a status.
@@ -29,45 +24,53 @@ function dotFor(slug: string): CanvasTone {
 
 // Pure: a roster of Minds -> a canvas `board`. Zero Minds renders a cold-start
 // launchpad (author the first Mind); >=1 renders one card per Mind (Enter inline,
-// Retire in the overflow) plus the Convene-a-room action section at >=2. Validated
-// against canvasViewSchema in tests; the producer never parses (validation lives at
-// the binding edge).
-export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
+// Retire in the overflow) plus the Convene-a-room composer at >=2. `draftExcluded`
+// is the server-side draft (deselected slugs) the chips reflect — absent/empty means
+// all Minds selected. Validated against canvasViewSchema in tests; the producer never
+// parses (validation lives at the binding edge).
+export function buildRosterBoard(
+  minds: readonly Mind[],
+  draftExcluded: ReadonlySet<string> = new Set(),
+): CanvasBoardView {
   const sections: CanvasBoardView["sections"] =
     minds.length === 0 ? coldStartSections() : [{ kind: "cards", items: minds.map(cardFor) }];
 
-  // A room needs at least two Minds to be a conversation; bake the participants
-  // (all current Minds) into the start action so the payload-required control
-  // works from the canvas, not just the API.
+  // A room needs at least two Minds to be a conversation. The composer is a
+  // toggle-chip per Mind against the server-side draft (each chip is a draft-set
+  // action) plus a Convene action with NO participants in its payload — the server
+  // resolves the participant set from the draft (all minus the excluded).
   if (minds.length >= 2) {
-    sections.push({
-      kind: "actions",
-      title: "Convene a room",
-      items: [
-        {
-          type: "room-start",
-          label: "Start room",
-          glyph: "▸",
-          // The operator types the opening topic; it merges into the payload as
-          // `topic` (roomStartAction reads it). Omitting it falls back to the
-          // driver's non-empty first-turn prompt.
-          fields: [
-            {
-              name: "topic",
-              label: "Topic",
-              placeholder: "What should they discuss? (optional)",
-              multiline: true,
-            },
-          ],
-          payload: {
-            name: "Room",
-            strategy: "sequential",
-            participants: minds.map((m) => m.slug),
-            turnBudget: DEFAULT_ROOM_TURN_BUDGET,
-          },
-        },
-      ],
+    const selectedCount = minds.filter((m) => !draftExcluded.has(m.slug)).length;
+    const items: CanvasActionItem[] = minds.map((mind) => {
+      const selected = !draftExcluded.has(mind.slug);
+      return {
+        type: "draft-set",
+        label: mind.name,
+        glyph: selected ? "✓" : "+",
+        payload: { slug: mind.slug },
+      };
     });
+    // Convene needs >=2 still selected (validateStart's floor); omit it below that
+    // so the chips can't surface a start the server would reject.
+    if (selectedCount >= 2) {
+      items.push({
+        type: "convene",
+        label: "Convene…",
+        glyph: "▸",
+        // The operator types the opening topic; it merges into the payload as
+        // `topic` (conveneAction reads it). Omitting it falls back to the driver's
+        // non-empty first-turn prompt.
+        fields: [
+          {
+            name: "topic",
+            label: "Topic",
+            placeholder: "What should they discuss? (optional)",
+            multiline: true,
+          },
+        ],
+      });
+    }
+    sections.push({ kind: "actions", title: "Convene a room", items });
   }
 
   return {

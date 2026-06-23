@@ -42,6 +42,7 @@ import {
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
+import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "./room-draft.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
@@ -672,6 +673,10 @@ const rib: Rib = {
         return retireAction(action);
       case "room-start":
         return roomStartAction(action);
+      case "draft-set":
+        return draftSetAction(action);
+      case "convene":
+        return conveneAction(action);
       case "room-inject":
         return roomInjectAction(action);
       case "room-stop":
@@ -1140,6 +1145,61 @@ function roomStartAction(action: RibAction): Promise<RibActionResult> {
     topic: asNonEmptyString(payload.topic) || undefined,
     ...roomConfigFromFlat(payload),
   });
+}
+
+// Toggle one Mind's membership in the Convene draft (the deselected-slug set). The
+// slug must name a real, current Mind (validated against the live roster, not just
+// shape) so a stale/forged chip can't write an unknown slug into the draft. On
+// success refresh the roster so the chips re-render with the new glyph; the refresh
+// is fail-soft (cadence covers an older harness). Returns the new exclusion list.
+async function draftSetAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const slug = asNonEmptyString(payload.slug);
+  if (!slug || !isValidParticipant(slug)) {
+    return { ok: false, error: "draft-set requires payload { slug } naming a current Mind" };
+  }
+  try {
+    const minds = await readMinds(mindsDir());
+    if (!minds.some((m) => m.slug === slug)) {
+      return { ok: false, error: `unknown Mind: ${slug}` };
+    }
+    const excluded = await toggleDraftExclusion(slug);
+    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+    return { ok: true, data: { excluded: [...excluded] } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+// Convene a room from the current draft: resolve participants as all current Minds
+// minus the draft's excluded set, then reuse the room start path (startRoom →
+// validateStart → driver), so the <2-participant / unknown-strategy / seam-absent
+// guards aren't duplicated here. On success clear the draft (back to all-selected)
+// and refresh the roster so the chips reset. The default empty draft yields every
+// Mind, preserving the historical all-Minds Start.
+async function conveneAction(action: RibAction): Promise<RibActionResult> {
+  if (!driver || driver.isDisposed()) return ROOM_DISABLED;
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  let participants: string[];
+  try {
+    const excluded = await readDraftExclusion();
+    const minds = await readMinds(mindsDir());
+    participants = minds.map((m) => m.slug).filter((s) => !excluded.has(s));
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+  const res = await startRoom({
+    name: "Room",
+    strategy: "sequential",
+    participants,
+    turnBudget: DEFAULT_ROOM_TURN_BUDGET,
+    topic: asNonEmptyString(payload.topic) || undefined,
+  });
+  if (res.ok) {
+    await clearDraft().catch(() => {});
+    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+  }
+  return res;
 }
 
 async function roomInjectAction(action: RibAction): Promise<RibActionResult> {
