@@ -28,28 +28,14 @@ function dotFor(slug: string): CanvasTone {
 }
 
 // Pure: a roster of Minds -> a canvas `board`. Zero Minds renders a cold-start
-// launchpad (author the first Mind); >=1 renders one card per Mind plus the
-// Enter/Convene fallback action sections. Validated against canvasViewSchema in
-// tests; the producer never parses (validation lives at the binding edge).
+// launchpad (author the first Mind); >=1 renders one card per Mind (Enter inline,
+// Retire in the overflow) plus the Convene-a-room action section at >=2. Validated
+// against canvasViewSchema in tests; the producer never parses (validation lives at
+// the binding edge).
 export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
   const sections: CanvasBoardView["sections"] =
     minds.length === 0 ? coldStartSections() : [{ kind: "cards", items: minds.map(cardFor) }];
 
-  // Enter is the primary, non-destructive verb. The canvas drops non-destructive
-  // card actions today (host #283), so it ships as a separate button-list until
-  // that lands; each button carries its Mind's slug to onAction.
-  if (minds.length > 0) {
-    sections.push({
-      kind: "actions",
-      title: "Enter",
-      items: minds.map((mind) => ({
-        type: "enter-mind",
-        label: `Enter ${mind.name}`,
-        glyph: "→",
-        payload: { slug: mind.slug },
-      })),
-    });
-  }
   // A room needs at least two Minds to be a conversation; bake the participants
   // (all current Minds) into the start action so the payload-required control
   // works from the canvas, not just the API.
@@ -99,8 +85,10 @@ export function buildRosterBoard(minds: readonly Mind[]): CanvasBoardView {
 }
 
 // One Mind -> one card: a hashed identity dot, the role in a single pill, persona
-// (and model when set) as fields, and Retire as a destructive overflow action with
-// a typed irreversible confirm gate. The slug rides the retire payload + dot hash.
+// (and model when set) as fields, and two actions — Enter (the primary verb, a
+// non-destructive action the host renders inline on the card) and Retire (a
+// destructive overflow action with a typed irreversible confirm gate). The slug
+// rides both action payloads + the dot hash.
 function cardFor(mind: Mind) {
   const fields: { label: string; value: string }[] = [
     { label: "persona", value: truncate(mind.persona) },
@@ -112,6 +100,12 @@ function cardFor(mind: Mind) {
     pill: { label: mind.role.trim() || "Mind" },
     fields,
     actions: [
+      {
+        type: "enter-mind",
+        label: `Enter ${mind.name}`,
+        glyph: "→",
+        payload: { slug: mind.slug },
+      },
       {
         type: "retire",
         label: "Retire Mind…",
