@@ -544,7 +544,10 @@ const rib: Rib = {
     // prompt node calls chamber_emit_genesis, and the write needs no room driver.
     // The room-control tools (and the driver) require the C1 agent-turn + snapshot
     // seams, so they only appear when those are present.
-    const genesisTool = makeGenesisTool();
+    // Pass the refresh seam so a genesis write re-runs the bound chamber-roster
+    // collector (republishing the roster), not just the 120s cadence. Optional and
+    // fail-soft: undefined on an older harness, where genesis falls back to cadence.
+    const genesisTool = makeGenesisTool(ctx.refreshWorkflow);
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
     const run = ctx.runAgentTurn;
@@ -1302,7 +1305,7 @@ const genesisEmitSchema = z.object({
   tools: z.array(z.string()).optional(),
 });
 
-function makeGenesisTool(): ToolDefinition {
+function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolDefinition {
   return {
     name: "chamber_emit_genesis",
     description:
@@ -1333,6 +1336,10 @@ function makeGenesisTool(): ToolDefinition {
         };
         await scaffoldMind(mindsDir(), record, soul);
         invalidateRoster();
+        // Re-run the bound chamber-roster collector so the new Mind appears
+        // promptly instead of waiting on the 120s cadence. Fail-soft (the seam
+        // resolves on error and is absent on an older harness) — never throw.
+        await refreshWorkflow?.("chamber-roster");
         emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_genesis failed: ${errText(e)}`, true);

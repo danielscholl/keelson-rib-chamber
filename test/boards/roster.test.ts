@@ -181,21 +181,42 @@ describe("buildRosterBoard populated", () => {
     expect(retire?.confirm?.subject).toBe("ada");
   });
 
+  test("each card.actions leads with a non-destructive Enter carrying the slug", () => {
+    const board = buildRosterBoard([mind({ slug: "ada", name: "Ada" })]);
+    const actions = cards(board)[0]?.actions ?? [];
+    const enter = actions.find((a) => a.type === "enter-mind");
+    expect(enter).toMatchObject({
+      type: "enter-mind",
+      label: "Enter Ada",
+      glyph: "→",
+      payload: { slug: "ada" },
+    });
+    // Non-destructive (so the host renders it inline, not in the overflow) and
+    // un-gated — no confirm.
+    expect(enter?.destructive ?? false).toBe(false);
+    expect(enter?.confirm).toBeUndefined();
+    // Enter is the primary verb: it precedes the destructive Retire on the card.
+    expect(actions[0]?.type).toBe("enter-mind");
+    expect(actions.findIndex((a) => a.type === "enter-mind")).toBeLessThan(
+      actions.findIndex((a) => a.type === "retire"),
+    );
+  });
+
+  test("no standalone actions section titled Enter; Enter lives on each card", () => {
+    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
+    // Enter moved onto the card (host renders non-destructive card actions inline),
+    // so there is no separate button-list section for it.
+    expect(actionsSection(board, "Enter")).toBeUndefined();
+    expect(actionItems(board).some((i) => i.type === "enter-mind")).toBe(false);
+    // One enter-mind card action per Mind, each carrying its own slug.
+    const enters = cards(board).map((c) => c.actions?.find((a) => a.type === "enter-mind"));
+    expect(enters.map((e) => e?.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
+    for (const e of enters) expect(e?.glyph).toBe("→");
+  });
+
   test("no standalone actions-section item of type retire", () => {
     const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
     expect(actionItems(board).some((i) => i.type === "retire")).toBe(false);
-  });
-
-  test("an Enter actions section exists at >= 1 mind, one enter-mind per Mind", () => {
-    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
-    const enter = actionsSection(board, "Enter");
-    if (enter?.kind !== "actions") throw new Error("no Enter section");
-    expect(enter.items).toHaveLength(2);
-    expect(enter.items.map((i) => i.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
-    for (const i of enter.items) {
-      expect(i.type).toBe("enter-mind");
-      expect(i.glyph).toBe("→");
-    }
   });
 
   test("the Convene-a-room section appears only at >= 2 minds", () => {

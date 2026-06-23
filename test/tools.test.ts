@@ -39,7 +39,11 @@ function fakeSnapshotManager(): SnapshotManager {
   } as unknown as SnapshotManager;
 }
 
-function makeCtx(run?: RunAgentTurn, sm?: SnapshotManager): RibContext {
+function makeCtx(
+  run?: RunAgentTurn,
+  sm?: SnapshotManager,
+  refreshWorkflow?: RibContext["refreshWorkflow"],
+): RibContext {
   return {
     getExec: () => ({
       runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
@@ -49,6 +53,7 @@ function makeCtx(run?: RunAgentTurn, sm?: SnapshotManager): RibContext {
     // no-op region registrar alongside the manager so the lens tool wires up.
     ...(sm ? { getSnapshotManager: () => sm, registerRegion: () => () => {} } : {}),
     ...(run ? { runAgentTurn: run } : {}),
+    ...(refreshWorkflow ? { refreshWorkflow } : {}),
   } as RibContext;
 }
 
@@ -634,6 +639,53 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     );
     expect(t.errored()).toBe(true);
     expect((await readMinds(mindsDir())).some((m) => m.slug === "ghost")).toBe(false);
+  });
+
+  it("refreshes the chamber-roster workflow after a successful scaffold", async () => {
+    // Wire a recording refreshWorkflow through registerTools, then drive the genesis
+    // tool it returns: a successful write must re-run the bound roster collector so a
+    // new Mind appears promptly, not only on the 120s cadence.
+    const refreshed: string[] = [];
+    const refreshTools = registerTools(
+      makeCtx(undefined, sm, async (name) => {
+        refreshed.push(name);
+      }),
+    );
+    const genesis = refreshTools.find((x) => x.name === "chamber_emit_genesis");
+    if (!genesis) throw new Error("genesis tool not found");
+    const t = makeToolCtx();
+    await genesis.execute(
+      {
+        name: "Refresher",
+        role: "writer",
+        voice: "plain",
+        soul: "# Refresher\n## Persona\nA writer.",
+        tagline: "Triggers a refresh.",
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(refreshed).toEqual(["chamber-roster"]);
+  });
+
+  it("does not refresh when the scaffold fails (slug collision)", async () => {
+    // The refresh is gated on a successful write: a collision throws before it, so
+    // the seam is never called for a no-op.
+    const refreshed: string[] = [];
+    const refreshTools = registerTools(
+      makeCtx(undefined, sm, async (name) => {
+        refreshed.push(name);
+      }),
+    );
+    const genesis = refreshTools.find((x) => x.name === "chamber_emit_genesis");
+    if (!genesis) throw new Error("genesis tool not found");
+    const t = makeToolCtx();
+    await genesis.execute(
+      { name: "Alice", role: "skeptic", voice: "terse", soul: "# Alice", tagline: "dupe" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(refreshed).toEqual([]);
   });
 });
 
