@@ -1,11 +1,52 @@
 ---
 title: Design
-description: Decision records and the Keelson base gaps the rib depends on.
+description: The decisions behind the Chamber rib, and the Keelson base seams it is built against
+sidebar:
+  label: Overview
+  order: 1
 ---
 
-The design tier is where the reasoning lives: decision records (agent-to-agent
-communication, agent invocation, the Phase 3 rooms model) and the Keelson base
-gaps this rib was built against. It is the right home for design narrative the
-source comment policy keeps out of code.
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Pages land here as the documentation grows.
+The design tier is where the reasoning lives: why the rib is built the way it is,
+and what it depends on from the harness. Each record states a decision, the
+alternative it rejected, and why. This is the home for design narrative the source
+comment policy keeps out of the code.
+
+## What Chamber needs from the harness
+
+Chamber adds no harness internals of its own. It attaches only through the
+`RibContext` seams the harness hands it, and it fails closed when a load-bearing
+seam is absent rather than degrading silently.
+
+| Seam | What the rib does with it | When absent |
+|---|---|---|
+| `runAgentTurn` | run a room, lens, or briefing turn | the room driver and room tools are not built; room actions fail closed |
+| `getSnapshotManager` | publish boards to `rib:chamber:*` keys | lens and room publishing are unavailable |
+| `registerRegion` | add a live room or lens panel at runtime | lenses and live room panels are unavailable |
+| `getDataDir` | a writable per-rib home for Minds, rooms, and lenses | falls back to a resolved per-rib data directory |
+
+A fifth seam, `refreshWorkflow`, lets an index republish on demand instead of
+waiting on its cadence; without it the rib falls back to cadence-only refresh. The
+rib also contributes workflows whose nodes bind a snapshot key and a fail-closed
+`validate`, so a producer's output is gated before it reaches a trusted renderer.
+
+The records below assume that model. For what a rib is in general, and the full
+context contract, see the
+[Keelson rib contract](https://danielscholl.github.io/keelson/docs/reference/rib-contract/).
+
+## The records
+
+<CardGrid>
+  <LinkCard title="Agent-to-agent communication and identity" href="communication-and-identity/" description="Why messaging is driver-mediated, and why only a Mind is addressable." />
+  <LinkCard title="The agent-turn seam" href="the-agent-turn-seam/" description="One provider-shaped seam, a fixed contract, an implementation that evolves behind it." />
+  <LinkCard title="Per-Mind capabilities" href="per-mind-capabilities/" description="Why a speaker reaches only its declared tools, intersected with a room-safe pool." />
+  <LinkCard title="The rooms model" href="rooms-and-strategies/" description="Why strategies are pure decisions and the driver owns execution and identity." />
+  <LinkCard title="Agent-authored lenses" href="agent-authored-lenses/" description="Why a lens is a turn, why the publish is fail-closed, and how the briefing is gated." />
+</CardGrid>
+
+## Related
+
+- [Concepts](../concepts/): the mental model these decisions produced.
+- [Reference](../reference/): the contract the decisions are realized as.
+- [Keelson rib contract](https://danielscholl.github.io/keelson/docs/reference/rib-contract/): the generic seams every rib plugs into.

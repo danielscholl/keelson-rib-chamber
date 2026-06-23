@@ -1,10 +1,45 @@
 ---
 title: Reference
-description: The contract tier for the Chamber rib.
+description: "The contract tier for the Chamber rib: its surface, snapshot keys, workflows, tools, strategies, and on-disk data"
+sidebar:
+  label: Overview
+  order: 1
 ---
 
-The reference tier is the contract: the surfaces, their `rib:chamber:*` snapshot
-keys, the workflows and room strategies that drive them, and the view payloads
-they publish to the canvas.
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Pages land here as the documentation grows.
+The reference tier is the exact contract for the Chamber rib: the surface it
+contributes, the snapshot keys behind it, the workflows and tools that drive them,
+the room strategies, and what the rib persists on disk. It is terse by design; the
+[concepts](../concepts/) explain why and the [guides](../guides/) show how.
+
+## Snapshot keys
+
+Every Chamber panel is a board published to a `rib:chamber:*` snapshot key. Four
+keys are standing; three are per-instance families bound at runtime.
+
+| Key | Producer | When it updates |
+|---|---|---|
+| `rib:chamber:roster` | `chamber-roster` collector | on a 120000 ms cadence, and when a Mind is authored or retired |
+| `rib:chamber:rooms` | `chamber-rooms` collector | on cadence, and when a room starts, ends, or is deleted |
+| `rib:chamber:lenses` | `chamber-lenses` collector | on cadence, and when a lens is authored or retired |
+| `rib:chamber:brief` | the rib's attention gate | only when a room ends or a lens changes |
+| `rib:chamber:room:<slug>` | the room driver | live, as turns land in each active room |
+| `rib:chamber:lens:<id>` | `chamber_emit_lens` | when a Mind authors or re-authors that subject |
+| `rib:chamber:room-view:<slug>` | the `room-open` action | on demand, when a closed room is opened in a drawer |
+
+## Pages
+
+<CardGrid>
+  <LinkCard title="The Chamber surface" href="surface/" description="The nav surface, its standing regions, and the dynamic panels added at runtime." />
+  <LinkCard title="Workflows" href="workflows/" description="The five workflows the rib contributes, each defined in code." />
+  <LinkCard title="Tools, commands, and actions" href="tools-and-commands/" description="Every chat tool, slash command, the agents seam, and the board action verbs." />
+  <LinkCard title="Room strategies" href="strategies/" description="The pure strategy contract, the five shipped strategies, and the routing knobs." />
+  <LinkCard title="Data on disk" href="data-on-disk/" description="What the rib persists under its data home, and the board payload it publishes." />
+</CardGrid>
+
+## Related
+
+- [Concepts](../concepts/): the model the contract implements.
+- [Design](../design/): the decisions behind the contract.
+- [Keelson reference](https://danielscholl.github.io/keelson/docs/reference/): the harness contract a rib plugs into.

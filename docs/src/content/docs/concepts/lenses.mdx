@@ -5,18 +5,29 @@ sidebar:
   order: 4
 ---
 
+import { Image } from "astro:assets";
+import lensShot from "../../../assets/screenshots/lens.png";
+
 A **lens** is a view a Mind authors itself. One agent turn composes a canvas board
 and publishes it, and it renders as a live panel on the Chamber surface with no
 hand-coded UI. The view is produced by an agent, not written by hand. That is the
 rib's hero capability.
 
+Here is one a Mind authored on a release-readiness subject, rendered straight onto
+the surface:
+
+<figure>
+  <Image src={lensShot} alt="An agent-authored lens titled release-readiness: a canvas board with a status pill, a current-read stats row, a blocker-themes list, a go/no-go checklist, and a decision-call row." />
+  <figcaption>Figure 1. An agent-authored lens. One agent turn composed this board on a release-readiness subject and published it to the Chamber surface, with no hand-coded UI.</figcaption>
+</figure>
+
 ## A lens is the output of a turn
 
 A lens is not a participant and not an agent. It is the product of a single Mind's
-turn, the same way genesis produces a Mind and a room turn produces a reply.
-Because it is a solo turn with no peer, a lens is orthogonal to rooms: it does not
-ride the room driver and does not depend on a strategy. (Minds talking to each
-other is a [room](../rooms/); a Mind authoring a view is a turn.)
+turn, the same way genesis produces a Mind and a room turn produces a reply. Because
+it is a solo turn with no peer, a lens is orthogonal to rooms: it does not ride the
+room driver and does not depend on a strategy. (Minds talking to each other is a
+[room](../rooms/); a Mind authoring a view is a turn.)
 
 ## The board, and the pipeline it rides
 
@@ -36,6 +47,17 @@ Each lens is keyed by a short subject id, and each new subject gets its own pane
 on the Chamber surface. Re-authoring the same subject updates that panel in place
 rather than adding another. The rib sets no fixed limit on how many lenses can
 exist; the harness enforces a per-surface ceiling.
+
+## Provenance the card carries
+
+A lens can record who authored it and why, so the Lenses index reads as a living
+library rather than an anonymous pile. The authoring turn may attach three optional
+fields: a **scope** (the board's kind, like "status board" or "checklist"), a
+**reason** (a short note on what the latest authoring changed), and, when a Mind
+authors a lens mid-room, a **maintainingMind** (its own name). The index card shows
+each one when present, alongside an "updated" time the server stamps on every write.
+None of it is required, and re-authoring a subject without a field clears whatever
+was there before.
 
 ## Two ways to author one
 
@@ -60,4 +82,5 @@ panel on the Chamber surface is a published board, never hand-coded UI.
 
 - [Minds and genesis](../minds/): declaring the `lens` capability.
 - [Rooms and strategies](../rooms/): authoring a lens mid-room.
-- [Concepts overview](../): the publish pipeline a lens shares.
+- [Concepts overview](../): the one pipeline a lens shares.
+- [Agent-authored lenses](../../design/agent-authored-lenses/): why the publish is fail-closed and the briefing is gated.
