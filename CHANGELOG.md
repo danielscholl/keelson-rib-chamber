@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.8.0...v0.8.1) (2026-06-23)
+
+
+### Fixed
+
+* **chamber:** per-room canvas keys for closed-room Open boards ([#96](https://github.com/danielscholl/keelson-rib-chamber/issues/96)) ([e00a1ec](https://github.com/danielscholl/keelson-rib-chamber/commit/e00a1ec4ce3438489bf7eb50c71aebd27e445131))
+* **chamber:** refresh roster pulse + guard brief-gate teardown ([#94](https://github.com/danielscholl/keelson-rib-chamber/issues/94)) ([7cf3a60](https://github.com/danielscholl/keelson-rib-chamber/commit/7cf3a604a23e5a1d1c279ca5457804b3573848de))
+
 ## [0.8.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.7.0...v0.8.0) (2026-06-23)
 
 
