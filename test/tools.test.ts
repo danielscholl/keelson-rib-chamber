@@ -350,7 +350,7 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(true);
   });
 
-  it("refreshes chamber-lenses after a successful retire, not when it fails", async () => {
+  it("refreshes chamber-lenses AND the roster pulse after a successful retire, not when it fails", async () => {
     const refreshed: string[] = [];
     const refreshTools = registerTools(
       makeCtx(undefined, sm, async (name) => {
@@ -365,9 +365,10 @@ describe("chamber room-control chat tools", () => {
       makeToolCtx().ctx,
     );
     refreshed.length = 0;
-    // A successful retire refreshes the index...
+    // A successful retire refreshes the index AND the roster (its "Live views" count
+    // drops with the lens) — without a wired brief seam no gate turn runs.
     await retire.execute({ id: "refresh-lens" }, makeToolCtx().ctx);
-    expect(refreshed).toEqual(["chamber-lenses"]);
+    expect(refreshed).toEqual(["chamber-lenses", "chamber-roster"]);
     // ...a failed one (unknown id) does not.
     refreshed.length = 0;
     const failed = makeToolCtx();
