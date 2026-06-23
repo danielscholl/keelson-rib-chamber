@@ -52,7 +52,7 @@ That variable is read by the harness, not by Chamber. The rib reads no
 
 With the server up, open the Chamber surface and select the **Chamber** tab:
 
-```
+```text
 http://127.0.0.1:7878
 ```
 
@@ -72,7 +72,7 @@ intended first step. See [Author a Mind](../author-a-mind/) for that path.
 harness has handed it the snapshot-manager, agent-turn, and region-registration
 seams. When all three are present the status reads:
 
-```
+```text
 rooms & lenses wired; provider resolved at turn time
 ```
 

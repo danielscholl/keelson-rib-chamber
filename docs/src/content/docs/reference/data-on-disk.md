@@ -10,7 +10,7 @@ home. The home path is the value the harness hands the rib at boot, captured
 from the `getDataDir` seam: `<keelson-home>/rib-chamber/`. Everything below is
 relative to that home.
 
-```
+```text
 <keelson-home>/rib-chamber/
 ├── minds/
 │   └── <slug>/
@@ -73,7 +73,7 @@ slug.
 A room lives in `rooms/<slug>/` as two files: current state and an append-only
 log.
 
-```
+```text
 rooms/<slug>/
 ├── room.json
 └── transcript.jsonl

@@ -65,7 +65,7 @@ A closed room has no standing `rib:chamber:room:<slug>` region. Opening one from
 the Rooms index rebuilds its board from the persisted transcript and publishes
 it to a separate per-slug key:
 
-```
+```text
 rib:chamber:room-view:<slug>
 ```
 
