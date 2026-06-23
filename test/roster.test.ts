@@ -135,18 +135,20 @@ describe("retire action", () => {
 });
 
 describe("cold-start author actions", () => {
-  test("author-archetype opens a seeded chat to author that Mind", async () => {
+  test("author-archetype launches chamber-genesis with pinned name/role/voice", async () => {
     const res = await rib.onAction?.(
       { type: "author-archetype", payload: { slug: "moneypenny" } },
       stubCtx,
     );
     expect(res?.ok).toBe(true);
     const data = (
-      res as { data: { effect: string; seed: { systemPrompt: string; openingPrompt: string } } }
+      res as { data: { effect: string; workflow: string; args: Record<string, string> } }
     ).data;
-    expect(data.effect).toBe("open-chat");
-    expect(data.seed.systemPrompt.length).toBeGreaterThan(0);
-    expect(data.seed.openingPrompt).toMatch(/genesis|author/i);
+    expect(data.effect).toBe("run-workflow");
+    expect(data.workflow).toBe("chamber-genesis");
+    expect(data.args.name).toBe("Moneypenny");
+    expect(data.args.role).toBe("Chief of Staff");
+    expect(data.args.ARGUMENTS).toBeTruthy();
   });
 
   test("author-archetype with an unknown slug fails closed", async () => {
@@ -157,27 +159,23 @@ describe("cold-start author actions", () => {
     expect(res?.ok).toBe(false);
   });
 
-  test("describe-own folds a typed brief into the opening prompt", async () => {
+  test("describe-own folds a typed brief into chamber-genesis args", async () => {
     const res = await rib.onAction?.(
       { type: "describe-own", payload: { brief: "a skeptical SRE" } },
       stubCtx,
     );
     expect(res?.ok).toBe(true);
     const data = (
-      res as { data: { effect: string; seed: { systemPrompt: string; openingPrompt: string } } }
+      res as { data: { effect: string; workflow: string; args: Record<string, string> } }
     ).data;
-    expect(data.effect).toBe("open-chat");
-    expect(data.seed.openingPrompt).toContain("a skeptical SRE");
+    expect(data.effect).toBe("run-workflow");
+    expect(data.workflow).toBe("chamber-genesis");
+    expect(data.args.ARGUMENTS).toContain("a skeptical SRE");
   });
 
-  test("describe-own with no brief still opens a chat that prompts for one", async () => {
+  test("describe-own with no brief fails closed", async () => {
     const res = await rib.onAction?.({ type: "describe-own", payload: {} }, stubCtx);
-    expect(res?.ok).toBe(true);
-    const data = (
-      res as { data: { effect: string; seed: { systemPrompt: string; openingPrompt: string } } }
-    ).data;
-    expect(data.effect).toBe("open-chat");
-    expect(data.seed.openingPrompt.length).toBeGreaterThan(0);
-    expect(data.seed.openingPrompt.toLowerCase()).toMatch(/describe/);
+    expect(res?.ok).toBe(false);
+    expect((res as { error: string }).error.length).toBeGreaterThan(0);
   });
 });
