@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { access, appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileRoomStore, sweepClosedRooms } from "../src/room-store.ts";
+import { createFileRoomStore, listRooms, sweepClosedRooms } from "../src/room-store.ts";
 import type { Room, TurnEntry } from "../src/types.ts";
 
 function makeRoom(over: Partial<Room> = {}): Room {
@@ -252,5 +252,119 @@ describe("createFileRoomStore", () => {
       kept: [],
       skipped: [],
     });
+  });
+});
+
+describe("deleteRoom", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "chamber-rooms-"));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("removes a room's dir (room.json + transcript); a sibling is untouched", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(makeRoom({ slug: "gone", status: "done" }));
+    await store.appendTranscript("gone", makeEntry());
+    await store.saveRoom(makeRoom({ slug: "keep" }));
+
+    await store.deleteRoom("gone");
+
+    expect(await pathExists(join(root, "gone"))).toBe(false);
+    expect(await store.loadRoom("gone")).toBeUndefined();
+    expect(await store.loadTranscript("gone")).toEqual([]);
+    // The sibling room survives.
+    expect((await store.loadRoom("keep"))?.slug).toBe("keep");
+  });
+
+  it("refuses to delete a room that is active on disk (even if not in the in-memory set)", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(makeRoom({ slug: "live", status: "active" }));
+    await expect(store.deleteRoom("live")).rejects.toThrow(/active/);
+    // The refused delete leaves the live room's dir intact.
+    expect(await pathExists(join(root, "live"))).toBe(true);
+  });
+
+  it("throws 'room <slug> not found' for an unknown room (not a silent no-op)", async () => {
+    const store = createFileRoomStore(root);
+    await expect(store.deleteRoom("nope")).rejects.toThrow(/room 'nope' not found/);
+  });
+
+  it("runs assertSafeSlug first: a traversal slug rejects before touching the FS", async () => {
+    const store = createFileRoomStore(root);
+    await expect(store.deleteRoom("../escape")).rejects.toThrow();
+  });
+});
+
+describe("listRooms", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "chamber-rooms-"));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("returns one Room per persisted dir, newest-first by createdAt", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(makeRoom({ slug: "old", createdAt: "2026-01-01T00:00:00.000Z" }));
+    await store.saveRoom(makeRoom({ slug: "new", createdAt: "2026-03-01T00:00:00.000Z" }));
+    await store.saveRoom(makeRoom({ slug: "mid", createdAt: "2026-02-01T00:00:00.000Z" }));
+
+    const rooms = await listRooms(root);
+    expect(rooms.map((r) => r.slug)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("includes ACTIVE and closed rooms (unlike sweepClosedRooms)", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(
+      makeRoom({ slug: "live", status: "active", createdAt: "2026-02-02T00:00:00.000Z" }),
+    );
+    await store.saveRoom(
+      makeRoom({ slug: "done", status: "done", createdAt: "2026-01-01T00:00:00.000Z" }),
+    );
+    const rooms = await listRooms(root);
+    expect(rooms.map((r) => r.slug).sort()).toEqual(["done", "live"]);
+    expect(rooms.find((r) => r.slug === "live")?.status).toBe("active");
+  });
+
+  it("breaks createdAt ties deterministically, newest slug first", async () => {
+    const store = createFileRoomStore(root);
+    const at = "2026-02-02T00:00:00.000Z";
+    await store.saveRoom(makeRoom({ slug: "tie-a", createdAt: at }));
+    await store.saveRoom(makeRoom({ slug: "tie-c", createdAt: at }));
+    await store.saveRoom(makeRoom({ slug: "tie-b", createdAt: at }));
+    expect((await listRooms(root)).map((r) => r.slug)).toEqual(["tie-c", "tie-b", "tie-a"]);
+  });
+
+  it("skips non-dirs, unsafe slugs, slug-mismatched, and unparseable room.json", async () => {
+    const store = createFileRoomStore(root);
+    await store.saveRoom(makeRoom({ slug: "good", createdAt: "2026-01-01T00:00:00.000Z" }));
+    // Loose file (not a dir).
+    await writeFile(join(root, "loose.txt"), "not a room dir");
+    // Unsafe directory name (assertSafeSlug rejects).
+    await mkdir(join(root, "Bad_Slug"), { recursive: true });
+    await writeFile(
+      join(root, "Bad_Slug", "room.json"),
+      JSON.stringify(makeRoom({ slug: "Bad_Slug" })),
+    );
+    // room.json whose slug disagrees with its dir.
+    await mkdir(join(root, "mismatch"), { recursive: true });
+    await writeFile(
+      join(root, "mismatch", "room.json"),
+      JSON.stringify(makeRoom({ slug: "other" })),
+    );
+    // Unparseable room.json.
+    await mkdir(join(root, "bad-json"), { recursive: true });
+    await writeFile(join(root, "bad-json", "room.json"), "{ not json");
+
+    const rooms = await listRooms(root);
+    expect(rooms.map((r) => r.slug)).toEqual(["good"]);
+  });
+
+  it("ENOENT (missing rooms root) → []", async () => {
+    expect(await listRooms(join(root, "missing"))).toEqual([]);
   });
 });

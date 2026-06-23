@@ -52,6 +52,7 @@ import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
+const ROOMS_KEY = "rib:chamber:rooms";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -78,6 +79,11 @@ let lensSm: SnapshotManager | undefined;
 // re-bootstrap with a different one rebinds it.
 let roomRegistry: RoomRegionRegistry | undefined;
 let roomSm: SnapshotManager | undefined;
+// The refresh seam, captured in registerTools (the only hook with the full ctx) so
+// onAction handlers can re-run a bound collector on demand instead of waiting on
+// cadence — room-delete uses it to drop a deleted session's card. Optional and
+// fail-soft: undefined on an older harness, where the index falls back to cadence.
+let refreshWorkflow: RibContext["refreshWorkflow"];
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -181,6 +187,8 @@ function roomNote(slug: string): string {
 // (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
 // it is shell-quoted where interpolated into the bash node below.
 const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
+// The rooms-index collector, resolved the same way (see ROSTER_COLLECTOR).
+const ROOMS_COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.meta.url));
 
 // POSIX single-quote: wrap a value and escape any embedded quote so a path
 // (spaces, `$`, backticks, backslashes) reaches `bash -c` literally — never
@@ -395,6 +403,7 @@ const rib: Rib = {
   // producers (the roster collector, the brief turn, the room driver) run.
   views: [
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
+    { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
@@ -403,11 +412,13 @@ const rib: Rib = {
   // needs a freeform brief); retire and the room controls (start/inject/stop) are
   // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
-  // The Chamber nav tab. The roster sits in the header (the Minds you genesis) and
-  // the brief settles into the footer. No static rows: room and lens panels are both
-  // push-fed dynamic regions a producer registers at runtime — each room registers
-  // its own per-slug region (group "rooms") on start via room-region-registry, and a
-  // Mind authors lenses (chamber_emit_lens, group "lens"), all through registerRegion.
+  // The Chamber nav tab. The roster sits in the header (the Minds you genesis), the
+  // sessions index (ended rooms) is the standing row, and the brief settles into the
+  // footer. The live room panels and lenses are push-fed dynamic regions a producer
+  // registers at runtime — each ACTIVE room registers its own per-slug region (group
+  // "rooms") on start via room-region-registry, and a Mind authors lenses
+  // (chamber_emit_lens, group "lens"), all through registerRegion. The index is the
+  // history of CLOSED rooms; an active room shows as its live inline panel, not here.
   surfaces: [
     {
       id: CHAMBER_SURFACE_ID,
@@ -424,7 +435,22 @@ const rib: Rib = {
           cadenceMs: 120_000,
           glyph: { char: "◇", tone: "brand" },
         },
-        rows: [],
+        rows: [
+          {
+            columns: [
+              {
+                key: ROOMS_KEY,
+                workflow: "chamber-rooms",
+                title: "Rooms",
+                // Like the roster: a cheap deterministic disk read that changes only
+                // when a room ends or is deleted; the same modest cadence keeps it
+                // self-populating on open, with room-delete refreshing it on demand.
+                cadenceMs: 120_000,
+                glyph: { char: "▦", tone: "brand" },
+              },
+            ],
+          },
+        ],
         footer: {
           key: BRIEF_KEY,
           workflow: "chamber-brief",
@@ -461,6 +487,30 @@ const rib: Rib = {
       },
       bindSnapshotKey: ROSTER_KEY,
       validate: expectView(ROSTER_KEY, "board"),
+    },
+    {
+      // The rooms-index producer (the chamber-roster sibling): a deterministic
+      // collector that reads the persisted rooms from the data home and emits the
+      // index of ENDED sessions (one card per closed room, each with Delete). A
+      // room ending or a room-delete refreshes it; active rooms render as their own
+      // live per-slug panels, so they never appear in this index.
+      definition: {
+        name: "chamber-rooms",
+        description:
+          'Use when: you want to see past Chamber sessions (rooms that have ended). Triggers: "show past rooms", "list sessions", "room history". Does: reads the persisted rooms from the Chamber data home and publishes a sessions index (one card per ended room, with a Delete control) to the Chamber Rooms canvas. NOT for: an active room (it streams in its own live panel), starting a room (the Roster\'s Convene), or deleting one (the index card\'s Delete action).',
+        nodes: [
+          {
+            id: "collect",
+            // Out-of-process (a bash node), so bake the resolved rooms dir in —
+            // captured in registerTools, which runs before this — so both sides
+            // read one path (see the roster collector).
+            bash: `bun ${shQuote(ROOMS_COLLECTOR)} ${shQuote(roomsDir())}`,
+            output_schema: { type: "object", required: ["view", "sections"] },
+          },
+        ],
+      },
+      bindSnapshotKey: ROOMS_KEY,
+      validate: expectView(ROOMS_KEY, "board"),
     },
     {
       definition: {
@@ -540,6 +590,9 @@ const rib: Rib = {
     // leave it uncaptured: chamberDataHome() lazily resolves ribDataDir("chamber").
     const dataDir = ctx.getDataDir?.();
     if (dataDir) setChamberDataHome(dataDir);
+    // Capture the refresh seam for onAction handlers (room-delete refreshes the
+    // sessions index). dispose() clears it so a re-boot recaptures the new ctx's.
+    refreshWorkflow = ctx.refreshWorkflow;
     // The genesis write seam is always available: genesis is a workflow whose
     // prompt node calls chamber_emit_genesis, and the write needs no room driver.
     // The room-control tools (and the driver) require the C1 agent-turn + snapshot
@@ -623,6 +676,8 @@ const rib: Rib = {
         return roomInjectAction(action);
       case "room-stop":
         return roomStopAction(action);
+      case "room-delete":
+        return roomDeleteAction(action);
       default:
         return { ok: false, error: `unknown action '${action.type}'` };
     }
@@ -683,6 +738,7 @@ const rib: Rib = {
     loops.clear();
     activeRooms.clear();
     lastSlug = undefined;
+    refreshWorkflow = undefined;
     invalidateRoster();
     lensRegistry?.dispose();
     lensRegistry = undefined;
@@ -736,6 +792,10 @@ function ensureLoop(slug: string): void {
       activeRooms.delete(slug);
       reconcileRoomPanels();
       queueRoomRetentionSweep();
+      // The room just became a closed session — refresh the index so its card
+      // appears promptly instead of on the next cadence. Fail-soft, never thrown
+      // into the detached loop.
+      void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
     }
   })();
 }
@@ -1058,6 +1118,9 @@ async function stopRoom(slug: string): Promise<RibActionResult> {
     await driver.stop(slug);
     activeRooms.delete(slug);
     reconcileRoomPanels();
+    // The room is now a closed session — refresh the index so it appears as a card
+    // (fail-soft; cadence covers an older harness without the seam).
+    await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -1094,6 +1157,36 @@ async function roomStopAction(action: RibAction): Promise<RibActionResult> {
   const resolved = requireRoomSlug(action);
   if ("error" in resolved) return resolved.error;
   return stopRoom(resolved.slug);
+}
+
+// Delete a closed room: remove its rooms/<slug>/ dir, then refresh the sessions
+// index so the card drops (the mutate-then-refresh pattern). Fail-closed on a
+// missing/unsafe slug (requireRoomSlug) before any FS touch. The in-memory
+// activeRooms check is a fast-path with a clear message; deleteRoom is the
+// authoritative guard — it re-reads the on-disk room.json status and refuses a
+// LIVE room (whose dir the driver rewrites each turn), so a stale in-memory set
+// (a restart or a second process) can't race a delete into a live room. deleteRoom
+// throws on an already-gone room (surfaced here, not as success); the try/catch
+// fails soft like retireAction.
+async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  const slug = resolved.slug;
+  if (activeRooms.has(slug)) {
+    return { ok: false, error: "stop the room before deleting it" };
+  }
+  try {
+    await createFileRoomStore(roomsDir()).deleteRoom(slug);
+    // Drop any lingering panel/most-recent pin for the deleted room, then refresh
+    // the index card away (fail-soft — the seam resolves on error / is absent on an
+    // older harness, where the 120s cadence drops the card).
+    if (lastSlug === slug) lastSlug = undefined;
+    reconcileRoomPanels();
+    await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
 }
 
 // Resolve the target room slug for a control. With server-assigned slugs there
