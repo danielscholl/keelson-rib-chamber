@@ -5,10 +5,10 @@ sidebar:
   order: 2
 ---
 
-Chamber is a [Keelson](https://danielscholl.github.io/keelson/) rib: a package
-the harness discovers and attaches through one typed contract. This guide adds
-it to a Keelson you already run. If you want to hack on the rib's source
-instead, see [Develop locally](../develop-locally/).
+Chamber is a [Keelson](https://danielscholl.github.io/keelson/) rib, so the
+harness loads it like any other. This guide adds it to a Keelson you already
+run. If you want to hack on the rib's source instead, see
+[CONTRIBUTING.md](https://github.com/danielscholl/keelson-rib-chamber/blob/main/CONTRIBUTING.md).
 
 ## Add the rib
 
@@ -86,5 +86,4 @@ a seam the harness has not supplied.
 
 - [Author a Mind](../author-a-mind/): the first move from the cold-start roster.
 - [Run a room](../run-a-room/): put Minds in a room once you have a few.
-- [Develop locally](../develop-locally/): link the rib into a Keelson checkout to work on its source.
-- [Keelson documentation](https://danielscholl.github.io/keelson/): the harness, providers, and the rib contract this build on.
+- [CONTRIBUTING.md](https://github.com/danielscholl/keelson-rib-chamber/blob/main/CONTRIBUTING.md): set up a local checkout to work on the rib's source.
