@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.7.0...v0.8.0) (2026-06-23)
+
+
+### Added
+
+* **attention:** calm pulse and substance-gated briefing ([#92](https://github.com/danielscholl/keelson-rib-chamber/issues/92)) ([5440903](https://github.com/danielscholl/keelson-rib-chamber/commit/5440903f0867b35796ac058d2c7803e34b80cf76))
+* **draft:** implement Convene draft exclusion for roster ([#86](https://github.com/danielscholl/keelson-rib-chamber/issues/86)) ([6086123](https://github.com/danielscholl/keelson-rib-chamber/commit/60861234ca99156f939155c56388b27e62248336))
+* **lens:** add persistent lens store and retire lens support ([#87](https://github.com/danielscholl/keelson-rib-chamber/issues/87)) ([8be6025](https://github.com/danielscholl/keelson-rib-chamber/commit/8be602576cdf0e91de35b4e2bd87a576683664b0))
+* **lens:** capture index-card provenance (scope, by-Mind, reason) ([#91](https://github.com/danielscholl/keelson-rib-chamber/issues/91)) ([f0585f6](https://github.com/danielscholl/keelson-rib-chamber/commit/f0585f635fac26d6eb9e138c0b32f31b99d6cf47))
+* **lenses:** implement chamber-lenses index and collector ([#88](https://github.com/danielscholl/keelson-rib-chamber/issues/88)) ([85621f4](https://github.com/danielscholl/keelson-rib-chamber/commit/85621f498f8e11e9f89707a97bace40a51a8fc50))
+* **rooms:** add rooms index board and collector ([#85](https://github.com/danielscholl/keelson-rib-chamber/issues/85)) ([b345de8](https://github.com/danielscholl/keelson-rib-chamber/commit/b345de804765f3051225dedf79c67222ec7bd627))
+* **rooms:** implement room-open action and reusable room-view drawer ([#89](https://github.com/danielscholl/keelson-rib-chamber/issues/89)) ([0f6a02e](https://github.com/danielscholl/keelson-rib-chamber/commit/0f6a02e3ea9a01d37c3a220aac791d071c4334a2))
+* **rooms:** name convened rooms and index active sessions ([#90](https://github.com/danielscholl/keelson-rib-chamber/issues/90)) ([7f3f164](https://github.com/danielscholl/keelson-rib-chamber/commit/7f3f164861eaf9057ebe9243c88313d00d15771d))
+* **roster:** add enhanced roster with mind roles and genesis actions ([#82](https://github.com/danielscholl/keelson-rib-chamber/issues/82)) ([f1c5604](https://github.com/danielscholl/keelson-rib-chamber/commit/f1c5604c8657efda0d0f85557e4793b885104287))
+* **roster:** move enter action to per-card actions ([#84](https://github.com/danielscholl/keelson-rib-chamber/issues/84)) ([d2530c4](https://github.com/danielscholl/keelson-rib-chamber/commit/d2530c499f62d5e94295cebe8b5de5446fd7f738))
+
 ## [0.7.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.6.0...v0.7.0) (2026-06-22)
 
 
