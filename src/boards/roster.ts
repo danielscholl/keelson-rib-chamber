@@ -22,15 +22,29 @@ function dotFor(slug: string): CanvasTone {
   return DOT_TONES[Number.parseInt(stableHash(slug), 36) % DOT_TONES.length]!;
 }
 
+// The Chamber pulse, the optional `stats` section the roster leads with: the one
+// "for you" signal (a waiting briefing) plus the three at-a-glance counts. Built by
+// both the in-process gate and the out-of-process roster collector from one
+// buildChamberState read, so it stays a plain shape here (no store import).
+export interface RosterPulse {
+  forYou: boolean;
+  activeRooms: number;
+  liveLenses: number;
+  minds: number;
+}
+
 // Pure: a roster of Minds -> a canvas `board`. Zero Minds renders a cold-start
 // launchpad (author the first Mind); >=1 renders one card per Mind (Enter inline,
 // Retire in the overflow) plus the Convene-a-room composer at >=2. `draftExcluded`
 // is the server-side draft (deselected slugs) the chips reflect — absent/empty means
-// all Minds selected. Validated against canvasViewSchema in tests; the producer never
-// parses (validation lives at the binding edge).
+// all Minds selected. `pulse`, when present, leads the board with a calm stats
+// section (the Chamber pulse); omitted keeps the historical no-stats shape.
+// Validated against canvasViewSchema in tests; the producer never parses (validation
+// lives at the binding edge).
 export function buildRosterBoard(
   minds: readonly Mind[],
   draftExcluded: ReadonlySet<string> = new Set(),
+  pulse?: RosterPulse,
 ): CanvasBoardView {
   const sections: CanvasBoardView["sections"] =
     minds.length === 0 ? coldStartSections() : [{ kind: "cards", items: minds.map(cardFor) }];
@@ -73,6 +87,11 @@ export function buildRosterBoard(
     sections.push({ kind: "actions", title: "Convene a room", items });
   }
 
+  // The pulse leads the board: a Mind's first read is "is anything waiting for me?",
+  // so the for-you signal and the three counts sit above the cards. Calm by design —
+  // a zero count tones neutral so an idle Chamber doesn't shout.
+  if (pulse) sections.unshift(pulseSection(pulse));
+
   return {
     view: "board",
     title: "Roster",
@@ -84,6 +103,27 @@ export function buildRosterBoard(
       chip: "roster",
     },
     sections,
+  };
+}
+
+// The pulse `stats` section: exactly four calm items. "For you" reads "1 waiting"
+// (brand) when a briefing is promoted, "—" (neutral) otherwise; the three counts
+// tone bright when non-zero and neutral when zero so an idle Chamber stays quiet.
+function pulseSection(pulse: RosterPulse): CanvasBoardView["sections"][number] {
+  const toned = (n: number, tone: CanvasTone): CanvasTone => (n > 0 ? tone : "neutral");
+  return {
+    kind: "stats",
+    items: [
+      {
+        label: "For you",
+        value: pulse.forYou ? "1 waiting" : "—",
+        sub: "Briefing",
+        tone: pulse.forYou ? ("brand" as CanvasTone) : ("neutral" as CanvasTone),
+      },
+      { label: "Active work", value: pulse.activeRooms, tone: toned(pulse.activeRooms, "ok") },
+      { label: "Live views", value: pulse.liveLenses, tone: toned(pulse.liveLenses, "accent") },
+      { label: "Team", value: pulse.minds, tone: toned(pulse.minds, "brand") },
+    ],
   };
 }
 

@@ -70,6 +70,8 @@ describe("room region registry", () => {
     const call = region.calls.find((c) => c.region.key === roomKey("room-a"));
     expect(call?.surfaceId).toBe("chamber");
     expect(call?.region.group).toBe("rooms");
+    // The region carries the zone title so the merge labels the "Rooms" lane.
+    expect(call?.region.groupTitle).toBe("Rooms");
     // Region title comes from the board (buildRoomBoard sets it to the room name).
     expect(call?.region.title).toBe("Design Review");
     // The published board flowed through the validator to a broadcast.

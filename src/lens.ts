@@ -124,6 +124,9 @@ export function createLensRegistry(
         title: id,
         glyph: { char: "✦", tone: "accent" },
         group: "lens",
+        // The first lens's groupTitle labels the whole "Lenses" zone the merge forms
+        // from the per-id regions, so the live lens panels read as a titled lane.
+        groupTitle: "Lenses",
       });
     } catch (e) {
       // A failed region add (e.g. the harness per-surface ceiling) must not leak

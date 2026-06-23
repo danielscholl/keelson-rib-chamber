@@ -53,6 +53,9 @@ export function createRoomRegionRegistry(
         title,
         glyph: { char: "▦", tone: "brand" },
         group: "rooms",
+        // The first room's groupTitle labels the whole "Rooms" zone the merge forms
+        // from the per-slug regions, so the live room panels read as a titled lane.
+        groupTitle: "Rooms",
       });
     } catch (e) {
       // A failed region add (e.g. the harness per-surface ceiling) must not leak the

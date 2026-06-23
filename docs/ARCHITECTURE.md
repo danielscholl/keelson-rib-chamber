@@ -94,7 +94,7 @@ namespace).
 |---|---|---|---|
 | Roster (header) | `rib:chamber:roster` | per-Mind retire actions + a roster builder | `board` (cards: one per Mind) |
 | Room transcript (main) | `rib:chamber:room` | the room loop (push) | `board` (rows/cards: one per turn) |
-| Briefing (footer) | `rib:chamber:brief` | the `chamber-brief` workflow (pull) | `board` (briefing sections) |
+| Briefing (footer) | `rib:chamber:brief` | the rib attention gate (push; promotes on room-end / lens-change, watermark-gated) | `board` (briefing sections) |
 | Agent-authored lens | `rib:chamber:lens:<mind>:<id>` | a Mind turn (Phase 3) | `board` (Mind's choice) |
 
 The **Chamber surface** itself is not a key — it is a layout descriptor binding
@@ -229,11 +229,13 @@ MVP), so Phase 2 is unblocked and wired.
 
 ## 10. Current state
 
-- **Phase 0 wired.** A `chamber-brief` contributed workflow runs one agent turn
-  (a `prompt` node, no deterministic collector) that authors a canvas `board`
-  briefing; the executor promotes it to structured output and the rib binding
-  publishes it fail-closed (`validate` = `canvasViewSchema`, board kind) to
-  `rib:chamber:brief`. A `views[]` descriptor renders it.
+- **Briefing wired (rib-owned, substance-gated).** The footer Briefing is no longer
+  a contributed workflow. The rib seeds `rib:chamber:brief` with a quiet board at boot
+  and an attention gate (`evaluateBriefGate`, over `chamber-state` + a persisted
+  `brief-watermark.json`) promotes it to one agent turn — published fail-closed
+  (`validate` = `canvasViewSchema`, board kind) — ONLY when a room ended or a lens
+  changed since the watermark; an unchanged Chamber runs no (paid) turn. A `views[]`
+  descriptor renders it.
 - **Phase 1 wired.** Genesis authors a Mind via the `chamber-genesis` workflow: a
   `prompt` node reads a brief, authors the soul, and calls `chamber_emit_genesis`
   to persist `mind.json` + `SOUL.md` + seeded working-memory docs under the rib
