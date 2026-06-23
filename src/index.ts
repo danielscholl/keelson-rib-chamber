@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type {
-  CanvasBoardView,
+  CanvasView,
   CommandCompletion,
   CommandInvokeResult,
   Rib,
@@ -48,6 +48,7 @@ import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
 import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "./room-draft.ts";
+import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
@@ -88,14 +89,12 @@ let lensSm: SnapshotManager | undefined;
 // re-bootstrap with a different one rebinds it.
 let roomRegistry: RoomRegionRegistry | undefined;
 let roomSm: SnapshotManager | undefined;
-// A single reusable snapshot-only key the Rooms index `Open` focuses in the canvas
-// drawer. A CLOSED room has been released from the region registry (retainOnly keeps
-// only active + the most-recent), so it has no live key like a lens does — room-open
-// caches the selected room's board here and the drawer subscribes to this one key.
-// Reused across opens (bounded to one registration); reset in dispose().
-let roomViewBoard: CanvasBoardView | undefined;
-let roomViewRegistered = false;
+// A closed room is released from the region registry (retainOnly keeps only active +
+// the most-recent), so unlike a lens it has no standing key. room-open publishes the
+// opened room's board to one reusable snapshot-only key the drawer subscribes to.
+let roomViewPublisher: { publish(view: CanvasView): Promise<void> } | undefined;
 let roomViewSm: SnapshotManager | undefined;
+let roomViewUnregister: (() => void) | undefined;
 // The refresh seam, captured in registerTools (the only hook with the full ctx) so
 // onAction handlers can re-run a bound collector on demand instead of waiting on
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
@@ -852,8 +851,9 @@ const rib: Rib = {
     roomRegistry?.dispose();
     roomRegistry = undefined;
     roomSm = undefined;
-    roomViewBoard = undefined;
-    roomViewRegistered = false;
+    roomViewUnregister?.();
+    roomViewUnregister = undefined;
+    roomViewPublisher = undefined;
     roomViewSm = undefined;
     await driver?.dispose();
   },
@@ -1353,53 +1353,43 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
   }
 }
 
-// Lazily register the reusable room-view snapshot key against the active manager —
-// snapshot-only, with NO surface region, so opening a past room never resurrects an
-// inline panel. Registered once per manager; a re-bootstrap onto a new manager (the
-// old one disposed) re-registers against the new one. The composer throws when no
-// room is open so the validator never sees undefined — recompose only runs right
-// after room-open sets roomViewBoard.
-function ensureRoomViewRegistered(sm: SnapshotManager): void {
-  if (roomViewRegistered && roomViewSm === sm) return;
-  roomViewRegistered = true;
+// Register the reusable room-view key against the active manager via the same
+// coalescing publisher the lens/room registries use, capturing the unregister handle
+// so dispose() releases it and a rebind onto a new manager doesn't leak the old one.
+function ensureRoomViewPublisher(sm: SnapshotManager): {
+  publish(view: CanvasView): Promise<void>;
+} {
+  if (roomViewSm === sm && roomViewPublisher) return roomViewPublisher;
+  roomViewUnregister?.();
+  const { publisher, latest } = createCoalescingPublisher(() => sm.recompose(ROOM_VIEW_KEY));
+  roomViewUnregister = sm.register(ROOM_VIEW_KEY, latest, {
+    validate: expectView(ROOM_VIEW_KEY, "board"),
+  });
   roomViewSm = sm;
-  sm.register(
-    ROOM_VIEW_KEY,
-    () => {
-      if (!roomViewBoard) throw new Error("no room is open");
-      return roomViewBoard;
-    },
-    { validate: expectView(ROOM_VIEW_KEY, "board") },
-  );
+  roomViewPublisher = publisher;
+  return publisher;
 }
 
-// Open a CLOSED room from the sessions index: load its persisted state + transcript,
-// build the room board, cache it under the reusable room-view key, and return the host
-// open-canvas effect focusing that key in the drawer. A closed room has been released
-// from the live region registry, so unlike a lens it has no standing key — this viewer
-// key is the seam. The board carries the room's Start-again / group-chat / open-floor
-// controls, so reconvene works from the drawer. Fails closed on a missing/unsafe slug,
-// an unknown room, or an absent room seam.
+// Open a closed room from the sessions index: rebuild its board from the persisted
+// transcript, publish it to the reusable room-view key, and return the host open-canvas
+// effect. The board carries the room's Start-again / group-chat / open-floor controls,
+// so a past session can be relaunched from the drawer. Fails closed on a missing/unsafe
+// slug, an unknown room, or an absent room seam.
 async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
   const resolved = requireRoomSlug(action);
   if ("error" in resolved) return resolved.error;
   const sm = roomSm;
   if (!sm) return ROOM_DISABLED;
-  let title: string;
   try {
     const store = createFileRoomStore(roomsDir());
     const room = await store.loadRoom(resolved.slug);
     if (!room) return { ok: false, error: `room '${resolved.slug}' not found` };
-    roomViewBoard = buildRoomBoard(room, await store.loadTranscript(resolved.slug));
-    title = room.name;
+    const board = buildRoomBoard(room, await store.loadTranscript(resolved.slug));
+    await ensureRoomViewPublisher(sm).publish(board);
+    return { ok: true, data: { effect: "open-canvas", key: ROOM_VIEW_KEY, title: room.name } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
-  ensureRoomViewRegistered(sm);
-  // Seed the cache so a client subscribing the instant the drawer opens reads the
-  // board, not a 204 (the GET path doesn't lazy-compose).
-  await sm.recompose(ROOM_VIEW_KEY);
-  return { ok: true, data: { effect: "open-canvas", key: ROOM_VIEW_KEY, title } };
 }
 
 // Retire a lens: delete its lenses/<id>/ record AND drop its live panel + snapshot
