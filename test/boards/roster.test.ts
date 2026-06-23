@@ -219,14 +219,73 @@ describe("buildRosterBoard populated", () => {
     expect(actionItems(board).some((i) => i.type === "retire")).toBe(false);
   });
 
-  test("the Convene-a-room section appears only at >= 2 minds", () => {
+  test("the Convene-a-room composer appears only at >= 2 minds", () => {
     expect(actionsSection(buildRosterBoard([mind()]), "Convene a room")).toBeUndefined();
     const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
-    const room = actionsSection(board, "Convene a room");
-    if (room?.kind !== "actions") throw new Error("no Convene section");
-    expect(room.items[0]).toMatchObject({
-      type: "room-start",
-      payload: { strategy: "sequential", participants: ["a", "b"], turnBudget: 6 },
-    });
+    expect(actionsSection(board, "Convene a room")?.kind).toBe("actions");
+  });
+});
+
+describe("buildRosterBoard convene composer", () => {
+  const two = [mind({ slug: "a", name: "Ada" }), mind({ slug: "b", name: "Bo" })];
+
+  function convene(board: ReturnType<typeof buildRosterBoard>) {
+    const section = actionsSection(board, "Convene a room");
+    if (section?.kind !== "actions") throw new Error("no Convene section");
+    return section.items;
+  }
+  const chips = (board: ReturnType<typeof buildRosterBoard>) =>
+    convene(board).filter((i) => i.type === "draft-set");
+  const conveneAction = (board: ReturnType<typeof buildRosterBoard>) =>
+    convene(board).find((i) => i.type === "convene");
+
+  test("default (empty exclusion) renders one selected chip per Mind", () => {
+    const board = buildRosterBoard(two);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const items = chips(board);
+    expect(items).toHaveLength(2);
+    // ✓ glyph = selected; each chip is a draft-set action carrying only its slug.
+    for (const chip of items) expect(chip.glyph).toBe("✓");
+    expect(items.map((c) => c.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
+    expect(items.map((c) => c.label)).toEqual(["Ada", "Bo"]);
+  });
+
+  test("an excluded slug renders unselected (+ glyph); others stay selected (✓)", () => {
+    const board = buildRosterBoard(two, new Set(["a"]));
+    const bySlug = new Map(
+      chips(board).map((c) => [(c.payload as { slug: string }).slug, c.glyph]),
+    );
+    expect(bySlug.get("a")).toBe("+");
+    expect(bySlug.get("b")).toBe("✓");
+  });
+
+  test("Convene is present at >= 2 selected and carries NO participants in its payload", () => {
+    const action = conveneAction(buildRosterBoard(two));
+    expect(action).toBeDefined();
+    expect(action?.glyph).toBe("▸");
+    // The server reads the draft — the action must not bake participants.
+    expect(action?.payload ?? {}).not.toHaveProperty("participants");
+    // It does carry the optional topic capture field.
+    expect(action?.fields?.[0]?.name).toBe("topic");
+  });
+
+  test("Convene is absent below 2 selected (one excluded of two)", () => {
+    const board = buildRosterBoard(two, new Set(["a"]));
+    // Chips still render (so the operator can re-select), but Convene is omitted —
+    // validateStart needs >= 2 distinct participants.
+    expect(chips(board)).toHaveLength(2);
+    expect(conveneAction(board)).toBeUndefined();
+  });
+
+  test("Convene is absent when all are excluded", () => {
+    expect(conveneAction(buildRosterBoard(two, new Set(["a", "b"])))).toBeUndefined();
+  });
+
+  test("the board stays valid with an excluded slug and no Convene", () => {
+    expect(canvasViewSchema.safeParse(buildRosterBoard(two, new Set(["a"]))).success).toBe(true);
+  });
+
+  test("no room-start action remains anywhere on the board", () => {
+    expect(actionItems(buildRosterBoard(two)).some((i) => i.type === "room-start")).toBe(false);
   });
 });
