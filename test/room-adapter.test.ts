@@ -292,37 +292,59 @@ describe("room adapter — room-open", () => {
     });
   }
 
-  it("opens a closed room: returns open-canvas over the room-view key and seeds its board", async () => {
+  it("opens a closed room: returns open-canvas over the room's per-slug view key and seeds its board", async () => {
     await seedClosedWithTurn("open-me", "Q3 priorities");
     const res = await onAction({ type: "room-open", payload: { slug: "open-me" } }, makeCtx());
     expect(res).toEqual({
       ok: true,
-      data: { effect: "open-canvas", key: "rib:chamber:room-view", title: "Q3 priorities" },
+      data: { effect: "open-canvas", key: "rib:chamber:room-view:open-me", title: "Q3 priorities" },
     });
     // The viewer key was registered (snapshot-only) and recomposed, and the cached
     // board is the room's transcript board — proven renderable by the fake's validate.
-    expect(snap.registered).toContain("rib:chamber:room-view");
-    expect(snap.recomposed).toContain("rib:chamber:room-view");
+    expect(snap.registered).toContain("rib:chamber:room-view:open-me");
+    expect(snap.recomposed).toContain("rib:chamber:room-view:open-me");
     const opened = snap.lastBoard();
     expect(opened?.view).toBe("board");
     if (opened?.view === "board") expect(opened.title).toBe("Q3 priorities");
     expect(JSON.stringify(opened)).toContain("Hello from the past.");
   });
 
-  it("reuses the single viewer key across opens (registered once, recomposed each time)", async () => {
-    await seedClosedWithTurn("first-room", "First");
-    await seedClosedWithTurn("second-room", "Second");
-    await onAction({ type: "room-open", payload: { slug: "first-room" } }, makeCtx());
-    const before = snap.recomposed.filter((k) => k === "rib:chamber:room-view").length;
-    const res = await onAction({ type: "room-open", payload: { slug: "second-room" } }, makeCtx());
+  it("reuses a slug's view key across re-opens (registered once per slug, recomposed each time)", async () => {
+    await seedClosedWithTurn("reopen-me", "Reopen");
+    const key = "rib:chamber:room-view:reopen-me";
+    await onAction({ type: "room-open", payload: { slug: "reopen-me" } }, makeCtx());
+    const before = snap.recomposed.filter((k) => k === key).length;
+    const res = await onAction({ type: "room-open", payload: { slug: "reopen-me" } }, makeCtx());
     expect(res.ok).toBe(true);
-    // One registration total for the key, a fresh recompose per open; the cached
-    // board follows the most-recently-opened room.
-    expect(snap.registered.filter((k) => k === "rib:chamber:room-view")).toHaveLength(1);
-    expect(snap.recomposed.filter((k) => k === "rib:chamber:room-view").length).toBe(before + 1);
-    const reopened = snap.lastBoard();
-    expect(reopened?.view).toBe("board");
-    if (reopened?.view === "board") expect(reopened.title).toBe("Second");
+    // One registration total for that slug's key, a fresh recompose per open.
+    expect(snap.registered.filter((k) => k === key)).toHaveLength(1);
+    expect(snap.recomposed.filter((k) => k === key).length).toBe(before + 1);
+  });
+
+  it("opening two different closed rooms yields two independent keys/boards that don't clobber each other", async () => {
+    await seedClosedWithTurn("room-a", "Alpha");
+    await seedClosedWithTurn("room-b", "Beta");
+    const keyA = "rib:chamber:room-view:room-a";
+    const keyB = "rib:chamber:room-view:room-b";
+
+    const resA = await onAction({ type: "room-open", payload: { slug: "room-a" } }, makeCtx());
+    const resB = await onAction({ type: "room-open", payload: { slug: "room-b" } }, makeCtx());
+    expect(resA.ok && (resA.data as { key: string }).key).toBe(keyA);
+    expect(resB.ok && (resB.data as { key: string }).key).toBe(keyB);
+    expect(keyA).not.toBe(keyB);
+    expect(snap.registered).toContain(keyA);
+    expect(snap.registered).toContain(keyB);
+
+    // Recomposing A's key AFTER B was opened still yields A's board — the boards are
+    // keyed per-room, so opening B can't clobber the board A's drawer subscribes to.
+    const boardA = await snap.sm.recompose(keyA);
+    const boardB = await snap.sm.recompose(keyB);
+    const titleOf = (frame: unknown) => {
+      const data = (frame as { data?: CanvasView } | undefined)?.data;
+      return data?.view === "board" ? data.title : undefined;
+    };
+    expect(titleOf(boardA)).toBe("Alpha");
+    expect(titleOf(boardB)).toBe("Beta");
   });
 
   it("fails closed on a missing slug, an unsafe slug, and an unknown room", async () => {
