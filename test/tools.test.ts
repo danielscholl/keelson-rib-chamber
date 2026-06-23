@@ -269,6 +269,39 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(true);
   });
 
+  it("chamber_emit_lens accepts provenance and persists it on the record", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      {
+        id: "with-prov",
+        board: { view: "board", title: "Prov", sections: [] },
+        scope: "checklist",
+        maintainingMind: "alice",
+        reason: "added a risk",
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const rec = (await listLenses(lensesDir())).find((l) => l.id === "with-prov");
+    expect(rec?.scope).toBe("checklist");
+    expect(rec?.maintainingMind).toBe("alice");
+    expect(rec?.reason).toBe("added a risk");
+  });
+
+  it("chamber_emit_lens still works with no provenance — record carries none", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "no-prov", board: { view: "board", title: "Plain", sections: [] } },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const rec = (await listLenses(lensesDir())).find((l) => l.id === "no-prov");
+    expect(rec).toBeDefined();
+    expect(rec?.scope).toBeUndefined();
+    expect(rec?.maintainingMind).toBeUndefined();
+    expect(rec?.reason).toBeUndefined();
+  });
+
   it("chamber_retire_lens advertises state_changing", () => {
     expect(tool("chamber_retire_lens").state_changing).toBe(true);
   });

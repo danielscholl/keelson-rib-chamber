@@ -4,9 +4,9 @@ import type { CanvasBoardView } from "@keelson/shared";
 import { assertSafeSlug } from "./genesis.ts";
 
 // A persisted lens: the authored board plus a server-stamped freshness time. The
-// optional scope/maintainingMind/reason fields are RESERVED for the living-views
-// index (81b) so adding them later needs no migration — they stay absent until
-// emit is extended to capture them, and the index omits them when absent.
+// optional scope/maintainingMind/reason fields are the index card's PROVENANCE —
+// the authoring agent supplies whatever it can name (never fabricated), so each
+// stays absent when the emit omitted it and the index omits it in turn.
 export interface LensRecord {
   id: string;
   board: CanvasBoardView;
@@ -16,9 +16,12 @@ export interface LensRecord {
   reason?: string;
 }
 
-// saveLens stamps updatedAt itself, so a caller persists only { id, board }.
+// The provenance an emit may carry alongside { id, board }: all optional, all
+// agent-supplied. saveLens stamps updatedAt itself (freshness is server-owned).
+export type LensProvenance = Pick<LensRecord, "scope" | "maintainingMind" | "reason">;
+
 export interface LensStore {
-  saveLens(record: { id: string; board: CanvasBoardView }): Promise<void>;
+  saveLens(record: { id: string; board: CanvasBoardView } & LensProvenance): Promise<void>;
   deleteLens(id: string): Promise<void>;
 }
 
@@ -43,10 +46,15 @@ export function createFileLensStore(lensesRoot: string): LensStore {
       await mkdir(lensDir(record.id), { recursive: true });
       // The store owns the clock: stamp updatedAt server-side at save (like
       // room/mind createdAt), overwriting on re-author so freshness is honest.
+      // Provenance is spread in only when present, so an absent field leaves no key
+      // on the record and the index omits it (a re-author without it clears a prior).
       const stored: LensRecord = {
         id: record.id,
         board: record.board,
         updatedAt: new Date().toISOString(),
+        ...(record.scope ? { scope: record.scope } : {}),
+        ...(record.maintainingMind ? { maintainingMind: record.maintainingMind } : {}),
+        ...(record.reason ? { reason: record.reason } : {}),
       };
       // lens.json is rewritten on every re-author; write a unique temp then
       // rename (atomic on the same filesystem) so a crash mid-write can't leave a
@@ -137,10 +145,18 @@ function isLensRecord(value: unknown): value is LensRecord {
   if (typeof value !== "object" || value === null) return false;
   const r = value as Record<string, unknown>;
   if (typeof r.id !== "string" || typeof r.updatedAt !== "string") return false;
+  // Provenance is optional but must be a string when present, so a corrupt
+  // record can't smuggle a non-string into the card's pill/field/reason.
+  if (!isOptionalString(r.scope) || !isOptionalString(r.maintainingMind)) return false;
+  if (!isOptionalString(r.reason)) return false;
   const board = r.board;
   if (typeof board !== "object" || board === null) return false;
   const b = board as Record<string, unknown>;
   return b.view === "board" && Array.isArray(b.sections);
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
 }
 
 function isNodeError(value: unknown): value is NodeJS.ErrnoException {
