@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type {
+  CanvasView,
   CommandCompletion,
   CommandInvokeResult,
   Rib,
@@ -21,6 +22,7 @@ import {
   z,
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
+import { buildRoomBoard } from "./boards/room.ts";
 import { capabilityVocabulary, KNOWN_CAPABILITY_SLUGS } from "./capabilities.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
@@ -46,6 +48,7 @@ import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
 import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "./room-draft.ts";
+import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
@@ -58,6 +61,8 @@ const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
+// The reusable snapshot-only key the Rooms index `Open` focuses (see roomOpenAction).
+const ROOM_VIEW_KEY = "rib:chamber:room-view";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -84,6 +89,12 @@ let lensSm: SnapshotManager | undefined;
 // re-bootstrap with a different one rebinds it.
 let roomRegistry: RoomRegionRegistry | undefined;
 let roomSm: SnapshotManager | undefined;
+// A closed room is released from the region registry (retainOnly keeps only active +
+// the most-recent), so unlike a lens it has no standing key. room-open publishes the
+// opened room's board to one reusable snapshot-only key the drawer subscribes to.
+let roomViewPublisher: { publish(view: CanvasView): Promise<void> } | undefined;
+let roomViewSm: SnapshotManager | undefined;
+let roomViewUnregister: (() => void) | undefined;
 // The refresh seam, captured in registerTools (the only hook with the full ctx) so
 // onAction handlers can re-run a bound collector on demand instead of waiting on
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
@@ -766,6 +777,8 @@ const rib: Rib = {
         return roomStopAction(action);
       case "room-delete":
         return roomDeleteAction(action);
+      case "room-open":
+        return roomOpenAction(action);
       case "retire-lens":
         return retireLensAction(action);
       case "lens-open":
@@ -838,6 +851,10 @@ const rib: Rib = {
     roomRegistry?.dispose();
     roomRegistry = undefined;
     roomSm = undefined;
+    roomViewUnregister?.();
+    roomViewUnregister = undefined;
+    roomViewPublisher = undefined;
+    roomViewSm = undefined;
     await driver?.dispose();
   },
 };
@@ -1331,6 +1348,45 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
     reconcileRoomPanels();
     await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
     return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+// Register the reusable room-view key against the active manager via the same
+// coalescing publisher the lens/room registries use, capturing the unregister handle
+// so dispose() releases it and a rebind onto a new manager doesn't leak the old one.
+function ensureRoomViewPublisher(sm: SnapshotManager): {
+  publish(view: CanvasView): Promise<void>;
+} {
+  if (roomViewSm === sm && roomViewPublisher) return roomViewPublisher;
+  roomViewUnregister?.();
+  const { publisher, latest } = createCoalescingPublisher(() => sm.recompose(ROOM_VIEW_KEY));
+  roomViewUnregister = sm.register(ROOM_VIEW_KEY, latest, {
+    validate: expectView(ROOM_VIEW_KEY, "board"),
+  });
+  roomViewSm = sm;
+  roomViewPublisher = publisher;
+  return publisher;
+}
+
+// Open a closed room from the sessions index: rebuild its board from the persisted
+// transcript, publish it to the reusable room-view key, and return the host open-canvas
+// effect. The board carries the room's Start-again / group-chat / open-floor controls,
+// so a past session can be relaunched from the drawer. Fails closed on a missing/unsafe
+// slug, an unknown room, or an absent room seam.
+async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  const sm = roomSm;
+  if (!sm) return ROOM_DISABLED;
+  try {
+    const store = createFileRoomStore(roomsDir());
+    const room = await store.loadRoom(resolved.slug);
+    if (!room) return { ok: false, error: `room '${resolved.slug}' not found` };
+    const board = buildRoomBoard(room, await store.loadTranscript(resolved.slug));
+    await ensureRoomViewPublisher(sm).publish(board);
+    return { ok: true, data: { effect: "open-canvas", key: ROOM_VIEW_KEY, title: room.name } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }

@@ -5,8 +5,9 @@ import type { Room } from "../types.ts";
 // rooms. Active rooms keep their live inline per-slug panels (reconcileRoomPanels)
 // and never appear here, so the index filters to closed (done/stopped) rooms only.
 // No closed rooms renders a cold/empty state; otherwise one card per closed room,
-// newest-first, each with a destructive Delete. Validated against canvasViewSchema
-// in tests; the producer never parses (validation lives at the binding edge).
+// newest-first, each with an Open (→ the room in the canvas drawer) and a destructive
+// Delete. Validated against canvasViewSchema in tests; the producer never parses
+// (validation lives at the binding edge).
 export function buildRoomsIndexBoard(rooms: readonly Room[]): CanvasBoardView {
   // Closed = done/stopped. listRooms is already newest-first, so this preserves
   // that order. A live room is surfaced by its own inline panel, not as a card.
@@ -31,9 +32,9 @@ export function buildRoomsIndexBoard(rooms: readonly Room[]): CanvasBoardView {
 
 // One closed room -> one card: an identity dot toned by status, the
 // `<status> · <turnIndex>/<turnBudget>` progress in a status-toned pill,
-// participants and the started-relative time as fields, and a destructive Delete
-// (an overflow action with a typed irreversible confirm). The slug rides the
-// Delete payload.
+// participants and the started-relative time as fields, an inline Open (focuses the
+// room's transcript in the canvas drawer) and a destructive Delete (an overflow
+// action with a typed irreversible confirm). The slug rides both action payloads.
 function cardFor(room: Room) {
   return {
     title: room.name,
@@ -49,6 +50,12 @@ function cardFor(room: Room) {
       { label: "started", value: `${relativeAgo(room.createdAt)} ago` },
     ],
     actions: [
+      {
+        type: "room-open",
+        label: "Open",
+        glyph: "↗",
+        payload: { slug: room.slug },
+      },
       {
         type: "room-delete",
         label: "Delete room…",
