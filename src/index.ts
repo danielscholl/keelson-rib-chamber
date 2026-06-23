@@ -50,7 +50,7 @@ import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
 import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "./room-draft.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
-import { createFileRoomStore, sweepClosedRooms } from "./room-store.ts";
+import { createFileRoomStore, deriveRoomName, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import { GENESIS_STARTERS } from "./starters.ts";
 import { getStrategy } from "./strategies/index.ts";
@@ -554,13 +554,13 @@ const rib: Rib = {
     {
       // The rooms-index producer (the chamber-roster sibling): a deterministic
       // collector that reads the persisted rooms from the data home and emits the
-      // index of ENDED sessions (one card per closed room, each with Delete). A
-      // room ending or a room-delete refreshes it; active rooms render as their own
-      // live per-slug panels, so they never appear in this index.
+      // sessions index — active rooms first (status-only cards), then ended sessions
+      // (each with Open + Delete). A room starting/ending or a room-delete refreshes
+      // it; an active room ALSO renders as its own live per-slug panel.
       definition: {
         name: "chamber-rooms",
         description:
-          'Use when: you want to see past Chamber sessions (rooms that have ended). Triggers: "show past rooms", "list sessions", "room history". Does: reads the persisted rooms from the Chamber data home and publishes a sessions index (one card per ended room, with a Delete control) to the Chamber Rooms canvas. NOT for: an active room (it streams in its own live panel), starting a room (the Roster\'s Convene), or deleting one (the index card\'s Delete action).',
+          'Use when: you want to see Chamber sessions — active rooms and ended history. Triggers: "show rooms", "list sessions", "room history". Does: reads the persisted rooms from the Chamber data home and publishes a sessions index (active rooms first as status-only cards, then ended rooms each with Open + a Delete control) to the Chamber Rooms canvas. NOT for: starting a room (the Roster\'s Convene) or stopping a live room (its inline controls).',
         nodes: [
           {
             id: "collect",
@@ -1152,7 +1152,7 @@ async function startRoom(
     endVoteThreshold: input.endVoteThreshold,
   });
   if (!valid.ok) return { ok: false, error: valid.error };
-  const name = (input.name ?? "").trim() || "Room";
+  const name = (input.name ?? "").trim() || deriveRoomName(input.topic, input.participants);
   // Normalize here so both entry points (the chat tool and the board action)
   // store a trimmed topic or none — a whitespace-only topic becomes no topic.
   const topic = (input.topic ?? "").trim();
@@ -1285,19 +1285,23 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   let participants: string[];
+  let displayNames: string[];
   try {
     const excluded = await readDraftExclusion();
     const minds = await readMinds(mindsDir());
-    participants = minds.map((m) => m.slug).filter((s) => !excluded.has(s));
+    const drafted = minds.filter((m) => !excluded.has(m.slug));
+    participants = drafted.map((m) => m.slug);
+    displayNames = drafted.map((m) => m.name);
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
+  const topic = asNonEmptyString(payload.topic) || undefined;
   const res = await startRoom({
-    name: "Room",
+    name: deriveRoomName(topic, displayNames),
     strategy: "sequential",
     participants,
     turnBudget: DEFAULT_ROOM_TURN_BUDGET,
-    topic: asNonEmptyString(payload.topic) || undefined,
+    topic,
   });
   if (res.ok) {
     await clearDraft().catch(() => {});

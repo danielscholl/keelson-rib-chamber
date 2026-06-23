@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { access, appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileRoomStore, listRooms, sweepClosedRooms } from "../src/room-store.ts";
+import {
+  createFileRoomStore,
+  deriveRoomName,
+  listRooms,
+  sweepClosedRooms,
+} from "../src/room-store.ts";
 import type { Room, TurnEntry } from "../src/types.ts";
 
 function makeRoom(over: Partial<Room> = {}): Room {
@@ -366,5 +371,32 @@ describe("listRooms", () => {
 
   it("ENOENT (missing rooms root) → []", async () => {
     expect(await listRooms(join(root, "missing"))).toEqual([]);
+  });
+});
+
+describe("deriveRoomName", () => {
+  it("a non-empty topic wins over participants", () => {
+    expect(deriveRoomName("Q3 priorities", ["Alice", "Bob"])).toBe("Q3 priorities");
+  });
+
+  it("trims the topic and caps it at 60 chars", () => {
+    expect(deriveRoomName("  spaced  ", [])).toBe("spaced");
+    const long = "x".repeat(80);
+    expect(deriveRoomName(long, [])).toBe("x".repeat(60));
+  });
+
+  it("falls back to participants when there is no topic", () => {
+    expect(deriveRoomName(undefined, ["Alice"])).toBe("Alice");
+    expect(deriveRoomName("", ["Alice", "Bob"])).toBe("Alice & Bob");
+    expect(deriveRoomName("   ", ["Alice", "Bob", "Cy", "Dee"])).toBe("Alice, Bob +2");
+  });
+
+  it("ignores blank participant names when counting", () => {
+    expect(deriveRoomName(undefined, ["Alice", "  ", "Bob"])).toBe("Alice & Bob");
+  });
+
+  it("falls back to 'Room' only with no topic AND no participants", () => {
+    expect(deriveRoomName(undefined, [])).toBe("Room");
+    expect(deriveRoomName("", ["  "])).toBe("Room");
   });
 });

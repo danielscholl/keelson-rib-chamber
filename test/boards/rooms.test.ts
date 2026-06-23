@@ -43,16 +43,44 @@ describe("buildRoomsIndexBoard empty", () => {
     expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
   });
 
-  test("only-active rooms → still the empty state (active never indexed)", () => {
-    const board = buildRoomsIndexBoard([room({ status: "active" })]);
+  test("only-active rooms → indexed as status cards (NOT the empty state), counted", () => {
+    const board = buildRoomsIndexBoard([room({ status: "active", turnIndex: 2, turnBudget: 6 })]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    expect(board.header?.status?.label).toBe("0 sessions");
-    expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
+    expect(board.header?.status?.label).toBe("1 session");
+    const items = cards(board);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.pill).toEqual({ label: "active · 2/6", tone: "info" });
+    expect(items[0]?.dot).toBe("info");
+    // An active room is status-only — already live in its inline panel — so its card
+    // carries no actions (no frozen-snapshot Open, no orphaning Delete).
+    expect(items[0]?.actions).toBeUndefined();
+  });
+});
+
+describe("buildRoomsIndexBoard active + closed", () => {
+  test("active rooms come first, then closed; header counts BOTH", () => {
+    const board = buildRoomsIndexBoard([
+      room({ slug: "live", name: "Live", status: "active" }),
+      room({ slug: "ended", name: "Ended", status: "done" }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(board.header?.status?.label).toBe("2 sessions");
+    expect(cards(board).map((c) => c.title)).toEqual(["Live", "Ended"]);
+  });
+
+  test("active card is status-only (no actions); the closed card keeps Open + Delete", () => {
+    const board = buildRoomsIndexBoard([
+      room({ slug: "live", status: "active" }),
+      room({ slug: "ended", status: "done" }),
+    ]);
+    const [activeCard, closedCard] = cards(board);
+    expect(activeCard?.actions).toBeUndefined();
+    expect(closedCard?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);
   });
 });
 
 describe("buildRoomsIndexBoard closed sessions", () => {
-  test("valid; header counts closed sessions singular/plural, no 'active' count", () => {
+  test("valid; header counts sessions singular/plural", () => {
     expect(buildRoomsIndexBoard([room()]).header?.status?.label).toBe("1 session");
     const two = buildRoomsIndexBoard([
       room({ slug: "room-1" }),
@@ -60,19 +88,6 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     ]);
     expect(canvasViewSchema.safeParse(two).success).toBe(true);
     expect(two.header?.status?.label).toBe("2 sessions");
-    // Honest copy: the header never advertises an active count.
-    expect(JSON.stringify(two)).not.toContain("active");
-  });
-
-  test("lists only CLOSED rooms — an active room is excluded from the cards", () => {
-    const board = buildRoomsIndexBoard([
-      room({ slug: "live", status: "active" }),
-      room({ slug: "ended", status: "done" }),
-    ]);
-    const titles = cards(board);
-    expect(titles).toHaveLength(1);
-    expect(JSON.stringify(board)).toContain("ended");
-    expect(JSON.stringify(board)).not.toContain("live");
   });
 
   test("one card per closed room, preserving the given (newest-first) order", () => {

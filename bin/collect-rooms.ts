@@ -2,7 +2,7 @@
 /**
  * Rooms-index collector — the producer behind the `chamber-rooms` workflow. Reads
  * the persisted rooms under the data home and prints a canvas board-view JSON
- * object (the index of ENDED sessions, one card per closed room), and nothing
+ * object (one card per room — active first, then ended sessions), and nothing
  * else, to stdout. Degrades to a valid empty index: a missing rooms/ dir (nothing
  * convened yet) or any read error yields `[]`, never a thrown collector.
  */

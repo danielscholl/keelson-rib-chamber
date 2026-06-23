@@ -32,15 +32,24 @@ async function runCollector(roomsRoot: string): Promise<{ out: string; code: num
 }
 
 describe("collect-rooms", () => {
-  test("reads the rooms dir from argv[2] and emits a sessions index of closed rooms", async () => {
+  test("reads the rooms dir from argv[2] and emits a sessions index with active + closed rooms", async () => {
     const root = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
     try {
       const store = createFileRoomStore(root);
-      await store.saveRoom(room({ slug: "room-ended", status: "done" }));
+      await store.saveRoom(room({ slug: "room-ended", name: "Ended room", status: "done" }));
+      await store.saveRoom(room({ slug: "room-live", name: "Live room", status: "active" }));
       const { out, code } = await runCollector(root);
       expect(code).toBe(0);
-      const board = JSON.parse(out) as { view: string };
+      const board = JSON.parse(out) as {
+        view: string;
+        sections: { kind: string; items: { title: string; pill?: { label: string } }[] }[];
+      };
       expect(board.view).toBe("board");
+      const items = board.sections.find((s) => s.kind === "cards")?.items ?? [];
+      // Both sessions are indexed; the active one comes first with an "active" pill.
+      expect(items.map((i) => i.title)).toEqual(["Live room", "Ended room"]);
+      expect(items[0]?.pill?.label).toContain("active");
+      // The ended room is actionable, so its slug rides its Open/Delete payloads.
       expect(out).toContain("room-ended");
     } finally {
       await rm(root, { recursive: true, force: true });
