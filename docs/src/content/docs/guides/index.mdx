@@ -1,6 +1,6 @@
 ---
 title: Guides
-description: Task-oriented how-tos for installing, operating, and developing the Chamber rib
+description: Task-oriented how-tos for installing and operating the Chamber rib
 sidebar:
   label: Overview
   order: 1
@@ -10,19 +10,17 @@ import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
 The guides are task-oriented: each walks one operator job from start to finish.
 Install the rib into a running Keelson first, then author the Minds, rooms, and
-lenses that fill the Chamber surface. The last guide is for contributors working on
-the rib's own source.
+lenses that fill the Chamber surface.
 
 <CardGrid>
   <LinkCard title="Install Chamber into Keelson" href="install/" description="Add the rib, choose which ribs activate, and open the Chamber surface." />
   <LinkCard title="Author a mind" href="author-a-mind/" description="Create a persistent agent with genesis, enter it for a direct chat, and retire it." />
   <LinkCard title="Run a room" href="run-a-room/" description="Convene Minds, pick a strategy, and steer the live conversation." />
   <LinkCard title="Author a lens" href="author-a-lens/" description="Render an agent-authored canvas board on a subject and keep it current." />
-  <LinkCard title="Develop the rib locally" href="develop-locally/" description="Link the rib into a Keelson checkout and run the pre-PR checks." />
 </CardGrid>
 
 ## Related
 
 - [Concepts](../concepts/): the mental model behind these tasks.
 - [Reference](../reference/): the exact contract each task touches.
-- [Keelson documentation](https://danielscholl.github.io/keelson/): the harness these guides run on.
+- Working on the rib's own source? See [CONTRIBUTING.md](https://github.com/danielscholl/keelson-rib-chamber/blob/main/CONTRIBUTING.md).

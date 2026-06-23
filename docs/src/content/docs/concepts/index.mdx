@@ -8,11 +8,9 @@ sidebar:
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Chamber is a [Keelson](https://danielscholl.github.io/keelson/) **rib**: a
-package the harness discovers at runtime and attaches through one typed
-contract. It adds a multi-agent operating layer on top of the harness, and it
-ships no hand-coded UI. For what a rib is and how the harness loads one, see the
-keelson docs; this site assumes that and spends its words on what Chamber adds.
+Chamber is a [Keelson](https://danielscholl.github.io/keelson/) rib that adds a
+multi-agent operating layer to the harness. These pages assume you know the
+harness and spend their words on what Chamber adds: Minds, rooms, and lenses.
 
 ## The mode Chamber adds
 
@@ -25,7 +23,7 @@ their own views of what they are doing.
 Rooms are emergent and non-deterministic, which is the point. They are the
 generative counterpart to workflows, not a replacement. Repeatable operations
 still belong in workflows; a room is where you want exploration, debate, or a
-second opinion. The two are complementary modes, and keelson already owns the
+second opinion. The two are complementary modes, and Keelson already owns the
 deterministic half.
 
 ## One pipeline underneath
@@ -33,9 +31,8 @@ deterministic half.
 Everything Chamber renders shares a single path. An agent turn (a room turn or a
 lens turn) emits a generic canvas **board**, the rib publishes that board
 fail-closed to a snapshot key under `rib:chamber:*`, and the bound view renders
-it live in the SPA. There is no per-view React: a board is data, and the
-harness already knows how to draw one. The board shape and the canvas renderer
-are keelson's; Chamber only produces the payloads.
+it live. A board is data, not view code, and the canvas already knows how to
+draw one, so a Mind can stand up a brand-new panel just by emitting a board.
 
 That single pipeline is what makes the hero capability honest. When an agent
 authors a lens, it emits the same kind of board the room transcript and the
@@ -61,17 +58,8 @@ briefing do, so its view renders through machinery that already exists.
   />
 </CardGrid>
 
-## Zero hand-coded UI
-
-The roster, the live room transcript, the briefing, and every agent-authored
-lens are boards published to `rib:chamber:*` keys and drawn by the canvas
-renderer. None of them is React shipped from the rib. This is the invariant the
-whole rib protects: the surface is produced by running agents and the harness
-canvas, not by view code.
-
 ## Related
 
 - [Minds and genesis](minds/): the agents Chamber authors and runs.
 - [Rooms and strategies](rooms/): how Minds take turns together.
 - [Lenses](lenses/): how an agent renders its own view.
-- [Keelson documentation](https://danielscholl.github.io/keelson/): the harness, the rib contract, and the canvas board these pages build on.

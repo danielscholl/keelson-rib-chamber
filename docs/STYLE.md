@@ -65,8 +65,10 @@ Same tiers as keelson, aimed at the concrete rib. The Chamber rib's framing:
   this way before *how*. Link out to keelson's concept pages for anything generic
   (the rib contract, workflows, surfaces); do not re-explain the harness.
 - **`guides/`** — task-oriented operator how-tos: author a mind, run a room,
-  render an agent-authored lens onto a surface, link the rib into a local keelson
-  checkout for development.
+  render an agent-authored lens onto a surface. The guides tier is user-facing;
+  contributor setup (linking the rib into a local keelson checkout, the pre-PR
+  checks) lives in `CONTRIBUTING.md`, the way keelson keeps dev setup out of its
+  guides. Don't add a "develop locally" page here.
 - **`tutorials/`** — a problem-first learning rail, each page handing off to the
   next. The capstone is the rib's own deepest task (for Chamber, authoring a new
   room strategy).
