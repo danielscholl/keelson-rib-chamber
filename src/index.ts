@@ -338,10 +338,12 @@ Use 2-4 Section kinds, in a sensible order:
   - rows:  { "kind":"rows", "title"?:string, "items":[{ "text":string, "glyph"?:Tone, "trailing"?:string }] }
   - cards: { "kind":"cards", "title"?:string, "items":[{ "title":string, "pill"?:{ "label":string, "tone"?:Tone }, "fields"?:[{ "label"?:string, "value":string|number }], "footnote"?:string }] }
 
-Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board }:
+Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, reason? }:
   - id: a short, stable, kebab-case identifier for this subject (e.g. "release-risks") — re-authoring the same subject reuses its panel.
   - board: the canvas board object above.
-Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
+  - scope (optional): the board's kind in a word or two — e.g. "status board", "timeline", "checklist".
+  - reason (optional): a short note on what this authoring changed (e.g. "added two new risks") — omit it on a first author.
+Supply scope/reason only when you can name them truthfully; never invent provenance. Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
 
 // The rib's slash commands for the harness command registry (GET /api/commands).
 // /mind opens a Mind as a seeded chat; /genesis authors a new Mind from a brief.
@@ -1690,17 +1692,22 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
 // Lens publish seam: the chamber-lens workflow's prompt node composes a canvas
 // board and calls this tool to publish it under a per-subject key. `id` routes
 // re-authoring of the same subject back to the same panel; the board is validated
-// fail-closed (the key's expectView guard) before it is broadcast.
+// fail-closed (the key's expectView guard) before it is broadcast. scope /
+// maintainingMind / reason are the index card's optional PROVENANCE — the agent
+// supplies what it can name (never fabricated); each is omitted when absent.
 const lensEmitSchema = z.object({
   id: z.string().min(1).max(64),
   board: canvasBoardViewSchema,
+  scope: z.string().min(1).max(40).optional(),
+  maintainingMind: z.string().min(1).max(40).optional(),
+  reason: z.string().min(1).max(120).optional(),
 });
 
 function makeLensTool(registry: LensRegistry): ToolDefinition {
   return {
     name: LENS_TOOL_NAME,
     description:
-      "Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Call it once per lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.",
+      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Call it once per lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.',
     inputSchema: lensEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -1718,8 +1725,13 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         emitResult(ctx, "chamber_emit_lens: id has no usable characters", true);
         return;
       }
+      const { scope, maintainingMind, reason } = parsed.data;
       try {
-        const { key } = await registry.publish(id, parsed.data.board);
+        const { key } = await registry.publish(id, parsed.data.board, {
+          scope,
+          maintainingMind,
+          reason,
+        });
         // Re-run the bound chamber-lenses collector so a newly-authored lens appears
         // in the index promptly instead of waiting on cadence (mirrors genesis
         // refreshing the roster). Fail-soft: the seam resolves on error / is absent

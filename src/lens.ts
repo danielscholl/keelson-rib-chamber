@@ -1,6 +1,6 @@
 import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
-import type { LensStore } from "./lens-store.ts";
+import type { LensProvenance, LensStore } from "./lens-store.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
 // A Mind authors a lens by publishing a board under a per-subject key
@@ -64,7 +64,13 @@ type RegisterRegion = (surfaceId: string, region: RibSurfaceRegion) => () => voi
 // id updates the existing panel in place. Holds the snapshot + region handles per id
 // so dispose() releases both (letting a re-bootstrap re-register cleanly).
 export interface LensRegistry {
-  publish(id: string, board: CanvasBoardView): Promise<{ key: string }>;
+  // `provenance` (scope / maintaining-Mind / reason) is forwarded to the store for
+  // the index card; the live key + region are board-only, so reregister omits it.
+  publish(
+    id: string,
+    board: CanvasBoardView,
+    provenance?: LensProvenance,
+  ): Promise<{ key: string }>;
   // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving, so
   // the authored updatedAt is preserved (a restart must not reset every lens's
   // freshness).
@@ -150,11 +156,12 @@ export function createLensRegistry(
   }
 
   return {
-    async publish(id, board) {
+    async publish(id, board, provenance) {
       const result = await liveRegister(id, board);
       // Persist only AFTER the live validate + publish succeed, so a board we
-      // can't render never reaches disk (fail-closed); the store stamps updatedAt.
-      await store.saveLens({ id, board });
+      // can't render never reaches disk (fail-closed); the store stamps updatedAt
+      // and carries the provenance through (absent fields stay absent).
+      await store.saveLens({ id, board, ...provenance });
       return result;
     },
     // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving:

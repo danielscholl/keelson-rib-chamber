@@ -83,33 +83,49 @@ describe("buildLensesIndexBoard cards", () => {
     expect(a1).toBe(a2 as CanvasTone);
   });
 
-  test("the only field is an `updated … ago` freshness from updatedAt — no scope/by/reason", () => {
+  test("with no provenance, the only field is an `updated … ago` freshness — no pill/by/reason", () => {
     const card = cards(buildLensesIndexBoard([lens()]))[0];
     expect(card?.fields).toHaveLength(1);
     expect(card?.fields?.[0]?.label).toBe("updated");
     expect(String(card?.fields?.[0]?.value)).toMatch(/ ago$/);
-    // Honest, thin card: emit captures only { id, board }, so these are OMITTED.
+    // Fail-soft: an emit of just { id, board } leaves provenance absent.
     const labels = card?.fields?.map((f) => f.label) ?? [];
-    expect(labels).not.toContain("scope");
     expect(labels).not.toContain("by");
-    expect(labels).not.toContain("maintaining");
     expect(card?.pill).toBeUndefined();
     expect(card?.reason).toBeUndefined();
   });
 
-  test("scope/maintainingMind/reason on the record are NOT surfaced (don't invent data)", () => {
+  test("scope → an info pill; maintainingMind → a `by` field; reason → a `changed:` reason line", () => {
     const board = buildLensesIndexBoard([
-      lens({
-        id: "loaded",
-        scope: "checklist",
-        maintainingMind: "ada",
-        reason: "changed: budget cut",
-      }),
+      lens({ id: "loaded", scope: "checklist", maintainingMind: "ada", reason: "budget cut" }),
     ]);
-    const json = JSON.stringify(board);
-    expect(json).not.toContain("checklist");
-    expect(json).not.toContain("ada");
-    expect(json).not.toContain("budget cut");
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const card = cards(board)[0];
+    expect(card?.pill).toEqual({ label: "checklist", tone: "info" });
+    const by = card?.fields?.find((f) => f.label === "by");
+    expect(by?.value).toBe("ada");
+    // "by" leads, freshness follows.
+    expect(card?.fields?.[0]?.label).toBe("by");
+    expect(card?.fields?.at(-1)?.label).toBe("updated");
+    expect(card?.reason).toEqual({ label: "changed", text: "budget cut" });
+  });
+
+  test("each provenance bit is independent — present ones render, absent ones omit", () => {
+    // Only maintainingMind present: a `by` field, but no pill, no reason.
+    const onlyBy = cards(
+      buildLensesIndexBoard([lens({ id: "by-only", maintainingMind: "ada" })]),
+    )[0];
+    expect(onlyBy?.fields?.map((f) => f.label)).toEqual(["by", "updated"]);
+    expect(onlyBy?.pill).toBeUndefined();
+    expect(onlyBy?.reason).toBeUndefined();
+    // Only scope present: a pill, but the lone field is still freshness.
+    const onlyScope = cards(
+      buildLensesIndexBoard([lens({ id: "scope-only", scope: "timeline" })]),
+    )[0];
+    expect(onlyScope?.pill).toEqual({ label: "timeline", tone: "info" });
+    expect(onlyScope?.fields).toHaveLength(1);
+    expect(onlyScope?.fields?.[0]?.label).toBe("updated");
+    expect(onlyScope?.reason).toBeUndefined();
   });
 
   test("Open is the FIRST action — non-destructive, no confirm, payload { id }", () => {

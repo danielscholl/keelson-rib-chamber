@@ -23,11 +23,12 @@ function dotFor(id: string): CanvasTone {
 }
 
 // Pure: the persisted lenses -> a canvas `board` index of LIVING views, one card
-// per lens (listLenses is already newest-first). Each card is THIN and honest: only
-// data emit actually captures — the board title and a server-stamped freshness —
-// with Open (the lens is live the whole time it exists, so its key always resolves)
-// and a destructive Retire. scope / maintaining-Mind / reason stay OMITTED: emit
-// captures only { id, board }, so surfacing them would be invented data. No lenses
+// per lens (listLenses is already newest-first). Each card carries the lens's
+// title, a server-stamped freshness, and whatever PROVENANCE the authoring emit
+// supplied (scope / maintaining-Mind / reason), plus Open (the lens is live the
+// whole time it exists, so its key always resolves) and a destructive Retire. The
+// provenance is fail-soft: a field the agent omitted is omitted from the card, so
+// an emit of just { id, board } yields the plain title + freshness card. No lenses
 // renders a single rows hint. Validated against canvasViewSchema in tests; the
 // producer never parses (validation lives at the binding edge).
 export function buildLensesIndexBoard(lenses: readonly LensRecord[]): CanvasBoardView {
@@ -49,17 +50,26 @@ export function buildLensesIndexBoard(lenses: readonly LensRecord[]): CanvasBoar
 }
 
 // One lens -> one card: a hashed identity dot, the authored board title (or the id
-// when untitled), the server-stamped freshness as the one field, and two actions —
-// Open (the primary, non-destructive verb the host renders inline; the live key
-// always resolves) and Retire (a destructive overflow action with a typed
-// irreversible confirm). The id rides both action payloads + the dot hash. scope /
-// by-Mind / reason are OMITTED — emit doesn't capture them.
+// when untitled), the emit's provenance where present (scope as a calm pill,
+// maintaining-Mind as a "by" field, the change note as the reason line), the
+// server-stamped freshness as a field, and two actions — Open (the primary,
+// non-destructive verb the host renders inline; the live key always resolves) and
+// Retire (a destructive overflow action with a typed irreversible confirm). The id
+// rides both action payloads + the dot hash. Each provenance bit is fail-soft:
+// absent on the record means absent on the card.
 function cardFor(lens: LensRecord) {
   const title = lens.board.title || lens.id;
+  // by-Mind first, then freshness — the maintainer reads ahead of "how stale".
+  const fields = [
+    ...(lens.maintainingMind ? [{ label: "by", value: lens.maintainingMind }] : []),
+    { label: "updated", value: `${relativeAgo(lens.updatedAt)} ago` },
+  ];
   return {
     title,
     dot: dotFor(lens.id),
-    fields: [{ label: "updated", value: `${relativeAgo(lens.updatedAt)} ago` }],
+    ...(lens.scope ? { pill: { label: lens.scope, tone: "info" as CanvasTone } } : {}),
+    fields,
+    ...(lens.reason ? { reason: { label: "changed", text: lens.reason } } : {}),
     actions: [
       {
         type: "lens-open",

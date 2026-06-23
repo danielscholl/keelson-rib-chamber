@@ -84,6 +84,35 @@ describe("createFileLensStore", () => {
     expect(parsed.id).toBe("x");
     expect(raw.endsWith("\n")).toBe(true);
   });
+
+  it("round-trips provenance (scope / maintainingMind / reason) alongside the board", async () => {
+    const store = createFileLensStore(root);
+    await store.saveLens({
+      id: "findings",
+      board: board("Findings"),
+      scope: "status board",
+      maintainingMind: "ada",
+      reason: "added two risks",
+    });
+    const [rec] = await listLenses(root);
+    expect(rec?.scope).toBe("status board");
+    expect(rec?.maintainingMind).toBe("ada");
+    expect(rec?.reason).toBe("added two risks");
+  });
+
+  it("omitted provenance stays absent — no undefined keys leak to disk", async () => {
+    const store = createFileLensStore(root);
+    await store.saveLens({ id: "bare", board: board("Bare") });
+    const [rec] = await listLenses(root);
+    expect(rec?.scope).toBeUndefined();
+    expect(rec?.maintainingMind).toBeUndefined();
+    expect(rec?.reason).toBeUndefined();
+    // JSON.stringify drops undefined, so the keys are truly absent on disk.
+    const raw = await readFile(join(root, "bare", "lens.json"), "utf8");
+    expect(raw).not.toContain("scope");
+    expect(raw).not.toContain("maintainingMind");
+    expect(raw).not.toContain("reason");
+  });
 });
 
 describe("deleteLens", () => {
