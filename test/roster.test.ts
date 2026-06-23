@@ -148,7 +148,7 @@ describe("cold-start author actions", () => {
     expect(data.workflow).toBe("chamber-genesis");
     expect(data.args.name).toBe("Moneypenny");
     expect(data.args.role).toBe("Chief of Staff");
-    expect(data.args.ARGUMENTS.length).toBeGreaterThan(0);
+    expect(data.args.ARGUMENTS).toBeTruthy();
   });
 
   test("author-archetype with an unknown slug fails closed", async () => {
