@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type {
+  CanvasBoardView,
   CommandCompletion,
   CommandInvokeResult,
   Rib,
@@ -21,6 +22,7 @@ import {
   z,
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
+import { buildRoomBoard } from "./boards/room.ts";
 import { capabilityVocabulary, KNOWN_CAPABILITY_SLUGS } from "./capabilities.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
@@ -58,6 +60,8 @@ const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
+// The reusable snapshot-only key the Rooms index `Open` focuses (see roomOpenAction).
+const ROOM_VIEW_KEY = "rib:chamber:room-view";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -84,6 +88,14 @@ let lensSm: SnapshotManager | undefined;
 // re-bootstrap with a different one rebinds it.
 let roomRegistry: RoomRegionRegistry | undefined;
 let roomSm: SnapshotManager | undefined;
+// A single reusable snapshot-only key the Rooms index `Open` focuses in the canvas
+// drawer. A CLOSED room has been released from the region registry (retainOnly keeps
+// only active + the most-recent), so it has no live key like a lens does — room-open
+// caches the selected room's board here and the drawer subscribes to this one key.
+// Reused across opens (bounded to one registration); reset in dispose().
+let roomViewBoard: CanvasBoardView | undefined;
+let roomViewRegistered = false;
+let roomViewSm: SnapshotManager | undefined;
 // The refresh seam, captured in registerTools (the only hook with the full ctx) so
 // onAction handlers can re-run a bound collector on demand instead of waiting on
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
@@ -766,6 +778,8 @@ const rib: Rib = {
         return roomStopAction(action);
       case "room-delete":
         return roomDeleteAction(action);
+      case "room-open":
+        return roomOpenAction(action);
       case "retire-lens":
         return retireLensAction(action);
       case "lens-open":
@@ -838,6 +852,9 @@ const rib: Rib = {
     roomRegistry?.dispose();
     roomRegistry = undefined;
     roomSm = undefined;
+    roomViewBoard = undefined;
+    roomViewRegistered = false;
+    roomViewSm = undefined;
     await driver?.dispose();
   },
 };
@@ -1334,6 +1351,55 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
+}
+
+// Lazily register the reusable room-view snapshot key against the active manager —
+// snapshot-only, with NO surface region, so opening a past room never resurrects an
+// inline panel. Registered once per manager; a re-bootstrap onto a new manager (the
+// old one disposed) re-registers against the new one. The composer throws when no
+// room is open so the validator never sees undefined — recompose only runs right
+// after room-open sets roomViewBoard.
+function ensureRoomViewRegistered(sm: SnapshotManager): void {
+  if (roomViewRegistered && roomViewSm === sm) return;
+  roomViewRegistered = true;
+  roomViewSm = sm;
+  sm.register(
+    ROOM_VIEW_KEY,
+    () => {
+      if (!roomViewBoard) throw new Error("no room is open");
+      return roomViewBoard;
+    },
+    { validate: expectView(ROOM_VIEW_KEY, "board") },
+  );
+}
+
+// Open a CLOSED room from the sessions index: load its persisted state + transcript,
+// build the room board, cache it under the reusable room-view key, and return the host
+// open-canvas effect focusing that key in the drawer. A closed room has been released
+// from the live region registry, so unlike a lens it has no standing key — this viewer
+// key is the seam. The board carries the room's Start-again / group-chat / open-floor
+// controls, so reconvene works from the drawer. Fails closed on a missing/unsafe slug,
+// an unknown room, or an absent room seam.
+async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  const sm = roomSm;
+  if (!sm) return ROOM_DISABLED;
+  let title: string;
+  try {
+    const store = createFileRoomStore(roomsDir());
+    const room = await store.loadRoom(resolved.slug);
+    if (!room) return { ok: false, error: `room '${resolved.slug}' not found` };
+    roomViewBoard = buildRoomBoard(room, await store.loadTranscript(resolved.slug));
+    title = room.name;
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+  ensureRoomViewRegistered(sm);
+  // Seed the cache so a client subscribing the instant the drawer opens reads the
+  // board, not a 204 (the GET path doesn't lazy-compose).
+  await sm.recompose(ROOM_VIEW_KEY);
+  return { ok: true, data: { effect: "open-canvas", key: ROOM_VIEW_KEY, title } };
 }
 
 // Retire a lens: delete its lenses/<id>/ record AND drop its live panel + snapshot

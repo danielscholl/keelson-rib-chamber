@@ -113,11 +113,19 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(card?.fields?.some((f) => f.label === "ended")).toBe(false);
   });
 
-  test("each card's only action is a destructive Delete with a typed irreversible confirm", () => {
+  test("each card has an inline Open then a destructive Delete with a typed irreversible confirm", () => {
     const board = buildRoomsIndexBoard([room({ slug: "room-1", name: "Q3 priorities" })]);
     const actions = cards(board)[0]?.actions ?? [];
-    expect(actions).toHaveLength(1);
-    const del = actions[0];
+    expect(actions).toHaveLength(2);
+    // Open is the primary, non-destructive verb (the host renders it inline).
+    expect(actions[0]).toEqual({
+      type: "room-open",
+      label: "Open",
+      glyph: "↗",
+      payload: { slug: "room-1" },
+    });
+    expect(actions[0]?.destructive).toBeUndefined();
+    const del = actions[1];
     expect(del).toMatchObject({
       type: "room-delete",
       label: "Delete room…",
@@ -132,11 +140,12 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(del?.confirm?.cancelLabel).toBe("Cancel");
   });
 
-  test("no Open / open-canvas action on the card (deferred — no dead button)", () => {
-    const board = buildRoomsIndexBoard([room()]);
-    const types = cards(board).flatMap((c) => c.actions?.map((a) => a.type) ?? []);
-    expect(types).not.toContain("open-canvas");
-    expect(types).not.toContain("room-open");
+  test("the card's Open is a room-open carrying the slug; the board itself names no effect", () => {
+    const board = buildRoomsIndexBoard([room({ slug: "room-xyz" })]);
+    const open = cards(board)[0]?.actions?.find((a) => a.type === "room-open");
+    expect((open?.payload as { slug: string }).slug).toBe("room-xyz");
+    // The open-canvas EFFECT is returned by onAction (server-side), never baked into
+    // the board — mirrors the lens card's lens-open.
     expect(JSON.stringify(board)).not.toContain("open-canvas");
   });
 

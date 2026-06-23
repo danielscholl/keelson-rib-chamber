@@ -164,6 +164,14 @@ describe("room adapter — fails closed without the seams", () => {
     const res = await onAction(startPayload(), makeCtx({ sm }));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("require the C1 agent-turn seam");
+    // room-open caches into the snapshot manager captured on the room path, so it
+    // fails closed identically before the driver is built.
+    const open = await onAction(
+      { type: "room-open", payload: { slug: "anything" } },
+      makeCtx({ sm }),
+    );
+    expect(open.ok).toBe(false);
+    if (!open.ok) expect(open.error).toContain("require the C1 agent-turn seam");
   });
 });
 
@@ -244,6 +252,91 @@ describe("room adapter — room-delete", () => {
 
     // Clean up: stop it so the active set drains before the next block.
     await onAction({ type: "room-stop", payload: { slug } }, makeCtx({ sm: snap.sm }));
+  });
+});
+
+describe("room adapter — room-open", () => {
+  let snap: ReturnType<typeof fakeSnapshotManager>;
+  beforeAll(() => {
+    const { run } = scriptedRunAgentTurn([{ text: "noop" }]);
+    snap = fakeSnapshotManager();
+    registerTools(makeCtx({ run, sm: snap.sm }));
+  });
+  afterAll(async () => {
+    await rib.dispose?.();
+  });
+
+  // Seed a closed room AND a transcript turn straight to disk — a valid Open target
+  // without driving a live room.
+  async function seedClosedWithTurn(slug: string, name: string): Promise<void> {
+    const store = createFileRoomStore(roomsDir());
+    await store.saveRoom({
+      slug,
+      name,
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: "done",
+      turnBudget: 2,
+      turnIndex: 2,
+      round: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } satisfies Room);
+    await store.appendTranscript(slug, {
+      messageId: "m1",
+      roomSlug: slug,
+      turnIndex: 0,
+      from: "alice",
+      role: "agent",
+      parts: [{ text: "Hello from the past." }],
+      at: "2026-01-01T00:00:01.000Z",
+    });
+  }
+
+  it("opens a closed room: returns open-canvas over the room-view key and seeds its board", async () => {
+    await seedClosedWithTurn("open-me", "Q3 priorities");
+    const res = await onAction({ type: "room-open", payload: { slug: "open-me" } }, makeCtx());
+    expect(res).toEqual({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:chamber:room-view", title: "Q3 priorities" },
+    });
+    // The viewer key was registered (snapshot-only) and recomposed, and the cached
+    // board is the room's transcript board — proven renderable by the fake's validate.
+    expect(snap.registered).toContain("rib:chamber:room-view");
+    expect(snap.recomposed).toContain("rib:chamber:room-view");
+    const opened = snap.lastBoard();
+    expect(opened?.view).toBe("board");
+    if (opened?.view === "board") expect(opened.title).toBe("Q3 priorities");
+    expect(JSON.stringify(opened)).toContain("Hello from the past.");
+  });
+
+  it("reuses the single viewer key across opens (registered once, recomposed each time)", async () => {
+    await seedClosedWithTurn("first-room", "First");
+    await seedClosedWithTurn("second-room", "Second");
+    await onAction({ type: "room-open", payload: { slug: "first-room" } }, makeCtx());
+    const before = snap.recomposed.filter((k) => k === "rib:chamber:room-view").length;
+    const res = await onAction({ type: "room-open", payload: { slug: "second-room" } }, makeCtx());
+    expect(res.ok).toBe(true);
+    // One registration total for the key, a fresh recompose per open; the cached
+    // board follows the most-recently-opened room.
+    expect(snap.registered.filter((k) => k === "rib:chamber:room-view")).toHaveLength(1);
+    expect(snap.recomposed.filter((k) => k === "rib:chamber:room-view").length).toBe(before + 1);
+    const reopened = snap.lastBoard();
+    expect(reopened?.view).toBe("board");
+    if (reopened?.view === "board") expect(reopened.title).toBe("Second");
+  });
+
+  it("fails closed on a missing slug, an unsafe slug, and an unknown room", async () => {
+    const noSlug = await onAction({ type: "room-open", payload: {} }, makeCtx());
+    expect(noSlug.ok).toBe(false);
+    if (!noSlug.ok) expect(noSlug.error).toContain("requires payload { slug }");
+
+    const unsafe = await onAction({ type: "room-open", payload: { slug: "../../etc" } }, makeCtx());
+    expect(unsafe.ok).toBe(false);
+    if (!unsafe.ok) expect(unsafe.error).toContain("unsafe room slug");
+
+    const ghost = await onAction({ type: "room-open", payload: { slug: "ghost-room" } }, makeCtx());
+    expect(ghost.ok).toBe(false);
+    if (!ghost.ok) expect(ghost.error).toContain("not found");
   });
 });
 
