@@ -17,7 +17,7 @@ the trusted SPA.
 > **concurrent**, moderated **group-chat**, unmoderated **open-floor**, and
 > cross-vendor **review**), and agent-authored lenses all work today —
 > driven from chat tools, the Chamber surface, or workflows. The contract is
-> still alpha. See [docs/PRD.md](docs/PRD.md) and
+> still alpha. See the [documentation site](https://danielscholl.github.io/keelson-rib-chamber/) and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## What it adds
@@ -78,10 +78,11 @@ Then open `http://127.0.0.1:5173` → the **Chamber** tab (or **Ribs**).
 ## Documentation
 
 The docs site lives under [`docs/`](docs/) — an Astro Starlight project mirroring
-Keelson's documentation tiers. Build it locally with `cd docs && bun install &&
-bun run build`, or read [`docs/PRD.md`](docs/PRD.md) and
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the product design and the
-Keelson seams it builds on.
+Keelson's documentation tiers, published at
+[danielscholl.github.io/keelson-rib-chamber](https://danielscholl.github.io/keelson-rib-chamber/).
+Build it locally with `cd docs && bun install && bun run build`. For the design
+rationale and the Keelson base seams it builds on, see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Acknowledgments
 
