@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.8.1...v0.8.2) (2026-06-23)
+
+
+### Documentation
+
+* build out guides, tutorials, reference, and design tiers ([#97](https://github.com/danielscholl/keelson-rib-chamber/issues/97)) ([d183a45](https://github.com/danielscholl/keelson-rib-chamber/commit/d183a450daad8abf9fff06f1ac6e2fc58fc68f31))
+
 ## [0.8.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.8.0...v0.8.1) (2026-06-23)
 
 
