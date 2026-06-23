@@ -118,6 +118,43 @@ describe("retire-lens onAction", () => {
   });
 });
 
+describe("lens-open onAction", () => {
+  // lensOpenAction is pure — it reads only the payload id and returns the host
+  // open-canvas effect over the live lens key. No store/registry, so the minimal
+  // actionCtx suffices and no boot wiring is needed.
+  it("returns the open-canvas effect over lensKey(id) so the host focuses the live lens", async () => {
+    const res = await onAction({ type: "lens-open", payload: { id: "alpha" } }, actionCtx);
+    expect(res).toEqual({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:chamber:lens:alpha", title: "alpha" },
+    });
+  });
+
+  it("canonicalizes the payload id so the card's subject maps to the live key", async () => {
+    const res = await onAction({ type: "lens-open", payload: { id: "Release Risks" } }, actionCtx);
+    expect(res).toEqual({
+      ok: true,
+      data: {
+        effect: "open-canvas",
+        key: "rib:chamber:lens:release-risks",
+        title: "release-risks",
+      },
+    });
+  });
+
+  it("fails closed on a missing payload id (no effect)", async () => {
+    const res = await onAction({ type: "lens-open", payload: {} }, actionCtx);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/requires payload/);
+  });
+
+  it("fails closed on an unsafe / unusable id (no effect)", async () => {
+    const res = await onAction({ type: "lens-open", payload: { id: "!!!" } }, actionCtx);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/unsafe lens id/);
+  });
+});
+
 describe("boot lens re-registration", () => {
   let workspace: string;
   beforeAll(async () => {

@@ -32,10 +32,11 @@ describe("rib-chamber", () => {
     expect(rib.displayName).toBe("Chamber");
   });
 
-  it("declares the roster, rooms-index and brief views; the room is a runtime per-slug region", () => {
+  it("declares the roster, rooms-index, lenses-index and brief views; the room is a runtime per-slug region", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
     expect(keys).toContain("rib:chamber:roster");
     expect(keys).toContain("rib:chamber:rooms");
+    expect(keys).toContain("rib:chamber:lenses");
     expect(keys).toContain("rib:chamber:brief");
     // No static room view: each room registers its own per-slug key + region at start.
     expect(keys).not.toContain("rib:chamber:room");
@@ -73,13 +74,18 @@ describe("rib-chamber", () => {
     expect(keys.some((k) => k.startsWith("rib:chamber:lens:"))).toBe(false);
   });
 
-  it("ships the sessions-index row bound to chamber-rooms; room + lens panels stay runtime", () => {
+  it("ships the sessions-index and lenses-index rows; room + lens panels stay runtime", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
     const cols = rows.flatMap((r) => r.columns);
-    // The one standing row is the ended-sessions index (a workflow-backed collector
-    // region); the live room and lens panels remain runtime per-slug regions.
-    const index = cols.find((c) => c.key === "rib:chamber:rooms");
-    expect(index?.workflow).toBe("chamber-rooms");
+    // The standing row pairs the ended-sessions index with the lenses index (both
+    // workflow-backed collector regions); the live room and lens panels remain
+    // runtime per-slug regions.
+    const roomsIndex = cols.find((c) => c.key === "rib:chamber:rooms");
+    expect(roomsIndex?.workflow).toBe("chamber-rooms");
+    // The lenses index is a static column bound to chamber-lenses; the per-id LENS
+    // panels (rib:chamber:lens:<id>) are the runtime regions and never static columns.
+    const lensesIndex = cols.find((c) => c.key === "rib:chamber:lenses");
+    expect(lensesIndex?.workflow).toBe("chamber-lenses");
     expect(cols.some((c) => c.key.startsWith("rib:chamber:lens:"))).toBe(false);
     // The live per-slug room panels stay runtime regions — never a static column.
     expect(cols.some((c) => c.key.startsWith("rib:chamber:room:"))).toBe(false);
@@ -89,6 +95,16 @@ describe("rib-chamber", () => {
     const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
     const rooms = wfs.find((w) => (w.definition as { name?: string }).name === "chamber-rooms");
     expect(rooms?.bindSnapshotKey).toBe("rib:chamber:rooms");
+  });
+
+  it("contributes the chamber-lenses collector workflow bound to the lenses-index key", () => {
+    const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
+    const lenses = wfs.find((w) => (w.definition as { name?: string }).name === "chamber-lenses");
+    expect(lenses?.bindSnapshotKey).toBe("rib:chamber:lenses");
+    // A deterministic bash collector (not an agent turn), guarded by an output_schema
+    // requiring a view + sections — the same shape as the rooms collector.
+    const node = (lenses?.definition as { nodes?: { bash?: string }[] }).nodes?.[0];
+    expect(node?.bash).toContain("collect-lenses.ts");
   });
 
   it("contributes the chamber-lens workflow", () => {

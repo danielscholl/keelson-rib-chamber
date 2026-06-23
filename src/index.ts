@@ -57,6 +57,7 @@ import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const ROOMS_KEY = "rib:chamber:rooms";
+const LENSES_KEY = "rib:chamber:lenses";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -225,6 +226,8 @@ function roomNote(slug: string): string {
 const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
 // The rooms-index collector, resolved the same way (see ROSTER_COLLECTOR).
 const ROOMS_COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.meta.url));
+// The lenses-index collector, resolved the same way (see ROSTER_COLLECTOR).
+const LENSES_COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", import.meta.url));
 
 // POSIX single-quote: wrap a value and escape any embedded quote so a path
 // (spaces, `$`, backticks, backslashes) reaches `bash -c` literally — never
@@ -440,6 +443,7 @@ const rib: Rib = {
   views: [
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
     { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
+    { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
@@ -449,12 +453,14 @@ const rib: Rib = {
   // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
   // The Chamber nav tab. The roster sits in the header (the Minds you genesis), the
-  // sessions index (ended rooms) is the standing row, and the brief settles into the
-  // footer. The live room panels and lenses are push-fed dynamic regions a producer
-  // registers at runtime — each ACTIVE room registers its own per-slug region (group
-  // "rooms") on start via room-region-registry, and a Mind authors lenses
-  // (chamber_emit_lens, group "lens"), all through registerRegion. The index is the
-  // history of CLOSED rooms; an active room shows as its live inline panel, not here.
+  // standing row pairs the sessions index (ended rooms) with the lenses index (the
+  // living views), and the brief settles into the footer. The live room panels and
+  // lens panels are push-fed dynamic regions a producer registers at runtime — each
+  // ACTIVE room registers its own per-slug region (group "rooms") on start via
+  // room-region-registry, and a Mind authors lenses (chamber_emit_lens, group "lens"),
+  // all through registerRegion. The rooms index is the history of CLOSED rooms (an
+  // active room shows as its live inline panel); the lenses index sits alongside each
+  // lens's own live panel, with Open focusing it.
   surfaces: [
     {
       id: CHAMBER_SURFACE_ID,
@@ -483,6 +489,16 @@ const rib: Rib = {
                 // self-populating on open, with room-delete refreshing it on demand.
                 cadenceMs: 120_000,
                 glyph: { char: "▦", tone: "brand" },
+              },
+              {
+                key: LENSES_KEY,
+                workflow: "chamber-lenses",
+                title: "Lenses",
+                // The living-views index: a cheap deterministic disk read that
+                // changes only on author/retire; the same modest cadence self-
+                // populates it on open, with author + retire refreshing it on demand.
+                cadenceMs: 120_000,
+                glyph: { char: "✦", tone: "accent" },
               },
             ],
           },
@@ -547,6 +563,30 @@ const rib: Rib = {
       },
       bindSnapshotKey: ROOMS_KEY,
       validate: expectView(ROOMS_KEY, "board"),
+    },
+    {
+      // The lenses-index producer (the chamber-rooms sibling): a deterministic
+      // collector that reads the persisted lenses from the data home and emits the
+      // living-views index (one card per lens, each with Open + Retire). An author
+      // or a retire refreshes it; each lens also renders as its own live per-id
+      // panel, so this index sits alongside those, not in place of them.
+      definition: {
+        name: "chamber-lenses",
+        description:
+          'Use when: you want a single index of the living lenses Minds have authored. Triggers: "show the lenses", "list lenses", "what lenses exist". Does: reads the persisted lenses from the Chamber data home and publishes a living-views index (one card per lens, each with Open and a Retire control) to the Chamber Lenses canvas. NOT for: authoring a lens (the chamber-lens workflow) or viewing one (each lens has its own live panel; Open focuses it).',
+        nodes: [
+          {
+            id: "collect",
+            // Out-of-process (a bash node), so bake the resolved lenses dir in —
+            // captured in registerTools, which runs before this — so both sides
+            // read one path (see the rooms collector).
+            bash: `bun ${shQuote(LENSES_COLLECTOR)} ${shQuote(lensesDir())}`,
+            output_schema: { type: "object", required: ["view", "sections"] },
+          },
+        ],
+      },
+      bindSnapshotKey: LENSES_KEY,
+      validate: expectView(LENSES_KEY, "board"),
     },
     {
       definition: {
@@ -728,6 +768,8 @@ const rib: Rib = {
         return roomDeleteAction(action);
       case "retire-lens":
         return retireLensAction(action);
+      case "lens-open":
+        return lensOpenAction(action);
       default:
         return { ok: false, error: `unknown action '${action.type}'` };
     }
@@ -1295,12 +1337,11 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
 }
 
 // Retire a lens: delete its lenses/<id>/ record AND drop its live panel + snapshot
-// key, then refresh the (81b) lenses index. Fail-closed on a missing/unsafe id
-// (canonicalLensId rejects garbage) before any FS touch; deleteLens throws on an
-// already-gone lens (surfaced here, not as success). registry.remove is a safe
-// no-op if the id isn't live. The refresh targets the chamber-lenses collector,
-// which doesn't exist until 81b — a fail-soft no-op now (the seam resolves unknown
-// names safely), included for forward-compat.
+// key, then refresh the lenses index so the card drops. Fail-closed on a
+// missing/unsafe id (canonicalLensId rejects garbage) before any FS touch;
+// deleteLens throws on an already-gone lens (surfaced here, not as success).
+// registry.remove is a safe no-op if the id isn't live. The refresh is fail-soft
+// (the seam resolves on error / is absent on an older harness).
 async function retireLensAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const raw = asNonEmptyString(payload.id);
@@ -1318,6 +1359,20 @@ async function retireLensAction(action: RibAction): Promise<RibActionResult> {
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
+}
+
+// Open a lens: return the host open-canvas effect focusing the lens's live board in
+// the drawer. A lens is live-published the whole time it exists, so its snapshot key
+// always resolves — no deferral (unlike a closed room). Non-destructive and
+// side-effect-free; fails closed on a missing/unsafe id (canonicalLensId rejects
+// garbage) so a stale/garbled payload can't open a bad key.
+function lensOpenAction(action: RibAction): RibActionResult {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const raw = asNonEmptyString(payload.id);
+  if (!raw) return { ok: false, error: "lens-open requires payload { id }" };
+  const id = canonicalLensId(raw);
+  if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(raw)}` };
+  return { ok: true, data: { effect: "open-canvas", key: lensKey(id), title: id } };
 }
 
 // Resolve the target room slug for a control. With server-assigned slugs there
@@ -1605,6 +1660,11 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
       }
       try {
         const { key } = await registry.publish(id, parsed.data.board);
+        // Re-run the bound chamber-lenses collector so a newly-authored lens appears
+        // in the index promptly instead of waiting on cadence (mirrors genesis
+        // refreshing the roster). Fail-soft: the seam resolves on error / is absent
+        // on an older harness — never throw past a successful publish.
+        await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);
@@ -1618,7 +1678,7 @@ const lensRetireSchema = z.object({ id: z.string().min(1).max(64) });
 // Lens retire seam: delete a lens's persisted record AND drop its live panel +
 // snapshot key, so an agent can retire a lens it (or another Mind) authored.
 // Mirrors the chamber-genesis refresh path: fail-closed on an unknown id
-// (deleteLens throws), then refresh the (81b) lenses index AFTER success only.
+// (deleteLens throws), then refresh the lenses index AFTER success only.
 function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefinition {
   return {
     name: "chamber_retire_lens",
