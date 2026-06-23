@@ -22,6 +22,8 @@ The same virtuous cycle the OSDU rib ran with `G0`–`G4`: each gap below is
 working the Keelson base, since these touch the shared `Rib` contract /
 `RibContext`.
 
+## Gap details
+
 ### C1 — Agent invocation from a rib *(load-bearing — **wired**, see [C1-agent-invocation.md](./C1-agent-invocation.md))*
 **Landed.** The seam types + optional `ctx.runAgentTurn?` field shipped in
 `@keelson/shared`, with a CLI-backed MVP impl (`makeRibAgentTurn`,

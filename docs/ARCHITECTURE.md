@@ -100,7 +100,7 @@ namespace).
 | Roster (header) | `rib:chamber:roster` | per-Mind retire actions + a roster builder | `board` (cards: one per Mind) |
 | Room transcript (main) | `rib:chamber:room` | the room loop (push) | `board` (rows/cards: one per turn) |
 | Briefing (footer) | `rib:chamber:brief` | the rib attention gate (push; promotes on room-end / lens-change, watermark-gated) | `board` (briefing sections) |
-| Agent-authored lens | `rib:chamber:lens:<mind>:<id>` | a Mind turn (lens write seam) | `board` (Mind's choice) |
+| Agent-authored lens | `rib:chamber:lens:<id>` | a Mind turn (lens write seam) | `board` (Mind's choice) |
 
 The **Chamber surface** itself is not a key — it is a layout descriptor binding
 these keys to page regions (header / rows / footer), exactly like the OSDU
@@ -156,7 +156,7 @@ rooted at the keelson home (the same root as `keelson.db`), named `rib-<id>`:
 <keelson-home>/rib-chamber/
   minds/<slug>/{SOUL.md, memory.md, rules.md, log.md, AGENT.md}
   rooms/<slug>/{room.json, transcript.jsonl}
-  lenses/<id>.json
+  lenses/<id>/lens.json
 ```
 
 The rib resolves this from the blessed `ctx.getDataDir()` seam on `RibContext`,
@@ -230,7 +230,7 @@ rib's `G0`–`G4`) is preserved — now resolved — in
   the room board offers **Call on \<mind\> / Stop** (active) or **Start again**
   (closed).
 - **Agent-authored lenses wired.** A Mind can author its own canvas board during a
-  turn (the lens write seam); the rib persists it (`lenses/<id>.json` via
+  turn (the lens write seam); the rib persists it (`lenses/<id>/lens.json` via
   `lens-store`) and registers a **dynamic surface region** for it through
   `ctx.registerRegion` (`C2`), so a new lens becomes a live panel after boot with
   no React shipped from the rib. A lens's freshness fingerprint feeds the briefing

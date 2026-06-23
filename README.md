@@ -47,7 +47,7 @@ keelson start
 |---|---|
 | Chamber | `0.8.x` |
 | Keelson shared contract | `@keelson/shared >= 0.12.0` (peer dependency) |
-| Tested with | Keelson `0.18.x` |
+| Tested against | Keelson `main` (CI tracks the latest harness) |
 | Status | Experimental — the `Rib` contract it builds on is still pre-1.0 |
 
 `@keelson/shared` resolves from the harness, so an up-to-date `keelson` satisfies
