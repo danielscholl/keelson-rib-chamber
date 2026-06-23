@@ -889,7 +889,9 @@ const rib: Rib = {
       // The footer was just re-seeded quiet, but a persisted briefPromoted:true would
       // make the pulse ("For you") read "1 waiting" against this quiet footer until the
       // next event. Clear the flag (preserving the acks) so the two agree from boot.
-      void clearPersistedBriefPromoted();
+      // Serialized through briefInFlight so it can't lose-update a concurrent gate
+      // promotion's watermark write — both are read-modify-writes of the same file.
+      briefInFlight = briefInFlight.then(clearPersistedBriefPromoted, clearPersistedBriefPromoted);
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —

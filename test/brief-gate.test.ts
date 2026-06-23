@@ -21,9 +21,17 @@ import { scriptedRunAgentTurn } from "./helpers/fakes.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 
-// registerTools seeds BRIEF_KEY via an unawaited sm.recompose; flush a macrotask so
-// the seed board lands before a test reads the published frame.
-const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+// registerTools seeds BRIEF_KEY + clears a stale briefPromoted via unawaited async
+// work (an sm.recompose and a serialized watermark write). Poll a condition rather
+// than a single macrotask so a slow fs write can't race a test's assertion under CI.
+async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pred()) return;
+    await new Promise<void>((r) => setTimeout(r, 10));
+  }
+  throw new Error("waitFor: condition not met within timeout");
+}
 
 // A valid briefing board an agent turn might author — the scripted reply text.
 const briefBoard: CanvasBoardView = {
@@ -123,7 +131,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const { sm, lastBoard } = fakeSnapshotManager();
     const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
     rib.registerTools?.(makeCtx(run, sm));
-    await flush();
+    await waitFor(() => lastBoard() !== undefined);
     // registerTools seeds BRIEF_KEY via sm.recompose — the cache holds the quiet board.
     const seeded = lastBoard();
     expect(seeded).toBeDefined();
@@ -146,7 +154,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const { sm } = fakeSnapshotManager();
     const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
     rib.registerTools?.(makeCtx(run, sm));
-    await flush(); // the reset is fire-and-forget
+    await waitFor(async () => (await readWatermark(home)).briefPromoted === false);
 
     const wm = await readWatermark(home);
     expect(wm.briefPromoted).toBe(false);
@@ -271,7 +279,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
       { text: JSON.stringify({ view: "table", columns: [{ key: "a" }], rows: [] }) },
     ]);
     rib.registerTools?.(makeCtx(run, sm));
-    await flush();
+    await waitFor(() => lastBoard() !== undefined);
     const seeded = lastBoard(); // the quiet seed
     expect(seeded?.header?.status?.label).toBe("Quiet");
 
