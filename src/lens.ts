@@ -1,5 +1,6 @@
 import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
+import type { LensStore } from "./lens-store.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
 // A Mind authors a lens by publishing a board under a per-subject key
@@ -64,6 +65,11 @@ type RegisterRegion = (surfaceId: string, region: RibSurfaceRegion) => () => voi
 // so dispose() releases both (letting a re-bootstrap re-register cleanly).
 export interface LensRegistry {
   publish(id: string, board: CanvasBoardView): Promise<{ key: string }>;
+  // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving, so
+  // the authored updatedAt is preserved (a restart must not reset every lens's
+  // freshness).
+  reregister(id: string, board: CanvasBoardView): Promise<{ key: string }>;
+  remove(id: string): void;
   dispose(): void;
 }
 
@@ -77,8 +83,21 @@ interface LensEntry {
 export function createLensRegistry(
   sm: SnapshotManager,
   registerRegion: RegisterRegion,
+  store: LensStore,
 ): LensRegistry {
   const entries = new Map<string, LensEntry>();
+
+  // Drop a single lens's snapshot key + surface region, a sync in-memory mirror
+  // of the per-entry handles dispose() invokes in bulk. No-op on an unknown id
+  // (matches RoomRegionRegistry.release). Durable deletion (store.deleteLens) is
+  // the caller's, so this stays a pure in-memory release.
+  function release(id: string): void {
+    const entry = entries.get(id);
+    if (!entry) return;
+    entry.unregisterRegion();
+    entry.unregisterSnapshot();
+    entries.delete(id);
+  }
 
   // Register a new subject's snapshot key and surface region. Fully synchronous
   // (no await between the entries.get miss in publish and this entries.set), so
@@ -111,28 +130,45 @@ export function createLensRegistry(
     return entry;
   }
 
+  // The live half of publish: validate the board, register the key + region if new,
+  // seed the cache, and push the board. Shared by publish (which then persists) and
+  // reregister (boot, which must NOT persist — see reregister).
+  async function liveRegister(id: string, board: CanvasBoardView): Promise<{ key: string }> {
+    // Validate the board BEFORE registering anything, so a board we can't render
+    // fails closed loudly and never leaves a dangling key or empty panel behind.
+    expectView(lensKey(id), "board")(board);
+    let entry = entries.get(id);
+    if (!entry) {
+      entry = register(id);
+      // Seed the cache so a client subscribing the instant the panel appears gets
+      // the seed board, not a 204 (the GET path doesn't lazy-compose). The entry is
+      // already mapped, so this await can't reopen the duplicate-register race.
+      await sm.recompose(entry.key);
+    }
+    await entry.publisher.publish(board);
+    return { key: entry.key };
+  }
+
   return {
     async publish(id, board) {
-      // Validate the board BEFORE registering anything, so a board we can't render
-      // fails closed loudly and never leaves a dangling key or empty panel behind.
-      expectView(lensKey(id), "board")(board);
-      let entry = entries.get(id);
-      if (!entry) {
-        entry = register(id);
-        // Seed the cache so a client subscribing the instant the panel appears gets
-        // the seed board, not a 204 (the GET path doesn't lazy-compose). The entry is
-        // already mapped, so this await can't reopen the duplicate-register race.
-        await sm.recompose(entry.key);
-      }
-      await entry.publisher.publish(board);
-      return { key: entry.key };
+      const result = await liveRegister(id, board);
+      // Persist only AFTER the live validate + publish succeed, so a board we
+      // can't render never reaches disk (fail-closed); the store stamps updatedAt.
+      await store.saveLens({ id, board });
+      return result;
+    },
+    // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving:
+    // the record is already on disk with its authored updatedAt, and re-stamping it
+    // would reset every lens's freshness on every restart. So boot goes through the
+    // live half only.
+    reregister(id, board) {
+      return liveRegister(id, board);
+    },
+    remove(id) {
+      release(id);
     },
     dispose() {
-      for (const entry of entries.values()) {
-        entry.unregisterRegion();
-        entry.unregisterSnapshot();
-      }
-      entries.clear();
+      for (const id of [...entries.keys()]) release(id);
     },
   };
 }

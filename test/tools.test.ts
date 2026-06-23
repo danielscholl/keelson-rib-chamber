@@ -11,8 +11,9 @@ import type {
 } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib, { MAX_ACTIVE_ROOMS } from "../src/index.ts";
+import { listLenses } from "../src/lens-store.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
-import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
+import { lensesDir, mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
 import { abortableRunAgentTurn } from "./helpers/fakes.ts";
 
@@ -185,16 +186,23 @@ describe("chamber room-control chat tools", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "chamber_emit_genesis",
       "chamber_emit_lens",
+      "chamber_retire_lens",
       "chamber_room_say",
       "chamber_room_start",
       "chamber_room_status",
       "chamber_room_stop",
     ]);
     // No runAgentTurn -> no driver -> no room tools, but the genesis write seam and
-    // the lens publish seam (both need only the snapshot manager) are still there.
+    // the lens publish + retire seams (which need only the snapshot manager +
+    // registerRegion) are still there.
     expect(registerTools(makeCtx(undefined, sm)).map((t) => t.name)).toEqual([
       "chamber_emit_genesis",
       "chamber_emit_lens",
+      "chamber_retire_lens",
+    ]);
+    // Without registerRegion the lens seam is withheld fail-closed — only genesis.
+    expect(registerTools(makeCtx(undefined, undefined)).map((t) => t.name)).toEqual([
+      "chamber_emit_genesis",
     ]);
   });
 
@@ -259,6 +267,80 @@ describe("chamber room-control chat tools", () => {
       t.ctx,
     );
     expect(t.errored()).toBe(true);
+  });
+
+  it("chamber_retire_lens advertises state_changing", () => {
+    expect(tool("chamber_retire_lens").state_changing).toBe(true);
+  });
+
+  it("chamber_retire_lens retires a lens: deletes from disk AND drops the live panel", async () => {
+    const emit = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "to-retire", board: { view: "board", title: "Bye", sections: [] } },
+      emit.ctx,
+    );
+    expect(emit.errored()).toBe(false);
+    expect((await listLenses(lensesDir())).some((l) => l.id === "to-retire")).toBe(true);
+
+    const t = makeToolCtx();
+    await tool("chamber_retire_lens").execute({ id: "to-retire" }, t.ctx);
+    expect(t.errored()).toBe(false);
+    const out = JSON.parse(t.out()) as { ok: boolean; key: string };
+    expect(out.ok).toBe(true);
+    expect(out.key).toBe("rib:chamber:lens:to-retire");
+    // The persisted record is gone, so a subsequent listing omits it.
+    expect((await listLenses(lensesDir())).some((l) => l.id === "to-retire")).toBe(false);
+  });
+
+  it("chamber_retire_lens canonicalizes the id ('Release Risks' -> release-risks)", async () => {
+    const emit = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "release-risks", board: { view: "board", title: "R", sections: [] } },
+      emit.ctx,
+    );
+    const t = makeToolCtx();
+    await tool("chamber_retire_lens").execute({ id: "Release Risks" }, t.ctx);
+    expect(t.errored()).toBe(false);
+    expect((await listLenses(lensesDir())).some((l) => l.id === "release-risks")).toBe(false);
+  });
+
+  it("chamber_retire_lens fails closed on an unknown/already-retired id", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_retire_lens").execute({ id: "ghost-lens" }, t.ctx);
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("ghost-lens");
+  });
+
+  it("chamber_retire_lens fails closed on an id with no usable characters", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_retire_lens").execute({ id: "!!!" }, t.ctx);
+    expect(t.errored()).toBe(true);
+  });
+
+  it("refreshes chamber-lenses after a successful retire, not when it fails", async () => {
+    const refreshed: string[] = [];
+    const refreshTools = registerTools(
+      makeCtx(undefined, sm, async (name) => {
+        refreshed.push(name);
+      }),
+    );
+    const emit = refreshTools.find((x) => x.name === "chamber_emit_lens");
+    const retire = refreshTools.find((x) => x.name === "chamber_retire_lens");
+    if (!emit || !retire) throw new Error("lens tools not found");
+    await emit.execute(
+      { id: "refresh-lens", board: { view: "board", title: "R", sections: [] } },
+      makeToolCtx().ctx,
+    );
+    refreshed.length = 0;
+    // A successful retire refreshes the index...
+    await retire.execute({ id: "refresh-lens" }, makeToolCtx().ctx);
+    expect(refreshed).toEqual(["chamber-lenses"]);
+    // ...a failed one (unknown id) does not.
+    refreshed.length = 0;
+    const failed = makeToolCtx();
+    await retire.execute({ id: "still-gone" }, failed.ctx);
+    expect(failed.errored()).toBe(true);
+    expect(refreshed).toEqual([]);
   });
 
   it("advertises start/say/stop as state-changing and start as requiring confirmation", () => {
