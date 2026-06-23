@@ -2,7 +2,7 @@
 
 *Ships the PRD's "Lens" capability without a base-contract change, by pre-declaring
 a small pool of lens snapshot keys instead of registering views dynamically.
-Companion: [PRD.md](../PRD.md) §6 (Phase 3), [phase3-rooms.md](./phase3-rooms.md) §6
+Companion: [phase3-rooms.md](./phase3-rooms.md) §6
 (why lenses are orthogonal to the room driver).*
 
 ## What a lens is
