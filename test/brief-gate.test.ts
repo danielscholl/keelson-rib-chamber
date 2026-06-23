@@ -17,7 +17,7 @@ import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 import { readWatermark, writeWatermark } from "../src/watermark-store.ts";
-import { scriptedRunAgentTurn } from "./helpers/fakes.ts";
+import { gatedRunAgentTurn, scriptedRunAgentTurn } from "./helpers/fakes.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 
@@ -71,7 +71,11 @@ function fakeSnapshotManager() {
   return { sm, published, lastBoard: () => published.at(-1) as CanvasBoardView | undefined };
 }
 
-function makeCtx(run: RunAgentTurn, sm: SnapshotManager): RibContext {
+function makeCtx(
+  run: RunAgentTurn,
+  sm: SnapshotManager,
+  refreshWorkflow?: RibContext["refreshWorkflow"],
+): RibContext {
   return {
     getExec: () => ({
       runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
@@ -80,6 +84,7 @@ function makeCtx(run: RunAgentTurn, sm: SnapshotManager): RibContext {
     getSnapshotManager: () => sm,
     registerRegion: () => () => {},
     runAgentTurn: run,
+    ...(refreshWorkflow ? { refreshWorkflow } : {}),
   } as RibContext;
 }
 
@@ -313,5 +318,48 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await expect(evaluateBriefGate()).resolves.toBeUndefined();
     // The watermark stays cold — the gate never advanced it.
     expect((await readWatermark(home)).briefPromoted).toBe(false);
+  });
+
+  test("a promote refreshes the roster pulse so its 'For you' tracks briefPromoted", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
+    const { sm } = fakeSnapshotManager();
+    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const refreshed: string[] = [];
+    rib.registerTools?.(
+      makeCtx(run, sm, async (name) => {
+        refreshed.push(name);
+      }),
+    );
+
+    await evaluateBriefGate();
+
+    expect((await readWatermark(home)).briefPromoted).toBe(true);
+    // The just-set briefPromoted must reach the roster pulse without the 120s cadence.
+    expect(refreshed).toContain("chamber-roster");
+  });
+
+  test("a gate turn that settles after dispose() does not publish or advance the watermark", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
+    const { sm, published } = fakeSnapshotManager();
+    // A turn held in flight until release(): dispose lands while it is parked, then it
+    // settles "ok" — only the disposed guard can stop the late publish/write.
+    const { run, started, release } = gatedRunAgentTurn(JSON.stringify(briefBoard));
+    rib.registerTools?.(makeCtx(run, sm));
+
+    const gate = evaluateBriefGate();
+    await started;
+    await rib.dispose?.();
+    release();
+    await gate;
+
+    // The only published board is the boot quiet seed — the post-dispose result was dropped.
+    expect(published.some((b) => (b as CanvasBoardView).title === "Chamber Briefing")).toBe(false);
+    const wm = await readWatermark(home);
+    expect(wm.briefPromoted).toBe(false);
+    expect(wm.ackedEndedRooms).toEqual([]);
   });
 });

@@ -116,6 +116,11 @@ let briefRunAgentTurn: RibContext["runAgentTurn"];
 // state — which the first turn's watermark advance has likely made quiet. The headline
 // cost-safety invariant rides this plus the hasSubstance gate.
 let briefInFlight: Promise<void> = Promise.resolve();
+// Aborts the gate's in-flight (paid) turn on dispose, mirroring the room driver's
+// per-room controllers; briefDisposed gates the post-turn publish/write so a turn
+// caught mid-shutdown drops its late result instead of writing post-teardown.
+let briefAbort = new AbortController();
+let briefDisposed = false;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -262,6 +267,9 @@ async function runBriefGate(): Promise<void> {
           briefPromoted: false,
           updatedAt: new Date().toISOString(),
         });
+        // The just-cleared briefPromoted flips the roster pulse's "For you" back to
+        // calm — refresh it so the footer and pulse agree without the 120s cadence.
+        void refreshWorkflow?.("chamber-roster")?.catch(() => {});
       } catch (e) {
         console.error(`[rib-chamber] brief quiet republish failed: ${errText(e)}`);
       }
@@ -287,6 +295,7 @@ async function runBriefGate(): Promise<void> {
       allowedTools: [],
       timeoutMs: BRIEF_TURN_TIMEOUT_MS,
       cwd: chamberDataHome(),
+      abortSignal: briefAbort.signal,
     });
     try {
       for await (const _chunk of turn.stream) {
@@ -306,6 +315,9 @@ async function runBriefGate(): Promise<void> {
     console.error(`[rib-chamber] brief turn failed: ${errText(e)}`);
     return;
   }
+  // Shutdown landed during the (paid) turn — drop the late result so nothing is
+  // published or written after the rib is disposed (mirrors room.ts runOneTurn).
+  if (briefDisposed) return;
   try {
     await publisher.publish(board);
     await writeWatermark({
@@ -314,6 +326,9 @@ async function runBriefGate(): Promise<void> {
       briefPromoted: true,
       updatedAt: new Date().toISOString(),
     });
+    // The just-set briefPromoted flips the roster pulse's "For you" to the waiting
+    // briefing — refresh it so the footer and pulse agree without the 120s cadence.
+    void refreshWorkflow?.("chamber-roster")?.catch(() => {});
   } catch (e) {
     // Published the board but the watermark write failed: the board is live, but a
     // later trigger may re-promote. Logged; never thrown into a fire-and-forget hook.
@@ -854,6 +869,10 @@ const rib: Rib = {
     // Capture the refresh seam for onAction handlers (room-delete refreshes the
     // sessions index). dispose() clears it so a re-boot recaptures the new ctx's.
     refreshWorkflow = ctx.refreshWorkflow;
+    // A (re-)boot reopens the gate after any prior dispose: clear the disposed gate
+    // and hand the gate a fresh controller so its turns aren't pre-aborted.
+    briefDisposed = false;
+    briefAbort = new AbortController();
     // The genesis write seam is always available: genesis is a workflow whose
     // prompt node calls chamber_emit_genesis, and the write needs no room driver.
     // The room-control tools (and the driver) require the C1 agent-turn + snapshot
@@ -1051,7 +1070,11 @@ const rib: Rib = {
     briefPublisher = undefined;
     briefSm = undefined;
     briefRunAgentTurn = undefined;
-    briefInFlight = Promise.resolve();
+    // Stop the gate's in-flight turn and gate its late publish/write. Leave
+    // briefInFlight intact (not reset to resolve()) so a re-bootstrap's clear still
+    // chains behind any pending watermark write rather than racing it.
+    briefDisposed = true;
+    briefAbort.abort();
     invalidateRoster();
     lensRegistry?.dispose();
     lensRegistry = undefined;
@@ -1628,6 +1651,9 @@ async function retireLensAction(action: RibAction): Promise<RibActionResult> {
     await createFileLensStore(lensesDir()).deleteLens(id);
     lensRegistry?.remove(id);
     await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+    // The retired lens drops from the roster pulse's "Live views" count too — refresh
+    // it so the count matches the just-updated index (mirrors the emit path).
+    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
     return { ok: true, data: { id, key: lensKey(id) } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2002,6 +2028,9 @@ function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefin
         await store.deleteLens(id);
         registry.remove(id);
         await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+        // The retired lens drops from the roster pulse's "Live views" count too —
+        // refresh it so the count matches the just-updated index (mirrors emit).
+        await refreshWorkflow?.("chamber-roster")?.catch(() => {});
         emitResult(ctx, JSON.stringify({ ok: true, key: lensKey(id) }));
       } catch (e) {
         emitResult(ctx, `chamber_retire_lens failed: ${errText(e)}`, true);
