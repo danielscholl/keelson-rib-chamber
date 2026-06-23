@@ -30,11 +30,14 @@ import {
   createLensRegistry,
   LENS_TOOL_NAME,
   type LensRegistry,
+  lensKey,
 } from "./lens.ts";
+import { createFileLensStore, type LensStore, listLenses } from "./lens-store.ts";
 import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
 import {
   chamberDataHome,
   isChamberDataHomeWritable,
+  lensesDir,
   mindsDir,
   roomsDir,
   setChamberDataHome,
@@ -141,6 +144,38 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
   } catch (e) {
     console.error(`[rib-chamber] room retention sweep failed: ${errText(e)}`);
   }
+}
+
+// Re-publish every persisted lens on boot so its live panel + snapshot key come
+// back after a restart (the registry is otherwise in-memory only). Fire-and-forget
+// and fail-soft per entry — listLenses already skips a corrupt record, and one lens
+// that fails to re-publish (e.g. the per-surface region ceiling) is logged and
+// skipped so it can't block boot. Re-registers via reregister (the live half of
+// publish) WITHOUT re-saving, so a lens's authored updatedAt is preserved — a
+// restart must not reset every lens's freshness.
+// In flight while boot re-registration runs. retire awaits it so a retire landing
+// mid-reconcile can't race a reregister into resurrecting the just-deleted lens (a
+// live key/panel with no on-disk record).
+let lensReconcileInFlight: Promise<void> | undefined;
+
+function reconcileLensPanels(registry: LensRegistry): void {
+  lensReconcileInFlight = (async () => {
+    let records: Awaited<ReturnType<typeof listLenses>>;
+    try {
+      records = await listLenses(lensesDir());
+    } catch (e) {
+      console.error(`[rib-chamber] lens re-registration failed: ${errText(e)}`);
+      return;
+    }
+    for (const rec of records) {
+      try {
+        await registry.reregister(rec.id, rec.board);
+      } catch (e) {
+        console.error(`[rib-chamber] lens '${rec.id}' re-registration failed: ${errText(e)}`);
+      }
+    }
+  })();
+  void lensReconcileInFlight;
 }
 
 // The room surface shows a panel for every active room plus the most-recent room's,
@@ -615,13 +650,21 @@ const rib: Rib = {
     // without an intervening dispose), rebuild against it rather than publishing through
     // the stale manager. Build the replacement BEFORE disposing the old one, so a failed
     // rebuild leaves the existing registry and lensSm consistent.
+    const lensStore = createFileLensStore(lensesDir());
     if (sm && registerRegion && sm !== lensSm) {
-      const next = createLensRegistry(sm, registerRegion);
+      const next = createLensRegistry(sm, registerRegion, lensStore);
       lensRegistry?.dispose();
       lensRegistry = next;
       lensSm = sm;
+      // Re-register every persisted lens so it survives a restart: each becomes a
+      // live region again (its snapshot key present for the index/open path).
+      // Fail-soft per entry — one bad lens can't break boot.
+      reconcileLensPanels(next);
     }
-    const lensTools = sm && registerRegion && lensRegistry ? [makeLensTool(lensRegistry)] : [];
+    const lensTools =
+      sm && registerRegion && lensRegistry
+        ? [makeLensTool(lensRegistry), makeRetireLensTool(lensStore, lensRegistry)]
+        : [];
     // The room publisher routes each room's board to a per-slug key + dynamic surface
     // region, so it requires registerRegion. Rebuilt against a new manager on a
     // re-bootstrap, reused otherwise; built before the old one is disposed so a failed
@@ -683,6 +726,8 @@ const rib: Rib = {
         return roomStopAction(action);
       case "room-delete":
         return roomDeleteAction(action);
+      case "retire-lens":
+        return retireLensAction(action);
       default:
         return { ok: false, error: `unknown action '${action.type}'` };
     }
@@ -1249,6 +1294,32 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
   }
 }
 
+// Retire a lens: delete its lenses/<id>/ record AND drop its live panel + snapshot
+// key, then refresh the (81b) lenses index. Fail-closed on a missing/unsafe id
+// (canonicalLensId rejects garbage) before any FS touch; deleteLens throws on an
+// already-gone lens (surfaced here, not as success). registry.remove is a safe
+// no-op if the id isn't live. The refresh targets the chamber-lenses collector,
+// which doesn't exist until 81b — a fail-soft no-op now (the seam resolves unknown
+// names safely), included for forward-compat.
+async function retireLensAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const raw = asNonEmptyString(payload.id);
+  if (!raw) return { ok: false, error: "retire-lens requires payload { id }" };
+  const id = canonicalLensId(raw);
+  if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(raw)}` };
+  try {
+    // Let any in-flight boot re-registration finish first, so a retire can't race a
+    // reregister into resurrecting this lens.
+    await lensReconcileInFlight?.catch(() => {});
+    await createFileLensStore(lensesDir()).deleteLens(id);
+    lensRegistry?.remove(id);
+    await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+    return { ok: true, data: { id, key: lensKey(id) } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
 // Resolve the target room slug for a control. With server-assigned slugs there
 // is no default: a payload-less call (a stale/static button or an API client
 // that forgot the slug) must fail closed rather than hit a legacy `room` dir.
@@ -1537,6 +1608,47 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+const lensRetireSchema = z.object({ id: z.string().min(1).max(64) });
+
+// Lens retire seam: delete a lens's persisted record AND drop its live panel +
+// snapshot key, so an agent can retire a lens it (or another Mind) authored.
+// Mirrors the chamber-genesis refresh path: fail-closed on an unknown id
+// (deleteLens throws), then refresh the (81b) lenses index AFTER success only.
+function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefinition {
+  return {
+    name: "chamber_retire_lens",
+    description:
+      "Retire a lens: permanently remove a lens you (or another Mind) authored — its persisted record AND its live Chamber panel. `id` is the lens's stable kebab-case identifier (the same id chamber_emit_lens used). Fails closed if no such lens exists.",
+    inputSchema: lensRetireSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = lensRetireSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_retire_lens: ${parsed.error.message}`, true);
+        return;
+      }
+      const id = canonicalLensId(parsed.data.id);
+      if (!id) {
+        emitResult(ctx, "chamber_retire_lens: id has no usable characters", true);
+        return;
+      }
+      try {
+        // Durable delete first (throws fail-closed on an unknown id), then the
+        // in-memory release, then refresh the index — all gated on the delete.
+        // Serialize with boot re-registration (see retireLensAction) so a retire
+        // can't race a reregister into resurrecting the lens.
+        await lensReconcileInFlight?.catch(() => {});
+        await store.deleteLens(id);
+        registry.remove(id);
+        await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+        emitResult(ctx, JSON.stringify({ ok: true, key: lensKey(id) }));
+      } catch (e) {
+        emitResult(ctx, `chamber_retire_lens failed: ${errText(e)}`, true);
       }
     },
   };

@@ -158,6 +158,7 @@ describe("room adapter — fails closed without the seams", () => {
     expect(registerTools(makeCtx({ sm })).map((t) => t.name)).toEqual([
       "chamber_emit_genesis",
       "chamber_emit_lens",
+      "chamber_retire_lens",
     ]);
     expect(registered.some((k) => k.startsWith("rib:chamber:room"))).toBe(false);
     const res = await onAction(startPayload(), makeCtx({ sm }));
