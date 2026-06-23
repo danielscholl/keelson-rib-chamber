@@ -7,6 +7,7 @@ sidebar:
 
 import { Image } from "astro:assets";
 import rosterShot from "../../../assets/screenshots/cosmos-roster.png";
+import lensShot from "../../../assets/screenshots/cosmos-lens.png";
 
 The keelson tutorial
 [One workflow, many models](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/)
@@ -266,9 +267,83 @@ This is the page you keep. Long after Cosmos fades, the line you carry to your o
 contract is the one the room kept proving: no solo phase was ever asked to defend
 the meaning of a field.
 
-You now hold a hardened contract. Paste it back as `plan.md` SECTION B and re-run
-the build, or run the build from both contracts the way the keelson tutorial diffs
-two models. Same pipeline, a reviewed contract instead of an unreviewed one.
+## The verdict as a living board
+
+`decisions.md` is the file you keep. Chamber can also keep it as a *view*. A Mind
+authors the verdict as a lens: a board that renders live on the Chamber surface, so
+the decision is not a flat file you remember to open but a panel that stays put,
+with its provenance built in. Author one:
+
+```sh
+keelson workflow run chamber-lens "Cosmos contract review: the five changes, each with its status and the Mind that forced it"
+```
+
+or type `/lens <subject>` in chat. One agent turn composes the board and publishes
+it:
+
+<figure>
+  <Image src={lensShot} alt="An agent-authored lens titled cosmos-contract-review, header reading 5 changed 1 carried, a stats row of 6 total decisions, 5 changed, 1 carried, and one row per decision with a status dot and the Mind that forced it: changed faultline, changed ledger, carried not fixed." />
+  <figcaption>Figure 2. The verdict, authored as a lens. One agent turn rendered the room's five changes as a live board, each row carrying the Mind that forced it, with no hand-coded UI.</figcaption>
+</figure>
+
+The board is not hand-written. A Mind composed it the same way it would compose any
+view, and the provenance the room produced (which Mind forced which change) rides
+along as a column. See [Lenses](../../concepts/lenses/) for the capability.
+
+## Rebuild and diff the apps
+
+The contract is better on paper. Now make it better in the browser. Paste the
+hardened contract back as `plan.md` SECTION B and run the build again, the way the
+keelson tutorial diffs two models, except here you are diffing a reviewed contract
+against an unreviewed one.
+
+A fresh build is non-deterministic, so the scaffolding shifts run to run. Look at the
+three places the contract actually decides; that is where the review shows up.
+
+**The daily object.** The unreviewed build rotates on UTC milliseconds; the reviewed
+build rotates on a calendar date in a configured timezone, with the tie-break the room
+demanded:
+
+```ts
+// before
+return Math.floor(Date.now() / 86400000) % 12;
+
+// after
+const dateStr = now.toLocaleDateString("en-CA", { timeZone: process.env.TIMEZONE ?? "UTC" });
+// derive the day from that calendar date, then:
+//   SELECT ... FROM objects ORDER BY sort_order, id LIMIT 1 OFFSET ?
+```
+
+**The reaction table.** The reviewed build materializes the day bucket so the database
+itself enforces one reaction per day:
+
+```diff
+- reaction_log(id, object_id, ip_hash, reacted_at)
++ reaction_log(id, object_id, ip_hash, reacted_at, utc_day)
++ UNIQUE(object_id, ip_hash, utc_day)
+```
+
+**The reaction write.** The unreviewed build checks, then inserts, then updates: three
+statements a second request can race between. The reviewed build does it in one
+transaction and lets the UNIQUE constraint settle the race:
+
+```ts
+// before: a race lives in the gaps
+const existing = db.select()...get();
+if (existing) return Response.json(..., { status: 429 });
+db.insert(reaction_log)...run();
+db.update(reactions).set({ count: count + 1 })...run();
+
+// after: one transaction; the second concurrent write is a no-op
+db.transaction(() => {
+  const r = db.prepare("INSERT OR IGNORE INTO reaction_log (...) VALUES (...)").run(...);
+  if (r.changes === 1) db.prepare("UPDATE reactions SET count = count + 1 WHERE object_id = ?").run(id);
+})();
+```
+
+The room did not write a line of that code. It changed the contract, and the contract
+changed the app: the daily object stops surprising non-UTC users, the count stops being
+spammable by a refresh loop, and the rate limit holds under a race.
 
 ## What you proved
 
