@@ -117,10 +117,11 @@ let briefRunAgentTurn: RibContext["runAgentTurn"];
 // cost-safety invariant rides this plus the hasSubstance gate.
 let briefInFlight: Promise<void> = Promise.resolve();
 // Aborts the gate's in-flight (paid) turn on dispose, mirroring the room driver's
-// per-room controllers; briefDisposed gates the post-turn publish/write so a turn
-// caught mid-shutdown drops its late result instead of writing post-teardown.
+// per-room controllers. The gate captures this signal per turn and re-checks it
+// before its publish/write, so a turn caught mid-shutdown drops its late result
+// instead of writing post-teardown. registerTools installs a fresh controller each
+// boot, so an orphaned pre-dispose turn stays aborted (gated out) even after re-boot.
 let briefAbort = new AbortController();
-let briefDisposed = false;
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -243,6 +244,10 @@ async function runBriefGate(): Promise<void> {
   if (!briefPublisher || !briefRunAgentTurn) return;
   const publisher = briefPublisher;
   const runTurn = briefRunAgentTurn;
+  // Capture this boot's abort signal up front: a dispose during the turn aborts it,
+  // and re-checking it (not the live briefAbort) before publish/write gates out a
+  // turn whose rib was torn down — including one orphaned across a later re-boot.
+  const { signal } = briefAbort;
 
   let state: Awaited<ReturnType<typeof buildChamberState>>;
   let watermark: Awaited<ReturnType<typeof readWatermark>>;
@@ -295,7 +300,7 @@ async function runBriefGate(): Promise<void> {
       allowedTools: [],
       timeoutMs: BRIEF_TURN_TIMEOUT_MS,
       cwd: chamberDataHome(),
-      abortSignal: briefAbort.signal,
+      abortSignal: signal,
     });
     try {
       for await (const _chunk of turn.stream) {
@@ -317,7 +322,7 @@ async function runBriefGate(): Promise<void> {
   }
   // Shutdown landed during the (paid) turn — drop the late result so nothing is
   // published or written after the rib is disposed (mirrors room.ts runOneTurn).
-  if (briefDisposed) return;
+  if (signal.aborted) return;
   try {
     await publisher.publish(board);
     await writeWatermark({
@@ -869,9 +874,9 @@ const rib: Rib = {
     // Capture the refresh seam for onAction handlers (room-delete refreshes the
     // sessions index). dispose() clears it so a re-boot recaptures the new ctx's.
     refreshWorkflow = ctx.refreshWorkflow;
-    // A (re-)boot reopens the gate after any prior dispose: clear the disposed gate
-    // and hand the gate a fresh controller so its turns aren't pre-aborted.
-    briefDisposed = false;
+    // A (re-)boot reopens the gate after any prior dispose: hand the gate a fresh
+    // controller so its turns aren't pre-aborted (the prior, aborted one stays bound
+    // to any orphaned in-flight turn, keeping that turn gated out).
     briefAbort = new AbortController();
     // The genesis write seam is always available: genesis is a workflow whose
     // prompt node calls chamber_emit_genesis, and the write needs no room driver.
@@ -1070,11 +1075,12 @@ const rib: Rib = {
     briefPublisher = undefined;
     briefSm = undefined;
     briefRunAgentTurn = undefined;
-    // Stop the gate's in-flight turn and gate its late publish/write. Leave
-    // briefInFlight intact (not reset to resolve()) so a re-bootstrap's clear still
-    // chains behind any pending watermark write rather than racing it.
-    briefDisposed = true;
+    // Abort the gate's in-flight (paid) turn; its post-turn signal re-check then drops
+    // any late publish/write. Reset the serialization chain so a re-bootstrap (or the
+    // next test) starts fresh — an aborted turn that ignores the signal must not leave
+    // briefInFlight parked on a never-settling promise (that would wedge a later boot).
     briefAbort.abort();
+    briefInFlight = Promise.resolve();
     invalidateRoster();
     lensRegistry?.dispose();
     lensRegistry = undefined;

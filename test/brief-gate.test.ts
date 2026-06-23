@@ -362,4 +362,36 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(wm.briefPromoted).toBe(false);
     expect(wm.ackedEndedRooms).toEqual([]);
   });
+
+  test("a parked gate turn across dispose does not wedge a later boot's gate (no leaked chain)", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
+    // First boot: a turn held in flight and NEVER released (and the gated fake ignores
+    // the abort signal) — the worst case for the serialization chain.
+    const parked = gatedRunAgentTurn(JSON.stringify(briefBoard));
+    rib.registerTools?.(makeCtx(parked.run, fakeSnapshotManager().sm));
+    void evaluateBriefGate().catch(() => {});
+    await parked.started;
+    // dispose must detach the parked turn from briefInFlight (resetting the chain), or
+    // the next boot's gate would serialize behind a promise that never settles. The
+    // held turn is deliberately left UNreleased here — mirroring the real leak where a
+    // turn's resolver is lost — so only the dispose-time chain reset can unwedge boot 2.
+    await rib.dispose?.();
+
+    // Fresh boot with a settled turn: the gate must run promptly, proving the chain was
+    // not left parked. A 1s budget — a leaked chain would never resolve.
+    const { sm } = fakeSnapshotManager();
+    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    rib.registerTools?.(makeCtx(run, sm));
+    await Promise.race([
+      evaluateBriefGate(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("gate wedged")), 1000)),
+    ]);
+    expect(requests).toHaveLength(1);
+    expect((await readWatermark(home)).briefPromoted).toBe(true);
+    // Release the still-parked first turn now (cleanup): its captured signal is aborted,
+    // so its post-turn re-check drops the late write — nothing is left unsettled.
+    parked.release();
+  });
 });
