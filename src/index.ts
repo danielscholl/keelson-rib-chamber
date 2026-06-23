@@ -64,8 +64,13 @@ const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
-// The reusable snapshot-only key the Rooms index `Open` focuses (see roomOpenAction).
-const ROOM_VIEW_KEY = "rib:chamber:room-view";
+// The snapshot-only key family the Rooms index `Open` focuses (see roomOpenAction).
+// Per-slug so two clients opening two different closed rooms get independent boards
+// in their drawers instead of colliding on one shared key (active rooms / lenses use
+// the same per-id isolation).
+function roomViewKey(slug: string): string {
+  return `rib:chamber:room-view:${slug}`;
+}
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -93,11 +98,14 @@ let lensSm: SnapshotManager | undefined;
 let roomRegistry: RoomRegionRegistry | undefined;
 let roomSm: SnapshotManager | undefined;
 // A closed room is released from the region registry (retainOnly keeps only active +
-// the most-recent), so unlike a lens it has no standing key. room-open publishes the
-// opened room's board to one reusable snapshot-only key the drawer subscribes to.
-let roomViewPublisher: { publish(view: CanvasView): Promise<void> } | undefined;
+// the most-recent), so unlike a lens it has no standing key. room-open publishes each
+// opened room's board to its own snapshot-only key (roomViewKey(slug)) the drawer
+// subscribes to, registered lazily and torn down in dispose().
 let roomViewSm: SnapshotManager | undefined;
-let roomViewUnregister: (() => void) | undefined;
+const roomViewEntries = new Map<
+  string,
+  { publisher: { publish(view: CanvasView): Promise<void> }; unregister: () => void }
+>();
 // The refresh seam, captured in registerTools (the only hook with the full ctx) so
 // onAction handlers can re-run a bound collector on demand instead of waiting on
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
@@ -1088,9 +1096,7 @@ const rib: Rib = {
     roomRegistry?.dispose();
     roomRegistry = undefined;
     roomSm = undefined;
-    roomViewUnregister?.();
-    roomViewUnregister = undefined;
-    roomViewPublisher = undefined;
+    releaseRoomViews();
     roomViewSm = undefined;
     await driver?.dispose();
   },
@@ -1599,28 +1605,41 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
   }
 }
 
-// Register the reusable room-view key against the active manager via the same
-// coalescing publisher the lens/room registries use, capturing the unregister handle
-// so dispose() releases it and a rebind onto a new manager doesn't leak the old one.
-function ensureRoomViewPublisher(sm: SnapshotManager): {
-  publish(view: CanvasView): Promise<void>;
-} {
-  if (roomViewSm === sm && roomViewPublisher) return roomViewPublisher;
-  roomViewUnregister?.();
-  const { publisher, latest } = createCoalescingPublisher(() => sm.recompose(ROOM_VIEW_KEY));
-  roomViewUnregister = sm.register(ROOM_VIEW_KEY, latest, {
-    validate: expectView(ROOM_VIEW_KEY, "board"),
-  });
-  roomViewSm = sm;
-  roomViewPublisher = publisher;
+// Unregister every per-slug room-view snapshot key so dispose() (and a rebind onto a
+// new manager) releases them rather than leaking registrations across boots/tests.
+function releaseRoomViews(): void {
+  for (const entry of roomViewEntries.values()) entry.unregister();
+  roomViewEntries.clear();
+}
+
+// Return the per-slug room-view publisher for the active manager, registering its key
+// lazily on first open via the same coalescing publisher the lens/room registries use.
+// A re-bootstrap onto a different manager releases the stale keys first so we don't leak
+// them or publish through a dead manager. The get-miss → register → set is synchronous,
+// so a second open of the same slug finds the entry rather than tripping sm.register's
+// duplicate-key guard.
+function ensureRoomViewPublisher(
+  sm: SnapshotManager,
+  slug: string,
+): { publish(view: CanvasView): Promise<void> } {
+  if (roomViewSm !== sm) {
+    releaseRoomViews();
+    roomViewSm = sm;
+  }
+  const existing = roomViewEntries.get(slug);
+  if (existing) return existing.publisher;
+  const key = roomViewKey(slug);
+  const { publisher, latest } = createCoalescingPublisher(() => sm.recompose(key));
+  const unregister = sm.register(key, latest, { validate: expectView(key, "board") });
+  roomViewEntries.set(slug, { publisher, unregister });
   return publisher;
 }
 
 // Open a closed room from the sessions index: rebuild its board from the persisted
-// transcript, publish it to the reusable room-view key, and return the host open-canvas
-// effect. The board carries the room's Start-again / group-chat / open-floor controls,
-// so a past session can be relaunched from the drawer. Fails closed on a missing/unsafe
-// slug, an unknown room, or an absent room seam.
+// transcript, publish it to the room's own room-view key, and return the host
+// open-canvas effect. The board carries the room's Start-again / group-chat / open-floor
+// controls, so a past session can be relaunched from the drawer. Fails closed on a
+// missing/unsafe slug, an unknown room, or an absent room seam.
 async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
   const resolved = requireRoomSlug(action);
   if ("error" in resolved) return resolved.error;
@@ -1631,8 +1650,11 @@ async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
     const room = await store.loadRoom(resolved.slug);
     if (!room) return { ok: false, error: `room '${resolved.slug}' not found` };
     const board = buildRoomBoard(room, await store.loadTranscript(resolved.slug));
-    await ensureRoomViewPublisher(sm).publish(board);
-    return { ok: true, data: { effect: "open-canvas", key: ROOM_VIEW_KEY, title: room.name } };
+    await ensureRoomViewPublisher(sm, resolved.slug).publish(board);
+    return {
+      ok: true,
+      data: { effect: "open-canvas", key: roomViewKey(resolved.slug), title: room.name },
+    };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
