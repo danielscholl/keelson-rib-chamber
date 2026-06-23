@@ -1,4 +1,13 @@
-import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
 import type { RoomStore } from "./ports.ts";
@@ -79,7 +88,75 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
       }
       return entries;
     },
+
+    async deleteRoom(slug) {
+      assertSafeSlug(slug);
+      const dir = roomDir(slug);
+      // Fail closed on a missing room (mirrors retireMind): deleting an already-gone
+      // room surfaces not-found rather than reporting success. Only ENOENT/ENOTDIR
+      // map to not-found — a permission/I/O error must surface, not masquerade as
+      // "gone" — and the path must be a directory (never rm a stray file at the slug).
+      let st: Awaited<ReturnType<typeof stat>>;
+      try {
+        st = await stat(dir);
+      } catch (e) {
+        if (isNodeError(e) && (e.code === "ENOENT" || e.code === "ENOTDIR")) {
+          throw new Error(`room '${slug}' not found`);
+        }
+        throw e;
+      }
+      if (!st.isDirectory()) throw new Error(`room '${slug}' not found`);
+      // Authoritative active-guard: re-read the on-disk status (the driver rewrites
+      // room.json every turn) and refuse a live room, so a delete can't race the
+      // driver even when the in-memory activeRooms set is stale (a restart/crash or
+      // a second process) — mirrors sweepClosedRooms's pre-rm re-read. A corrupt /
+      // unparseable room.json stays deletable (cleanup).
+      const current = await parseRoomJson(roomFile(slug));
+      if (current?.status === "active") {
+        throw new Error(`room '${slug}' is active — stop it before deleting it`);
+      }
+      await rm(dir, { recursive: true, force: true });
+    },
   };
+}
+
+// Enumerate every persisted room (active and closed) as the room-facing shape,
+// newest-first by createdAt. The same tolerant walk sweepClosedRooms does, but it
+// returns the rooms instead of pruning and keeps active ones — the index
+// collector's source. Degrades per entry (skips non-dirs / unsafe / mismatched /
+// unparseable) and ENOENT → [], so one bad dir can't blank the index.
+export async function listRooms(roomsRoot: string): Promise<Room[]> {
+  let entries: { name: string; isDirectory(): boolean }[];
+  try {
+    entries = await readdir(roomsRoot, { withFileTypes: true });
+  } catch (e) {
+    if (isNodeError(e) && e.code === "ENOENT") return [];
+    throw e;
+  }
+
+  const rooms: { room: Room; createdAtMs: number }[] = [];
+  for (const entry of entries) {
+    const slug = entry.name;
+    if (!entry.isDirectory()) continue;
+    try {
+      assertSafeSlug(slug);
+    } catch {
+      continue;
+    }
+    const room = await parseRoomJson(join(roomsRoot, slug, "room.json"));
+    const createdAtMs = room ? Date.parse(room.createdAt) : Number.NaN;
+    if (!room || room.slug !== slug || !Number.isFinite(createdAtMs)) continue;
+    rooms.push({ room, createdAtMs });
+  }
+
+  rooms.sort(
+    (a, b) =>
+      b.createdAtMs - a.createdAtMs ||
+      // Tie on createdAt (same-millisecond mints): newer slug first, the same
+      // byte-order tiebreak sweepClosedRooms uses (deterministic across locales).
+      (a.room.slug < b.room.slug ? 1 : a.room.slug > b.room.slug ? -1 : 0),
+  );
+  return rooms.map((r) => r.room);
 }
 
 export async function sweepClosedRooms(

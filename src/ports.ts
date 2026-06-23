@@ -13,6 +13,10 @@ export interface RoomStore {
   saveRoom(room: Room): Promise<void>;
   appendTranscript(slug: MindSlug, entry: TurnEntry): Promise<void>;
   loadTranscript(slug: MindSlug): Promise<readonly TurnEntry[]>;
+  // Remove a room's directory (room.json + transcript). Fails closed: rejects an
+  // unsafe slug and throws when the room is absent (mirrors retireMind), so a
+  // delete of an already-gone room surfaces rather than claiming success.
+  deleteRoom(slug: MindSlug): Promise<void>;
 }
 
 // Publish seam. The driver composes the finished board and hands it over with the

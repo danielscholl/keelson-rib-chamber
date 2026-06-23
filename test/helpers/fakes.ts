@@ -6,6 +6,7 @@ import type {
   RibAgentTurnResult,
   RunAgentTurn,
 } from "../../src/agent-turn.ts";
+import { assertSafeSlug } from "../../src/genesis.ts";
 import type { RoomPublisher, RoomStore } from "../../src/ports.ts";
 import type { MindSlug, Room, TurnEntry } from "../../src/types.ts";
 
@@ -29,6 +30,14 @@ export function makeFakeStore() {
     },
     async loadTranscript(slug) {
       return (transcripts.get(slug) ?? []).map((e) => ({ ...e }));
+    },
+    async deleteRoom(slug) {
+      // Reject an unsafe slug first (the FS boundary in the real store), then fail
+      // closed on a missing room — keeps the fake faithful to createFileRoomStore.
+      assertSafeSlug(slug);
+      if (!rooms.has(slug)) throw new Error(`room '${slug}' not found`);
+      rooms.delete(slug);
+      transcripts.delete(slug);
     },
   };
   return { store, rooms, transcripts };

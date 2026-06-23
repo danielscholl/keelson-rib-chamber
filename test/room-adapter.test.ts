@@ -15,7 +15,7 @@ import { scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
-import { scriptedRunAgentTurn } from "./helpers/fakes.ts";
+import { gatedRunAgentTurn, scriptedRunAgentTurn } from "./helpers/fakes.ts";
 
 const onAction = rib.onAction;
 const registerTools = rib.registerTools;
@@ -162,6 +162,86 @@ describe("room adapter — fails closed without the seams", () => {
     const res = await onAction(startPayload(), makeCtx({ sm }));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("require the C1 agent-turn seam");
+  });
+});
+
+describe("room adapter — room-delete", () => {
+  // A gated driver so a started room stays "active" (its first turn never settles)
+  // — the deterministic way to exercise the active-room delete guard.
+  let snap: ReturnType<typeof fakeSnapshotManager>;
+  let gate: ReturnType<typeof gatedRunAgentTurn>;
+  beforeAll(() => {
+    gate = gatedRunAgentTurn("held");
+    snap = fakeSnapshotManager();
+    registerTools(makeCtx({ run: gate.run, sm: snap.sm }));
+  });
+  afterAll(async () => {
+    // Let any in-flight gated turn settle, then reset the shared module state the
+    // later "live room" block relies on (it registers a fresh scripted driver).
+    gate.release();
+    await rib.dispose?.();
+  });
+
+  // Seed a closed room straight to disk: it is never in the active set, so it is a
+  // valid delete target without driving a live room.
+  async function seedClosed(slug: string, status: "done" | "stopped" = "done"): Promise<void> {
+    const store = createFileRoomStore(roomsDir());
+    await store.saveRoom({
+      slug,
+      name: "Closed",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status,
+      turnBudget: 4,
+      turnIndex: 4,
+      round: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } satisfies Room);
+  }
+
+  it("deletes a closed room and returns { ok, data:{ slug } }; it no longer loads", async () => {
+    const store = createFileRoomStore(roomsDir());
+    await seedClosed("del-me");
+    expect(await store.loadRoom("del-me")).toBeDefined();
+    const res = await onAction({ type: "room-delete", payload: { slug: "del-me" } }, makeCtx());
+    expect(res).toEqual({ ok: true, data: { slug: "del-me" } });
+    expect(await store.loadRoom("del-me")).toBeUndefined();
+  });
+
+  it("fails closed with no slug (requires payload { slug })", async () => {
+    const res = await onAction({ type: "room-delete", payload: {} }, makeCtx());
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("requires payload { slug }");
+  });
+
+  it("fails closed on an unsafe / traversal slug (before any FS touch)", async () => {
+    const res = await onAction({ type: "room-delete", payload: { slug: "../../etc" } }, makeCtx());
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("unsafe room slug");
+  });
+
+  it("fails closed on a missing / already-deleted room (surfaces not-found, not success)", async () => {
+    const res = await onAction({ type: "room-delete", payload: { slug: "ghost-room" } }, makeCtx());
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("not found");
+  });
+
+  it("rejects deleting an ACTIVE room and leaves it intact", async () => {
+    const store = createFileRoomStore(roomsDir());
+    // Start a real room; the gated turn keeps it "active" on disk.
+    const res = await onAction(startPayload({ turnBudget: 4 }), makeCtx({ sm: snap.sm }));
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "active");
+
+    const del = await onAction({ type: "room-delete", payload: { slug } }, makeCtx());
+    expect(del.ok).toBe(false);
+    if (!del.ok) expect(del.error).toBe("stop the room before deleting it");
+    // The live room (and its dir) is untouched — never deleted from under the driver.
+    expect((await store.loadRoom(slug))?.status).toBe("active");
+
+    // Clean up: stop it so the active set drains before the next block.
+    await onAction({ type: "room-stop", payload: { slug } }, makeCtx({ sm: snap.sm }));
   });
 });
 

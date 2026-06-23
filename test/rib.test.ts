@@ -32,9 +32,10 @@ describe("rib-chamber", () => {
     expect(rib.displayName).toBe("Chamber");
   });
 
-  it("declares the roster and brief views; the room is a runtime per-slug region", () => {
+  it("declares the roster, rooms-index and brief views; the room is a runtime per-slug region", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
     expect(keys).toContain("rib:chamber:roster");
+    expect(keys).toContain("rib:chamber:rooms");
     expect(keys).toContain("rib:chamber:brief");
     // No static room view: each room registers its own per-slug key + region at start.
     expect(keys).not.toContain("rib:chamber:room");
@@ -72,9 +73,22 @@ describe("rib-chamber", () => {
     expect(keys.some((k) => k.startsWith("rib:chamber:lens:"))).toBe(false);
   });
 
-  it("ships no static rows — room and lens panels are both runtime regions", () => {
+  it("ships the sessions-index row bound to chamber-rooms; room + lens panels stay runtime", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
-    expect(rows).toHaveLength(0);
+    const cols = rows.flatMap((r) => r.columns);
+    // The one standing row is the ended-sessions index (a workflow-backed collector
+    // region); the live room and lens panels remain runtime per-slug regions.
+    const index = cols.find((c) => c.key === "rib:chamber:rooms");
+    expect(index?.workflow).toBe("chamber-rooms");
+    expect(cols.some((c) => c.key.startsWith("rib:chamber:lens:"))).toBe(false);
+    // The live per-slug room panels stay runtime regions — never a static column.
+    expect(cols.some((c) => c.key.startsWith("rib:chamber:room:"))).toBe(false);
+  });
+
+  it("contributes the chamber-rooms collector workflow bound to the rooms-index key", () => {
+    const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
+    const rooms = wfs.find((w) => (w.definition as { name?: string }).name === "chamber-rooms");
+    expect(rooms?.bindSnapshotKey).toBe("rib:chamber:rooms");
   });
 
   it("contributes the chamber-lens workflow", () => {
