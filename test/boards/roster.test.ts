@@ -289,3 +289,66 @@ describe("buildRosterBoard convene composer", () => {
     expect(actionItems(buildRosterBoard(two)).some((i) => i.type === "room-start")).toBe(false);
   });
 });
+
+describe("buildRosterBoard pulse (stats atop the roster)", () => {
+  const two = [mind({ slug: "a", name: "Ada" }), mind({ slug: "b", name: "Bo" })];
+  const pulse = (over: Partial<Parameters<typeof buildRosterBoard>[2] & object> = {}) => ({
+    forYou: false,
+    activeRooms: 0,
+    liveLenses: 0,
+    minds: 2,
+    ...over,
+  });
+
+  function statsItems(board: ReturnType<typeof buildRosterBoard>) {
+    const first = board.sections[0];
+    if (first?.kind !== "stats") throw new Error("sections[0] is not a stats section");
+    return first.items;
+  }
+
+  test("omitting pulse keeps the historical no-stats shape", () => {
+    const board = buildRosterBoard(two);
+    expect(board.sections[0]?.kind).not.toBe("stats");
+    expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
+  });
+
+  test("with pulse, sections[0] is a stats section carrying the four labels", () => {
+    const board = buildRosterBoard(two, new Set(), pulse({ activeRooms: 1, liveLenses: 3 }));
+    expect(board.sections[0]?.kind).toBe("stats");
+    expect(statsItems(board).map((i) => i.label)).toEqual([
+      "For you",
+      "Active work",
+      "Live views",
+      "Team",
+    ]);
+    const byLabel = new Map(statsItems(board).map((i) => [i.label, i.value]));
+    expect(byLabel.get("Active work")).toBe(1);
+    expect(byLabel.get("Live views")).toBe(3);
+    expect(byLabel.get("Team")).toBe(2);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("forYou toggles the 'For you' value + tone (quiet when nothing waits)", () => {
+    const waiting = statsItems(buildRosterBoard(two, new Set(), pulse({ forYou: true })));
+    const forYouWaiting = waiting.find((i) => i.label === "For you");
+    expect(forYouWaiting?.value).toBe("1 waiting");
+    expect(forYouWaiting?.tone).toBe("brand");
+
+    const quiet = statsItems(buildRosterBoard(two, new Set(), pulse({ forYou: false })));
+    const forYouQuiet = quiet.find((i) => i.label === "For you");
+    expect(forYouQuiet?.value).toBe("—");
+    expect(forYouQuiet?.tone).toBe("neutral");
+  });
+
+  test("a zero count tones neutral so an idle Chamber stays calm", () => {
+    const items = statsItems(buildRosterBoard(two, new Set(), pulse()));
+    expect(items.find((i) => i.label === "Active work")?.tone).toBe("neutral");
+    expect(items.find((i) => i.label === "Live views")?.tone).toBe("neutral");
+  });
+
+  test("the pulse leads even the cold-start board and stays valid", () => {
+    const board = buildRosterBoard([], new Set(), pulse({ minds: 0 }));
+    expect(board.sections[0]?.kind).toBe("stats");
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+});

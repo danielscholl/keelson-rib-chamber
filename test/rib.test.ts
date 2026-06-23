@@ -42,6 +42,28 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:room");
   });
 
+  it("declares the surface subtitle and collapsible index columns (#284-p2 chrome)", () => {
+    const surface = rib.surfaces?.[0];
+    expect(surface?.subtitle).toBe(
+      "Author Minds · convene Rooms · keep Lenses · read the Briefing",
+    );
+    const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns);
+    expect(cols.find((c) => c.key === "rib:chamber:rooms")?.collapsible).toBe(true);
+    expect(cols.find((c) => c.key === "rib:chamber:lenses")?.collapsible).toBe(true);
+  });
+
+  it("the Briefing footer is rib-driven — keyed but with no workflow binding", () => {
+    // The brief moved off a contributed workflow onto the rib-owned attention gate,
+    // so the footer keeps the key but binds no workflow (none exists to refresh).
+    const footer = rib.surfaces?.[0]?.layout.footer;
+    expect(footer?.key).toBe("rib:chamber:brief");
+    expect(footer?.workflow).toBeUndefined();
+    const names = (rib.contributeWorkflows?.({} as RibContext) ?? []).map(
+      (w) => (w.definition as { name?: string }).name,
+    );
+    expect(names).not.toContain("chamber-brief");
+  });
+
   it("declares no static actions — every control is a workflow or a board action", () => {
     // A payload-less static actions[] button can't carry input, so genesis is the
     // chamber-genesis workflow and retire + the room controls are payload-carrying

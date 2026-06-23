@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type {
+  CanvasBoardView,
   CanvasView,
   CommandCompletion,
   CommandInvokeResult,
@@ -24,6 +25,7 @@ import {
 import { listAgents, resolveAgent } from "./agents.ts";
 import { buildRoomBoard } from "./boards/room.ts";
 import { capabilityVocabulary, KNOWN_CAPABILITY_SLUGS } from "./capabilities.ts";
+import { buildChamberState, type ChamberDelta, diffAgainstWatermark } from "./chamber-state.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import {
@@ -50,12 +52,13 @@ import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
 import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "./room-draft.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
-import { createFileRoomStore, deriveRoomName, sweepClosedRooms } from "./room-store.ts";
+import { createFileRoomStore, deriveRoomName, listRooms, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import { GENESIS_STARTERS } from "./starters.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
 import type { Mind, RoomConfig, RoomStrategyName } from "./types.ts";
+import { readWatermark, writeWatermark } from "./watermark-store.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
@@ -100,6 +103,19 @@ let roomViewUnregister: (() => void) | undefined;
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
 // fail-soft: undefined on an older harness, where the index falls back to cadence.
 let refreshWorkflow: RibContext["refreshWorkflow"];
+// The briefing gate's seams + state, captured in registerTools (the only hook with
+// the full ctx). The publisher routes the brief board to BRIEF_KEY; briefRunAgentTurn
+// is the (paid) turn the gate fires ONLY when something new happened. Both undefined
+// when a seam is absent — the gate then keeps a quiet board and runs no turn.
+let briefPublisher: { publish(board: CanvasBoardView): Promise<void> } | undefined;
+let briefUnregister: (() => void) | undefined;
+let briefSm: SnapshotManager | undefined;
+let briefRunAgentTurn: RibContext["runAgentTurn"];
+// Serializes brief evaluations so concurrent triggers (a room ending as a lens lands)
+// fire at most ONE agent turn: the second await-chains behind the first, then re-reads
+// state — which the first turn's watermark advance has likely made quiet. The headline
+// cost-safety invariant rides this plus the hasSubstance gate.
+let briefInFlight: Promise<void> = Promise.resolve();
 // Slugs whose auto-advance loop is running, so a re-start doesn't double-drive.
 const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
@@ -200,6 +216,169 @@ function reconcileRoomPanels(): void {
   roomRegistry?.retainOnly(keep);
 }
 
+// The attention gate. A room ending or a lens changing fires this; it is the SOLE
+// path that may run the (paid) briefing turn, and it runs one ONLY when the live
+// ChamberState shows substance the watermark hasn't seen. Every call chains onto
+// briefInFlight, so concurrent triggers collapse: the second runs after the first
+// has advanced the watermark and therefore re-reads as quiet (no second turn). The
+// returned promise is for tests; hooks fire-and-forget it. Never throws — a failed
+// turn keeps the prior board and leaves the watermark un-advanced. Exported so the
+// brief-gate test can drive it directly (asserting the no-turn-when-quiet invariant).
+export function evaluateBriefGate(): Promise<void> {
+  const next = briefInFlight.then(runBriefGate, runBriefGate);
+  // Keep the chain alive even if this run rejected, so a later trigger still serializes
+  // behind it rather than racing a half-finished evaluation.
+  briefInFlight = next.catch(() => {});
+  return next;
+}
+
+async function runBriefGate(): Promise<void> {
+  // Seam absent (older harness, or a ctx without the snapshot/turn seams): the footer
+  // keeps whatever board it has (the boot-seeded quiet one) and no turn ever runs.
+  if (!briefPublisher || !briefRunAgentTurn) return;
+  const publisher = briefPublisher;
+  const runTurn = briefRunAgentTurn;
+
+  let state: Awaited<ReturnType<typeof buildChamberState>>;
+  let watermark: Awaited<ReturnType<typeof readWatermark>>;
+  try {
+    state = await buildChamberState();
+    watermark = await readWatermark();
+  } catch (e) {
+    console.error(`[rib-chamber] brief gate state read failed: ${errText(e)}`);
+    return;
+  }
+  const delta = diffAgainstWatermark(state, watermark);
+
+  // Quiet: nothing new since the watermark. If the footer was showing a promoted
+  // brief, lapse it back to the calm board and clear the flag; otherwise this is an
+  // idempotent no-op — no publish, no write, and (the headline invariant) NO turn.
+  if (!delta.hasSubstance) {
+    if (watermark.briefPromoted) {
+      try {
+        await publisher.publish(quietBriefBoard());
+        await writeWatermark({
+          ...watermark,
+          briefPromoted: false,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.error(`[rib-chamber] brief quiet republish failed: ${errText(e)}`);
+      }
+    }
+    return;
+  }
+
+  // Promote: something new happened. Compose a delta-aware prompt (the brief core
+  // plus a "what's new" block built from METADATA only — no transcript text) and run
+  // ONE agent turn. On a clean board reply, publish it and advance the watermark to
+  // the state we just read; on any failure keep the prior board and do not advance.
+  let prompt: string;
+  try {
+    prompt = await composeBriefPrompt(delta);
+  } catch (e) {
+    console.error(`[rib-chamber] brief prompt compose failed: ${errText(e)}`);
+    return;
+  }
+  let board: CanvasBoardView;
+  try {
+    const turn = runTurn({
+      prompt,
+      allowedTools: [],
+      timeoutMs: BRIEF_TURN_TIMEOUT_MS,
+      cwd: chamberDataHome(),
+    });
+    try {
+      for await (const _chunk of turn.stream) {
+        // drained for progress; the result is the source of truth (mirrors room.ts)
+      }
+    } catch {
+      // a stream error surfaces via result.status below
+    }
+    const result = await turn.result;
+    if (result.status !== "ok") {
+      console.error(`[rib-chamber] brief turn ${result.status}: ${result.error ?? ""}`);
+      return;
+    }
+    board = expectView(BRIEF_KEY, "board")(parseBoard(result.text)) as CanvasBoardView;
+  } catch (e) {
+    // Parse/validate/turn failure — fail closed: keep the prior board, don't advance.
+    console.error(`[rib-chamber] brief turn failed: ${errText(e)}`);
+    return;
+  }
+  try {
+    await publisher.publish(board);
+    await writeWatermark({
+      ackedEndedRooms: state.endedRoomSlugs,
+      lensFingerprints: state.lensFingerprints,
+      briefPromoted: true,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    // Published the board but the watermark write failed: the board is live, but a
+    // later trigger may re-promote. Logged; never thrown into a fire-and-forget hook.
+    console.error(`[rib-chamber] brief watermark advance failed: ${errText(e)}`);
+  }
+}
+
+// Parse an agent's reply text into a candidate board object. The turn is JSON-only
+// (the prompt asks for one object), but a model may wrap it; JSON.parse throws on
+// junk and the caller treats a throw as fail-closed (prior board kept).
+function parseBoard(text: string): unknown {
+  return JSON.parse(text.trim());
+}
+
+// The promote prompt: the standing brief core plus a delta block naming what changed
+// since the last briefing — ended rooms by name/status/turns and changed/new lenses
+// by id + scope/reason. METADATA ONLY (no transcript text) so a briefing never reads
+// a room's content. Reads the rooms/lenses once on the promote path (rare, and a paid
+// turn is about to run anyway) to resolve the slugs/ids the delta carries to metadata.
+async function composeBriefPrompt(delta: ChamberDelta): Promise<string> {
+  const lines: string[] = [];
+  if (delta.newlyEndedRooms.length > 0) {
+    const rooms = await listRooms(roomsDir());
+    const bySlug = new Map(rooms.map((r) => [r.slug, r]));
+    lines.push("Rooms that ended since the last briefing:");
+    for (const slug of delta.newlyEndedRooms) {
+      const room = bySlug.get(slug);
+      if (!room) continue;
+      lines.push(`  - ${room.name} (${room.status}, ${room.turnIndex} turns)`);
+    }
+  }
+  if (delta.changedOrNewLenses.length > 0) {
+    const lenses = await listLenses(lensesDir());
+    const byId = new Map(lenses.map((l) => [l.id, l]));
+    lines.push("Lenses authored or updated since the last briefing:");
+    for (const id of delta.changedOrNewLenses) {
+      const lens = byId.get(id);
+      const detail = lens
+        ? [lens.scope, lens.reason].filter((s): s is string => Boolean(s)).join(" — ")
+        : "";
+      lines.push(`  - ${id}${detail ? ` (${detail})` : ""}`);
+    }
+  }
+  if (lines.length === 0) return BRIEF_PROMPT;
+  return `${BRIEF_PROMPT}
+
+What's new since the last briefing — lead the briefing with these, honestly (do NOT invent detail beyond what is listed):
+${lines.join("\n")}`;
+}
+
+// Boot reconciliation: the footer is re-seeded with the quiet board on every
+// registerTools, so a persisted briefPromoted:true must be cleared or the roster
+// pulse ("For you") would advertise a waiting briefing the quiet footer doesn't have.
+// Preserves the acks (a real promote still needs fresh substance to fire). Fail-soft:
+// a missing/unpromoted watermark is a no-op, and any error is swallowed at boot.
+async function clearPersistedBriefPromoted(): Promise<void> {
+  try {
+    const wm = await readWatermark();
+    if (!wm.briefPromoted) return;
+    await writeWatermark({ ...wm, briefPromoted: false, updatedAt: new Date().toISOString() });
+  } catch (e) {
+    console.error(`[rib-chamber] brief watermark boot reset failed: ${errText(e)}`);
+  }
+}
+
 // The most-recently-started active room, or undefined when none is active. Set
 // iteration is insertion-ordered, so the last entry is the newest active room.
 function mostRecentActiveSlug(): string | undefined {
@@ -247,35 +426,37 @@ function shQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-// The brief's JSON-Schema shape, used twice. As `output_format` it's the
-// structured-output directive appended to the prompt (and flips the node to a
-// structured producer so the bound-key publish bridge sees a value, not text).
-// As `output_schema` it's the executor's fail-closed node guard: listing
-// `properties` (not just `required`) makes a top-level type mismatch — e.g.
-// `sections` returned as a string — fail the run loudly, instead of passing a
-// keys-only check and then being silently dropped by the canvas `validate` on
-// publish (a stale panel with no refresh error). The deep board check stays the
-// canvas `validate` on the bound key below.
-const BRIEF_SHAPE = {
-  type: "object",
-  // `title` is required here (the prompt contract asks for one and a titled
-  // briefing reads better) even though the canvas board treats it as optional —
-  // a stricter-than-canvas node guard, not a looser one. `view` stays a plain
-  // string because the output_schema subset has no const/enum; the exact
-  // "board" kind is enforced fail-closed by `validate` (expectView) on publish.
-  required: ["view", "title", "sections"],
-  properties: {
-    view: { type: "string" },
-    title: { type: "string" },
-    sections: { type: "array" },
-  },
-} as const;
+// The quiet board the footer holds whenever nothing new has happened since the last
+// briefing — seeded at boot (so the footer never shows the idle "Load" state) and
+// republished when a promoted brief lapses back to quiet. A valid, calm board, not a
+// paid turn: the cost-safety invariant is that the quiet path authors nothing.
+function quietBriefBoard(): CanvasBoardView {
+  return {
+    view: "board",
+    title: "Briefing",
+    header: { status: { label: "Quiet", tone: "neutral" } },
+    sections: [
+      {
+        kind: "rows",
+        items: [
+          {
+            text: "Nothing to brief yet — the briefing fills in when a room ends or a lens changes.",
+            glyph: "neutral",
+          },
+        ],
+      },
+    ],
+  };
+}
 
-// Phase 0 is a seam proof: an agent turn authors a canvas `board` that renders
-// on the Chamber surface with no hand-coded UI. No data source is wired yet, so
-// the brief is an honest, self-describing operator briefing about Chamber
-// itself — not invented external metrics. Tools are withheld (allowed_tools: [])
-// so the turn composes purely from this prompt.
+// The brief turn's budget. A briefing is a single composing turn (no tools), so a
+// modest ceiling bounds a wedged provider without starving a normal compose.
+const BRIEF_TURN_TIMEOUT_MS = 60_000;
+
+// The briefing turn's prompt: an agent authors a canvas `board` rendered on the
+// Chamber surface with no hand-coded UI. The gate appends a delta block (the rooms
+// that ended / lenses that changed since the last briefing) so the briefing reports
+// what is NEW, not just what Chamber is. Tools are withheld so it composes from this.
 const BRIEF_PROMPT = `You are the editor of "Chamber" — Keelson's multi-agent operating layer (genesis agents, agent-to-agent rooms, agent-authored lenses). Compose a one-screen operator BRIEFING and return it as a single canvas \`board\` view.
 
 This is a live demonstration that an agent can author its own lens: your JSON is validated fail-closed and rendered directly on the Chamber surface, with no hand-coded UI. Do NOT invent clusters, users, or external metrics you cannot see — write an honest briefing about Chamber: what it is, what is live, and what is next.
@@ -294,13 +475,12 @@ Keep it tight: a status pill, ~3 KPI stats, a 3-5 item "rows" list (what's live 
 Example — copy this structure exactly, replace the content:
 { "view":"board","title":"Chamber Briefing","header":{"status":{"label":"Phase 0 · lens proof","tone":"brand"}},"sections":[{"kind":"stats","title":"Pulse","items":[{"label":"Minds","value":0,"sub":"genesis lands Phase 1","tone":"neutral"},{"label":"Rooms","value":0,"sub":"Phase 2","tone":"neutral"},{"label":"Lenses","value":1,"sub":"this briefing","tone":"ok"}]},{"kind":"rows","title":"Status","items":[{"text":"Agent-authored briefing lens","glyph":"ok","trailing":"live"},{"text":"Genesis + roster","glyph":"info","trailing":"next"},{"text":"Two-agent room","glyph":"neutral","trailing":"Phase 2"}]},{"kind":"cards","title":"What this proves","items":[{"title":"An agent authored this view","pill":{"label":"lens","tone":"brand"},"fields":[{"label":"key","value":"rib:chamber:brief"}],"footnote":"No hand-coded UI — the board came from an agent turn through Keelson's canvas."}]}] }`;
 
-// Genesis as a workflow (the chamber-brief sibling): one agent turn reads a
-// freeform brief, authors the SOUL.md body + a roster tagline, and persists the
-// Mind by calling the chamber_emit_genesis tool (the deterministic write seam).
-// Unlike brief it publishes no snapshot — its product is files on disk, which the
-// chamber-roster collector then reflects. $ARGUMENTS carries the brief (chat
-// `/workflow run chamber-genesis <brief>`); explicit $inputs.* are honored when a
-// caller supplies them (CLI --inputs). The model is scoped to the one emit tool.
+// Genesis as a workflow: one agent turn reads a freeform brief, authors the SOUL.md
+// body + a roster tagline, and persists the Mind by calling the chamber_emit_genesis
+// tool (the deterministic write seam). It publishes no snapshot — its product is files
+// on disk, which the chamber-roster collector then reflects. $ARGUMENTS carries the
+// brief (chat `/workflow run chamber-genesis <brief>`); explicit $inputs.* are honored
+// when a caller supplies them (CLI --inputs). The model is scoped to the one emit tool.
 const GENESIS_WF_PROMPT = `You are authoring the founding identity of a new persistent agent — a "Mind" — for Keelson's Chamber, a multi-agent operating layer.
 
 Brief: $ARGUMENTS
@@ -320,10 +500,10 @@ Compose:
 
 Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline, tools } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
 
-// The lens authoring prompt (the chamber-brief sibling): one agent turn composes a
-// canvas board on a subject and calls chamber_emit_lens to publish it. Unlike brief
-// it is not pinned to one key — the tool routes by `id` to a per-subject key, so
-// distinct subjects land in distinct panels and re-authoring a subject updates it.
+// The lens authoring prompt: one agent turn composes a canvas board on a subject and
+// calls chamber_emit_lens to publish it. It is not pinned to one key — the tool routes
+// by `id` to a per-subject key, so distinct subjects land in distinct panels and
+// re-authoring a subject updates it.
 const LENS_WF_PROMPT = `You are authoring a LENS for Keelson's Chamber — a one-screen canvas \`board\` view on a subject, rendered live on the Chamber surface with no hand-coded UI.
 
 Subject: $ARGUMENTS
@@ -478,6 +658,7 @@ const rib: Rib = {
     {
       id: CHAMBER_SURFACE_ID,
       title: "Chamber",
+      subtitle: "Author Minds · convene Rooms · keep Lenses · read the Briefing",
       layout: {
         header: {
           key: ROSTER_KEY,
@@ -501,6 +682,8 @@ const rib: Rib = {
                 // when a room ends or is deleted; the same modest cadence keeps it
                 // self-populating on open, with room-delete refreshing it on demand.
                 cadenceMs: 120_000,
+                // A long ended-sessions index can collapse to its head strip.
+                collapsible: true,
                 glyph: { char: "▦", tone: "brand" },
               },
               {
@@ -511,15 +694,21 @@ const rib: Rib = {
                 // changes only on author/retire; the same modest cadence self-
                 // populates it on open, with author + retire refreshing it on demand.
                 cadenceMs: 120_000,
+                // A long living-views index can collapse to its head strip.
+                collapsible: true,
                 glyph: { char: "✦", tone: "accent" },
               },
             ],
           },
         ],
+        // The Briefing footer has NO `workflow` binding: it is rib-driven, not a
+        // cadence/refresh-fed collector. The rib seeds a quiet board at boot and the
+        // attention gate (evaluateBriefGate) republishes it — promoting to a paid
+        // agent turn only when a room ended or a lens changed since the watermark.
         footer: {
           key: BRIEF_KEY,
-          workflow: "chamber-brief",
           title: "Briefing",
+          collapsible: true,
           glyph: { char: "❖", tone: "brand" },
         },
       },
@@ -543,9 +732,11 @@ const rib: Rib = {
           {
             id: "collect",
             // The collector runs out-of-process (a bash node) and can't call
-            // ctx.getDataDir, so bake the resolved minds dir in — captured in
-            // registerTools, which runs before this — so both sides read one path.
-            bash: `bun ${shQuote(ROSTER_COLLECTOR)} ${shQuote(mindsDir())}`,
+            // ctx.getDataDir, so bake the resolved data home in — captured in
+            // registerTools, which runs before this. The collector derives the minds
+            // dir, the draft, and the pulse's state dirs + watermark all from it, so
+            // both sides read one path (buildChamberState backs the pulse here too).
+            bash: `bun ${shQuote(ROSTER_COLLECTOR)} ${shQuote(chamberDataHome())}`,
             output_schema: { type: "object", required: ["view", "sections"] },
           },
         ],
@@ -602,24 +793,6 @@ const rib: Rib = {
       validate: expectView(LENSES_KEY, "board"),
     },
     {
-      definition: {
-        name: "chamber-brief",
-        description:
-          'Use when: you want a one-screen briefing of the Chamber multi-agent layer. Triggers: "chamber briefing", "what is chamber doing", "show the chamber brief". Does: runs one agent turn that authors a canvas board (an operator briefing — status pulse, KPI stats, what\'s live / next, explanatory cards) and publishes it to the Chamber Briefing canvas. NOT for: genesis-ing agents or running a room.',
-        nodes: [
-          {
-            id: "compose",
-            prompt: BRIEF_PROMPT,
-            output_format: BRIEF_SHAPE,
-            output_schema: BRIEF_SHAPE,
-            allowed_tools: [],
-          },
-        ],
-      },
-      bindSnapshotKey: BRIEF_KEY,
-      validate: expectView(BRIEF_KEY, "board"),
-    },
-    {
       // Genesis as a workflow: one prompt turn authors the soul and calls
       // chamber_emit_genesis to persist it. No bindSnapshotKey/validate — genesis
       // writes files (the roster collector reflects them), it does not publish a
@@ -643,14 +816,13 @@ const rib: Rib = {
       },
     },
     {
-      // The lens producer (the chamber-brief sibling, but key-routed): one agent
-      // turn composes a board for the subject and calls chamber_emit_lens to publish
-      // it. No bindSnapshotKey — the per-subject key is chosen at run time by the
-      // tool, not pinned to one static key.
+      // The lens producer: one agent turn composes a board for the subject and calls
+      // chamber_emit_lens to publish it. No bindSnapshotKey — the per-subject key is
+      // chosen at run time by the tool, not pinned to one static key.
       definition: {
         name: "chamber-lens",
         description:
-          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber briefing (chamber-brief), genesis-ing agents, or running a room.',
+          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber Briefing (the rib-driven footer), genesis-ing agents, or running a room.',
         nodes: [
           {
             id: "compose",
@@ -693,6 +865,34 @@ const rib: Rib = {
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
     const run = ctx.runAgentTurn;
+    // The Briefing footer is rib-driven (no workflow binding): wire its publisher
+    // here, gated on the snapshot + agent-turn seams the gate needs to run a turn.
+    // Mirrors ensureRoomViewPublisher — a coalescing publisher on BRIEF_KEY, rebound
+    // onto a new manager on a re-bootstrap. Seed the cache with the quiet board so the
+    // footer renders calm copy immediately (not the idle "Load" state), and capture
+    // runAgentTurn so the gate can promote to a paid turn when substance appears.
+    if (sm && run && (sm !== briefSm || !briefPublisher)) {
+      briefUnregister?.();
+      const { publisher, latest } = createCoalescingPublisher(
+        () => sm.recompose(BRIEF_KEY),
+        quietBriefBoard(),
+      );
+      briefUnregister = sm.register(BRIEF_KEY, latest, {
+        validate: expectView(BRIEF_KEY, "board"),
+      });
+      briefPublisher = publisher;
+      briefSm = sm;
+      briefRunAgentTurn = run;
+      // Prime BRIEF_KEY so a client subscribing the instant the footer appears reads
+      // the seeded quiet board, not a 204 (the GET path doesn't lazy-compose).
+      void sm.recompose(BRIEF_KEY);
+      // The footer was just re-seeded quiet, but a persisted briefPromoted:true would
+      // make the pulse ("For you") read "1 waiting" against this quiet footer until the
+      // next event. Clear the flag (preserving the acks) so the two agree from boot.
+      // Serialized through briefInFlight so it can't lose-update a concurrent gate
+      // promotion's watermark write — both are read-modify-writes of the same file.
+      briefInFlight = briefInFlight.then(clearPersistedBriefPromoted, clearPersistedBriefPromoted);
+    }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —
     // independent of the room's C1 agent-turn seam (the room tools below additionally
@@ -846,6 +1046,12 @@ const rib: Rib = {
     activeRooms.clear();
     lastSlug = undefined;
     refreshWorkflow = undefined;
+    briefUnregister?.();
+    briefUnregister = undefined;
+    briefPublisher = undefined;
+    briefSm = undefined;
+    briefRunAgentTurn = undefined;
+    briefInFlight = Promise.resolve();
     invalidateRoster();
     lensRegistry?.dispose();
     lensRegistry = undefined;
@@ -907,6 +1113,11 @@ function ensureLoop(slug: string): void {
       // appears promptly instead of on the next cadence. Fail-soft, never thrown
       // into the detached loop.
       void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+      // A newly-ended room is briefing substance: evaluate the gate (it runs a turn
+      // only if the watermark hasn't seen this room) and refresh the roster so its
+      // pulse counts/for-you update promptly. Both fire-and-forget — never thrown.
+      void evaluateBriefGate().catch(() => {});
+      void refreshWorkflow?.("chamber-roster")?.catch(() => {});
     }
   })();
 }
@@ -1737,6 +1948,11 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         // refreshing the roster). Fail-soft: the seam resolves on error / is absent
         // on an older harness — never throw past a successful publish.
         await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+        // A changed/new lens is briefing substance: evaluate the gate (it runs a turn
+        // only if the watermark hasn't seen this fingerprint) and refresh the roster
+        // so its pulse updates. Both fire-and-forget — never thrown past the publish.
+        void evaluateBriefGate().catch(() => {});
+        void refreshWorkflow?.("chamber-roster")?.catch(() => {});
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);

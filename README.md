@@ -46,7 +46,7 @@ Open `http://127.0.0.1:7878` → the **Chamber** surface, then:
 
 - **Create an agent** — `keelson workflow run chamber-genesis "a terse SRE who reasons about blast radius"` (or ask chat to create one). It authors a Mind you'll see on the Roster.
 - **Run a room** — ask chat to start a room between two Minds, or use the **Start room** control on the surface; steer it live and watch the transcript render as turns land.
-- **See a lens** — `keelson workflow run chamber-brief` runs one agent turn that authors a briefing board, published fail-closed to `rib:chamber:brief` and rendered with no hand-coded UI.
+- **See a lens** — `keelson workflow run chamber-lens "release risks"` runs one agent turn that authors a canvas board on the subject, published fail-closed and rendered with no hand-coded UI. The standing **Briefing** in the footer fills itself in — it promotes to an agent-authored board when a room ends or a lens changes, and stays quiet otherwise.
 
 ## How it works
 

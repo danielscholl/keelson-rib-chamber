@@ -121,6 +121,8 @@ describe("lens registry", () => {
     expect(region.calls[0]?.surfaceId).toBe(CHAMBER_SURFACE_ID);
     expect(region.calls[0]?.region.key).toBe(lensKey("findings"));
     expect(region.calls[0]?.region.group).toBe("lens");
+    // The region carries the zone title so the merge labels the "Lenses" lane.
+    expect(region.calls[0]?.region.groupTitle).toBe("Lenses");
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("findings"), view: board("Findings") });
   });
 

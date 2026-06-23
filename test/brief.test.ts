@@ -5,13 +5,13 @@ import rib from "../src/index.ts";
 const BRIEF_KEY = "rib:chamber:brief";
 
 // A fresh contribution list per call — contributeWorkflows takes a ctx, but the
-// Phase 0 brief never touches it, so an empty cast satisfies the type.
+// surviving collectors never touch it, so an empty cast satisfies the type.
 function contributions() {
   const ctx = {} as Parameters<NonNullable<typeof rib.contributeWorkflows>>[0];
   return rib.contributeWorkflows?.(ctx) ?? [];
 }
 
-describe("chamber-brief lens (Phase 0)", () => {
+describe("Briefing view + gate wiring", () => {
   test("declares the Briefing view bound to the rib-namespaced key", () => {
     const view = rib.views?.find((v) => v.key === BRIEF_KEY);
     expect(view).toBeDefined();
@@ -19,78 +19,45 @@ describe("chamber-brief lens (Phase 0)", () => {
     expect(ribViewDescriptorSchema.safeParse(view).success).toBe(true);
   });
 
-  test("contributes a chamber-brief workflow bound to rib:chamber:brief", () => {
-    const brief = contributions().find(
-      (c) => (c.definition as { name?: string }).name === "chamber-brief",
-    );
-    expect(brief).toBeDefined();
-    expect(brief?.bindSnapshotKey).toBe(BRIEF_KEY);
-  });
-
-  test("the producer is an agent turn (a prompt node), not a deterministic collector", () => {
-    const brief = contributions().find(
-      (c) => (c.definition as { name?: string }).name === "chamber-brief",
-    );
-    const nodes = (brief?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
-    expect(nodes).toHaveLength(1);
-    const node = nodes[0];
-    expect(typeof node?.prompt).toBe("string");
-    expect((node?.prompt as string).length).toBeGreaterThan(0);
-    expect(node?.bash).toBeUndefined();
-    // structured-output trigger + fail-closed node guard. The guard validates
-    // top-level field *types* (not just key presence) so a malformed agent reply
-    // — e.g. `sections` as a string — fails the run instead of being silently
-    // dropped by the canvas validate on publish.
-    expect(node?.output_format).toEqual({
-      type: "object",
-      required: ["view", "title", "sections"],
-      properties: {
-        view: { type: "string" },
-        title: { type: "string" },
-        sections: { type: "array" },
-      },
-    });
-    expect(node?.output_schema).toEqual(node?.output_format);
-  });
-
-  test("validate accepts a board payload and returns the parsed view", () => {
-    const brief = contributions().find((c) => c.bindSnapshotKey === BRIEF_KEY);
-    const board = {
-      view: "board",
-      title: "Chamber Briefing",
-      header: { status: { label: "Phase 0", tone: "brand" } },
-      sections: [{ kind: "stats", items: [{ label: "Lenses", value: 1, tone: "ok" }] }],
-    };
-    const parsed = brief?.validate?.(board) as { view?: string } | undefined;
-    expect(parsed?.view).toBe("board");
-  });
-
-  test("validate rejects a non-board view (wrong kind) fail-closed", () => {
-    const brief = contributions().find((c) => c.bindSnapshotKey === BRIEF_KEY);
-    const table = { view: "table", columns: [{ key: "a" }], rows: [] };
-    expect(() => brief?.validate?.(table)).toThrow();
-  });
-
-  test("validate rejects a payload that is not a canvas view at all", () => {
-    const brief = contributions().find((c) => c.bindSnapshotKey === BRIEF_KEY);
-    expect(() => brief?.validate?.({ not: "a view" })).toThrow();
+  test("no chamber-brief workflow is contributed — the briefing is rib-driven", () => {
+    // The briefing moved off a contributed workflow onto the rib-owned attention
+    // gate (evaluateBriefGate), which refreshWorkflow can't drive (it can't pass the
+    // delta), so the workflow must be gone from the catalog entirely.
+    const names = contributions().map((c) => (c.definition as { name?: string }).name);
+    expect(names).not.toContain("chamber-brief");
+    // No contribution binds the brief key any more either (the rib publishes it).
+    expect(contributions().some((c) => c.bindSnapshotKey === BRIEF_KEY)).toBe(false);
   });
 });
 
-describe("Chamber surface (Phase 0)", () => {
-  test("the rib declares one valid Chamber surface", () => {
+describe("Chamber surface (attention chrome)", () => {
+  test("the rib declares one valid Chamber surface with a subtitle", () => {
     expect(rib.surfaces).toHaveLength(1);
     const surface = rib.surfaces?.[0];
     expect(surface?.id).toBe("chamber");
     expect(surface?.title).toBe("Chamber");
+    // #284-p2 chrome: a static subtitle under the surface title.
+    expect(surface?.subtitle).toBe(
+      "Author Minds · convene Rooms · keep Lenses · read the Briefing",
+    );
     expect(ribSurfaceDescriptorSchema.safeParse(surface).success).toBe(true);
   });
 
-  test("the Briefing settles into the surface footer, in the rib namespace", () => {
+  test("the Briefing footer carries the key with NO workflow binding", () => {
     const footer = rib.surfaces?.[0]?.layout.footer;
     expect(footer?.key).toBe(BRIEF_KEY);
-    expect(footer?.workflow).toBe("chamber-brief");
     expect(footer?.key.startsWith("rib:chamber:")).toBe(true);
+    // Rib-driven, not refresh-fed: the footer must not bind a workflow (there is no
+    // chamber-brief workflow), or the SPA would try to refresh a non-existent one.
+    expect(footer?.workflow).toBeUndefined();
+  });
+
+  test("the rooms and lenses index columns are collapsible", () => {
+    const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) => r.columns);
+    const rooms = cols.find((c) => c.key === "rib:chamber:rooms");
+    const lenses = cols.find((c) => c.key === "rib:chamber:lenses");
+    expect(rooms?.collapsible).toBe(true);
+    expect(lenses?.collapsible).toBe(true);
   });
 
   test("every surface region's refresh workflow is one the rib contributes", () => {

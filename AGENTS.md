@@ -47,10 +47,14 @@ The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
   (`rib:chamber:roster`, `rib:chamber:room`, `rib:chamber:brief`) bound to the
   canvas renderer, and the **Chamber** nav surface that lays them out. No
   hand-coded UI: every view is a board a producer publishes.
-- **Workflows** (`contributeWorkflows`) — `chamber-roster` (a deterministic
-  collector that reads the Minds on disk), `chamber-brief` (one agent turn that
-  authors a briefing board), and `chamber-genesis` (one agent turn that authors a
-  Mind's SOUL.md and persists it via the `chamber_emit_genesis` write seam).
+- **Workflows** (`contributeWorkflows`) — `chamber-roster` / `chamber-rooms` /
+  `chamber-lenses` (deterministic collectors that read the data home), `chamber-lens`
+  (one agent turn that authors a lens board), and `chamber-genesis` (one agent turn
+  that authors a Mind's SOUL.md and persists it via the `chamber_emit_genesis` write
+  seam). The **Briefing** (`rib:chamber:brief`) is NOT a workflow — it is the rib-owned
+  attention gate (`evaluateBriefGate`, `src/chamber-state.ts` + `src/watermark-store.ts`):
+  a room ending or a lens changing promotes it to one agent-authored board, gated
+  fail-closed against a persisted watermark so a quiet Chamber runs no paid turn.
 - **Tools** (`registerTools`) — the genesis write seam is always present; the
   room-control chat tools (`chamber_room_start` / `_say` / `_stop` / `_status`)
   and the room driver are built **only when** the host provides the agent-turn
