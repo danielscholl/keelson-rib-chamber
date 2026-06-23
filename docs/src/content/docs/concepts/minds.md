@@ -2,7 +2,7 @@
 title: Minds and genesis
 description: A Mind is a persistent agent identity authored on demand. What it is, where it lives, and how genesis writes one.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 A **Mind** is a persistent agent identity: a name, a role, a voice, and a
