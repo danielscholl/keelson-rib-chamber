@@ -37,7 +37,14 @@ import {
   lensKey,
 } from "./lens.ts";
 import { createFileLensStore, type LensStore, listLenses } from "./lens-store.ts";
-import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
+import {
+  type MindRecord,
+  readMinds,
+  readSoul,
+  retireMind,
+  scaffoldMind,
+  setMindModel,
+} from "./minds-store.ts";
 import {
   chamberDataHome,
   isChamberDataHomeWritable,
@@ -513,7 +520,7 @@ const GENESIS_WF_PROMPT = `You are authoring the founding identity of a new pers
 
 Brief: $ARGUMENTS
 
-(If these explicit fields are non-empty, prefer them over the brief — name: "$inputs.name", role: "$inputs.role", voice: "$inputs.voice".)
+(If these explicit fields are non-empty, prefer them over the brief — name: "$inputs.name", role: "$inputs.role", voice: "$inputs.voice", model: "$inputs.model", provider: "$inputs.provider". When model/provider are non-empty, pass them through verbatim — do not author or guess them.)
 
 From the brief, decide the Mind's name, a short role title (1-4 words — e.g. "Chief of Staff", "Research Partner" — a label for a roster pill, NOT a sentence or description), and voice (how it speaks). Then write an honest founding document — do NOT invent tools, credentials, or capabilities it does not have; describe who it is, what it is for, and how it speaks.
 
@@ -526,7 +533,7 @@ Compose:
 - tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
 - tools: an OPTIONAL array of capability slugs the Mind may use inside a room — choose ONLY from this set: ${capabilityVocabulary()}. Include a slug only when the role genuinely calls for it; omit it (or use []) for a conversation-only Mind, and never invent a slug outside this set.
 
-Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline, tools } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
+Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline, tools, model?, provider? } to persist the Mind (include model/provider only when provided) — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
 
 // The lens authoring prompt: one agent turn composes a canvas board on a subject and
 // calls chamber_emit_lens to publish it. It is not pinned to one key — the tool routes
@@ -999,6 +1006,8 @@ const rib: Rib = {
         return describeOwnAction(action);
       case "retire":
         return retireAction(action);
+      case "set-model":
+        return setModelAction(action);
       case "room-start":
         return roomStartAction(action);
       case "draft-set":
@@ -1821,6 +1830,22 @@ async function retireAction(action: RibAction): Promise<RibActionResult> {
   }
 }
 
+async function setModelAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const slug = asNonEmptyString(payload.slug);
+  if (!slug) return { ok: false, error: "set-model requires payload { slug }" };
+  const model = asNonEmptyString(payload.model);
+  const provider = asNonEmptyString(payload.provider);
+  try {
+    await setMindModel(mindsDir(), slug, { model, provider });
+    invalidateRoster();
+    await refreshWorkflow?.("chamber-roster");
+    return { ok: true, data: { slug, ...(model ? { model } : {}) } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
 // Tool results stream to chat as `tool_result` chunks; keep each well under the
 // chat context budget. Truncation is signalled, never silent.
 const MAX_TOOL_RESULT_CHARS = 16_000;
@@ -1914,6 +1939,8 @@ const genesisEmitSchema = z.object({
   voice: z.string().min(1),
   soul: z.string().min(1),
   tagline: z.string().min(1),
+  model: z.string().optional(),
+  provider: z.string().optional(),
   // Capability slugs the Mind may invoke in a room (see CAPABILITIES).
   // Unknown slugs are dropped at persist; omitted/empty keeps the Mind text-only.
   tools: z.array(z.string()).optional(),
@@ -1923,7 +1950,7 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
   return {
     name: "chamber_emit_genesis",
     description:
-      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline, optional capability tools }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
+      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline, optional model/provider pin, optional capability tools }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
     inputSchema: genesisEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -1932,11 +1959,22 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         emitResult(ctx, `chamber_emit_genesis: ${parsed.error.message}`, true);
         return;
       }
-      const { name, role, voice, soul, tagline, tools } = parsed.data;
+      const {
+        name,
+        role,
+        voice,
+        soul,
+        tagline,
+        tools,
+        model: rawModel,
+        provider: rawProvider,
+      } = parsed.data;
       try {
         const knownTools = tools
           ? [...new Set(tools.filter((s) => KNOWN_CAPABILITY_SLUGS.has(s)))]
           : [];
+        const model = rawModel?.trim();
+        const provider = rawProvider?.trim();
         const record: MindRecord = {
           slug: slugify(name),
           name,
@@ -1946,6 +1984,8 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
           // authored tagline trimmed, not hard-cut.
           persona: tagline.trim(),
           createdAt: new Date().toISOString(),
+          ...(model ? { model } : {}),
+          ...(model && provider ? { provider } : {}),
           ...(knownTools.length > 0 ? { tools: knownTools } : {}),
         };
         await scaffoldMind(mindsDir(), record, soul);
