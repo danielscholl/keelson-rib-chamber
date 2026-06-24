@@ -467,6 +467,18 @@ describe("chamber room-control chat tools", () => {
     expect(t.out()).toContain("unknown Mind");
   });
 
+  it("rejects a coding room with no project to confine it to", async () => {
+    // Coding tools (Bash/Edit/Write) are confined to the project root, so a coding
+    // room must target a project. The gate fires in the dry-run, before any paid turn.
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], coding: true, confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("must target a project");
+  });
+
   it("a `moderator` with no explicit strategy is treated as group-chat", async () => {
     // The dry-run labels it group-chat AND validateStart enforces group-chat rules:
     // a valid (non-participant) moderator dry-runs as group-chat...

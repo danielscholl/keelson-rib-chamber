@@ -25,7 +25,7 @@ import {
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
 import { buildRoomBoard } from "./boards/room.ts";
-import { capabilityVocabulary, KNOWN_CAPABILITY_SLUGS } from "./capabilities.ts";
+import { capabilityVocabulary, codingToolPool, KNOWN_CAPABILITY_SLUGS } from "./capabilities.ts";
 import { buildChamberState, type ChamberDelta, diffAgainstWatermark } from "./chamber-state.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
@@ -1086,6 +1086,9 @@ const rib: Rib = {
         // turn seam resolves this name to the rib's registered chamber_emit_lens
         // def and projects it to the provider. Without it, room turns stay text-only.
         ...(lensRegistry ? { turnTools: [{ name: LENS_TOOL_NAME }] } : {}),
+        // The coding pool (host built-ins), always handed over but inert until a
+        // room opts in (room.coding) and is confined — the tier is gated per-room.
+        codingTools: codingToolPool(),
       });
       queueRoomRetentionSweep();
       // Expose the room controls as chat tools (start / say / stop / status),
@@ -1329,6 +1332,7 @@ async function validateStart(
   strategy: string,
   config: StartConfigInput = {},
   projectId?: string,
+  coding?: boolean,
 ): Promise<
   { ok: true; participants: string[]; config?: RoomConfig } | { ok: false; error: string }
 > {
@@ -1357,6 +1361,17 @@ async function validateStart(
     return {
       ok: false,
       error: `unknown project "${projectId}" — pick a project from the host's project list`,
+    };
+  }
+  // The coding tier is unconfined without a repo to bound it to: a coding room's
+  // turns run Bash/Edit/Write confined to the project root (allowedDirectories), so
+  // require a project. Checked here, not in the driver, so the dry-run rejects an
+  // unbounded coding room before advertising a start the confirm path can't honor.
+  if (coding && projectId === undefined) {
+    return {
+      ok: false,
+      error:
+        "a coding room must target a project (set `projectId`) — coding tools are confined to the project's repo",
     };
   }
   const minds = await resolveMinds();
@@ -1532,6 +1547,7 @@ async function startRoom(
     strategy?: string;
     topic?: string;
     projectId?: string;
+    coding?: boolean;
   } & RoomConfigInput,
 ): Promise<RibActionResult> {
   // Refuse once disposed: driver.start() doesn't check, so without this a start
@@ -1551,6 +1567,7 @@ async function startRoom(
       endVoteThreshold: input.endVoteThreshold,
     },
     input.projectId,
+    input.coding,
   );
   if (!valid.ok) return { ok: false, error: valid.error };
   const name = (input.name ?? "").trim() || deriveRoomName(input.topic, input.participants);
@@ -1581,6 +1598,7 @@ async function startRoom(
       ...(topic ? { topic } : {}),
       ...(valid.config ? { config: valid.config } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.coding ? { coding: input.coding } : {}),
     });
     lastSlug = slug;
     // driver.start published this room's first board (registering its per-slug
@@ -1650,6 +1668,7 @@ function roomStartAction(action: RibAction): Promise<RibActionResult> {
     strategy: asNonEmptyString(payload.strategy) || undefined,
     topic: asNonEmptyString(payload.topic) || undefined,
     projectId: asNonEmptyString(payload.projectId) || undefined,
+    coding: payload.coding === true,
     ...roomConfigFromFlat(payload),
   });
 }
@@ -2104,6 +2123,9 @@ const roomStartSchema = z.object({
   topic: z.string().optional(),
   // Optional: target the room at a keelson project (turns run at its rootPath).
   projectId: z.string().optional(),
+  // Opt into the coding tier (default off): a Mind that declares `code`/`read` can
+  // run Bash/Edit/Write/Read, confined to the project root. Requires `projectId`.
+  coding: z.boolean().optional(),
   // Routing config. `strategy` defaults to sequential; `moderator` is required
   // (and validated) only for "group-chat"; `endVoteThreshold` tunes "open-floor"'s
   // close. All optional so a plain two-Mind room needs none of them.
@@ -2426,9 +2448,10 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;
         const endVoteThreshold = parsed.data.endVoteThreshold;
         const projectId = (parsed.data.projectId ?? "").trim() || undefined;
+        const coding = parsed.data.coding ?? false;
         // Validate up front (including roster membership + group-chat moderator
-        // rules + project resolution) so the dry-run never advertises a start the
-        // confirm path rejects.
+        // rules + project resolution + the coding-tier project requirement) so the
+        // dry-run never advertises a start the confirm path rejects.
         const valid = await validateStart(
           participants,
           turnBudget,
@@ -2441,6 +2464,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
             endVoteThreshold,
           },
           projectId,
+          coding,
         );
         if (!valid.ok) {
           emitResult(ctx, `chamber_room_start: ${valid.error}`, true);
@@ -2470,10 +2494,15 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const projectNote = projectId
           ? ` in project "${resolveProject(projectId)?.name ?? projectId}"`
           : "";
+        // Name the elevated capability at the confirm step so the human approving
+        // the (paid) room knows a coding Mind can run Bash/Edit/Write.
+        const codingNote = coding
+          ? " with the coding tier ON (Minds that declare `code`/`read` can run Bash/Edit/Write/Read, confined to the project repo)"
+          : "";
         if (!confirm) {
           emitResult(
             ctx,
-            `Would open a room with ${who}${topicNote}${modeNote}${projectNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
+            `Would open a room with ${who}${topicNote}${modeNote}${projectNote}${codingNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
           );
           return;
         }
@@ -2486,6 +2515,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           topic,
           strategy,
           projectId,
+          coding,
           moderator,
           synthesizer,
           minRounds,

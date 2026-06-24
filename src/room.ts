@@ -59,6 +59,12 @@ export interface RoomDriverDeps {
   // safe for a room turn — today the lens write seam, so a Mind can author a lens
   // mid-room. Omitted/empty keeps the turn text-only (the room default).
   turnTools?: readonly { name: string }[];
+  // The coding tier's pool, layered on top of turnTools only for a room that opted
+  // in (`room.coding`) AND has a cwd to confine the turn to. These are host provider
+  // built-ins (Bash/Edit/Write/Read), so a turn that gets them is confined to its
+  // cwd via allowedDirectories — granting and confining are one decision. Omitted
+  // keeps every room text-only/lens (the coding tier is unavailable).
+  codingTools?: readonly { name: string }[];
   now?: () => Date;
   newId?: () => string;
 }
@@ -72,6 +78,7 @@ export interface RoomStartConfig {
   topic?: string;
   config?: RoomConfig;
   projectId?: string;
+  coding?: boolean;
 }
 
 export interface RoomInjectInput {
@@ -298,6 +305,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         ...(config.topic ? { topic: config.topic } : {}),
         ...(config.config ? { config: config.config } : {}),
         ...(config.projectId ? { projectId: config.projectId } : {}),
+        ...(config.coding ? { coding: config.coding } : {}),
         createdAt: now().toISOString(),
       };
       await persistAndPublish(room);
@@ -446,11 +454,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
   // Resolve a turn's cwd. A project-targeted room runs at the project root
   // (path-as-context, as chat/workflows do); otherwise — including a targeted
-  // project the host no longer knows (deleted mid-room) — it keeps the neutral
-  // turnCwd, so a turn never inherits the host repo's ambient context. Resolved
-  // per turn so the projects store stays the single source of truth.
+  // project the host no longer knows (deleted mid-room) or one whose root is
+  // empty/whitespace (rootPath is `z.string()`, no min length) — it keeps the
+  // neutral turnCwd, so a turn never falls through to the seam's process-tmpdir
+  // default. Resolved per turn so the projects store stays the single source of truth.
   function turnCwdFor(room: Room): string | undefined {
-    if (room.projectId) return deps.resolveProjectRoot?.(room.projectId) ?? deps.turnCwd;
+    if (room.projectId) {
+      const root = deps.resolveProjectRoot?.(room.projectId)?.trim();
+      return root || deps.turnCwd;
+    }
     return deps.turnCwd;
   }
 
@@ -481,19 +493,31 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       text = "";
       aborted = true;
     } else {
+      const cwd = turnCwdFor(room);
+      // Granting coding tools and confining the turn are one decision: the coding
+      // pool is offered only when there is a real cwd to bound it to (project root,
+      // or the neutral home if the project vanished), so a coding turn never runs
+      // unconfined. The host enforces the boundary off allowedDirectories. The cwd
+      // truthiness check is load-bearing: an empty root would confine to nothing.
+      const coding = Boolean(room.coding) && Boolean(cwd);
+      const confineRoot = coding ? cwd : undefined;
+      const pool =
+        coding && deps.codingTools?.length
+          ? [...(deps.turnTools ?? []), ...deps.codingTools]
+          : deps.turnTools;
       // A speaker's declared capability slugs (mind.tools) map onto the turn's
       // tool rail, intersected with the room-safe pool; no declaration stays
       // text-only. The Mind's model/provider pin is honoured (provider alongside
       // model so a cross-provider pin resolves coherently here, the same as a
       // direct /mind chat — not just against the default provider).
-      const tools = resolveMindTools(mind, deps.turnTools);
-      const cwd = turnCwdFor(room);
+      const tools = resolveMindTools(mind, pool);
       const turn = deps.runAgentTurn({
         system,
         prompt,
         abortSignal: controller.signal,
         ...(cwd ? { cwd } : {}),
         ...(tools.length > 0 ? { tools } : {}),
+        ...(confineRoot ? { allowedDirectories: [confineRoot] } : {}),
         ...(mind.model ? { model: mind.model } : {}),
         ...(mind.provider ? { provider: mind.provider } : {}),
       });

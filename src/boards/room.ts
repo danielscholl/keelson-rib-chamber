@@ -60,9 +60,11 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             // Carry the topic so restarting a finished room keeps its subject, the
             // routing config (flat keys) so a finished group-chat/open-floor restarts
             // with the same config rather than failing start validation, and the
-            // project target so the restart runs against the same repo.
+            // project target + coding tier so the restart runs against the same repo
+            // with the same capabilities.
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
+            ...(room.coding ? { coding: room.coding } : {}),
             ...flatFromRoomConfig(room.config),
           },
         },
@@ -81,6 +83,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             turnBudget: room.turnBudget,
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
+            ...(room.coding ? { coding: room.coding } : {}),
           },
           fields: [
             {
@@ -104,6 +107,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             turnBudget: room.turnBudget,
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
+            ...(room.coding ? { coding: room.coding } : {}),
           },
         },
       ],

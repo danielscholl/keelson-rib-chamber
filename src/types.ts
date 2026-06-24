@@ -78,6 +78,11 @@ export interface Room {
   // resolved path, so the host projects store stays the single source of truth —
   // the driver resolves it to a turn cwd per turn (see turnCwdFor in room.ts).
   projectId?: string;
+  // The opt-in coding tier (off by default). When set, a Mind that declares a
+  // coding capability (`code`/`read`) can run Bash/Edit/Write/Read, and every turn
+  // is confined to its cwd (allowedDirectories). Requires `projectId` — the project
+  // root is the confinement boundary — so a coding turn never runs unconfined.
+  coding?: boolean;
   pending?: RoomPending;
   createdAt: string;
 }
