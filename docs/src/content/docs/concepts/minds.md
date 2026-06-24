@@ -42,7 +42,8 @@ Run it with the `/genesis` command, or with
 decides the Mind's name, role, and voice, composes the `SOUL.md` body and a
 roster tagline, and then calls a single write seam to persist the Mind. The
 prompt asks for an honest founding document: it describes who the Mind is and how
-it speaks, and does not invent tools or credentials it does not have.
+it speaks, and does not invent tools or credentials it does not have. It also
+ends with `Authored <name> (<slug>)`, using the tool-returned slug verbatim.
 
 The write is deterministic and fails closed. If a Mind with the same slug already
 exists, the write refuses rather than clobbering an existing soul, and the

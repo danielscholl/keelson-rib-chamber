@@ -30,8 +30,9 @@ keelson workflow run chamber-genesis "a meticulous release manager who tracks ev
 
 The turn reads your brief, decides the Mind's name, a short role title, and its
 voice, composes the founding document and a one-line roster tagline, then persists
-the Mind through a single write seam. When it lands, the roster reflects it as a
-card.
+the Mind through a single write seam. It ends with `Authored <name> (<slug>)`,
+using the slug value the tool returned. When it lands, the roster reflects it as
+a card.
 
 :::note
 Genesis composes the identity; a small write tool persists it. You never call that

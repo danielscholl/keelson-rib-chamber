@@ -52,7 +52,8 @@ waiting on the cadence.
 
 `chamber-genesis` is one `prompt` node, `genesis`. The turn reads a brief,
 authors a `SOUL.md` and a one-line roster tagline, and persists the Mind by
-calling `chamber_emit_genesis`. It has:
+calling `chamber_emit_genesis`. It ends with the deterministic reply
+`Authored <name> (<slug>)`, using the slug value the tool returned. It has:
 
 - `allowed_tools: ["chamber_emit_genesis"]`. Rib tools are off by default in a
   workflow prompt node, so the turn opts in to the single write seam by name.
