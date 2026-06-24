@@ -53,10 +53,14 @@ export async function scaffoldMind(
   );
 }
 
-// Read every Mind back as the room-facing shape, newest first. Degrades per
-// entry: a directory without a parseable mind.json is skipped, not fatal, so one
-// corrupt Mind can't blank the whole roster.
-export async function readMinds(mindsRoot: string): Promise<Mind[]> {
+// Read every Mind's record back, newest first, KEEPING the server-stamped
+// createdAt that the room-facing readMinds drops — the activity feed reads a
+// Mind's genesis time from here. Degrades per entry: a directory without a
+// parseable mind.json is skipped, not fatal, so one corrupt Mind can't blank the
+// whole roster.
+export async function listMindRecords(
+  mindsRoot: string,
+): Promise<(Mind & { createdAt: string })[]> {
   let entries: string[];
   try {
     entries = await readdir(mindsRoot);
@@ -93,6 +97,13 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
   }
 
   records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return records;
+}
+
+// Read every Mind back as the room-facing shape, newest first — the roster + room
+// driver's source.
+export async function readMinds(mindsRoot: string): Promise<Mind[]> {
+  const records = await listMindRecords(mindsRoot);
   return records.map((r) => ({
     slug: r.slug,
     name: r.name,

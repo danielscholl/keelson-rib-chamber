@@ -83,6 +83,7 @@ const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
+const ACTIVITY_KEY = "rib:chamber:activity";
 // The snapshot-only key family the Rooms index `Open` focuses (see roomOpenAction).
 // Per-slug so two clients opening two different closed rooms get independent boards
 // in their drawers instead of colliding on one shared key (active rooms / lenses use
@@ -534,6 +535,9 @@ const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", impor
 const ROOMS_COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.meta.url));
 // The lenses-index collector, resolved the same way (see ROSTER_COLLECTOR).
 const LENSES_COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", import.meta.url));
+// The activity collector, resolved the same way (see ROSTER_COLLECTOR). It reads
+// all three stores, so the bash node bakes in the data home (not a single store dir).
+const ACTIVITY_COLLECTOR = fileURLToPath(new URL("../bin/collect-activity.ts", import.meta.url));
 
 // POSIX single-quote: wrap a value and escape any embedded quote so a path
 // (spaces, `$`, backticks, backslashes) reaches `bash -c` literally — never
@@ -759,6 +763,7 @@ const rib: Rib = {
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
     { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
     { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
+    { key: ACTIVITY_KEY, canvasKind: "view", title: "Activity" },
     { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
@@ -820,6 +825,20 @@ const rib: Rib = {
                 // A long living-views index can collapse to its head strip.
                 collapsible: true,
                 glyph: { char: "✦", tone: "accent" },
+              },
+              {
+                key: ACTIVITY_KEY,
+                workflow: "chamber-activity",
+                title: "Activity",
+                // The standing lens this rib ships: a cheap deterministic collector
+                // that recomputes the pulse + recent-events feed from disk, so the
+                // host scheduler refreshes it on cadence with NO tab open. Cost-safe
+                // by construction — a disk read, never a paid agent turn (an
+                // agent-turn standing lens would instead have to be watermark-gated
+                // like the Briefing).
+                cadenceMs: 120_000,
+                collapsible: true,
+                glyph: { char: "↻", tone: "info" },
               },
             ],
           },
@@ -914,6 +933,31 @@ const rib: Rib = {
       },
       bindSnapshotKey: LENSES_KEY,
       validate: expectView(LENSES_KEY, "board"),
+    },
+    {
+      // The activity producer (the chamber-lenses sibling): a deterministic collector
+      // that reads ALL THREE Chamber stores from the data home and emits the standing
+      // activity board — a cumulative pulse plus a reverse-chron feed of recent
+      // genesis / room / lens events. The host scheduler refreshes it on cadence with
+      // no tab open (the standing lens); because it is a cheap disk read — never an
+      // agent turn — every tick is cost-safe.
+      definition: {
+        name: "chamber-activity",
+        description:
+          'Use when: you want a single standing panel of what is happening across the Chamber. Triggers: "show activity", "what is happening", "recent events". Does: reads the Minds, rooms, and lenses from the Chamber data home and publishes a standing activity board (cumulative pulse stats + a recent-events feed) to the Chamber Activity canvas, auto-refreshed on cadence. NOT for: authoring a Mind/room/lens, or the editorial Briefing (the rib-driven footer).',
+        nodes: [
+          {
+            id: "collect",
+            // Out-of-process (a bash node), so bake the resolved data home in —
+            // captured in registerTools, which runs before this — so both sides read
+            // one path (see the roster collector, which also reads all three stores).
+            bash: `bun ${shQuote(ACTIVITY_COLLECTOR)} ${shQuote(chamberDataHome())}`,
+            output_schema: { type: "object", required: ["view", "sections"] },
+          },
+        ],
+      },
+      bindSnapshotKey: ACTIVITY_KEY,
+      validate: expectView(ACTIVITY_KEY, "board"),
     },
     {
       // Genesis as a workflow: one prompt turn authors the soul and calls
