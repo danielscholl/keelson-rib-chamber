@@ -738,6 +738,12 @@ async function invokeChamberCommand(name: string, arg: string): Promise<CommandI
   return { ok: false, error: `unknown command: ${name}` };
 }
 
+// The only chamber verbs an untrusted HTML-lens iframe may reach (origin
+// "canvas-html"): a no-op ack (`lens-html`) and read-only navigation to a lens
+// panel (`lens-open`). Everything destructive or paid stays off this list, so a
+// prompt-injected lens can't drive retire / room-* / set-model / convene. See #124.
+const FRAME_SAFE_ACTIONS: ReadonlySet<string> = new Set(["lens-html", "lens-open"]);
+
 const rib: Rib = {
   id: "chamber",
   displayName: "Chamber",
@@ -1096,6 +1102,14 @@ const rib: Rib = {
   // transcript pushes to the canvas as turns land (no refresh needed). Turns
   // advance on their own (the auto-advance loop), so there is no manual step.
   onAction: (action) => {
+    // Actions relayed from the sandboxed HTML-lens iframe arrive with origin
+    // "canvas-html" (the host stamps it; the frame can't forge it — see #124). That
+    // markup is LLM-authored and can auto-fire on load, so gate it to a non-paid,
+    // non-destructive subset — never retire / room-* / set-model / convene. Trusted
+    // board actions (origin absent) keep the full verb surface below.
+    if (action.origin === "canvas-html" && !FRAME_SAFE_ACTIONS.has(action.type)) {
+      return { ok: false, error: `'${action.type}' is not permitted from an HTML lens` };
+    }
     switch (action.type) {
       case "enter-mind":
         return enterMindAction(action);

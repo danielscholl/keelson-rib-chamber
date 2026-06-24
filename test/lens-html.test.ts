@@ -125,6 +125,42 @@ describe("HTML lens rib wiring", () => {
 
     expect(res).toEqual({ ok: false, error: "lens-html requires an object payload" });
   });
+
+  test("gates a destructive verb relayed from the iframe (origin canvas-html)", async () => {
+    const res = await rib.onAction!(
+      { type: "retire", payload: { slug: "alice" }, origin: "canvas-html" },
+      actionCtx,
+    );
+    expect(res).toEqual({ ok: false, error: "'retire' is not permitted from an HTML lens" });
+  });
+
+  test("allows the safe lens verbs from the iframe (origin canvas-html)", async () => {
+    const ack = await rib.onAction!(
+      { type: "lens-html", payload: {}, origin: "canvas-html" },
+      actionCtx,
+    );
+    expect(ack).toEqual({ ok: true, data: { key: HTML_LENS_KEY } });
+
+    const open = await rib.onAction!(
+      { type: "lens-open", payload: { id: "release-risks" }, origin: "canvas-html" },
+      actionCtx,
+    );
+    expect(open).toEqual({
+      ok: true,
+      data: {
+        effect: "open-canvas",
+        key: "rib:chamber:lens:release-risks",
+        title: "release-risks",
+      },
+    });
+  });
+
+  test("does NOT gate the same destructive verb from a trusted board action (origin absent)", async () => {
+    // No origin = trusted host UI: the gate must not intercept, so this reaches
+    // retireAction's own payload validation rather than the frame-gate refusal.
+    const res = await rib.onAction!({ type: "retire", payload: {} }, actionCtx);
+    expect(res).toEqual({ ok: false, error: "retire requires payload { slug }" });
+  });
 });
 
 describe("board lens regression", () => {
