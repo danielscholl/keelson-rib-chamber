@@ -50,6 +50,28 @@ export function capabilityVocabulary(): string {
     .join(", ");
 }
 
+// Fail-closed guard for the coding review preset. A code→review room only works
+// when the author can edit and the reviewer can inspect: an author with no `code`
+// has nothing to review, a reviewer with no `read`/`code` can't see the change —
+// either way the room silently degenerates to a prose pass. Require the author to
+// declare `code` and the reviewer `read` or `code`; return a helpful message, or
+// null when the pair is equipped. Pure — validateStart calls it once the
+// cross-vendor provider pins check out.
+export function codingReviewCapabilityError(
+  author: Pick<Mind, "slug" | "tools">,
+  reviewer: Pick<Mind, "slug" | "tools">,
+): string | null {
+  const declares = (m: Pick<Mind, "tools">, slug: string): boolean =>
+    Boolean(m.tools?.includes(slug));
+  if (!declares(author, "code")) {
+    return `a coding review room needs the author (${author.slug}) to declare the \`code\` capability so it can edit files — add \`code\` to its tools`;
+  }
+  if (!declares(reviewer, "read") && !declares(reviewer, "code")) {
+    return `a coding review room needs the reviewer (${reviewer.slug}) to declare \`read\` or \`code\` so it can inspect the author's change — add \`read\` to its tools`;
+  }
+  return null;
+}
+
 // Resolve a Mind's declared slugs to the turn's `tools` rail, intersected with
 // the room-safe pool. No declaration (or no pool) yields text-only — the room
 // default — never "all tools". Unknown slugs resolve to nothing.

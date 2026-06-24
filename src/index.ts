@@ -25,7 +25,12 @@ import {
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
 import { buildRoomBoard } from "./boards/room.ts";
-import { capabilityVocabulary, codingToolPool, KNOWN_CAPABILITY_SLUGS } from "./capabilities.ts";
+import {
+  capabilityVocabulary,
+  codingReviewCapabilityError,
+  codingToolPool,
+  KNOWN_CAPABILITY_SLUGS,
+} from "./capabilities.ts";
 import { buildChamberState, type ChamberDelta, diffAgainstWatermark } from "./chamber-state.ts";
 import { buildSeedFor } from "./compose.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
@@ -1526,6 +1531,16 @@ async function validateStart(
         ok: false,
         error: `review must be cross-vendor: ${authorSlug} and ${reviewerSlug} both use "${authorProvider}" — pin them to different providers`,
       };
+    }
+    // A coding review is only a real code→review loop if the author can edit and
+    // the reviewer can read the change; otherwise it's a same-as-non-coding prose
+    // pass with a confined cwd nobody uses. Reject the under-equipped pair here, on
+    // the dry-run path, so the operator fixes the Minds before confirming.
+    const author = bySlug.get(authorSlug);
+    const reviewer = bySlug.get(reviewerSlug);
+    if (coding && author && reviewer) {
+      const capError = codingReviewCapabilityError(author, reviewer);
+      if (capError) return { ok: false, error: capError };
     }
     return { ok: true, participants: deduped };
   }

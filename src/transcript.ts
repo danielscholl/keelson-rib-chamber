@@ -135,25 +135,40 @@ export function buildSynthesisPrompt(input: {
 // author's artifact — deliberately NOT the windowed transcript, so the reviewer
 // judges the deliverable on its own terms, cross-vendor, without the author's
 // working context. Always non-empty.
+//
+// In a coding room (`coding`) the deliverable lives in the repo, not the author's
+// reply, so the artifact is reframed as a SUMMARY and the reviewer is pointed at
+// the files the author changed — read/run the real change, don't grade the prose.
 export function buildReviewPrompt(input: {
   contract?: string;
   artifact: string;
   author?: MindSlug;
   directionInjection?: string;
+  coding?: boolean;
 }): string {
   const parts: string[] = [];
   const contract = input.contract?.trim();
   if (contract) parts.push(`Contract / acceptance criteria:\n\n${contract}`);
   const who = input.author ? ` from ${input.author}` : "";
   const artifact = input.artifact.trim();
-  parts.push(
-    artifact.length > 0
-      ? `Artifact to review${who}:\n\n${artifact}`
-      : `The author${who} produced no artifact to review.`,
-  );
+  if (input.coding) {
+    parts.push(
+      artifact.length > 0
+        ? `The author's summary of the change${who}:\n\n${artifact}`
+        : `The author${who} left no summary — inspect the repository for the change.`,
+    );
+  } else {
+    parts.push(
+      artifact.length > 0
+        ? `Artifact to review${who}:\n\n${artifact}`
+        : `The author${who} produced no artifact to review.`,
+    );
+  }
   if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
   parts.push(
-    "You are the reviewer, from a different vendor than the author. Review ONLY the artifact above against the contract — correctness, gaps, and risks — and give a clear verdict (approve or request changes). Do not rewrite it; report your findings concisely, in character.",
+    input.coding
+      ? "You are the reviewer, from a different vendor than the author. The author edited files in the repository at your working directory — read the files they changed (and run or build them, if your tools allow) to review the ACTUAL change against the contract, not the summary alone: correctness, gaps, and risks. Give a clear verdict (approve or request changes); report your findings concisely, in character. Do not rewrite the author's change yourself."
+      : "You are the reviewer, from a different vendor than the author. Review ONLY the artifact above against the contract — correctness, gaps, and risks — and give a clear verdict (approve or request changes). Do not rewrite it; report your findings concisely, in character.",
   );
   return parts.join("\n\n");
 }

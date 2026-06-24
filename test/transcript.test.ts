@@ -202,6 +202,29 @@ describe("buildReviewPrompt", () => {
     const p = buildReviewPrompt({ artifact: "x" });
     expect(p).not.toContain("Contract / acceptance criteria");
   });
+
+  test("coding mode sends the reviewer to the repo and reframes the artifact as a summary", () => {
+    const p = buildReviewPrompt({
+      contract: "Add a parser",
+      artifact: "I added parser.ts",
+      author: "scribe",
+      coding: true,
+    });
+    // The author's text is context (a summary), not the deliverable to grade.
+    expect(p).toContain("The author's summary of the change from scribe");
+    expect(p).not.toContain("Artifact to review");
+    // The reviewer is pointed at the files, not the prose.
+    expect(p).toContain("read the files they changed");
+    expect(p).not.toContain("Review ONLY the artifact above");
+    // The cross-vendor framing is preserved.
+    expect(p.toLowerCase()).toContain("different vendor");
+  });
+
+  test("coding mode with no summary still points the reviewer at the repository", () => {
+    const p = buildReviewPrompt({ artifact: "", coding: true });
+    expect(p).toContain("inspect the repository for the change");
+    expect(p).toContain("read the files they changed");
+  });
 });
 
 describe("buildTurnEntry", () => {

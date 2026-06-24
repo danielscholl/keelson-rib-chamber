@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   MessageChunk,
+  Project,
   RibContext,
   SnapshotManager,
   ToolContext,
@@ -44,6 +45,7 @@ function makeCtx(
   run?: RunAgentTurn,
   sm?: SnapshotManager,
   refreshWorkflow?: RibContext["refreshWorkflow"],
+  getProjects?: RibContext["getProjects"],
 ): RibContext {
   return {
     getExec: () => ({
@@ -55,6 +57,7 @@ function makeCtx(
     ...(sm ? { getSnapshotManager: () => sm, registerRegion: () => () => {} } : {}),
     ...(run ? { runAgentTurn: run } : {}),
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
+    ...(getProjects ? { getProjects } : {}),
   } as RibContext;
 }
 
@@ -958,5 +961,98 @@ describe("chamber room cap is atomic under concurrent starts", () => {
     );
     const opened = ctxs.filter((t) => t.out().includes("Opened room")).length;
     expect(opened).toBe(MAX_ACTIVE_ROOMS);
+  });
+});
+
+// Exercises validateStart's coding-review capability guard through the real tool
+// dry-run (the pure helper is unit-tested in capabilities.test.ts; this proves the
+// wiring fires). Reaching the guard needs a resolvable project, so the ctx wires a
+// getProjects seam, and the participants must be cross-vendor to clear the prior
+// gate. smith/wesson are equipped (code / read); scribe/critic carry no tools.
+describe("chamber_room_start — coding review capability guard", () => {
+  const PROJECTS: Project[] = [
+    {
+      id: "repo",
+      name: "Repo",
+      rootPath: join(tmpdir(), "chamber-guard-repo"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+
+  beforeAll(async () => {
+    await scaffoldMind(
+      mindsDir(),
+      {
+        slug: "smith",
+        name: "Smith",
+        role: "author",
+        voice: "plain",
+        persona: "You write code.",
+        provider: "claude",
+        tools: ["code"],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      "Smith's soul.",
+    );
+    await scaffoldMind(
+      mindsDir(),
+      {
+        slug: "wesson",
+        name: "Wesson",
+        role: "reviewer",
+        voice: "sharp",
+        persona: "You review code.",
+        provider: "codex",
+        tools: ["read"],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      "Wesson's soul.",
+    );
+    await rib.dispose?.();
+    abort = abortableRunAgentTurn();
+    tools = registerTools(makeCtx(abort.run, sm, undefined, () => PROJECTS));
+  });
+
+  it("dry-runs an equipped cross-vendor coding pair (author codes, reviewer reads)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["smith", "wesson"], strategy: "review", coding: true, projectId: "repo" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("review: smith reviewed by wesson");
+    expect(t.out()).toContain("coding tier ON");
+  });
+
+  it("rejects a coding review whose author can't `code`", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["scribe", "wesson"], strategy: "review", coding: true, projectId: "repo" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("scribe");
+    expect(t.out()).toContain("`code`");
+  });
+
+  it("rejects a coding review whose reviewer can neither read nor code", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["smith", "critic"], strategy: "review", coding: true, projectId: "repo" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("critic");
+    expect(t.out()).toContain("`read`");
+  });
+
+  it("leaves a non-coding review of the same unequipped pair valid (guard is coding-only)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["scribe", "critic"], strategy: "review" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("review: scribe reviewed by critic");
   });
 });
