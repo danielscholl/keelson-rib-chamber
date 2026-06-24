@@ -44,15 +44,17 @@ never the board.
 These three are the producers behind the Roster, Rooms, and Lenses regions of
 the Chamber surface. On the surface each binds with a `cadenceMs` of `120000`,
 so the board re-collects every two minutes on its own. State changes that should
-show sooner (a new Mind, a room starting or ending, a lens authored or retired)
-trigger a targeted `refreshWorkflow` so the right index republishes without
-waiting on the cadence.
+show sooner (a new Mind, a room ending, stopping, or being deleted, a lens
+authored or retired) trigger a targeted `refreshWorkflow` so the right index
+republishes without waiting on the cadence. Starting a room is the exception: it
+creates the room's own live panel at once but does not refresh the Rooms index,
+which picks the new room up on its next cadence.
 
 ## chamber-genesis
 
 `chamber-genesis` is one `prompt` node, `genesis`. The turn reads a brief,
 authors a `SOUL.md` and a one-line roster tagline, and persists the Mind by
-calling `chamber_emit_genesis`. It ends with the reply `Authored <name> (<slug>)`,
+calling `chamber_emit_genesis`. It ends with the reply `Authored {name} ({slug})`,
 using the slug value the tool returned. It has:
 
 - `allowed_tools: ["chamber_emit_genesis"]`. Rib tools are off by default in a
@@ -72,7 +74,7 @@ for a subject and publishes it by calling `chamber_emit_lens`. It has:
 - `allowed_tools: [LENS_TOOL_NAME]`, the lens publish tool (`chamber_emit_lens`).
 - `fail_on_tool_error: true`, so a publish that fails the board validation fails
   the run rather than reporting success with nothing rendered.
-- No `bindSnapshotKey`. The per-subject key (`rib:chamber:lens:<id>`) is chosen
+- No `bindSnapshotKey`. The per-subject key (`rib:chamber:lens:{id}`) is chosen
   at run time by the tool from the `id` the turn supplies, not pinned to one
   static key, so each subject lands in its own panel.
 

@@ -83,9 +83,9 @@ the descriptor; the leading slash is the operator's typed form.
 
 | Command | Argument | Completes | Effect |
 |---|---|---|---|
-| `/mind <slug>` | a Mind slug | yes (roster slugs filtered by prefix) | `open-agent` with the slug, or an inline `message` (no arg, or empty roster) |
-| `/genesis <brief>` | a freeform brief | no | `run-workflow` `chamber-genesis` (brief rides as `$ARGUMENTS`) |
-| `/lens <subject>` | a lens subject | no | `run-workflow` `chamber-lens` |
+| `/mind {slug}` | a Mind slug | yes (roster slugs filtered by prefix) | `open-agent` with the slug, or an inline `message` (no arg, or empty roster) |
+| `/genesis {brief}` | a freeform brief | no | `run-workflow` `chamber-genesis` (brief rides as `$ARGUMENTS`) |
+| `/lens {subject}` | a lens subject | no | `run-workflow` `chamber-lens` |
 
 `/mind` is the only command that completes, returning roster slugs. With no
 argument and a non-empty roster it lists the Minds inline; with no argument and no

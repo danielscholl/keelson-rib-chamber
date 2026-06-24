@@ -33,20 +33,22 @@ seeded with a quiet board at boot and republished only by the attention gate.
 | Row, column 2 | `rib:chamber:lenses` | `chamber-lenses` | 120000 | yes | `✦` accent |
 | Footer | `rib:chamber:brief` | none (rib-driven) | none | yes | `❖` brand |
 
-The Rooms index shows closed rooms; an active room appears as its own live
-panel, not here. The Lenses index sits alongside each lens's live panel.
+The Rooms index lists active rooms first, as status-only cards, then closed
+rooms with Open and Delete actions. An active room also gets its own live panel
+(below). The Lenses index sits alongside each lens's live panel.
 
 ## Dynamic regions
 
 Live rooms and live lenses are not in the static layout. A producer registers
 each one at runtime with `registerRegion`, so the surface grows panels as rooms
-convene and lenses are authored, and sheds them when a room ends or a lens
-retires.
+convene and lenses are authored. A lens panel sheds when the lens retires. A room
+keeps its panel while active, and after it ends the most recently finished room
+stays visible until a newer room supersedes it, or the room is deleted.
 
 | Region | Key | Title | Group | Group title | Glyph |
 |---|---|---|---|---|---|
-| Live room | `rib:chamber:room:<slug>` | room name (falls back to slug) | `rooms` | `Rooms` | `▦` brand |
-| Live lens | `rib:chamber:lens:<id>` | the lens `id` | `lens` | `Lenses` | `✦` accent |
+| Live room | `rib:chamber:room:{slug}` | room name (falls back to slug) | `rooms` | `Rooms` | `▦` brand |
+| Live lens | `rib:chamber:lens:{id}` | the lens `id` | `lens` | `Lenses` | `✦` accent |
 
 Each active room gets its own per-slug key and region, and each lens its own
 per-id key and region. The key routes a re-publish back to the same panel:
@@ -61,12 +63,12 @@ for its lane.
 
 ### The Rooms index Open key
 
-A closed room has no standing `rib:chamber:room:<slug>` region. Opening one from
+A closed room has no standing `rib:chamber:room:{slug}` region. Opening one from
 the Rooms index rebuilds its board from the persisted transcript and publishes
 it to a separate per-slug key:
 
 ```text
-rib:chamber:room-view:<slug>
+rib:chamber:room-view:{slug}
 ```
 
 This key is snapshot-only: it has no surface region and no canvas view. It is
@@ -86,7 +88,7 @@ the standing keys to the canvas renderer; data arrives when the producers run.
 | `rib:chamber:lenses` | `view` | Lenses |
 | `rib:chamber:brief` | `view` | Briefing |
 
-The per-instance keys (`room:<slug>`, `lens:<id>`, `room-view:<slug>`) are not
+The per-instance keys (`room:{slug}`, `lens:{id}`, `room-view:{slug}`) are not
 declared as views. They are bound at runtime, the room and lens keys through
 `registerRegion` and the room-view key through a snapshot registration alone.
 

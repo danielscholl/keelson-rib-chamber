@@ -30,7 +30,7 @@ keelson workflow run chamber-genesis "a meticulous release manager who tracks ev
 
 The turn reads your brief, decides the Mind's name, a short role title, and its
 voice, composes the founding document and a one-line roster tagline, then persists
-the Mind through a single write seam. It ends with `Authored <name> (<slug>)`,
+the Mind through a single write seam. It ends with `Authored {name} ({slug})`,
 using the slug value the tool returned. When it lands, the roster reflects it as
 a card.
 
@@ -48,22 +48,22 @@ first move:
 - **Mycroft**, a research partner for synthesis, patterns, and framing.
 - **Jarvis**, an engineering partner for diagnostics, telemetry, and tradeoffs.
 
-Each preset is a brief, not a baked soul. Convening one runs genesis to author
-fresh artifacts that capture the character's energy for your workspace, from the
-model's own knowledge. The same screen also offers a describe-your-own option,
+Each preset is a brief, not a baked soul. Authoring from a preset runs genesis to
+write fresh artifacts that capture the character's energy for your workspace, from
+the model's own knowledge. The same screen also offers a describe-your-own option,
 which is the `/genesis` path with the brief you type.
 
 ## What genesis writes on disk
 
 A Mind is a directory under the rib's data home,
-`<keelson-home>/rib-chamber/minds/<slug>/`. Genesis populates it:
+`{keelson-home}/rib-chamber/minds/{slug}/`. Genesis populates it:
 
 | File | What it holds |
 |---|---|
 | `SOUL.md` | The founding identity, authored by the turn: a **Persona**, a **Mission**, and a **Voice** section. This is the system prompt the Mind runs under. |
 | `mind.json` | The structured roster record: slug, name, role, voice, the one-line tagline, and any declared capabilities. |
 | `AGENT.md` | A seeded operating doctrine: take one turn at a time, stay in character, never claim another speaker's identity. |
-| `memory.md`, `rules.md` | Seeded empty, to accrue durable memory and operating rules over the Mind's life. |
+| `memory.md`, `rules.md` | Seeded empty. Ordinary files you edit to give the Mind durable memory and operating rules; nothing writes to them automatically. |
 | `log.md` | Seeded with one entry recording the genesis. |
 
 The slug is the directory name and the Mind's stable identity everywhere else. It
@@ -75,6 +75,11 @@ Genesis can pin `model` and `provider` when you pass them as workflow inputs.
 You can also set or clear the pin later from the roster card's **Set model…**
 action. `provider` is only kept when `model` is set.
 :::
+
+With no pin, the provider depends on where the Mind runs: entering it for a direct
+chat keeps the chat surface's current provider, while a room turn resolves through
+Keelson's agent-turn routing (a provider hint, then `KEELSON_WORKFLOW_PROVIDER`,
+then the first registered non-stub provider), not a surface session.
 
 ## Enter a Mind
 

@@ -70,11 +70,11 @@ because authoring an identity needs words: you describe the agent you want, and 
 agent turn does the rest.
 
 Run it with the `/genesis` command, or with
-`keelson workflow run chamber-genesis "<brief>"`. The turn reads your brief, decides
+`keelson workflow run chamber-genesis "{brief}"`. The turn reads your brief, decides
 the Mind's name, role, and voice, composes the `SOUL.md` body and a roster tagline,
 and then calls a single write seam to persist the Mind. The prompt asks for an honest
 founding document: it describes who the Mind is and how it speaks, and does not invent
-tools or credentials it does not have. It also ends with `Authored <name> (<slug>)`,
+tools or credentials it does not have. It also ends with `Authored {name} ({slug})`,
 using the tool-returned slug verbatim.
 
 The write is deterministic and fails closed. If a Mind with the same slug already
@@ -99,7 +99,7 @@ workspace, from the model's own knowledge.
 ## What persists on disk
 
 Each Mind is a directory under the rib's data home,
-`<keelson-home>/rib-chamber/minds/<slug>/`:
+`{keelson-home}/rib-chamber/minds/{slug}/`:
 
 - `SOUL.md` is the founding identity document, authored by an agent at genesis. It
   has a Persona, a Mission, and a Voice, and it is the system prompt the Mind runs
@@ -124,7 +124,7 @@ the filesystem).
 ## Entering and retiring a Mind
 
 Entering a Mind opens it as a direct one-to-one chat, seeded with its soul as the
-system prompt. Use `/mind <slug>`, or the Enter action on the roster. The seed stacks
+system prompt. Use `/mind {slug}`, or the Enter action on the roster. The seed stacks
 the Mind's identity (its `SOUL.md`, falling back to the tagline), then any real durable
 memory, rules, and recent log, then a short set of direct-chat rules, all clamped to
 the harness seed budget. If the Mind pins a model or provider, the seeded chat runs on

@@ -90,8 +90,9 @@ Call on Cyrus next.
 ```
 
 In chat this is `chamber_room_say` with a `callOn`; on the Chamber surface it is
-the room's Call on control. The Mind you name has to be a current participant; a
-name that is not in the room is dropped and the strategy keeps routing. In a
+the room's Call on control. The Mind you name has to be a current participant:
+`chamber_room_say` rejects a `callOn` that names a Mind not in the room, with an
+error that lists the valid participants, rather than silently dropping it. In a
 moderated or unmoderated room a call-on wins outright: it does not route through
 the moderator or wait for a nomination.
 
@@ -128,10 +129,13 @@ not the same model grading its own work. See the
 
 ## Where to go next
 
-You have now run every routing shape Chamber ships: a moderator that picks
-speakers, a floor that routes itself, and a director (you) reaching into a live
-room. The capstone shows you how to write a routing policy of your own, a pure
-decision the rib drives through the same seam these strategies use. Head to
+You have now run two more routing shapes, the moderated `group-chat` and the
+unmoderated `open-floor`, and steered a live room as director. With the
+sequential room from before, that is three of the five strategies driven
+first-hand; `concurrent` (a parallel round) and `review` (the cross-vendor pass
+above) round out the set, in the [strategies reference](../../reference/strategies/).
+The capstone shows you how to write a routing policy of your own, a pure decision
+the rib drives through the same seam these strategies use. Head to
 [author your own room strategy](../author-a-room-strategy/).
 
 ## Related

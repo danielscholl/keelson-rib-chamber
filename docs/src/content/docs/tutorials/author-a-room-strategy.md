@@ -87,7 +87,7 @@ moderator's pick can perturb the rotation without losing the round count.
 
 ### 1. Write the strategy file
 
-Create `src/strategies/<name>.ts` and export a `const` of type `Strategy`. Every
+Create `src/strategies/{name}.ts` and export a `const` of type `Strategy`. Every
 shipped strategy opens with the same three structural guards, in this order, each
 returning `{ kind: "end" }`:
 
@@ -159,7 +159,7 @@ export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
 `getStrategy` resolves with `Object.hasOwn`, so adding the key is enough to make
 the strategy selectable. You may re-export the function from the bottom of the
 file to match convention, but that is optional. A name that is in the union but
-not in the object throws `strategy "<name>" is not implemented` when a room tries
+not in the object throws `strategy "{name}" is not implemented` when a room tries
 to use it.
 
 ## Test it

@@ -14,8 +14,8 @@ participant, see [Lenses](../../concepts/lenses/).
 
 There are two ways to author a lens, and both run the same single agent turn:
 
-- **From chat or the command palette**, run `/lens <subject>`.
-- **From the CLI**, run `keelson workflow run chamber-lens "<subject>"`.
+- **From chat or the command palette**, run `/lens {subject}`.
+- **From the CLI**, run `keelson workflow run chamber-lens "{subject}"`.
 
 Either path runs the `chamber-lens` workflow. The turn composes a board for the
 subject and calls the emit tool once to publish it. The reply is one short line

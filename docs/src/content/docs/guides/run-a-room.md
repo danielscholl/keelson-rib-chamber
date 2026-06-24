@@ -33,7 +33,7 @@ In chat, the `chamber_room_start` tool opens a room. It is confirm-gated. Withou
 You re-call it with `confirm:true` once you approve what it described.
 
 ```text
-Would open a room with <who> on <topic> for <turnBudget> turns
+Would open a room with {who} on {topic} for {turnBudget} turns
 (each turn is a paid agent call). Re-call chamber_room_start with
 confirm:true once the user approves.
 ```

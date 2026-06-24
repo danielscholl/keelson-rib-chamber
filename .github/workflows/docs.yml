@@ -41,9 +41,17 @@ jobs:
         working-directory: docs
         run: bun install --frozen-lockfile
 
+      - name: Type-check content and config
+        working-directory: docs
+        run: bun run check
+
       - name: Build
         working-directory: docs
         run: bun run build
+
+      - name: Check docs for drift
+        working-directory: docs
+        run: bun scripts/check-docs-drift.mjs
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

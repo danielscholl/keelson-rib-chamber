@@ -23,6 +23,20 @@ keelson start
 discovers any installed `@keelson/rib-*` package at boot, so the install is all
 the wiring Chamber needs.
 
+## Remove the rib
+
+To uninstall Chamber, remove it by its rib id and restart the server:
+
+```bash
+keelson rib remove chamber
+keelson stop && keelson start
+```
+
+`keelson rib remove` unwires the package (it shells `bun remove`). A rib only
+deactivates at boot, so restart the server to drop Chamber's surface and tools.
+The data home (`{keelson-home}/rib-chamber/`, holding your authored Minds, rooms,
+and lenses) is left on disk; delete it by hand if you want to discard it.
+
 ## Choose which ribs activate
 
 The harness reads `KEELSON_RIBS` to decide which discovered ribs to activate.
@@ -39,8 +53,10 @@ That variable is read by the harness, not by Chamber. The rib reads no
 ## What Chamber needs
 
 - **A configured provider.** Rooms and lenses run real agent turns, so the
-  harness must have a coding-agent provider set up, either Copilot or Claude. To
-  try the wiring offline before you connect one, run with
+  harness must have a coding-agent provider configured. Keelson ships five
+  built-ins, Copilot (the default), Claude, Codex, Pi, and a stub echo provider,
+  and registers any OpenAI-compatible gateway you add; all but Copilot are
+  opt-in. To try the wiring offline before you connect one, run with
   `KEELSON_PROVIDERS=stub`, which lets the surface and tools come up without
   billing a real turn.
 - **No external CLIs.** Chamber does its work through harness seams and the

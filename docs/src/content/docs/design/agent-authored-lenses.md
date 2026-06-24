@@ -20,7 +20,7 @@ turn produces a reply. That framing decides its place in the rib: because a lens
 has no peer to talk to, it is orthogonal to rooms. It does not ride the room driver
 and does not depend on a strategy.
 
-One turn composes a board and publishes it to a `rib:chamber:lens:<id>` key, and
+One turn composes a board and publishes it to a `rib:chamber:lens:{id}` key, and
 that key renders as its own panel on the surface. The same write seam is reachable
 two ways, as a standalone workflow turn and as a tool a Mind can call mid-room, so
 the model has to hold whether the author is a workflow or a live speaker.

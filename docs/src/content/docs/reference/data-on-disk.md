@@ -7,17 +7,17 @@ sidebar:
 
 Chamber is a Keelson rib, so it persists everything under its own per-rib data
 home. The home path is the value the harness hands the rib at boot, captured
-from the `getDataDir` seam: `<keelson-home>/rib-chamber/`. Everything below is
+from the `getDataDir` seam: `{keelson-home}/rib-chamber/`. Everything below is
 relative to that home.
 
 ```text
-<keelson-home>/rib-chamber/
+{keelson-home}/rib-chamber/
 ├── minds/
-│   └── <slug>/
+│   └── {slug}/
 ├── rooms/
-│   └── <slug>/
+│   └── {slug}/
 ├── lenses/
-│   └── <id>/
+│   └── {id}/
 ├── room-draft.json
 └── brief-watermark.json
 ```
@@ -28,7 +28,7 @@ briefing watermark.
 
 ## A Mind
 
-A Mind lives in `minds/<slug>/`. The directory name is the authoritative slug:
+A Mind lives in `minds/{slug}/`. The directory name is the authoritative slug:
 if `mind.json` carries a divergent `slug`, the directory name wins on read.
 
 | File | Origin | Contents |
@@ -57,8 +57,9 @@ if `mind.json` carries a divergent `slug`, the directory name wins on read.
 `SOUL.md`. `model` and `provider` are optional. Genesis writes them when provided
 via workflow inputs, and the roster **Set model…** action can update or clear the
 pin later. `tools` is an optional array of capability slugs, written only when
-non-empty. `SOUL.md` holds the three named sections; the seeded docs carry
-placeholder text until a Mind earns real content.
+non-empty. `SOUL.md` holds the three named sections. `memory.md` and `rules.md`
+are seeded empty and stay empty until you edit them: they are ordinary
+operator-edited files, and nothing writes to them automatically.
 
 ### Slug rules
 
@@ -70,17 +71,18 @@ slug.
 
 ## A room
 
-A room lives in `rooms/<slug>/` as two files: current state and an append-only
+A room lives in `rooms/{slug}/` as two files: current state and an append-only
 log.
 
 ```text
-rooms/<slug>/
+rooms/{slug}/
 ├── room.json
 └── transcript.jsonl
 ```
 
-`room.json` is the `Room` record, rewritten each turn and reconcilable from the
-transcript:
+`room.json` is the `Room` record, rewritten each turn and read directly. It is
+not rebuilt from the transcript; only its `turnIndex` cursor is reconcilable from
+the transcript on resume:
 
 ```json
 {
@@ -105,6 +107,7 @@ or moderator pick can perturb rotation without losing the round count.
 ```json
 {
   "messageId": "…",
+  "roomSlug": "room-lq2x-3",
   "turnIndex": 3,
   "round": 2,
   "from": "mycroft",
@@ -123,7 +126,7 @@ older ones; active rooms are always kept.
 
 ## A lens
 
-A lens lives in `lenses/<id>/lens.json`. There is no transcript sibling: a lens
+A lens lives in `lenses/{id}/lens.json`. There is no transcript sibling: a lens
 is a single board record.
 
 ```json
