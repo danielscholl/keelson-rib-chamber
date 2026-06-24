@@ -1939,6 +1939,8 @@ const genesisEmitSchema = z.object({
   voice: z.string().min(1),
   soul: z.string().min(1),
   tagline: z.string().min(1),
+  model: z.string().optional(),
+  provider: z.string().optional(),
   // Capability slugs the Mind may invoke in a room (see CAPABILITIES).
   // Unknown slugs are dropped at persist; omitted/empty keeps the Mind text-only.
   tools: z.array(z.string()).optional(),
@@ -1948,7 +1950,7 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
   return {
     name: "chamber_emit_genesis",
     description:
-      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline, optional capability tools }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
+      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline, optional model/provider pin, optional capability tools }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
     inputSchema: genesisEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -1957,11 +1959,14 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         emitResult(ctx, `chamber_emit_genesis: ${parsed.error.message}`, true);
         return;
       }
-      const { name, role, voice, soul, tagline, tools } = parsed.data;
+      const { name, role, voice, soul, tagline, tools, model: rawModel, provider: rawProvider } =
+        parsed.data;
       try {
         const knownTools = tools
           ? [...new Set(tools.filter((s) => KNOWN_CAPABILITY_SLUGS.has(s)))]
           : [];
+        const model = rawModel?.trim();
+        const provider = rawProvider?.trim();
         const record: MindRecord = {
           slug: slugify(name),
           name,
@@ -1971,6 +1976,8 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
           // authored tagline trimmed, not hard-cut.
           persona: tagline.trim(),
           createdAt: new Date().toISOString(),
+          ...(model ? { model } : {}),
+          ...(model && provider ? { provider } : {}),
           ...(knownTools.length > 0 ? { tools: knownTools } : {}),
         };
         await scaffoldMind(mindsDir(), record, soul);
