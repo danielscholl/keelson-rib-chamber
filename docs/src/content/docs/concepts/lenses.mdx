@@ -10,8 +10,9 @@ import lensShot from "../../../assets/screenshots/lens.png";
 
 A **lens** is a view a Mind authors itself. One agent turn composes a canvas board
 and publishes it, and it renders as a live panel on the Chamber surface with no
-hand-coded UI. The view is produced by an agent, not written by hand. That is the
-rib's hero capability.
+hand-coded UI. The view is produced by an agent, not written by hand. It is the
+distinctive last move of a Chamber session: the reasoning does not just leave a
+transcript, it leaves a live board you can keep open.
 
 Here is one a Mind authored on a release-readiness subject, rendered straight onto
 the surface:
@@ -29,6 +30,18 @@ it is a solo turn with no peer, a lens is orthogonal to rooms: it does not ride 
 room driver and does not depend on a strategy. (Minds talking to each other is a
 [room](../rooms/); a Mind authoring a view is a turn.)
 
+## Lens, transcript, and briefing
+
+A lens is one of several boards on the Chamber surface. It helps to know how it
+differs from the others by author and update model:
+
+| Artifact | Producer | Purpose | Update model |
+|---|---|---|---|
+| Room board | The room driver | Show the attributed conversation | Updated after each committed turn |
+| Lens | A Mind or the lens workflow | Preserve an interpretation or a decision | Re-authored explicitly under a stable id |
+| Briefing | The rib's attention gate plus one agent turn | Surface newly ended rooms or changed lenses | Runs only when its watermark finds new substance |
+| Roster and index boards | Deterministic collectors | Show persistent Chamber state | Cadence or explicit refresh |
+
 ## The board, and the pipeline it rides
 
 A board is a generic canvas payload: a title, an optional status, and a few kinds
@@ -41,12 +54,20 @@ emits a board, the rib validates it fail-closed before anything renders, and the
 bound view draws it live. A board that does not validate is rejected loudly rather
 than rendered half-formed or dropped without a word.
 
+:::caution[Validation protects the canvas contract, not the conclusion]
+A valid lens has the correct board shape. Its claims are still agent-authored
+judgments. Weigh them against the room transcript and the lens's provenance, not the
+fact that it rendered cleanly.
+:::
+
 ## A panel per subject
 
 Each lens is keyed by a short subject id, and each new subject gets its own panel
 on the Chamber surface. Re-authoring the same subject updates that panel in place
-rather than adding another. The rib sets no fixed limit on how many lenses can
-exist; the harness enforces a per-surface ceiling.
+rather than adding another. A lens is a persistent published view, not a background
+monitor: it changes only when a Mind or workflow authors the same id again, never on
+its own. The rib sets no fixed limit on how many lenses can exist; the harness
+enforces a per-surface ceiling.
 
 ## Provenance the card carries
 
@@ -69,14 +90,15 @@ was there before.
   with no declared capability is text-only, so this is opt-in per Mind. See
   [Minds and genesis](../minds/) for declaring capabilities.
 
-## Every panel is authored
+## Every panel uses the same canvas contract
 
-The standing briefing on the surface footer is a board an agent turn composes. It
-was the first proof that an agent can author its own view, and it still runs on
-demand. It is a fixed board on its own key, not one of the per-subject lenses
-described here, but the principle is the same: a view composed by an agent, not
-written by hand. The roster and the live room transcript are boards too, so every
-panel on the Chamber surface is a published board, never hand-coded UI.
+Every panel on the Chamber surface is a published board, never hand-coded UI, but they
+do not all share an author. A lens and the briefing are agent-authored: an agent turn
+composes the board. The roster and the live room transcript are deterministic boards a
+collector or the room driver assembles. What they have in common is the contract, not
+the author. Each is a board published to a `rib:chamber:*` key and drawn by the canvas.
+The briefing was the first proof an agent could author its own view, and it still runs
+on demand on its own key, distinct from the per-subject lenses described here.
 
 ## Related
 

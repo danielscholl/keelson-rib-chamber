@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-A lens is the rib's hero capability: an agent authors its own view. One turn
+A lens is the rib's architectural hero: an agent authors its own view. One turn
 composes a canvas board and publishes it, and that board renders as a live panel
 with no hand-coded UI. This record states the shape that ships, the alternatives
 it replaced, and the two decisions that keep it honest: a fail-closed publish, and

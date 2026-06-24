@@ -1,44 +1,72 @@
 ---
 title: Concepts
-description: "The mental model for the Chamber rib: genesis, rooms, and lenses, and the one pipeline they share."
+description: "The mental model for the Chamber rib: where a room fits, the path from a question to a durable outcome, and the four ideas underneath it."
 sidebar:
   label: Overview
   order: 1
 ---
 
-import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+import { CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
 
-Chamber is a [Keelson](https://danielscholl.github.io/keelson/) rib that adds a
-multi-agent operating layer to the harness. These pages assume you know the
-harness and spend their words on what Chamber adds: Minds, rooms, and lenses.
+This is the mental model behind Chamber. It assumes you know the
+[Keelson](https://danielscholl.github.io/keelson/) harness and spends its words on
+what Chamber adds: where a room fits, the path from a question to a durable outcome,
+and the four ideas underneath it.
 
-## The mode Chamber adds
+## Where a room fits
 
-Keelson runs agents in two modes. **Chat** is one agent, conversational.
-**Workflows** are a deterministic graph of agent steps, repeatable and authored
-in YAML. Chamber adds the mode between them: many persistent agents you author
-on demand, that talk to each other under a chosen turn strategy, and that render
-their own views of what they are doing.
+Keelson already runs agents two ways. Chamber adds a third, for the work the other
+two cannot check on their own.
+
+| Mode | Use it for | Control flow |
+|---|---|---|
+| **Chat** | Fast, open-ended work with one agent | The agent decides |
+| **Workflow** | Repeatable execution with known steps | The YAML decides |
+| **Chamber room** | Decisions worth challenging from several perspectives | A room strategy decides |
 
 Rooms are emergent and non-deterministic, which is the point. They are the
-generative counterpart to workflows, not a replacement. Repeatable operations
-still belong in workflows; a room is where you want exploration, debate, or a
-second opinion. The two are complementary modes, and Keelson already owns the
-deterministic half.
+generative counterpart to workflows, not a replacement: repeatable operations still
+belong in workflows, and a room is where you want exploration, debate, or a second
+opinion. The two compose, and Keelson already owns the deterministic half. See
+[when to convene a room](when-to-convene-a-room/) for the call itself.
 
-## One pipeline underneath
+## From question to durable outcome
 
-Everything Chamber renders shares a single path. An agent turn (a room turn or a
-lens turn) emits a generic canvas **board**, the rib publishes that board
-fail-closed to a snapshot key under `rib:chamber:*`, and the bound view renders
-it live. A board is data, not view code, and the canvas already knows how to
-draw one, so a Mind can stand up a brand-new panel just by emitting a board.
+Chamber's pieces are not three adjacent features. They are stages of one path, from
+a plain-language brief to something you can act on and keep.
 
-That single pipeline is what makes the hero capability honest. When an agent
-authors a lens, it emits the same kind of board the room transcript and the
-briefing do, so its view renders through machinery that already exists.
+<Steps>
 
-## Three capabilities
+1. **Brief.** You describe a perspective you want, in plain language.
+2. **Minds.** Genesis authors that brief into a persistent specialist agent. You
+   author a Mind once and reuse it across many rooms.
+3. **Room and strategy.** You convene several Minds, and a strategy routes their
+   turns.
+4. **Attributed transcript.** The driver records who argued what, turn by turn.
+5. **Lens or briefing.** A Mind can publish the result as a live board on the
+   canvas, so it outlives the transcript.
+6. **Outcome.** You act on it: a human decision, or a deterministic workflow that
+   carries it out.
+
+</Steps>
+
+Read the stages by what each one preserves. A **Mind** preserves a perspective. A
+**room** tests perspectives against one another. A **lens** preserves the useful
+result outside the transcript. All of it persists as inspectable files: the Minds,
+the saved transcript, and any lenses they author.
+
+## The model
+
+Four ideas carry the rest of the rib.
+
+- **Minds** are durable points of view: persistent specialist agents you author from
+  a brief, each with a stable identity and an optional pinned model.
+- **Rooms** are governed exchanges between those points of view: you convene Minds
+  and they take turns on one topic.
+- **Strategies** encode the shape of the exchange: sequential, concurrent,
+  group-chat, open-floor, or a cross-vendor review.
+- **Lenses** turn a conclusion into a visible artifact: a Mind authors a live board
+  on the canvas, so the judgment does not stay trapped in the transcript.
 
 <CardGrid>
   <LinkCard
@@ -58,8 +86,48 @@ briefing do, so its view renders through machinery that already exists.
   />
 </CardGrid>
 
+## Boundaries and tradeoffs
+
+Every room turn is a paid agent call, so a room earns its cost or it does not run.
+The basic call:
+
+Reach for Chamber when:
+
+- A plan carries assumptions that should be challenged before you build on them.
+- Distinct roles should defend competing concerns.
+- An independent model or provider reading is worth having.
+- You want an attributed record of how a decision changed.
+- The conclusion should stay visible as a lens.
+
+Prefer something else when:
+
+- One quick answer is enough: use **Chat**.
+- The steps are known and should repeat exactly: use a **Workflow**.
+- You want an always-running service: a Mind is an identity on disk, not a daemon.
+- You need guaranteed correctness: more agents buy more scrutiny, not certainty.
+- The extra turns are not worth their cost or latency.
+
+[When to convene a room](when-to-convene-a-room/) goes deeper, including the turn
+budget and the confirm-gated dry run that bound a room's spend.
+
+## One pipeline underneath
+
+Everything Chamber renders shares a single path. An agent turn (a room turn or a
+lens turn) emits a generic canvas **board**, the rib publishes that board
+fail-closed to a snapshot key under `rib:chamber:*`, and the bound view renders it
+live. A board is data, not view code, and the canvas already knows how to draw one,
+so a Mind can stand up a brand-new panel just by emitting a board.
+
+The invariant is one line: Chamber publishes data through Keelson's canvas contract
+rather than shipping its own UI. That is what makes a lens trustworthy and cheap to
+extend, not what makes Chamber worth running. For the rest, follow the boundary:
+[Design](../design/agent-authored-lenses/) for why it exists, the
+[Reference](../reference/surface/) for the exact keys and schemas, and
+[Lenses](lenses/) for how agent-authored views use it.
+
 ## Related
 
+- [When to convene a room](when-to-convene-a-room/): the decisions a single agent cannot check on its own.
 - [Minds and genesis](minds/): the agents Chamber authors and runs.
 - [Rooms and strategies](rooms/): how Minds take turns together.
 - [Lenses](lenses/): how an agent renders its own view.
