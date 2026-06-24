@@ -186,6 +186,7 @@ describe("chamber room-control chat tools", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "chamber_emit_genesis",
       "chamber_emit_lens",
+      "chamber_emit_lens_html",
       "chamber_retire_lens",
       "chamber_room_say",
       "chamber_room_start",
@@ -195,11 +196,18 @@ describe("chamber room-control chat tools", () => {
     // No runAgentTurn -> no driver -> no room tools, but the genesis write seam and
     // the lens publish + retire seams (which need only the snapshot manager +
     // registerRegion) are still there.
-    expect(registerTools(makeCtx(undefined, sm)).map((t) => t.name)).toEqual([
-      "chamber_emit_genesis",
-      "chamber_emit_lens",
-      "chamber_retire_lens",
-    ]);
+    expect(
+      registerTools(makeCtx(undefined, sm))
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(
+      [
+        "chamber_emit_genesis",
+        "chamber_emit_lens",
+        "chamber_emit_lens_html",
+        "chamber_retire_lens",
+      ].sort(),
+    );
     // Without registerRegion the lens seam is withheld fail-closed — only genesis.
     expect(registerTools(makeCtx(undefined, undefined)).map((t) => t.name)).toEqual([
       "chamber_emit_genesis",

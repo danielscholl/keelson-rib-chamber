@@ -91,9 +91,12 @@ describe("rib-chamber", () => {
     expect((rib.registerTools?.(ctx) ?? []).map((t) => t.name)).toEqual(["chamber_emit_genesis"]);
   });
 
-  it("declares no static lens views — a lens registers its own at author time", () => {
+  it("declares the static html lens view while board lens views stay runtime", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
-    expect(keys.some((k) => k.startsWith("rib:chamber:lens:"))).toBe(false);
+    expect(keys).toContain("rib:chamber:lens:html");
+    expect(keys.filter((k) => k.startsWith("rib:chamber:lens:"))).toEqual([
+      "rib:chamber:lens:html",
+    ]);
   });
 
   it("ships the sessions-index and lenses-index rows; room + lens panels stay runtime", () => {
