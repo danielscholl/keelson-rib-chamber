@@ -526,7 +526,7 @@ Compose:
 - tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
 - tools: an OPTIONAL array of capability slugs the Mind may use inside a room — choose ONLY from this set: ${capabilityVocabulary()}. Include a slug only when the role genuinely calls for it; omit it (or use []) for a conversation-only Mind, and never invent a slug outside this set.
 
-Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline, tools } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with a single short line naming the Mind you created.`;
+Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline, tools } to persist the Mind — do NOT print the JSON as your reply. After the tool returns, reply with EXACTLY one line: "Authored <name> (<slug>)", using the name you authored and the tool-returned slug verbatim.`;
 
 // The lens authoring prompt: one agent turn composes a canvas board on a subject and
 // calls chamber_emit_lens to publish it. It is not pinned to one key — the tool routes
