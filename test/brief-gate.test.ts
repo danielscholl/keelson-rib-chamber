@@ -299,6 +299,63 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(wm.ackedEndedRooms).toEqual([]);
   });
 
+  test("tolerates a ```json-fenced board reply: still promotes (parse hardening)", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
+    const { sm, lastBoard } = fakeSnapshotManager();
+    // A live model commonly wraps the JSON board in a markdown fence.
+    const fenced = ["```json", JSON.stringify(briefBoard), "```"].join("\n");
+    const { run, requests } = scriptedRunAgentTurn([{ text: fenced }]);
+    rib.registerTools?.(makeCtx(run, sm));
+
+    await evaluateBriefGate();
+
+    expect(requests).toHaveLength(1);
+    expect(lastBoard()?.title).toBe("Chamber Briefing");
+    const wm = await readWatermark(home);
+    expect(wm.ackedEndedRooms).toEqual(["r-done"]);
+    expect(wm.briefPromoted).toBe(true);
+  });
+
+  test("tolerates a board reply with leading prose: still promotes (parse hardening)", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run, requests } = scriptedRunAgentTurn([
+      { text: `Here is the briefing:\n${JSON.stringify(briefBoard)}` },
+    ]);
+    rib.registerTools?.(makeCtx(run, sm));
+
+    await evaluateBriefGate();
+
+    expect(requests).toHaveLength(1);
+    expect(lastBoard()?.title).toBe("Chamber Briefing");
+    expect((await readWatermark(home)).briefPromoted).toBe(true);
+  });
+
+  test("fail-closed: an unparseable (non-JSON) reply keeps the prior board, no advance, no throw", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
+    const { sm, lastBoard } = fakeSnapshotManager();
+    // Prose with no JSON object at all — nothing to recover, so the gate fails closed.
+    const { run, requests } = scriptedRunAgentTurn([{ text: "Bob replies." }]);
+    rib.registerTools?.(makeCtx(run, sm));
+    await waitFor(() => lastBoard() !== undefined);
+    const seeded = lastBoard();
+    expect(seeded?.header?.status?.label).toBe("Quiet");
+
+    await expect(evaluateBriefGate()).resolves.toBeUndefined();
+
+    expect(requests).toHaveLength(1);
+    expect(lastBoard()).toEqual(seeded);
+    const wm = await readWatermark(home);
+    expect(wm.briefPromoted).toBe(false);
+    expect(wm.ackedEndedRooms).toEqual([]);
+  });
+
   test("seam absent (no runAgentTurn) keeps quiet only — no turn, no publish path", async () => {
     await seedMinds();
     const rooms = createFileRoomStore(roomsDir());
