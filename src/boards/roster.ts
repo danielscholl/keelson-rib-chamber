@@ -150,6 +150,24 @@ function cardFor(mind: Mind) {
         payload: { slug: mind.slug },
       },
       {
+        type: "set-model",
+        label: "Set model…",
+        glyph: "⚙",
+        payload: { slug: mind.slug },
+        fields: [
+          {
+            name: "model",
+            label: "Model",
+            placeholder: mind.model ?? "e.g. claude-opus-4.8 (blank to clear)",
+          },
+          {
+            name: "provider",
+            label: "Provider",
+            placeholder: mind.provider ?? "optional, e.g. anthropic",
+          },
+        ],
+      },
+      {
         type: "retire",
         label: "Retire Mind…",
         glyph: "✕",

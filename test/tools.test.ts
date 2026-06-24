@@ -738,6 +738,62 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     expect(plain?.tools).toBeUndefined();
   });
 
+  it("persists model and provider when both are provided", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "Pinned",
+        role: "reviewer",
+        voice: "precise",
+        soul: "# Pinned\n## Persona\nA reviewer.",
+        tagline: "Pinned to a specific model.",
+        model: " claude-opus-4.8 ",
+        provider: " anthropic ",
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const pinned = (await readMinds(mindsDir())).find((m) => m.slug === "pinned");
+    expect(pinned?.model).toBe("claude-opus-4.8");
+    expect(pinned?.provider).toBe("anthropic");
+  });
+
+  it("persists model alone and drops an orphan provider", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "ModelOnly",
+        role: "reviewer",
+        voice: "precise",
+        soul: "# ModelOnly\n## Persona\nA reviewer.",
+        tagline: "Model-only pin.",
+        model: "gpt-5.3-codex",
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const modelOnly = (await readMinds(mindsDir())).find((m) => m.slug === "modelonly");
+    expect(modelOnly?.model).toBe("gpt-5.3-codex");
+    expect(modelOnly?.provider).toBeUndefined();
+
+    const orphan = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "OrphanProvider",
+        role: "reviewer",
+        voice: "precise",
+        soul: "# OrphanProvider\n## Persona\nA reviewer.",
+        tagline: "Provider without model.",
+        provider: "anthropic",
+      },
+      orphan.ctx,
+    );
+    expect(orphan.errored()).toBe(false);
+    const orphanProvider = (await readMinds(mindsDir())).find((m) => m.slug === "orphanprovider");
+    expect(orphanProvider?.model).toBeUndefined();
+    expect(orphanProvider?.provider).toBeUndefined();
+  });
+
   it("fails closed on a slug collision (alice was seeded)", async () => {
     const t = makeToolCtx();
     await tool("chamber_emit_genesis").execute(
