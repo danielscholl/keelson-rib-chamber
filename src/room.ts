@@ -454,11 +454,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 
   // Resolve a turn's cwd. A project-targeted room runs at the project root
   // (path-as-context, as chat/workflows do); otherwise — including a targeted
-  // project the host no longer knows (deleted mid-room) — it keeps the neutral
-  // turnCwd, so a turn never inherits the host repo's ambient context. Resolved
-  // per turn so the projects store stays the single source of truth.
+  // project the host no longer knows (deleted mid-room) or one whose root is
+  // empty/whitespace (rootPath is `z.string()`, no min length) — it keeps the
+  // neutral turnCwd, so a turn never falls through to the seam's process-tmpdir
+  // default. Resolved per turn so the projects store stays the single source of truth.
   function turnCwdFor(room: Room): string | undefined {
-    if (room.projectId) return deps.resolveProjectRoot?.(room.projectId) ?? deps.turnCwd;
+    if (room.projectId) {
+      const root = deps.resolveProjectRoot?.(room.projectId)?.trim();
+      return root || deps.turnCwd;
+    }
     return deps.turnCwd;
   }
 

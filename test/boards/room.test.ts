@@ -137,6 +137,26 @@ describe("buildRoomBoard", () => {
     }
   });
 
+  test("a coding room's restart actions all round-trip the coding tier", () => {
+    const board = buildRoomBoard(room({ status: "done", projectId: "p1", coding: true }), []);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    // Start again / group-chat / open-floor — all keep the coding tier so a restart
+    // runs with the same capability rather than silently dropping it.
+    for (const item of actions.items) {
+      expect(item.payload).toMatchObject({ coding: true });
+    }
+  });
+
+  test("a non-coding room's restart actions carry no coding flag", () => {
+    const board = buildRoomBoard(room({ status: "done" }), []);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    for (const item of actions.items) {
+      expect(item.payload).not.toHaveProperty("coding");
+    }
+  });
+
   test("a finished open-floor's Start-again round-trips the end-vote threshold", () => {
     const board = buildRoomBoard(
       room({ status: "done", strategy: "open-floor", config: { endVoteThreshold: 0.6 } }),

@@ -127,17 +127,23 @@ describe("room driver — coding tier", () => {
     expect((req?.tools ?? []).map((t) => t.name).sort()).toEqual(["Bash", "Edit", "Read", "Write"]);
   });
 
-  test("an empty-string project root is treated as no confinement root (fails closed)", async () => {
+  test("an empty/whitespace project root falls back to the neutral home, not the tmpdir", async () => {
     // Project.rootPath is `z.string()` with no min length, so a host could resolve a
-    // project to "". A degenerate root is not a boundary: withhold the tier rather
-    // than confine to nothing — the truthiness gate in runOneTurn, not `!== undefined`.
-    const h = harness({ minds: [CODER, TALKER], resolveProjectRoot: () => "" });
+    // project to "" / whitespace. turnCwdFor trims and treats that as unresolved, so
+    // the turn runs at — and is confined to — the neutral home, exactly like a
+    // vanished project, rather than dropping cwd to the seam's process tmpdir.
+    const h = harness({
+      minds: [CODER, TALKER],
+      turnCwd: "/neutral",
+      resolveProjectRoot: () => "  ",
+    });
     await h.driver.start({ ...START, projectId: "proj", coding: true });
     expect(await h.driver.step("demo")).toBe("ended");
 
     const req = h.turns.requests[0];
-    expect(req?.allowedDirectories).toBeUndefined();
-    expect(req?.tools).toBeUndefined();
+    expect(req?.cwd).toBe("/neutral");
+    expect(req?.allowedDirectories).toEqual(["/neutral"]);
+    expect((req?.tools ?? []).map((t) => t.name).sort()).toEqual(["Bash", "Edit", "Read", "Write"]);
   });
 
   test("a coding room with no cwd to confine to grants no coding tools (fails closed)", async () => {

@@ -42,8 +42,9 @@ room-safe tools, so the two layers are belt-and-suspenders.
 
 ## The coding tier (opt-in)
 
-By default the room-safe pool is the lens write seam alone, so a room turn is
-text-or-lens — it never touches the filesystem. A room started with `coding: true`
+When the lens seam is wired, the default room-safe pool is the lens write seam
+alone, so a room turn is text-or-lens — it never touches the filesystem; without
+that seam, room turns are text-only. A room started with `coding: true`
 (which **requires** a target `projectId`) layers the **coding pool** on top: the
 host built-ins a coding slug authorizes — `code → Bash/Edit/Write`, `read → Read`
 (`CODING_CAPABILITY_SLUGS` / `codingToolPool()`, `src/capabilities.ts`). The
