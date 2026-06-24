@@ -134,6 +134,78 @@ describe("retire action", () => {
   });
 });
 
+describe("set-model action", () => {
+  let workspace: string;
+
+  beforeEach(async () => {
+    workspace = await mkdtemp(join(tmpdir(), "chamber-ws-"));
+    setChamberDataHome(join(workspace, "chamber"));
+  });
+
+  afterEach(async () => {
+    setChamberDataHome(undefined);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  const mindsRoot = () => join(workspace, "chamber", "minds");
+
+  async function seedScout(over: Partial<Parameters<typeof scaffoldMind>[1]> = {}): Promise<void> {
+    await scaffoldMind(
+      mindsRoot(),
+      {
+        slug: "scout",
+        name: "Scout",
+        role: "researcher",
+        voice: "terse",
+        persona: "Digs up facts.",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        ...over,
+      },
+      "# Scout\n## Persona\nA researcher.",
+    );
+  }
+
+  test("set-model persists model and provider", async () => {
+    await seedScout();
+    const res = await rib.onAction?.(
+      {
+        type: "set-model",
+        payload: { slug: "scout", model: "claude-opus-4.8", provider: "anthropic" },
+      },
+      stubCtx,
+    );
+    expect(res?.ok).toBe(true);
+    const [mind] = await readMinds(mindsRoot());
+    expect(mind?.model).toBe("claude-opus-4.8");
+    expect(mind?.provider).toBe("anthropic");
+  });
+
+  test("set-model fails closed without a slug", async () => {
+    const res = await rib.onAction?.({ type: "set-model", payload: {} }, stubCtx);
+    expect(res?.ok).toBe(false);
+  });
+
+  test("set-model surfaces a missing Mind", async () => {
+    const res = await rib.onAction?.(
+      { type: "set-model", payload: { slug: "ghost", model: "claude-opus-4.8" } },
+      stubCtx,
+    );
+    expect(res?.ok).toBe(false);
+  });
+
+  test("set-model clears a pinned model when given a blank model", async () => {
+    await seedScout({ model: "claude-opus-4.8", provider: "anthropic" });
+    const res = await rib.onAction?.(
+      { type: "set-model", payload: { slug: "scout", model: "  " } },
+      stubCtx,
+    );
+    expect(res?.ok).toBe(true);
+    const [mind] = await readMinds(mindsRoot());
+    expect(mind?.model).toBeUndefined();
+    expect(mind?.provider).toBeUndefined();
+  });
+});
+
 describe("cold-start author actions", () => {
   test("author-archetype launches chamber-genesis with pinned name/role/voice", async () => {
     const res = await rib.onAction?.(

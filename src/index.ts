@@ -37,7 +37,14 @@ import {
   lensKey,
 } from "./lens.ts";
 import { createFileLensStore, type LensStore, listLenses } from "./lens-store.ts";
-import { type MindRecord, readMinds, readSoul, retireMind, scaffoldMind } from "./minds-store.ts";
+import {
+  type MindRecord,
+  readMinds,
+  readSoul,
+  retireMind,
+  scaffoldMind,
+  setMindModel,
+} from "./minds-store.ts";
 import {
   chamberDataHome,
   isChamberDataHomeWritable,
@@ -999,6 +1006,8 @@ const rib: Rib = {
         return describeOwnAction(action);
       case "retire":
         return retireAction(action);
+      case "set-model":
+        return setModelAction(action);
       case "room-start":
         return roomStartAction(action);
       case "draft-set":
@@ -1816,6 +1825,22 @@ async function retireAction(action: RibAction): Promise<RibActionResult> {
     await retireMind(mindsDir(), slug);
     invalidateRoster(); // a Mind is gone — drop it from the cached roster
     return { ok: true, data: { slug } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+async function setModelAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const slug = asNonEmptyString(payload.slug);
+  if (!slug) return { ok: false, error: "set-model requires payload { slug }" };
+  const model = asNonEmptyString(payload.model);
+  const provider = asNonEmptyString(payload.provider);
+  try {
+    await setMindModel(mindsDir(), slug, { model, provider });
+    invalidateRoster();
+    await refreshWorkflow?.("chamber-roster");
+    return { ok: true, data: { slug, ...(model ? { model } : {}) } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
