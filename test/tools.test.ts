@@ -681,7 +681,7 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     expect(tool("chamber_emit_genesis").state_changing).toBe(true);
   });
 
-  it("persists a Mind (mind.json + SOUL.md) and reports its slug", async () => {
+  it("persists a Mind (mind.json + SOUL.md) and reports its slug and name", async () => {
     const t = makeToolCtx();
     await tool("chamber_emit_genesis").execute(
       {
@@ -695,6 +695,7 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     );
     expect(t.errored()).toBe(false);
     expect(t.out()).toContain('"slug":"ariadne"');
+    expect(t.out()).toContain('"name":"Ariadne"');
     const ariadne = (await readMinds(mindsDir())).find((m) => m.slug === "ariadne");
     expect(ariadne?.persona).toBe("Meticulous security reviewer.");
     const soul = await readFile(join(mindsDir(), "ariadne", "SOUL.md"), "utf8");

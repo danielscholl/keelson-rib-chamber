@@ -52,6 +52,8 @@ describe("chamber-genesis workflow", () => {
     const prompt = node?.prompt as string;
     expect(prompt).toContain("$ARGUMENTS");
     expect(prompt).toContain("chamber_emit_genesis");
+    expect(prompt).toContain("Authored <name> (<slug>)");
+    expect(prompt).toContain("tool-returned slug verbatim");
     expect(prompt).toContain("$inputs.model");
     expect(prompt).toContain("$inputs.provider");
     expect(prompt).toContain("model?, provider?");
