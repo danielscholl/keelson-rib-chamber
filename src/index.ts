@@ -1954,7 +1954,7 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         // promptly instead of waiting on the 120s cadence. Fail-soft (the seam
         // resolves on error and is absent on an older harness) — never throw.
         await refreshWorkflow?.("chamber-roster");
-        emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug }));
+        emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug, name: record.name }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_genesis failed: ${errText(e)}`, true);
       }
