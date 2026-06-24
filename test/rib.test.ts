@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import type { RibContext, SnapshotManager } from "@keelson/shared";
 import rib from "../src/index.ts";
+import { HTML_LENS_KEY } from "../src/lens-html.ts";
 import { setChamberDataHome } from "../src/paths.ts";
 
 // registerTools (exercised below) captures the data home into a module global;
@@ -93,10 +94,8 @@ describe("rib-chamber", () => {
 
   it("declares the static html lens view while board lens views stay runtime", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
-    expect(keys).toContain("rib:chamber:lens:html");
-    expect(keys.filter((k) => k.startsWith("rib:chamber:lens:"))).toEqual([
-      "rib:chamber:lens:html",
-    ]);
+    expect(keys).toContain(HTML_LENS_KEY);
+    expect(keys.filter((k) => k.startsWith("rib:chamber:lens:"))).toEqual([]);
   });
 
   it("ships the sessions-index and lenses-index rows; room + lens panels stay runtime", () => {
