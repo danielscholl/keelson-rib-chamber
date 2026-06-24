@@ -117,6 +117,26 @@ describe("buildRoomBoard", () => {
     });
   });
 
+  test("a project-targeted room's restart actions all round-trip the projectId", () => {
+    const board = buildRoomBoard(room({ status: "done", projectId: "p1" }), []);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    // Start again / group-chat / open-floor — all keep the project target so the
+    // restart runs against the same repo rather than silently dropping it.
+    for (const item of actions.items) {
+      expect(item.payload).toMatchObject({ projectId: "p1" });
+    }
+  });
+
+  test("an untargeted room's restart actions carry no projectId", () => {
+    const board = buildRoomBoard(room({ status: "done" }), []);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    for (const item of actions.items) {
+      expect(item.payload).not.toHaveProperty("projectId");
+    }
+  });
+
   test("a finished open-floor's Start-again round-trips the end-vote threshold", () => {
     const board = buildRoomBoard(
       room({ status: "done", strategy: "open-floor", config: { endVoteThreshold: 0.6 } }),

@@ -4,6 +4,7 @@ import type {
   CanvasView,
   CommandCompletion,
   CommandInvokeResult,
+  Project,
   Rib,
   RibAction,
   RibActionResult,
@@ -118,6 +119,19 @@ const roomViewEntries = new Map<
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
 // fail-soft: undefined on an older harness, where the index falls back to cadence.
 let refreshWorkflow: RibContext["refreshWorkflow"];
+// The host projects lookup, captured in registerTools and cleared in dispose (like
+// refreshWorkflow). Undefined on a harness that predates RibContext.getProjects,
+// where a projectId is rejected at start (fail closed) rather than targeting nothing.
+let getProjects: RibContext["getProjects"];
+
+// The one place a projectId is matched against the host list, so start-time
+// validation and the driver's per-turn cwd agree on what an id means.
+function resolveProject(projectId: string): Project | undefined {
+  return getProjects?.().find((p) => p.id === projectId);
+}
+function resolveProjectRoot(projectId: string): string | undefined {
+  return resolveProject(projectId)?.rootPath;
+}
 // The briefing gate's seams + state, captured in registerTools (the only hook with
 // the full ctx). The publisher routes the brief board to BRIEF_KEY; briefRunAgentTurn
 // is the (paid) turn the gate fires ONLY when something new happened. Both undefined
@@ -939,6 +953,9 @@ const rib: Rib = {
     // Capture the refresh seam for onAction handlers (room-delete refreshes the
     // sessions index). dispose() clears it so a re-boot recaptures the new ctx's.
     refreshWorkflow = ctx.refreshWorkflow;
+    // Capture the host projects lookup so a room can be targeted at a project
+    // (per-room turn cwd = project.rootPath). dispose() clears it like the above.
+    getProjects = ctx.getProjects;
     // A (re-)boot reopens the gate after any prior dispose: hand the gate a fresh
     // controller so its turns aren't pre-aborted (the prior, aborted one stays bound
     // to any orphaned in-flight turn, keeping that turn gated out).
@@ -1027,6 +1044,7 @@ const rib: Rib = {
         minds: resolveMinds,
         readSoul: (slug) => readSoul(mindsDir(), slug),
         turnCwd: chamberDataHome(),
+        resolveProjectRoot,
         // When the lens seam is wired, let a Mind author a lens mid-room: the C1
         // turn seam resolves this name to the rib's registered chamber_emit_lens
         // def and projects it to the provider. Without it, room turns stay text-only.
@@ -1139,6 +1157,7 @@ const rib: Rib = {
     activeRooms.clear();
     lastSlug = undefined;
     refreshWorkflow = undefined;
+    getProjects = undefined;
     briefUnregister?.();
     briefUnregister = undefined;
     briefPublisher = undefined;
@@ -1258,6 +1277,7 @@ async function validateStart(
   turnBudget: number,
   strategy: string,
   config: StartConfigInput = {},
+  projectId?: string,
 ): Promise<
   { ok: true; participants: string[]; config?: RoomConfig } | { ok: false; error: string }
 > {
@@ -1278,6 +1298,15 @@ async function validateStart(
     getStrategy(strategy as RoomStrategyName);
   } catch {
     return { ok: false, error: `unknown strategy "${strategy}"` };
+  }
+  // Fail closed on an unknown projectId (or an absent getProjects seam). Checked
+  // here, not in driver.start, so the dry-run — which calls validateStart but not
+  // startRoom — never advertises a target the confirm path would reject.
+  if (projectId !== undefined && !resolveProjectRoot(projectId)) {
+    return {
+      ok: false,
+      error: `unknown project "${projectId}" — pick a project from the host's project list`,
+    };
   }
   const minds = await resolveMinds();
   const known = new Set(minds.map((m) => m.slug));
@@ -1451,6 +1480,7 @@ async function startRoom(
     name?: string;
     strategy?: string;
     topic?: string;
+    projectId?: string;
   } & RoomConfigInput,
 ): Promise<RibActionResult> {
   // Refuse once disposed: driver.start() doesn't check, so without this a start
@@ -1458,13 +1488,19 @@ async function startRoom(
   // bails on isDisposed) — a phantom room nothing ever clears.
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
   const strategy = ((input.strategy ?? "").trim() || "sequential") as RoomStrategyName;
-  const valid = await validateStart(input.participants, input.turnBudget, strategy, {
-    moderator: input.moderator,
-    minRounds: input.minRounds,
-    synthesizer: input.synthesizer,
-    maxSpeakerRepeats: input.maxSpeakerRepeats,
-    endVoteThreshold: input.endVoteThreshold,
-  });
+  const valid = await validateStart(
+    input.participants,
+    input.turnBudget,
+    strategy,
+    {
+      moderator: input.moderator,
+      minRounds: input.minRounds,
+      synthesizer: input.synthesizer,
+      maxSpeakerRepeats: input.maxSpeakerRepeats,
+      endVoteThreshold: input.endVoteThreshold,
+    },
+    input.projectId,
+  );
   if (!valid.ok) return { ok: false, error: valid.error };
   const name = (input.name ?? "").trim() || deriveRoomName(input.topic, input.participants);
   // Normalize here so both entry points (the chat tool and the board action)
@@ -1493,6 +1529,7 @@ async function startRoom(
       turnBudget: input.turnBudget,
       ...(topic ? { topic } : {}),
       ...(valid.config ? { config: valid.config } : {}),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
     });
     lastSlug = slug;
     // driver.start published this room's first board (registering its per-slug
@@ -1561,6 +1598,7 @@ function roomStartAction(action: RibAction): Promise<RibActionResult> {
     name: asNonEmptyString(payload.name) || undefined,
     strategy: asNonEmptyString(payload.strategy) || undefined,
     topic: asNonEmptyString(payload.topic) || undefined,
+    projectId: asNonEmptyString(payload.projectId) || undefined,
     ...roomConfigFromFlat(payload),
   });
 }
@@ -2002,6 +2040,8 @@ const roomStartSchema = z.object({
   turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).optional(),
   name: z.string().optional(),
   topic: z.string().optional(),
+  // Optional: target the room at a keelson project (turns run at its rootPath).
+  projectId: z.string().optional(),
   // Routing config. `strategy` defaults to sequential; `moderator` is required
   // (and validated) only for "group-chat"; `endVoteThreshold` tunes "open-floor"'s
   // close. All optional so a plain two-Mind room needs none of them.
@@ -2293,15 +2333,23 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const minRounds = parsed.data.minRounds;
         const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;
         const endVoteThreshold = parsed.data.endVoteThreshold;
+        const projectId = (parsed.data.projectId ?? "").trim() || undefined;
         // Validate up front (including roster membership + group-chat moderator
-        // rules) so the dry-run never advertises a start the confirm path rejects.
-        const valid = await validateStart(participants, turnBudget, strategy, {
-          moderator,
-          synthesizer,
-          minRounds,
-          maxSpeakerRepeats,
-          endVoteThreshold,
-        });
+        // rules + project resolution) so the dry-run never advertises a start the
+        // confirm path rejects.
+        const valid = await validateStart(
+          participants,
+          turnBudget,
+          strategy,
+          {
+            moderator,
+            synthesizer,
+            minRounds,
+            maxSpeakerRepeats,
+            endVoteThreshold,
+          },
+          projectId,
+        );
         if (!valid.ok) {
           emitResult(ctx, `chamber_room_start: ${valid.error}`, true);
           return;
@@ -2325,10 +2373,15 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
             : strategy === "review"
               ? ` (review: ${valid.participants[0]} reviewed by ${valid.participants[1]})`
               : "";
+        // validateStart confirmed the project resolves; name it so the operator sees
+        // the repo the turns will run against.
+        const projectNote = projectId
+          ? ` in project "${resolveProject(projectId)?.name ?? projectId}"`
+          : "";
         if (!confirm) {
           emitResult(
             ctx,
-            `Would open a room with ${who}${topicNote}${modeNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
+            `Would open a room with ${who}${topicNote}${modeNote}${projectNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
           );
           return;
         }
@@ -2340,6 +2393,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           name,
           topic,
           strategy,
+          projectId,
           moderator,
           synthesizer,
           minRounds,

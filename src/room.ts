@@ -49,6 +49,11 @@ export interface RoomDriverDeps {
   // server's cwd, leaking the host repo's ambient context (git state, files)
   // into the conversation; pointing it at the Chamber data home isolates that.
   turnCwd?: string;
+  // Resolve a room's targeted project to its root path, so a turn runs at the
+  // project root instead of turnCwd. Host-provided (RibContext.getProjects); omitted
+  // means targeting is unavailable. NB: this sets cwd, not a filesystem boundary —
+  // confinement is a separate host seam.
+  resolveProjectRoot?: (projectId: string) => string | undefined;
   // Tool names every room turn may invoke, forwarded as the turn's `tools` (the
   // C1 seam resolves them to the rib's registered defs). The rib decides what is
   // safe for a room turn — today the lens write seam, so a Mind can author a lens
@@ -66,6 +71,7 @@ export interface RoomStartConfig {
   turnBudget: number;
   topic?: string;
   config?: RoomConfig;
+  projectId?: string;
 }
 
 export interface RoomInjectInput {
@@ -291,6 +297,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         round: 0,
         ...(config.topic ? { topic: config.topic } : {}),
         ...(config.config ? { config: config.config } : {}),
+        ...(config.projectId ? { projectId: config.projectId } : {}),
         createdAt: now().toISOString(),
       };
       await persistAndPublish(room);
@@ -437,12 +444,23 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return undefined;
   }
 
+  // Resolve a turn's cwd. A project-targeted room runs at the project root
+  // (path-as-context, as chat/workflows do); otherwise — including a targeted
+  // project the host no longer knows (deleted mid-room) — it keeps the neutral
+  // turnCwd, so a turn never inherits the host repo's ambient context. Resolved
+  // per turn so the projects store stays the single source of truth.
+  function turnCwdFor(room: Room): string | undefined {
+    if (room.projectId) return deps.resolveProjectRoot?.(room.projectId) ?? deps.turnCwd;
+    return deps.turnCwd;
+  }
+
   // Run one agent turn and return its reply text + aborted flag, or "disposed" if
   // the rib was torn down mid-turn (the caller drops a disposed turn without
   // committing). The prompt is built by the caller — the speaker, moderator, and
   // synthesizer differ only in their prompt — so this owns just the abort check
   // (before AND after the SOUL read), the stream drain, and result extraction.
   async function runOneTurn(
+    room: Room,
     mind: Mind,
     prompt: string,
     controller: AbortController,
@@ -469,11 +487,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // model so a cross-provider pin resolves coherently here, the same as a
       // direct /mind chat — not just against the default provider).
       const tools = resolveMindTools(mind, deps.turnTools);
+      const cwd = turnCwdFor(room);
       const turn = deps.runAgentTurn({
         system,
         prompt,
         abortSignal: controller.signal,
-        ...(deps.turnCwd ? { cwd: deps.turnCwd } : {}),
+        ...(cwd ? { cwd } : {}),
         ...(tools.length > 0 ? { tools } : {}),
         ...(mind.model ? { model: mind.model } : {}),
         ...(mind.provider ? { provider: mind.provider } : {}),
@@ -624,7 +643,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       directionInjection,
       mindSlug,
     );
-    const turn = await runOneTurn(mind, prompt, controller);
+    const turn = await runOneTurn(room, mind, prompt, controller);
     if (turn === "disposed") return false;
     return await commitTurn(room, mind, turn.text, turn.aborted, gen);
   }
@@ -672,7 +691,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       await loadCachedTranscript(room.slug),
       directionInjection,
     );
-    const turns = minds.map((m) => runOneTurn(m, prompt, controller));
+    const turns = minds.map((m) => runOneTurn(room, m, prompt, controller));
     let results: ({ text: string; aborted: boolean } | "disposed")[];
     try {
       results = await Promise.all(turns);
@@ -750,7 +769,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // moderator (who decides who speaks), not directly to a speaker.
       ...(directionInjection ? { directionInjection } : {}),
     });
-    const modTurn = await runOneTurn(moderator, modPrompt, controller);
+    const modTurn = await runOneTurn(room, moderator, modPrompt, controller);
     if (modTurn === "disposed") return false;
     const modActive = await commitTurn(room, moderator, modTurn.text, modTurn.aborted, gen);
     if (!modActive) return false; // aborted/stopped, budget -> done, or superseded
@@ -794,7 +813,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         ? { directionInjection: decision.direction }
         : {}),
     });
-    const spkTurn = await runOneTurn(speakerMind, spkPrompt, controller);
+    const spkTurn = await runOneTurn(room, speakerMind, spkPrompt, controller);
     if (spkTurn === "disposed") return false;
     return await commitTurn(afterMod, speakerMind, spkTurn.text, spkTurn.aborted, gen);
   }
@@ -884,7 +903,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           ...(room.topic ? { topic: room.topic } : {}),
           transcript: await loadCachedTranscript(room.slug),
         });
-        const turn = await runOneTurn(synth, prompt, controller);
+        const turn = await runOneTurn(room, synth, prompt, controller);
         if (turn === "disposed") return false;
         await appendEntry(
           room.slug,

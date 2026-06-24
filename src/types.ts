@@ -74,6 +74,10 @@ export interface Room {
   // a non-empty fallback), it just has no shared subject.
   topic?: string;
   config?: RoomConfig;
+  // The keelson project this room targets, if any. Stored as the id, not the
+  // resolved path, so the host projects store stays the single source of truth —
+  // the driver resolves it to a turn cwd per turn (see turnCwdFor in room.ts).
+  projectId?: string;
   pending?: RoomPending;
   createdAt: string;
 }
