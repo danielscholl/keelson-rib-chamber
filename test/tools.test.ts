@@ -310,6 +310,31 @@ describe("chamber room-control chat tools", () => {
     expect(rec?.reason).toBeUndefined();
   });
 
+  it("chamber_emit_lens_html advertises state_changing", () => {
+    expect(tool("chamber_emit_lens_html").state_changing).toBe(true);
+  });
+
+  it("chamber_emit_lens_html publishes html and reports its key", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens_html").execute({ html: "<p>hello lens</p>" }, t.ctx);
+    expect(t.errored()).toBe(false);
+    const out = JSON.parse(t.out()) as { ok: boolean; key: string };
+    expect(out.ok).toBe(true);
+    expect(out.key).toBe("rib:chamber:lens-html");
+  });
+
+  it("chamber_emit_lens_html fails closed on empty html", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens_html").execute({ html: "" }, t.ctx);
+    expect(t.errored()).toBe(true);
+  });
+
+  it("chamber_emit_lens_html fails closed on oversized html (> 256 KB)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens_html").execute({ html: "x".repeat(262145) }, t.ctx);
+    expect(t.errored()).toBe(true);
+  });
+
   it("chamber_retire_lens advertises state_changing", () => {
     expect(tool("chamber_retire_lens").state_changing).toBe(true);
   });

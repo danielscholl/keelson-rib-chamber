@@ -107,6 +107,10 @@ let lensRegistry: LensRegistry | undefined;
 let lensSm: SnapshotManager | undefined;
 let htmlLensRegistry: HtmlLensRegistry | undefined;
 let htmlLensSm: SnapshotManager | undefined;
+// Tracked alongside htmlLensSm because createHtmlLensRegistry captures registerRegion:
+// a re-bootstrap that reuses the same manager but hands a fresh seam must rebuild, or
+// the registry would publish/register through the stale registerRegion.
+let htmlLensRegisterRegion: NonNullable<RibContext["registerRegion"]> | undefined;
 // The room region registry is a boot-time singleton like the lens one: it owns the
 // per-slug room snapshot keys + surface regions, built once in registerTools and
 // disposed in dispose(). roomSm tracks the manager it was built against so a
@@ -939,7 +943,7 @@ const rib: Rib = {
             // should fail loudly if the publish errors, not report SUCCEEDED with
             // no lens rendered.
             fail_on_tool_error: true,
-            allowed_tools: [LENS_TOOL_NAME, HTML_LENS_TOOL_NAME],
+            allowed_tools: [LENS_TOOL_NAME],
           },
         ],
       },
@@ -1023,11 +1027,17 @@ const rib: Rib = {
       htmlLensRegistry?.dispose();
       htmlLensRegistry = undefined;
       htmlLensSm = undefined;
-    } else if (!htmlLensRegistry || sm !== htmlLensSm) {
+      htmlLensRegisterRegion = undefined;
+    } else if (
+      !htmlLensRegistry ||
+      sm !== htmlLensSm ||
+      registerRegion !== htmlLensRegisterRegion
+    ) {
       const next = createHtmlLensRegistry(sm, registerRegion);
       htmlLensRegistry?.dispose();
       htmlLensRegistry = next;
       htmlLensSm = sm;
+      htmlLensRegisterRegion = registerRegion;
     }
     if (sm && registerRegion && sm !== lensSm) {
       const next = createLensRegistry(sm, registerRegion, lensStore);
@@ -1201,6 +1211,7 @@ const rib: Rib = {
     htmlLensRegistry?.dispose();
     htmlLensRegistry = undefined;
     htmlLensSm = undefined;
+    htmlLensRegisterRegion = undefined;
     lensRegistry?.dispose();
     lensRegistry = undefined;
     lensSm = undefined;
@@ -2294,9 +2305,9 @@ function makeEmitLensHtmlTool(registry: HtmlLensRegistry): ToolDefinition {
       }
       try {
         const { key } = await registry.publish(parsed.data.html);
-        await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
-        void evaluateBriefGate().catch(() => {});
-        void refreshWorkflow?.("chamber-roster")?.catch(() => {});
+        // No chamber-lenses/roster/brief refresh here (unlike chamber_emit_lens): the
+        // HTML lens is published in-memory only and isn't part of the persisted lens
+        // store those collectors read, so refreshing them would be inert.
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens_html failed: ${errText(e)}`, true);
