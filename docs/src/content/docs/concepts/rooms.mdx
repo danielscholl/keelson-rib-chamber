@@ -34,9 +34,9 @@ next.
 
 ## A strategy controls turn-taking, not thought
 
-A **strategy** decides only one thing: who acts next. Given the room and its
-transcript, it returns the next step, speak (one Mind), speak in parallel (a whole
-round at once), moderate, or end, and nothing more. The driver owns everything with a
+A **strategy** decides the next orchestration step: which Mind speaks, whether a
+parallel round runs, whether a moderator routes, or whether the room ends. Given the
+room and its transcript, it returns that step and nothing more. The driver owns everything with a
 side effect: running turns, attribution, persistence, publishing, aborting, and all
 text parsing. A strategy proposes; the driver disposes.
 
