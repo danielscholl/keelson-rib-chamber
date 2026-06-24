@@ -22,6 +22,7 @@ export type LensProvenance = Pick<LensRecord, "scope" | "maintainingMind" | "rea
 
 export interface LensStore {
   saveLens(record: { id: string; board: CanvasBoardView } & LensProvenance): Promise<void>;
+  loadLens(id: string): Promise<LensRecord | undefined>;
   deleteLens(id: string): Promise<void>;
 }
 
@@ -62,6 +63,15 @@ export function createFileLensStore(lensesRoot: string): LensStore {
       const tmp = `${lensFile(record.id)}.${++writeSeq}.tmp`;
       await writeFile(tmp, `${JSON.stringify(stored, null, 2)}\n`);
       await rename(tmp, lensFile(record.id));
+    },
+
+    async loadLens(id) {
+      assertSafeSlug(id);
+      const record = await parseLensJson(lensFile(id));
+      // The dir name is the authoritative id (mirrors listLenses): a record whose
+      // in-file id drifted from its dir is treated as absent, not returned.
+      if (!record || record.id !== id) return undefined;
+      return record;
     },
 
     async deleteLens(id) {
