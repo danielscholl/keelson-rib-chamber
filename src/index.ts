@@ -207,6 +207,11 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
 // live key/panel with no on-disk record).
 let lensReconcileInFlight: Promise<void> | undefined;
 
+// Serializes lens write-backs (the lens-note action's load-append-publish) so two
+// concurrent appends to the same board can't lose-update each other. Mirrors
+// briefInFlight: a global chain, reset on dispose so a re-boot starts fresh.
+let lensWriteInFlight: Promise<unknown> = Promise.resolve();
+
 function reconcileLensPanels(registry: LensRegistry): void {
   lensReconcileInFlight = (async () => {
     let records: Awaited<ReturnType<typeof listLenses>>;
@@ -1071,6 +1076,8 @@ const rib: Rib = {
         return retireLensAction(action);
       case "lens-open":
         return lensOpenAction(action);
+      case "lens-note":
+        return lensNoteAction(action);
       default:
         return { ok: false, error: `unknown action '${action.type}'` };
     }
@@ -1147,6 +1154,7 @@ const rib: Rib = {
     lensRegistry?.dispose();
     lensRegistry = undefined;
     lensSm = undefined;
+    lensWriteInFlight = Promise.resolve();
     roomRegistry?.dispose();
     roomRegistry = undefined;
     roomSm = undefined;
@@ -1756,6 +1764,82 @@ function lensOpenAction(action: RibAction): RibActionResult {
   return { ok: true, data: { effect: "open-canvas", key: lensKey(id), title: id } };
 }
 
+// The rows section a lens write-back appends annotation notes to. The verb owns
+// this section title so repeated notes accumulate in one place regardless of how
+// the maintaining Mind laid out the rest of the board.
+const LENS_NOTES_SECTION_TITLE = "Notes";
+const LENS_NOTE_MAX = 500;
+
+// Append a note as a row to a lens board's "Notes" section, creating that section
+// if the board has none. Pure (no I/O): the caller persists + republishes the
+// returned board. New rows go to the end so the section reads oldest-first.
+function appendLensNote(board: CanvasBoardView, note: string): CanvasBoardView {
+  const row = { text: note };
+  let appended = false;
+  const sections: CanvasBoardView["sections"] = board.sections.map((s) => {
+    if (!appended && s.kind === "rows" && s.title === LENS_NOTES_SECTION_TITLE) {
+      appended = true;
+      return { ...s, items: [...s.items, row] };
+    }
+    return s;
+  });
+  if (!appended) {
+    sections.push({ kind: "rows", title: LENS_NOTES_SECTION_TITLE, items: [row] });
+  }
+  return { ...board, sections };
+}
+
+// Lens write-back: append an operator-supplied note from the lens's own panel (a
+// board `actions` section dispatches `{ id, note }` here). A deterministic edit,
+// NOT a re-prompt of the maintaining Mind, so it costs nothing. The brief gate is
+// deliberately NOT fired — a free in-view annotation must not promote a paid
+// briefing turn (that path is reserved for Mind-authored substance).
+async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const raw = asNonEmptyString(payload.id);
+  if (!raw) return { ok: false, error: "lens-note requires payload { id, note }" };
+  const id = canonicalLensId(raw);
+  if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(raw)}` };
+  const note = asNonEmptyString(payload.note);
+  if (!note) return { ok: false, error: "lens-note requires a non-empty note" };
+  if (note.length > LENS_NOTE_MAX) {
+    return { ok: false, error: `note too long (max ${LENS_NOTE_MAX} characters)` };
+  }
+  // The write-back republishes through the registry to update the live panel, so the
+  // region seam must be wired (it always is when a lens exists — fail closed if not).
+  if (!lensRegistry)
+    return { ok: false, error: "lens write-back unavailable (region seam absent)" };
+  const registry = lensRegistry;
+  // Serialize the load-append-publish: it is a read-modify-write, so two concurrent
+  // appends to the same board would lose-update (the store's atomic rename guards a
+  // torn file, not a stale read). Note appends are rare operator actions, so one
+  // global chain — not a per-id lock — suffices.
+  const apply = async (): Promise<RibActionResult> => {
+    try {
+      // Let any in-flight boot re-registration finish first, so the write can't race a
+      // reregister republishing the pre-edit board over the live key.
+      await lensReconcileInFlight?.catch(() => {});
+      const record = await createFileLensStore(lensesDir()).loadLens(id);
+      if (!record) return { ok: false, error: `lens '${id}' not found` };
+      const { key } = await registry.publish(id, appendLensNote(record.board, note), {
+        scope: record.scope,
+        maintainingMind: record.maintainingMind,
+        reason: record.reason,
+      });
+      // The lens's updatedAt advanced — refresh the index card and roster pulse (cheap
+      // deterministic collectors), fail-soft like the emit/retire paths.
+      await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+      await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+      return { ok: true, data: { id, key } };
+    } catch (e) {
+      return { ok: false, error: errText(e) };
+    }
+  };
+  const run = lensWriteInFlight.then(apply, apply);
+  lensWriteInFlight = run.catch(() => {});
+  return run;
+}
+
 // Resolve the target room slug for a control. With server-assigned slugs there
 // is no default: a payload-less call (a stale/static button or an API client
 // that forgot the slug) must fail closed rather than hit a legacy `room` dir.
@@ -2065,7 +2149,7 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
   return {
     name: LENS_TOOL_NAME,
     description:
-      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Call it once per lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.',
+      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.',
     inputSchema: lensEmitSchema,
     state_changing: true,
     async execute(input, ctx) {

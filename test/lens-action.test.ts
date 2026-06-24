@@ -155,6 +155,147 @@ describe("lens-open onAction", () => {
   });
 });
 
+describe("lens-note onAction", () => {
+  let workspace: string;
+  beforeAll(async () => {
+    workspace = await mkdtemp(join(tmpdir(), "chamber-lens-note-"));
+    setChamberDataHome(join(workspace, "chamber"));
+  });
+  afterAll(async () => {
+    await rib.dispose?.();
+    setChamberDataHome(undefined);
+    await rm(workspace, { recursive: true, force: true });
+  });
+  beforeEach(async () => {
+    await rib.dispose?.();
+    await rm(lensesDir(), { recursive: true, force: true });
+    registerTools(makeCtx(fakeSnapshotManager()));
+  });
+
+  // Read the persisted board back through the store, the way the live panel would.
+  const loadBoard = (id: string) => createFileLensStore(lensesDir()).loadLens(id);
+
+  it("appends a note, creating a Notes rows section, and re-stamps the lens", async () => {
+    await createFileLensStore(lensesDir()).saveLens({ id: "alpha", board: board("Alpha") });
+    const res = await onAction(
+      { type: "lens-note", payload: { id: "alpha", note: "first note" } },
+      actionCtx,
+    );
+    expect(res).toEqual({ ok: true, data: { id: "alpha", key: "rib:chamber:lens:alpha" } });
+    const rec = await loadBoard("alpha");
+    expect(rec?.board.sections).toEqual([
+      { kind: "rows", title: "Notes", items: [{ text: "first note" }] },
+    ]);
+  });
+
+  it("accumulates successive notes in the one Notes section", async () => {
+    await createFileLensStore(lensesDir()).saveLens({ id: "alpha", board: board("Alpha") });
+    await onAction({ type: "lens-note", payload: { id: "alpha", note: "one" } }, actionCtx);
+    await onAction({ type: "lens-note", payload: { id: "alpha", note: "two" } }, actionCtx);
+    const rec = await loadBoard("alpha");
+    expect(rec?.board.sections).toEqual([
+      { kind: "rows", title: "Notes", items: [{ text: "one" }, { text: "two" }] },
+    ]);
+  });
+
+  it("appends into an author-supplied Notes section rather than duplicating it", async () => {
+    await createFileLensStore(lensesDir()).saveLens({
+      id: "alpha",
+      board: {
+        view: "board",
+        title: "Alpha",
+        sections: [{ kind: "rows", title: "Notes", items: [{ text: "pre-existing" }] }],
+      },
+    });
+    await onAction({ type: "lens-note", payload: { id: "alpha", note: "added" } }, actionCtx);
+    const rec = await loadBoard("alpha");
+    expect(rec?.board.sections).toEqual([
+      { kind: "rows", title: "Notes", items: [{ text: "pre-existing" }, { text: "added" }] },
+    ]);
+  });
+
+  it("preserves the lens's provenance across the write-back", async () => {
+    await createFileLensStore(lensesDir()).saveLens({
+      id: "alpha",
+      board: board("Alpha"),
+      scope: "status board",
+      maintainingMind: "ada",
+    });
+    await onAction({ type: "lens-note", payload: { id: "alpha", note: "n" } }, actionCtx);
+    const rec = await loadBoard("alpha");
+    expect(rec?.scope).toBe("status board");
+    expect(rec?.maintainingMind).toBe("ada");
+  });
+
+  it("canonicalizes the payload id so the card's subject maps to the stored lens", async () => {
+    await createFileLensStore(lensesDir()).saveLens({ id: "release-risks", board: board("R") });
+    const res = await onAction(
+      { type: "lens-note", payload: { id: "Release Risks", note: "n" } },
+      actionCtx,
+    );
+    expect(res.ok).toBe(true);
+    const rec = await loadBoard("release-risks");
+    expect(rec?.board.sections).toEqual([{ kind: "rows", title: "Notes", items: [{ text: "n" }] }]);
+  });
+
+  it("fails closed on a missing payload id", async () => {
+    const res = await onAction({ type: "lens-note", payload: { note: "n" } }, actionCtx);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/requires payload/);
+  });
+
+  it("fails closed on a blank note (no mutation)", async () => {
+    await createFileLensStore(lensesDir()).saveLens({ id: "alpha", board: board("Alpha") });
+    const res = await onAction(
+      { type: "lens-note", payload: { id: "alpha", note: "   " } },
+      actionCtx,
+    );
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/non-empty note/);
+    expect((await loadBoard("alpha"))?.board.sections).toEqual([]);
+  });
+
+  it("fails closed on an over-long note (no mutation)", async () => {
+    await createFileLensStore(lensesDir()).saveLens({ id: "alpha", board: board("Alpha") });
+    const res = await onAction(
+      { type: "lens-note", payload: { id: "alpha", note: "x".repeat(501) } },
+      actionCtx,
+    );
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/too long/);
+    expect((await loadBoard("alpha"))?.board.sections).toEqual([]);
+  });
+
+  it("serializes concurrent appends to the same lens so neither note is lost", async () => {
+    await createFileLensStore(lensesDir()).saveLens({ id: "alpha", board: board("Alpha") });
+    const [a, b] = await Promise.all([
+      onAction({ type: "lens-note", payload: { id: "alpha", note: "one" } }, actionCtx),
+      onAction({ type: "lens-note", payload: { id: "alpha", note: "two" } }, actionCtx),
+    ]);
+    expect(a.ok && b.ok).toBe(true);
+    const section = (await loadBoard("alpha"))?.board.sections.find(
+      (s) => s.kind === "rows" && s.title === "Notes",
+    );
+    const notes = section?.kind === "rows" ? section.items.map((i) => i.text).sort() : [];
+    expect(notes).toEqual(["one", "two"]);
+  });
+
+  it("fails closed on an unknown lens, surfacing not-found", async () => {
+    const res = await onAction(
+      { type: "lens-note", payload: { id: "ghost", note: "n" } },
+      actionCtx,
+    );
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/lens 'ghost' not found/);
+  });
+
+  it("fails closed on an unsafe / unusable id", async () => {
+    const res = await onAction({ type: "lens-note", payload: { id: "!!!", note: "n" } }, actionCtx);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/unsafe lens id/);
+  });
+});
+
 describe("boot lens re-registration", () => {
   let workspace: string;
   beforeAll(async () => {

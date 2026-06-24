@@ -21,6 +21,10 @@ function fakeLensStore() {
     async saveLens(record) {
       saved.set(record.id, record.board);
     },
+    async loadLens(id) {
+      const board = saved.get(id);
+      return board ? { id, board, updatedAt: "1970-01-01T00:00:00.000Z" } : undefined;
+    },
     async deleteLens(id) {
       deleted.push(id);
       saved.delete(id);

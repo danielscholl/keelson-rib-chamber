@@ -115,6 +115,54 @@ describe("createFileLensStore", () => {
   });
 });
 
+describe("loadLens", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "chamber-lenses-"));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("returns the persisted record, board + provenance intact", async () => {
+    const store = createFileLensStore(root);
+    await store.saveLens({
+      id: "findings",
+      board: board("Findings"),
+      scope: "status board",
+      maintainingMind: "ada",
+    });
+    const rec = await store.loadLens("findings");
+    expect(rec?.id).toBe("findings");
+    expect(rec?.board).toEqual(board("Findings"));
+    expect(rec?.scope).toBe("status board");
+    expect(rec?.maintainingMind).toBe("ada");
+  });
+
+  it("returns undefined for an unknown lens", async () => {
+    expect(await createFileLensStore(root).loadLens("nope")).toBeUndefined();
+  });
+
+  it("treats an id-mismatched record as absent (dir name is authoritative)", async () => {
+    await seedLens(root, "mismatch", {
+      id: "other",
+      board: board("M"),
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(await createFileLensStore(root).loadLens("mismatch")).toBeUndefined();
+  });
+
+  it("returns undefined for a corrupt record rather than throwing", async () => {
+    await mkdir(join(root, "bad-json"), { recursive: true });
+    await writeFile(join(root, "bad-json", "lens.json"), "{ not json");
+    expect(await createFileLensStore(root).loadLens("bad-json")).toBeUndefined();
+  });
+
+  it("runs assertSafeSlug first: a traversal id rejects before touching the FS", async () => {
+    await expect(createFileLensStore(root).loadLens("../escape")).rejects.toThrow();
+  });
+});
+
 describe("deleteLens", () => {
   let root: string;
   beforeEach(async () => {
