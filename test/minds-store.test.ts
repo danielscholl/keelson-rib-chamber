@@ -9,8 +9,8 @@ import {
   readMinds,
   readSoul,
   retireMind,
-  setMindModel,
   scaffoldMind,
+  setMindModel,
 } from "../src/minds-store.ts";
 
 let root: string;
@@ -167,7 +167,11 @@ describe("retireMind", () => {
     });
 
     test("blank model clears both model and provider", async () => {
-      await scaffoldMind(root, record({ model: "claude-opus-4.8", provider: "anthropic" }), "# Scout");
+      await scaffoldMind(
+        root,
+        record({ model: "claude-opus-4.8", provider: "anthropic" }),
+        "# Scout",
+      );
       await setMindModel(root, "scout", { model: " " });
       const [mind] = await readMinds(root);
       expect(mind?.model).toBeUndefined();
@@ -194,7 +198,9 @@ describe("retireMind", () => {
     test("preserves other mind record fields", async () => {
       await scaffoldMind(root, record({ tools: ["web"] }), "# Scout");
       await setMindModel(root, "scout", { model: "claude-opus-4.8", provider: "anthropic" });
-      const rec = JSON.parse(await readFile(join(root, "scout", "mind.json"), "utf8")) as MindRecord;
+      const rec = JSON.parse(
+        await readFile(join(root, "scout", "mind.json"), "utf8"),
+      ) as MindRecord;
       expect(rec.name).toBe("Scout");
       expect(rec.role).toBe("researcher");
       expect(rec.voice).toBe("terse");
