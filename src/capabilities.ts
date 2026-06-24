@@ -15,9 +15,32 @@ export const CAPABILITIES: Readonly<
   Record<string, { readonly tools: readonly string[]; readonly summary: string }>
 > = {
   lens: { tools: [LENS_TOOL_NAME], summary: "author a live canvas board mid-room" },
+  read: { tools: ["Read"], summary: "read files in the room's project (coding rooms only)" },
+  code: {
+    tools: ["Bash", "Edit", "Write"],
+    summary: "edit files and run commands in the room's project (coding rooms only)",
+  },
 };
 
 export const KNOWN_CAPABILITY_SLUGS: ReadonlySet<string> = new Set(Object.keys(CAPABILITIES));
+
+// The slugs whose tools are filesystem/exec built-ins (Read/Bash/Edit/Write) — the
+// host provider's own tools, not chamber-registered ones. They resolve to nothing
+// in a normal room and only enter the pool when a room opts into the coding tier
+// (`room.coding`), where every turn is confined to its cwd. Held as data so
+// `codingToolPool` and the genesis gloss can't drift from the map above.
+export const CODING_CAPABILITY_SLUGS: ReadonlySet<string> = new Set(["read", "code"]);
+
+// The pool a coding room layers on top of the base (lens) pool: every tool a coding
+// slug authorizes, deduped, in the driver's `turnTools` shape. Derived from
+// CAPABILITIES so the coding ceiling stays the same set the slugs resolve to.
+export function codingToolPool(): { name: string }[] {
+  const names = new Set<string>();
+  for (const slug of CODING_CAPABILITY_SLUGS) {
+    for (const name of CAPABILITIES[slug]?.tools ?? []) names.add(name);
+  }
+  return [...names].map((name) => ({ name }));
+}
 
 // "slug (what it does)" list for the genesis prompt, derived from CAPABILITIES
 // so the advertised vocabulary can't drift from what actually resolves.

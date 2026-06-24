@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   CAPABILITIES,
+  CODING_CAPABILITY_SLUGS,
   capabilityVocabulary,
+  codingToolPool,
   KNOWN_CAPABILITY_SLUGS,
   resolveMindTools,
 } from "../src/capabilities.ts";
 import { LENS_TOOL_NAME } from "../src/lens.ts";
 
 const POOL = [{ name: LENS_TOOL_NAME }];
+// The ceiling a coding room layers on: base (lens) + the coding built-ins.
+const CODING_POOL = [{ name: LENS_TOOL_NAME }, ...codingToolPool()];
 
 describe("resolveMindTools", () => {
   test("maps a declared slug to its tool name when the pool permits it", () => {
@@ -45,5 +49,53 @@ describe("resolveMindTools", () => {
     const doc = capabilityVocabulary();
     for (const slug of KNOWN_CAPABILITY_SLUGS) expect(doc).toContain(slug);
     expect(doc).toContain("lens (");
+  });
+});
+
+describe("coding capability tier", () => {
+  test("the `code` slug maps to the write/exec built-ins when the pool permits", () => {
+    expect(
+      resolveMindTools({ tools: ["code"] }, CODING_POOL)
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["Bash", "Edit", "Write"]);
+  });
+
+  test("the `read` slug maps to Read", () => {
+    expect(resolveMindTools({ tools: ["read"] }, CODING_POOL)).toEqual([{ name: "Read" }]);
+  });
+
+  test("read + code together resolve to the full coding rail", () => {
+    expect(
+      resolveMindTools({ tools: ["read", "code"] }, CODING_POOL)
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["Bash", "Edit", "Read", "Write"]);
+  });
+
+  test("a coding slug is dropped when the pool is the base (non-coding) pool — the ceiling holds", () => {
+    // The room-pool intersection is chamber's allowlist ceiling: a code-declaring
+    // Mind in a non-coding room reaches nothing, so the tier is genuinely opt-in.
+    expect(resolveMindTools({ tools: ["code"] }, POOL)).toEqual([]);
+    expect(resolveMindTools({ tools: ["read", "code"] }, POOL)).toEqual([]);
+  });
+
+  test("CODING_CAPABILITY_SLUGS names exactly the filesystem/exec slugs", () => {
+    expect([...CODING_CAPABILITY_SLUGS].sort()).toEqual(["code", "read"]);
+    // Every coding slug is also a known slug (genesis can declare it).
+    for (const slug of CODING_CAPABILITY_SLUGS) expect(KNOWN_CAPABILITY_SLUGS.has(slug)).toBe(true);
+  });
+
+  test("codingToolPool is the deduped union of every coding slug's tools, derived from CAPABILITIES", () => {
+    expect(
+      codingToolPool()
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["Bash", "Edit", "Read", "Write"]);
+    // Derived, not hand-listed: it can't drift from what the slugs resolve to.
+    const fromMap = new Set(
+      [...CODING_CAPABILITY_SLUGS].flatMap((s) => [...(CAPABILITIES[s]?.tools ?? [])]),
+    );
+    expect(new Set(codingToolPool().map((t) => t.name))).toEqual(fromMap);
   });
 });
