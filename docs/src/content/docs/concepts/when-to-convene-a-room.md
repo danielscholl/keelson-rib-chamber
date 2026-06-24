@@ -16,8 +16,8 @@ turns spent arguing it out.
 ## What a room catches that one pass cannot
 
 A single agent, or a linear chain of them, can be completely self-consistent and
-still be wrong. Each step trusts the step before it, and nothing in the chain is
-ever asked to challenge the premise. A wrong assumption made early is not caught
+still be wrong. Each step trusts the step before it, and unless you build a challenge
+into the chain, nothing in it is asked to question the premise. A wrong assumption made early is not caught
 later. It is inherited, implemented faithfully, and validated against itself, so
 the whole run finishes green while the result stays wrong.
 

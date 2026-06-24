@@ -15,8 +15,8 @@ chat or drop several into a room together.
 A Mind is a reusable, named perspective. Instead of re-describing "act like a
 skeptic" in a prompt every time, you author the skeptic once and convene it whenever
 a decision needs that lens. It keeps a stable identity across tasks and across rooms,
-so its arguments are attributable and its character does not drift from one prompt to
-the next.
+so its arguments are attributable and its defining role does not depend on you
+rewriting the prompt each time.
 
 | Ad hoc role prompt | Chamber Mind |
 |---|---|
@@ -29,16 +29,15 @@ the next.
 ## Persistent identity, stateless execution
 
 :::note[Persistent does not mean continuously running]
-A Mind persists as an inspectable identity, configuration, and working files. It is
-not a background process and holds no live session. Each turn invokes the Mind
-afresh: a direct chat seeds it from its soul, and a room turn rebuilds its context
-from the room transcript. The driver, not a hidden model session, provides
-continuity.
+A Mind itself is files and configuration, not a running process. Inside a room, every
+turn is stateless and rebuilt from the Mind's soul and the room transcript, so the
+driver, not a hidden model session, provides continuity. Entering a Mind opens a normal
+Keelson conversation, which follows Keelson's chat and provider-session semantics.
 :::
 
-That distinction is the whole trust model. Because a turn is rebuilt every time, what
-a Mind brings to it is exactly what you can read on disk and in the transcript.
-Nothing accumulates invisibly between turns. It also makes the
+That distinction is the room's trust model. Because a room turn is rebuilt every time,
+what a Mind brings to it is exactly what you can read in its soul and the transcript,
+with nothing accumulating invisibly between turns. It also makes the
 [driver-as-router](../rooms/) model easy to follow later: the driver holds the state,
 and the Mind is invoked into it.
 
