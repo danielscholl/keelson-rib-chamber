@@ -54,9 +54,9 @@ if `mind.json` carries a divergent `slug`, the directory name wins on read.
 ```
 
 `persona` is the roster tagline, one line, not the Persona section from
-`SOUL.md`. `model` and `provider` are optional and are not written at genesis: a
-fresh Mind has neither, and a Mind with no pin enters on the surface's current
-provider. `tools` is an optional array of capability slugs, written only when
+`SOUL.md`. `model` and `provider` are optional. Genesis writes them when provided
+via workflow inputs, and the roster **Set model…** action can update or clear the
+pin later. `tools` is an optional array of capability slugs, written only when
 non-empty. `SOUL.md` holds the three named sections; the seeded docs carry
 placeholder text until a Mind earns real content.
 

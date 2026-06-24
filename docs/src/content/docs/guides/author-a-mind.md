@@ -70,9 +70,9 @@ is derived from the name, path-safe by construction (lowercase, kebab-case,
 guarded against traversal before it ever touches the filesystem).
 
 :::note
-Genesis does not set a model or provider. A fresh `mind.json` carries no model or
-provider pin, so the Mind runs on the surface's current provider until you hand-edit
-one in.
+Genesis can pin `model` and `provider` when you pass them as workflow inputs.
+You can also set or clear the pin later from the roster card's **Set model…**
+action. `provider` is only kept when `model` is set.
 :::
 
 ## Enter a Mind

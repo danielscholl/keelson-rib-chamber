@@ -96,7 +96,8 @@ reuse one you have. Genesis named mine **stoneplan**, **faultline**, and
 **ledger**, with **avery-slate** moderating. Yours will get their own names.
 
 A room is most useful when its Minds do not all think alike. Each Mind can pin its
-own model in `mind.json`, so the panel reasons with genuinely different engines.
+own model from the roster card's **Set model…** action, so the panel reasons with
+genuinely different engines.
 Mine ran on three vendors at once:
 
 <figure>
@@ -104,11 +105,12 @@ Mine ran on three vendors at once:
   <figcaption>Figure 1. The review panel on the Chamber roster. Each Mind shows its persona and its pinned model, so the same contract is read by three different reasoning engines at once.</figcaption>
 </figure>
 
-To pin a model, set `provider` and `model` in the Mind's `mind.json` under
-`<keelson-home>/rib-chamber/minds/<slug>/`:
+To pin after authoring, open the Mind card's **Set model…** action and set
+`model` (required) and `provider` (optional). You can also pre-pin at authoring
+time with workflow inputs:
 
-```json
-{ "provider": "copilot", "model": "gpt-5.5" }
+```text
+/workflow run chamber-genesis "a backend realist who owns persistence and restart behavior" --inputs model=gemini-3.1-pro-preview provider=google
 ```
 
 The pin is optional. The room works with every Mind on one model; different models
