@@ -32,18 +32,18 @@ Each turn is stateless. The driver rebuilds the speaker's context from the room'
 transcript every turn, so a Mind carries no hidden session from one turn to the
 next.
 
-## Strategies are pure
+## A strategy controls turn-taking, not thought
 
-A **strategy** is a pure decision over the current room state. Given the room and
-its transcript, it returns the next step: speak (one Mind), speak in parallel (a
-whole round at once), moderate, or end. That is all a strategy does.
-It performs no I/O, talks to no provider, and never parses free text.
+A **strategy** decides only one thing: who acts next. Given the room and its
+transcript, it returns the next step, speak (one Mind), speak in parallel (a whole
+round at once), moderate, or end, and nothing more. The driver owns everything with a
+side effect: running turns, attribution, persistence, publishing, aborting, and all
+text parsing. A strategy proposes; the driver disposes.
 
-Everything with side effects lives in the driver: running turns, persistence,
-publishing, aborting, and all text parsing. Keeping strategies pure is what makes
-them unit-testable in isolation and safe to add, and it is why authoring a new
-strategy is the capstone of the tutorial tier. A strategy proposes; the driver
-disposes.
+That split is also why a strategy is a pure function, which keeps it unit-testable in
+isolation and safe to add, and why authoring a new one is the capstone of the tutorial
+tier. The [design notes](../../design/rooms-and-strategies/) cover the purity contract
+in full.
 
 :::note
 A strategy decides *who* speaks next. The driver is the sole authority for *who
@@ -54,7 +54,17 @@ next speaker, never the authorship of an entry.
 
 ## The strategies
 
-Chamber ships five:
+Chamber ships five. Pick by the kind of thinking you want, not the count of minds.
+
+| Strategy | Choose it when | Defining behavior |
+|---|---|---|
+| **sequential** | The conversation should build turn by turn | Each speaker hears the preceding turns |
+| **concurrent** | You want independent first readings | Everyone in a round gets the same pre-round context |
+| **group-chat** | The discussion needs focus and convergence | A separate moderator picks speakers and decides when to close |
+| **open-floor** | You want an emergent, participant-routed exchange | Speakers nominate who goes next and can vote to end |
+| **review** | One artifact needs an independent second-vendor critique | Exactly two Minds, author then reviewer, pinned to different providers |
+
+The precise behavior of each:
 
 - **sequential** rotates one speaker per turn, round-robin over the participants.
   The simplest room, and the default.

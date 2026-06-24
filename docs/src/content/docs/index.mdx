@@ -5,14 +5,27 @@ description: "Multi-agent rooms, persistent agents, and agent-authored lenses fo
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Chamber gives Keelson a multi-agent operating layer. You author persistent
-agents (**Minds**) on demand from a plain-language brief, put them in a **room**
-to take turns on a problem under a strategy you choose, and let them author their
-own **lenses**: live views they draw onto the canvas as they work.
+One agent can produce a clear answer and still carry one set of assumptions all
+the way through. A deterministic workflow can make that answer repeatable, but it
+cannot challenge the premise it was handed.
 
-It is a [Keelson](https://danielscholl.github.io/keelson/) rib, so it installs
-into the harness you already run and reuses what the harness owns (its providers,
-the workflow engine, and the canvas). Everything here is what Chamber adds.
+Chamber adds structured multi-agent review to Keelson. You author persistent
+specialist agents, convene them around a plan or a decision, and choose how they
+take turns, challenge each other, or review work across providers. Chamber keeps
+the attributed transcript, and a Mind can turn the result into a live lens on the
+canvas.
+
+Use Chamber to red-team a design, review a contract before implementation, compare
+competing approaches, or force a plan to survive a defender, a skeptic, and an
+operator before a workflow acts on it.
+
+**Minds** are persistent perspectives. **Rooms** put those perspectives into a
+governed conversation. **Lenses** keep the resulting judgment visible.
+
+Chamber is a [Keelson](https://danielscholl.github.io/keelson/) rib: it installs
+into the harness you already run and reuses what the harness owns, its providers,
+the workflow engine, and the canvas, so a Mind renders a live view with no
+hand-coded UI. Everything here is what Chamber adds.
 
 :::tip[New here?]
 Start with [Concepts](concepts/) for the model, or jump straight to
