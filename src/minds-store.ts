@@ -144,6 +144,32 @@ export async function retireMind(mindsRoot: string, slug: string): Promise<void>
   await rm(dir, { recursive: true, force: true });
 }
 
+export async function setMindModel(
+  mindsRoot: string,
+  slug: string,
+  pin: { model?: string; provider?: string },
+): Promise<void> {
+  assertSafeSlug(slug);
+  const dir = join(mindsRoot, slug);
+  if (!(await exists(dir))) throw new Error(`mind '${slug}' not found`);
+
+  const rec = JSON.parse(await readFile(join(dir, "mind.json"), "utf8")) as MindRecord;
+  const model = pin.model?.trim();
+  const provider = pin.provider?.trim();
+  if (provider && !model) throw new Error("provider requires a model");
+
+  if (model) {
+    rec.model = model;
+    if (provider) rec.provider = provider;
+    else delete rec.provider;
+  } else {
+    delete rec.model;
+    delete rec.provider;
+  }
+
+  await writeFile(join(dir, "mind.json"), `${JSON.stringify(rec, null, 2)}\n`);
+}
+
 // stat, not readdir: readdir only succeeds on a directory, so a non-directory
 // entry at the path would read as absent and silently bypass the collision /
 // not-found guards.

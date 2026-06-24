@@ -9,6 +9,7 @@ import {
   readMinds,
   readSoul,
   retireMind,
+  setMindModel,
   scaffoldMind,
 } from "../src/minds-store.ts";
 
@@ -146,6 +147,60 @@ describe("retireMind", () => {
     await scaffoldMind(root, record(), "# Scout");
     await retireMind(root, "scout");
     expect(await readMinds(root)).toEqual([]);
+  });
+
+  describe("setMindModel", () => {
+    test("sets model and provider on an existing Mind", async () => {
+      await scaffoldMind(root, record(), "# Scout");
+      await setMindModel(root, "scout", { model: " claude-opus-4.8 ", provider: " anthropic " });
+      const [mind] = await readMinds(root);
+      expect(mind?.model).toBe("claude-opus-4.8");
+      expect(mind?.provider).toBe("anthropic");
+    });
+
+    test("sets model alone and drops provider", async () => {
+      await scaffoldMind(root, record({ provider: "anthropic" }), "# Scout");
+      await setMindModel(root, "scout", { model: "gpt-5.3-codex" });
+      const [mind] = await readMinds(root);
+      expect(mind?.model).toBe("gpt-5.3-codex");
+      expect(mind?.provider).toBeUndefined();
+    });
+
+    test("blank model clears both model and provider", async () => {
+      await scaffoldMind(root, record({ model: "claude-opus-4.8", provider: "anthropic" }), "# Scout");
+      await setMindModel(root, "scout", { model: " " });
+      const [mind] = await readMinds(root);
+      expect(mind?.model).toBeUndefined();
+      expect(mind?.provider).toBeUndefined();
+    });
+
+    test("rejects provider without model", async () => {
+      await scaffoldMind(root, record(), "# Scout");
+      await expect(setMindModel(root, "scout", { provider: "anthropic" })).rejects.toThrow(
+        /requires a model/,
+      );
+    });
+
+    test("throws on unknown slug", async () => {
+      await expect(setMindModel(root, "ghost", { model: "claude-opus-4.8" })).rejects.toThrow(
+        /not found/,
+      );
+    });
+
+    test("throws on unsafe slug", async () => {
+      await expect(setMindModel(root, "../escape", { model: "claude-opus-4.8" })).rejects.toThrow();
+    });
+
+    test("preserves other mind record fields", async () => {
+      await scaffoldMind(root, record({ tools: ["web"] }), "# Scout");
+      await setMindModel(root, "scout", { model: "claude-opus-4.8", provider: "anthropic" });
+      const rec = JSON.parse(await readFile(join(root, "scout", "mind.json"), "utf8")) as MindRecord;
+      expect(rec.name).toBe("Scout");
+      expect(rec.role).toBe("researcher");
+      expect(rec.voice).toBe("terse");
+      expect(rec.persona).toBe("Digs up facts.");
+      expect(rec.tools).toEqual(["web"]);
+    });
   });
 
   test("errors on an unknown slug and rejects an unsafe one", async () => {
