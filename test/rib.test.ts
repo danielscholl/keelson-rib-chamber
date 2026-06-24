@@ -166,4 +166,33 @@ describe("rib-chamber", () => {
     expect(names).toContain("chamber_emit_lens");
     expect(names).not.toContain("chamber_room_start");
   });
+
+  it("declares the Activity standing-lens view", () => {
+    const keys = (rib.views ?? []).map((v) => v.key);
+    expect(keys).toContain("rib:chamber:activity");
+  });
+
+  it("ships the Activity standing column — workflow-bound and cadence-refreshed", () => {
+    const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) => r.columns);
+    const activity = cols.find((c) => c.key === "rib:chamber:activity");
+    expect(activity?.workflow).toBe("chamber-activity");
+    // The host scheduler reads cadenceMs off a STATIC region to refresh it tab-closed;
+    // a fixed-key bound producer is the only standing-lens form the scheduler sees.
+    expect(activity?.cadenceMs).toBeGreaterThanOrEqual(30_000);
+    expect(activity?.collapsible).toBe(true);
+  });
+
+  it("contributes the chamber-activity collector workflow bound to the activity key", () => {
+    const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
+    const activity = wfs.find(
+      (w) => (w.definition as { name?: string }).name === "chamber-activity",
+    );
+    expect(activity?.bindSnapshotKey).toBe("rib:chamber:activity");
+    // A deterministic bash collector (not an agent turn) — the cost-safe arm of the
+    // standing-lens cost guard — guarded by an output_schema requiring view + sections.
+    const node = (activity?.definition as { nodes?: { bash?: string; output_schema?: unknown }[] })
+      .nodes?.[0];
+    expect(node?.bash).toContain("collect-activity.ts");
+    expect(node?.output_schema).toBeDefined();
+  });
 });

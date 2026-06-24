@@ -1,6 +1,7 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { stableHash } from "../genesis.ts";
 import type { LensRecord } from "../lens-store.ts";
+import { relativeAgo } from "../relative-time.ts";
 
 // The full canvas tone ramp, used to give each lens a deterministic identity dot
 // hashed from its id — a stable per-lens hue (the roster's dotFor idiom), so cards
@@ -111,23 +112,4 @@ function emptySections(): CanvasBoardView["sections"] {
       ],
     },
   ];
-}
-
-// A coarse "<n> <unit>" relative span from an ISO timestamp to now — enough for a
-// card's "updated … ago". Floors to the largest whole unit; an unparseable or
-// future timestamp degrades to "just now" rather than a negative/NaN span.
-function relativeAgo(iso: string, now: number = Date.now()): string {
-  const then = Date.parse(iso);
-  const deltaMs = Number.isFinite(then) ? now - then : 0;
-  if (deltaMs < 60_000) return "just now";
-  const units: [number, string][] = [
-    [86_400_000, "day"],
-    [3_600_000, "hour"],
-    [60_000, "minute"],
-  ];
-  for (const [ms, unit] of units) {
-    const n = Math.floor(deltaMs / ms);
-    if (n >= 1) return `${n} ${unit}${n === 1 ? "" : "s"}`;
-  }
-  return "just now";
 }

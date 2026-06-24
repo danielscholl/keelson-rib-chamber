@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildRosterBoard } from "../src/boards/roster.ts";
 import {
+  listMindRecords,
   type MindRecord,
   readMinds,
   readSoul,
@@ -139,6 +140,27 @@ describe("readMinds", () => {
     await scaffoldMind(root, record(), "# Scout");
     const board = buildRosterBoard(await readMinds(root));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+});
+
+describe("listMindRecords", () => {
+  test("carries the server-stamped createdAt readMinds drops, newest first", async () => {
+    await scaffoldMind(root, record({ createdAt: "2026-01-01T00:00:00.000Z" }), "# Scout");
+    await scaffoldMind(
+      root,
+      record({ slug: "critic", name: "Critic", createdAt: "2026-02-01T00:00:00.000Z" }),
+      "# Critic",
+    );
+    const records = await listMindRecords(root);
+    expect(records.map((r) => r.slug)).toEqual(["critic", "scout"]);
+    expect(records.map((r) => r.createdAt)).toEqual([
+      "2026-02-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z",
+    ]);
+  });
+
+  test("a missing data home yields []", async () => {
+    expect(await listMindRecords(join(root, "nope"))).toEqual([]);
   });
 });
 
