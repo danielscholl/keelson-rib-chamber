@@ -12,7 +12,7 @@ import type {
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
-import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
+import { chamberDataHome, mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { clearDraft, readDraftExclusion } from "../src/room-draft.ts";
 import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
@@ -68,7 +68,9 @@ function fakeSnapshotManager() {
   return { sm, registered, recomposed, lastBoard: () => lastBoard };
 }
 
-function makeCtx(opts: { run?: RunAgentTurn; sm?: SnapshotManager } = {}): RibContext {
+function makeCtx(
+  opts: { run?: RunAgentTurn; sm?: SnapshotManager; projects?: RibContext["getProjects"] } = {},
+): RibContext {
   return {
     getExec: () => ({
       runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
@@ -78,6 +80,7 @@ function makeCtx(opts: { run?: RunAgentTurn; sm?: SnapshotManager } = {}): RibCo
     // registrar with the manager so the lens tool wires up.
     ...(opts.sm ? { getSnapshotManager: () => opts.sm, registerRegion: () => () => {} } : {}),
     ...(opts.run ? { runAgentTurn: opts.run } : {}),
+    ...(opts.projects ? { getProjects: opts.projects } : {}),
   } as RibContext;
 }
 
@@ -700,5 +703,68 @@ describe("room adapter — live room", () => {
     // startRoom checks driver.isDisposed() — a start after dispose would otherwise
     // write an "active" room whose loop never runs and never clears.
     expect(res.ok).toBe(false);
+  });
+});
+
+describe("room adapter — project targeting", () => {
+  const PROJECT = {
+    id: "p1",
+    name: "Alpha",
+    rootPath: "/repos/alpha",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+  const projects = () => [PROJECT];
+  // The briefing gate fires its own agent turn (through the same scripted run) when a
+  // room ends, so filter requests to the room's SPEAKER turns — the ones whose system
+  // is a participant's scaffolded soul — before asserting their cwd.
+  const SOULS = new Set(["Alice's soul.", "Bob's soul."]);
+  const roomTurnsSince = (before: number) =>
+    turns.requests.slice(before).filter((r) => SOULS.has(r.system ?? ""));
+  let snap: ReturnType<typeof fakeSnapshotManager>;
+  let turns: ReturnType<typeof scriptedRunAgentTurn>;
+  beforeAll(() => {
+    turns = scriptedRunAgentTurn([{ text: "Alice speaks." }, { text: "Bob replies." }]);
+    snap = fakeSnapshotManager();
+    registerTools(makeCtx({ run: turns.run, sm: snap.sm, projects }));
+  });
+  afterAll(async () => {
+    await rib.dispose?.();
+  });
+
+  it("targets a room at a project: persists projectId and runs every turn at the project root", async () => {
+    const store = createFileRoomStore(roomsDir());
+    const before = turns.requests.length;
+    const slug = slugOf(
+      await onAction(startPayload({ projectId: "p1" }), makeCtx({ sm: snap.sm, projects })),
+    );
+    expect(slug).toMatch(/^room-/);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    expect((await store.loadRoom(slug))?.projectId).toBe("p1");
+    const reqs = roomTurnsSince(before);
+    expect(reqs.length).toBeGreaterThanOrEqual(1);
+    expect(reqs.every((r) => r.cwd === "/repos/alpha")).toBe(true);
+  });
+
+  it("fails closed on an unknown projectId — validated at start, before any turn", async () => {
+    const before = turns.requests.length;
+    const res = await onAction(
+      startPayload({ projectId: "ghost" }),
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain('unknown project "ghost"');
+    // No turn was ever invoked — the fail-closed gate is before driver.start.
+    expect(turns.requests.length).toBe(before);
+  });
+
+  it("an untargeted room keeps the neutral data-home cwd", async () => {
+    const store = createFileRoomStore(roomsDir());
+    const before = turns.requests.length;
+    const slug = slugOf(await onAction(startPayload(), makeCtx({ sm: snap.sm, projects })));
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    expect((await store.loadRoom(slug))?.projectId).toBeUndefined();
+    const reqs = roomTurnsSince(before);
+    expect(reqs.length).toBeGreaterThanOrEqual(1);
+    expect(reqs.every((r) => r.cwd === chamberDataHome())).toBe(true);
   });
 });

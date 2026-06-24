@@ -57,10 +57,12 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             strategy: room.strategy,
             participants: room.participants,
             turnBudget: room.turnBudget,
-            // Carry the topic so restarting a finished room keeps its subject, and
-            // the routing config (flat keys) so a finished group-chat/open-floor
-            // restarts with the same config rather than failing start validation.
+            // Carry the topic so restarting a finished room keeps its subject, the
+            // routing config (flat keys) so a finished group-chat/open-floor restarts
+            // with the same config rather than failing start validation, and the
+            // project target so the restart runs against the same repo.
             ...(room.topic ? { topic: room.topic } : {}),
+            ...(room.projectId ? { projectId: room.projectId } : {}),
             ...flatFromRoomConfig(room.config),
           },
         },
@@ -78,6 +80,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             participants: room.participants,
             turnBudget: room.turnBudget,
             ...(room.topic ? { topic: room.topic } : {}),
+            ...(room.projectId ? { projectId: room.projectId } : {}),
           },
           fields: [
             {
@@ -100,6 +103,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             participants: room.participants,
             turnBudget: room.turnBudget,
             ...(room.topic ? { topic: room.topic } : {}),
+            ...(room.projectId ? { projectId: room.projectId } : {}),
           },
         },
       ],

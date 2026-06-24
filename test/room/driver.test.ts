@@ -30,7 +30,12 @@ const START = {
 
 function harness(
   scripts: TurnScript[] = [{ text: "reply" }],
-  opts: { minds?: readonly Mind[]; turnTools?: readonly { name: string }[] } = {},
+  opts: {
+    minds?: readonly Mind[];
+    turnTools?: readonly { name: string }[];
+    turnCwd?: string;
+    resolveProjectRoot?: (projectId: string) => string | undefined;
+  } = {},
 ) {
   const { store, rooms, transcripts } = makeFakeStore();
   const pub = makeFakePublisher();
@@ -41,6 +46,8 @@ function harness(
     runAgentTurn: turns.run,
     minds: () => opts.minds ?? MINDS,
     ...(opts.turnTools ? { turnTools: opts.turnTools } : {}),
+    ...(opts.turnCwd ? { turnCwd: opts.turnCwd } : {}),
+    ...(opts.resolveProjectRoot ? { resolveProjectRoot: opts.resolveProjectRoot } : {}),
     now: fixedClock(),
     newId: seqIds(),
   });
@@ -209,6 +216,39 @@ describe("room driver — round cursor", () => {
     const t = await h.store.loadTranscript("demo");
     expect(t.map((e) => e.from)).toEqual(["a", "b"]);
     expect(t.map((e) => e.round)).toEqual([0, 0]); // both authored before the cursor advanced
+  });
+});
+
+describe("room driver — project targeting (per-room cwd)", () => {
+  test("a room targeted at a project runs its turns at the project root", async () => {
+    const h = harness([{ text: "ok" }], {
+      turnCwd: "/data/home",
+      resolveProjectRoot: (id) => (id === "p1" ? "/repos/alpha" : undefined),
+    });
+    await h.driver.start({ ...START, projectId: "p1" });
+    await h.driver.step("demo");
+    expect(h.turns.requests[0]?.cwd).toBe("/repos/alpha");
+  });
+
+  test("an untargeted room keeps the neutral turnCwd", async () => {
+    const h = harness([{ text: "ok" }], {
+      turnCwd: "/data/home",
+      resolveProjectRoot: () => "/repos/alpha",
+    });
+    await h.driver.start(START); // no projectId
+    await h.driver.step("demo");
+    expect(h.turns.requests[0]?.cwd).toBe("/data/home");
+  });
+
+  test("a targeted project the host no longer knows falls back to the neutral cwd", async () => {
+    const h = harness([{ text: "ok" }], {
+      turnCwd: "/data/home",
+      resolveProjectRoot: () => undefined, // project deleted mid-room
+    });
+    await h.driver.start({ ...START, projectId: "p1" });
+    await h.driver.step("demo");
+    // Never the host process cwd — the neutral turnCwd, so no ambient context leaks.
+    expect(h.turns.requests[0]?.cwd).toBe("/data/home");
   });
 });
 
