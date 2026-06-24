@@ -202,6 +202,26 @@ describe("buildRosterBoard populated", () => {
     );
   });
 
+  test("each card carries a set-model action with model/provider fields", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "ada", name: "Ada", model: "claude-opus-4.8", provider: "anthropic" }),
+    ]);
+    const actions = cards(board)[0]?.actions ?? [];
+    const setModel = actions.find((a) => a.type === "set-model");
+    expect(setModel).toMatchObject({
+      type: "set-model",
+      label: "Set model…",
+      glyph: "⚙",
+      payload: { slug: "ada" },
+    });
+    expect(setModel?.destructive ?? false).toBe(false);
+    expect(setModel?.fields).toEqual([
+      { name: "model", label: "Model", placeholder: "claude-opus-4.8" },
+      { name: "provider", label: "Provider", placeholder: "anthropic" },
+    ]);
+    expect(actions.findIndex((a) => a.type === "retire")).toBe(actions.length - 1);
+  });
+
   test("no standalone actions section titled Enter; Enter lives on each card", () => {
     const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
     // Enter moved onto the card (host renders non-destructive card actions inline),
