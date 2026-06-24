@@ -158,11 +158,18 @@ describe("room adapter — fails closed without the seams", () => {
     // The driver-free seams — genesis (write) and lens (publish, given the snapshot +
     // registerRegion seams makeCtx supplies) — wire up without runAgentTurn; the
     // room-control tools additionally need it.
-    expect(registerTools(makeCtx({ sm })).map((t) => t.name)).toEqual([
-      "chamber_emit_genesis",
-      "chamber_emit_lens",
-      "chamber_retire_lens",
-    ]);
+    expect(
+      registerTools(makeCtx({ sm }))
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(
+      [
+        "chamber_emit_genesis",
+        "chamber_emit_lens",
+        "chamber_emit_lens_html",
+        "chamber_retire_lens",
+      ].sort(),
+    );
     expect(registered.some((k) => k.startsWith("rib:chamber:room"))).toBe(false);
     const res = await onAction(startPayload(), makeCtx({ sm }));
     expect(res.ok).toBe(false);

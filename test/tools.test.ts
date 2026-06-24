@@ -186,6 +186,7 @@ describe("chamber room-control chat tools", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "chamber_emit_genesis",
       "chamber_emit_lens",
+      "chamber_emit_lens_html",
       "chamber_retire_lens",
       "chamber_room_say",
       "chamber_room_start",
@@ -195,11 +196,18 @@ describe("chamber room-control chat tools", () => {
     // No runAgentTurn -> no driver -> no room tools, but the genesis write seam and
     // the lens publish + retire seams (which need only the snapshot manager +
     // registerRegion) are still there.
-    expect(registerTools(makeCtx(undefined, sm)).map((t) => t.name)).toEqual([
-      "chamber_emit_genesis",
-      "chamber_emit_lens",
-      "chamber_retire_lens",
-    ]);
+    expect(
+      registerTools(makeCtx(undefined, sm))
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(
+      [
+        "chamber_emit_genesis",
+        "chamber_emit_lens",
+        "chamber_emit_lens_html",
+        "chamber_retire_lens",
+      ].sort(),
+    );
     // Without registerRegion the lens seam is withheld fail-closed — only genesis.
     expect(registerTools(makeCtx(undefined, undefined)).map((t) => t.name)).toEqual([
       "chamber_emit_genesis",
@@ -300,6 +308,31 @@ describe("chamber room-control chat tools", () => {
     expect(rec?.scope).toBeUndefined();
     expect(rec?.maintainingMind).toBeUndefined();
     expect(rec?.reason).toBeUndefined();
+  });
+
+  it("chamber_emit_lens_html advertises state_changing", () => {
+    expect(tool("chamber_emit_lens_html").state_changing).toBe(true);
+  });
+
+  it("chamber_emit_lens_html publishes html and reports its key", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens_html").execute({ html: "<p>hello lens</p>" }, t.ctx);
+    expect(t.errored()).toBe(false);
+    const out = JSON.parse(t.out()) as { ok: boolean; key: string };
+    expect(out.ok).toBe(true);
+    expect(out.key).toBe("rib:chamber:lens-html");
+  });
+
+  it("chamber_emit_lens_html fails closed on empty html", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens_html").execute({ html: "" }, t.ctx);
+    expect(t.errored()).toBe(true);
+  });
+
+  it("chamber_emit_lens_html fails closed on oversized html (> 256 KB)", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens_html").execute({ html: "x".repeat(262145) }, t.ctx);
+    expect(t.errored()).toBe(true);
   });
 
   it("chamber_retire_lens advertises state_changing", () => {

@@ -13,18 +13,32 @@ import type { CanvasView } from "@keelson/shared";
 // It is seeded with `seed` (default: an empty Room board; the lens pool passes its
 // own placeholder) so a client subscribing before the first publish gets a
 // well-formed view, not a loading skeleton.
+export function createCoalescingPublisher<T>(
+  recompose: () => Promise<unknown>,
+  seed: T,
+): {
+  publisher: { publish(view: T): Promise<void> };
+  latest: () => T;
+};
 export function createCoalescingPublisher(
   recompose: () => Promise<unknown>,
-  seed: CanvasView = { view: "board", title: "Room", sections: [] },
+  seed?: CanvasView,
 ): {
   publisher: { publish(view: CanvasView): Promise<void> };
   latest: () => CanvasView;
+};
+export function createCoalescingPublisher<T>(
+  recompose: () => Promise<unknown>,
+  seed: T = { view: "board", title: "Room", sections: [] } as T,
+): {
+  publisher: { publish(view: T): Promise<void> };
+  latest: () => T;
 } {
-  let latest: CanvasView = seed;
+  let latest: T = seed;
   let composing = false;
   let dirty = false;
   const publisher = {
-    async publish(view: CanvasView): Promise<void> {
+    async publish(view: T): Promise<void> {
       latest = view;
       if (composing) {
         dirty = true;

@@ -37,6 +37,12 @@ import {
   type LensRegistry,
   lensKey,
 } from "./lens.ts";
+import {
+  createHtmlLensRegistry,
+  HTML_LENS_KEY,
+  HTML_LENS_TOOL_NAME,
+  type HtmlLensRegistry,
+} from "./lens-html.ts";
 import { createFileLensStore, type LensStore, listLenses } from "./lens-store.ts";
 import {
   type MindRecord,
@@ -99,6 +105,12 @@ let driver: RoomDriver | undefined;
 // was built against, so a re-bootstrap with a different one rebinds it.
 let lensRegistry: LensRegistry | undefined;
 let lensSm: SnapshotManager | undefined;
+let htmlLensRegistry: HtmlLensRegistry | undefined;
+let htmlLensSm: SnapshotManager | undefined;
+// Tracked alongside htmlLensSm because createHtmlLensRegistry captures registerRegion:
+// a re-bootstrap that reuses the same manager but hands a fresh seam must rebuild, or
+// the registry would publish/register through the stale registerRegion.
+let htmlLensRegisterRegion: NonNullable<RibContext["registerRegion"]> | undefined;
 // The room region registry is a boot-time singleton like the lens one: it owns the
 // per-slug room snapshot keys + surface regions, built once in registerTools and
 // disposed in dispose(). roomSm tracks the manager it was built against so a
@@ -726,6 +738,12 @@ async function invokeChamberCommand(name: string, arg: string): Promise<CommandI
   return { ok: false, error: `unknown command: ${name}` };
 }
 
+// The only chamber verbs an untrusted HTML-lens iframe may reach (origin
+// "canvas-html"): a no-op ack (`lens-html`) and read-only navigation to a lens
+// panel (`lens-open`). Everything destructive or paid stays off this list, so a
+// prompt-injected lens can't drive retire / room-* / set-model / convene. See #124.
+const FRAME_SAFE_ACTIONS: ReadonlySet<string> = new Set(["lens-html", "lens-open"]);
+
 const rib: Rib = {
   id: "chamber",
   displayName: "Chamber",
@@ -736,6 +754,7 @@ const rib: Rib = {
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
     { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
     { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
+    { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
 
@@ -1010,6 +1029,22 @@ const rib: Rib = {
     // the stale manager. Build the replacement BEFORE disposing the old one, so a failed
     // rebuild leaves the existing registry and lensSm consistent.
     const lensStore = createFileLensStore(lensesDir());
+    if (!sm || !registerRegion) {
+      htmlLensRegistry?.dispose();
+      htmlLensRegistry = undefined;
+      htmlLensSm = undefined;
+      htmlLensRegisterRegion = undefined;
+    } else if (
+      !htmlLensRegistry ||
+      sm !== htmlLensSm ||
+      registerRegion !== htmlLensRegisterRegion
+    ) {
+      const next = createHtmlLensRegistry(sm, registerRegion);
+      htmlLensRegistry?.dispose();
+      htmlLensRegistry = next;
+      htmlLensSm = sm;
+      htmlLensRegisterRegion = registerRegion;
+    }
     if (sm && registerRegion && sm !== lensSm) {
       const next = createLensRegistry(sm, registerRegion, lensStore);
       lensRegistry?.dispose();
@@ -1024,6 +1059,8 @@ const rib: Rib = {
       sm && registerRegion && lensRegistry
         ? [makeLensTool(lensRegistry), makeRetireLensTool(lensStore, lensRegistry)]
         : [];
+    const htmlLensTools =
+      sm && registerRegion && htmlLensRegistry ? [makeEmitLensHtmlTool(htmlLensRegistry)] : [];
     // The room publisher routes each room's board to a per-slug key + dynamic surface
     // region, so it requires registerRegion. Rebuilt against a new manager on a
     // re-bootstrap, reused otherwise; built before the old one is disposed so a failed
@@ -1055,9 +1092,9 @@ const rib: Rib = {
       // sharing the same driver + store this hook just built. Returned only when
       // the seams are present (no driver -> no tools), mirroring how the actions
       // fail closed.
-      return [genesisTool, ...lensTools, ...roomControlTools(roomStore)];
+      return [genesisTool, ...lensTools, ...htmlLensTools, ...roomControlTools(roomStore)];
     }
-    return [genesisTool, ...lensTools];
+    return [genesisTool, ...lensTools, ...htmlLensTools];
   },
 
   // Retire a Mind (removes it, then refreshes the roster — the OSDU
@@ -1065,6 +1102,14 @@ const rib: Rib = {
   // transcript pushes to the canvas as turns land (no refresh needed). Turns
   // advance on their own (the auto-advance loop), so there is no manual step.
   onAction: (action) => {
+    // Actions relayed from the sandboxed HTML-lens iframe arrive with origin
+    // "canvas-html" (the host stamps it; the frame can't forge it — see #124). That
+    // markup is LLM-authored and can auto-fire on load, so gate it to a non-paid,
+    // non-destructive subset — never retire / room-* / set-model / convene. Trusted
+    // board actions (origin absent) keep the full verb surface below.
+    if (action.origin === "canvas-html" && !FRAME_SAFE_ACTIONS.has(action.type)) {
+      return { ok: false, error: `'${action.type}' is not permitted from an HTML lens` };
+    }
     switch (action.type) {
       case "enter-mind":
         return enterMindAction(action);
@@ -1076,6 +1121,8 @@ const rib: Rib = {
         return retireAction(action);
       case "set-model":
         return setModelAction(action);
+      case "lens-html":
+        return lensHtmlAction(action);
       case "room-start":
         return roomStartAction(action);
       case "draft-set":
@@ -1175,6 +1222,10 @@ const rib: Rib = {
     // with a re-boot's writes.
     await lensWriteInFlight.catch(() => {});
     lensWriteInFlight = Promise.resolve();
+    htmlLensRegistry?.dispose();
+    htmlLensRegistry = undefined;
+    htmlLensSm = undefined;
+    htmlLensRegisterRegion = undefined;
     lensRegistry?.dispose();
     lensRegistry = undefined;
     lensSm = undefined;
@@ -1806,6 +1857,17 @@ function lensOpenAction(action: RibAction): RibActionResult {
   return { ok: true, data: { effect: "open-canvas", key: lensKey(id), title: id } };
 }
 
+function lensHtmlAction(action: RibAction): RibActionResult {
+  const payload = action.payload;
+  if (
+    typeof payload !== "undefined" &&
+    (typeof payload !== "object" || payload === null || Array.isArray(payload))
+  ) {
+    return { ok: false, error: "lens-html requires an object payload" };
+  }
+  return { ok: true, data: { key: HTML_LENS_KEY } };
+}
+
 // The rows section a lens write-back appends annotation notes to. The verb owns
 // this section title so repeated notes accumulate in one place regardless of how
 // the maintaining Mind laid out the rest of the board.
@@ -2233,6 +2295,36 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+const lensHtmlEmitSchema = z.object({
+  html: z.string().min(1).max(262144),
+});
+
+function makeEmitLensHtmlTool(registry: HtmlLensRegistry): ToolDefinition {
+  return {
+    name: HTML_LENS_TOOL_NAME,
+    description:
+      "Author an HTML lens: publish a literal HTML string to the Chamber HTML canvas, rendered in the host's sandboxed iframe. `html` is the exact markup to render; non-string or oversized payloads fail closed.",
+    inputSchema: lensHtmlEmitSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = lensHtmlEmitSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_emit_lens_html: ${parsed.error.message}`, true);
+        return;
+      }
+      try {
+        const { key } = await registry.publish(parsed.data.html);
+        // No chamber-lenses/roster/brief refresh here (unlike chamber_emit_lens): the
+        // HTML lens is published in-memory only and isn't part of the persisted lens
+        // store those collectors read, so refreshing them would be inert.
+        emitResult(ctx, JSON.stringify({ ok: true, key }));
+      } catch (e) {
+        emitResult(ctx, `chamber_emit_lens_html failed: ${errText(e)}`, true);
       }
     },
   };
