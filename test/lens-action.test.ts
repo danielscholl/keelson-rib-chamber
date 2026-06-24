@@ -266,6 +266,17 @@ describe("lens-note onAction", () => {
     expect((await loadBoard("alpha"))?.board.sections).toEqual([]);
   });
 
+  it("counts code points, not UTF-16 code units, against the length cap", async () => {
+    await createFileLensStore(lensesDir()).saveLens({ id: "alpha", board: board("Alpha") });
+    // 500 astral-plane code points = 1000 UTF-16 code units: a `.length` cap would
+    // reject this, a code-point cap accepts it.
+    const res = await onAction(
+      { type: "lens-note", payload: { id: "alpha", note: "😀".repeat(500) } },
+      actionCtx,
+    );
+    expect(res.ok).toBe(true);
+  });
+
   it("serializes concurrent appends to the same lens so neither note is lost", async () => {
     await createFileLensStore(lensesDir()).saveLens({ id: "alpha", board: board("Alpha") });
     const [a, b] = await Promise.all([

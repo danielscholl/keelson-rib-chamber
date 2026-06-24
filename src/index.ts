@@ -1151,10 +1151,14 @@ const rib: Rib = {
     briefAbort.abort();
     briefInFlight = Promise.resolve();
     invalidateRoster();
+    // Drain any in-flight lens write-back before tearing down the registry, so a
+    // late load-append-publish can't publish to a disposed registry or interleave
+    // with a re-boot's writes.
+    await lensWriteInFlight.catch(() => {});
+    lensWriteInFlight = Promise.resolve();
     lensRegistry?.dispose();
     lensRegistry = undefined;
     lensSm = undefined;
-    lensWriteInFlight = Promise.resolve();
     roomRegistry?.dispose();
     roomRegistry = undefined;
     roomSm = undefined;
@@ -1802,7 +1806,9 @@ async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
   if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(raw)}` };
   const note = asNonEmptyString(payload.note);
   if (!note) return { ok: false, error: "lens-note requires a non-empty note" };
-  if (note.length > LENS_NOTE_MAX) {
+  // Count code points, not UTF-16 code units, so the cap matches the "characters"
+  // the message promises (an emoji is one character but two code units).
+  if ([...note].length > LENS_NOTE_MAX) {
     return { ok: false, error: `note too long (max ${LENS_NOTE_MAX} characters)` };
   }
   // The write-back republishes through the registry to update the live panel, so the
