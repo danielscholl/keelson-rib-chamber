@@ -643,6 +643,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         artifact,
         ...(authorSlug ? { author: authorSlug } : {}),
         ...(directionInjection ? { directionInjection } : {}),
+        ...(room.coding ? { coding: true } : {}),
       });
     }
     return buildTurnPrompt({

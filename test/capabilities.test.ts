@@ -3,6 +3,7 @@ import {
   CAPABILITIES,
   CODING_CAPABILITY_SLUGS,
   capabilityVocabulary,
+  codingReviewCapabilityError,
   codingToolPool,
   KNOWN_CAPABILITY_SLUGS,
   resolveMindTools,
@@ -97,5 +98,34 @@ describe("coding capability tier", () => {
       [...CODING_CAPABILITY_SLUGS].flatMap((s) => [...(CAPABILITIES[s]?.tools ?? [])]),
     );
     expect(new Set(codingToolPool().map((t) => t.name))).toEqual(fromMap);
+  });
+});
+
+describe("codingReviewCapabilityError", () => {
+  const author = { slug: "author", tools: ["code"] };
+  const reviewerRead = { slug: "reviewer", tools: ["read"] };
+
+  test("passes when the author has `code` and the reviewer has `read`", () => {
+    expect(codingReviewCapabilityError(author, reviewerRead)).toBeNull();
+  });
+
+  test("passes when the reviewer has `code` (which can read and run)", () => {
+    expect(codingReviewCapabilityError(author, { slug: "reviewer", tools: ["code"] })).toBeNull();
+  });
+
+  test("rejects an author that can't edit, naming the author", () => {
+    const err = codingReviewCapabilityError({ slug: "scribe", tools: ["read"] }, reviewerRead);
+    expect(err).toContain("scribe");
+    expect(err).toContain("`code`");
+  });
+
+  test("rejects an author with no declared tools at all", () => {
+    expect(codingReviewCapabilityError({ slug: "scribe" }, reviewerRead)).toContain("scribe");
+  });
+
+  test("rejects a reviewer that can neither read nor code, naming the reviewer", () => {
+    const err = codingReviewCapabilityError(author, { slug: "critic", tools: ["lens"] });
+    expect(err).toContain("critic");
+    expect(err).toContain("`read`");
   });
 });
