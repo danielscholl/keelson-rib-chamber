@@ -21,12 +21,12 @@ keys are standing; three are per-instance families bound at runtime.
 | Key | Producer | When it updates |
 |---|---|---|
 | `rib:chamber:roster` | `chamber-roster` collector | on a 120000 ms cadence, and when a Mind is authored or retired |
-| `rib:chamber:rooms` | `chamber-rooms` collector | on cadence, and when a room starts, ends, or is deleted |
+| `rib:chamber:rooms` | `chamber-rooms` collector | on cadence, and when a room ends, stops, or is deleted (a starting room appears on the next cadence) |
 | `rib:chamber:lenses` | `chamber-lenses` collector | on cadence, and when a lens is authored or retired |
 | `rib:chamber:brief` | the rib's attention gate | only when a room ends or a lens changes |
-| `rib:chamber:room:<slug>` | the room driver | live, as turns land in each active room |
-| `rib:chamber:lens:<id>` | `chamber_emit_lens` | when a Mind authors or re-authors that subject |
-| `rib:chamber:room-view:<slug>` | the `room-open` action | on demand, when a closed room is opened in a drawer |
+| `rib:chamber:room:{slug}` | the room driver | live, as turns land in each active room |
+| `rib:chamber:lens:{id}` | `chamber_emit_lens` | when a Mind authors or re-authors that subject |
+| `rib:chamber:room-view:{slug}` | the `room-open` action | on demand, when a closed room is opened in a drawer |
 
 ## Pages
 

@@ -13,7 +13,7 @@ a room actually runs.
 Chamber is a Keelson rib, so everything here happens on the Chamber surface inside
 the harness you already have running. Open it and find the Roster. A fresh
 workspace shows no Minds yet, just a few starter archetypes waiting to be
-convened. That is your starting point.
+authored. That is your starting point.
 
 ## Author two Minds
 
@@ -22,10 +22,10 @@ your first job is to author two of them.
 
 The fastest path is the starters. The Roster offers a few presets for a cold
 workspace: Moneypenny, a chief of staff; Mycroft, a research partner; Jarvis, an
-engineering partner. These are briefs, not finished agents. Convening one runs
-**genesis**, the workflow that authors a Mind from a brief, so the soul you end up
+engineering partner. These are briefs, not finished agents. Authoring one runs
+**genesis**, the workflow that writes a Mind from a brief, so the soul you end up
 with is freshly written for your workspace rather than copied from a template.
-Convene two of them and you have two distinct Minds.
+Author two of them and you have two distinct Minds.
 
 If you would rather write your own, run genesis directly. Give it a short brief
 and it decides the rest:

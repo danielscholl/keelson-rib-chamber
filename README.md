@@ -7,24 +7,25 @@
 
 **Multi-agent rooms and agent-authored lenses for [Keelson](https://github.com/danielscholl/keelson).**
 
-Chamber adds a multi-agent operating layer to the harness: persistent agents you
-author on demand, rooms where they take agent-to-agent turns, and lenses where an
-agent renders its own view onto the canvas. The harness stays domain-free — all
-of the multi-agent machinery lives in the rib, and it ships **zero React** into
-the trusted SPA.
+One agent can produce a clear answer and still carry one set of assumptions all
+the way through. Chamber adds structured multi-agent review to Keelson: you author
+persistent specialist agents, convene them around a plan or a decision, and choose
+how they take turns, challenge each other, or review work across providers. The
+harness stays domain-free, so all of the multi-agent machinery lives in the rib,
+and it ships **zero React** into the trusted SPA.
 
 > Status: **experimental.** Genesis, rooms (five turn strategies: **sequential**,
 > **concurrent**, moderated **group-chat**, unmoderated **open-floor**, and
 > cross-vendor **review**), and agent-authored lenses all work today —
 > driven from chat tools, the Chamber surface, or workflows. The contract is
-> still alpha. See the [documentation site](https://danielscholl.github.io/keelson-rib-chamber/) and
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+> still alpha. See the [documentation site](https://danielscholl.github.io/keelson-rib-chamber/)
+> for the model, the guides, and the contract.
 
 ## What it adds
 
 - **Genesis** — author persistent agents (Minds) on demand from a freeform brief.
 - **Rooms** — run multi-agent conversations under five turn strategies: **sequential**, **concurrent**, moderated **group-chat**, unmoderated **open-floor**, and a cross-vendor **review**; steer them live (call on a speaker, inject a direction, stop).
-- **Lenses** — agents author their own canvas boards — a briefing, the roster, the live room transcript — rendered through Keelson's canvas with no hand-coded UI.
+- **Lenses** — a Mind authors its own canvas board on a subject (a risk view, a verdict, a status), rendered through Keelson's canvas with no hand-coded UI. The roster, the Rooms index, and the live transcript are deterministic boards the rib builds, not lenses.
 - **Zero trusted React** — every view renders through the canvas contract, not UI shipped from the rib.
 
 ## Install into Keelson
@@ -36,9 +37,16 @@ keelson rib add https://github.com/danielscholl/keelson-rib-chamber
 keelson start
 ```
 
+To remove it later, uninstall by its rib id and restart:
+
+```bash
+keelson rib remove chamber
+keelson stop && keelson start
+```
+
 ## Requirements
 
-- A configured Keelson with a provider (Copilot or Claude) — or `KEELSON_PROVIDERS=stub` to try the wiring offline.
+- A configured Keelson with a provider (Copilot, Claude, Codex, Pi, or any OpenAI-compatible gateway; Copilot is the default) — or `KEELSON_PROVIDERS=stub` to try the wiring offline.
 - No external CLIs. `@keelson/shared` comes from the harness as a peer dependency (one copy shared across the harness and every rib).
 
 ## Compatibility
@@ -60,7 +68,7 @@ if you need stability.
 Open `http://127.0.0.1:7878` → the **Chamber** surface, then:
 
 - **Create an agent** — `keelson workflow run chamber-genesis "a terse SRE who reasons about blast radius"` (or ask chat to create one). It authors a Mind you'll see on the Roster.
-- **Run a room** — ask chat to start a room between two Minds, or use the **Start room** control on the surface; steer it live and watch the transcript render as turns land.
+- **Run a room** — ask chat to start a room between two Minds, or use the **Convene** composer on the surface; steer it live and watch the transcript render as turns land.
 - **See a lens** — `keelson workflow run chamber-lens "release risks"` runs one agent turn that authors a canvas board on the subject, published fail-closed and rendered with no hand-coded UI. The standing **Briefing** in the footer fills itself in — it promotes to an agent-authored board when a room ends or a lens changes, and stays quiet otherwise.
 
 ## How it works
@@ -68,9 +76,9 @@ Open `http://127.0.0.1:7878` → the **Chamber** surface, then:
 Keelson already owns the *deterministic* half of Chamber — `packages/workflows`
 (the Archon DAG) and the canvas `board` view that renders a lens. This rib adds
 the *generative* half: agents authored on demand, rooms that orchestrate their
-turns, and agents that author their own lenses. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and the Keelson base
-seams it builds on.
+turns, and agents that author their own lenses. See the
+[Design tier](https://danielscholl.github.io/keelson-rib-chamber/design/) for the
+design and the Keelson base seams it builds on.
 
 ## Develop locally
 
@@ -95,8 +103,8 @@ The docs site lives under [`docs/`](docs/) — an Astro Starlight project mirror
 Keelson's documentation tiers, published at
 [danielscholl.github.io/keelson-rib-chamber](https://danielscholl.github.io/keelson-rib-chamber/).
 Build it locally with `cd docs && bun install && bun run build`. For the design
-rationale and the Keelson base seams it builds on, see
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+rationale and the Keelson base seams it builds on, see the
+[Design tier](https://danielscholl.github.io/keelson-rib-chamber/design/).
 
 ## Acknowledgments
 
