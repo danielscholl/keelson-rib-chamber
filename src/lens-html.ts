@@ -2,7 +2,7 @@ import type { RibSurfaceRegion, SnapshotManager, SnapshotValidator } from "@keel
 import { CHAMBER_SURFACE_ID } from "./lens.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
-export const HTML_LENS_KEY = "rib:chamber:lens:html";
+export const HTML_LENS_KEY = "rib:chamber:lens-html";
 export const HTML_LENS_TOOL_NAME = "chamber_emit_lens_html";
 
 export function emptyHtmlLens(): string {
