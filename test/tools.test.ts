@@ -392,7 +392,7 @@ describe("chamber room-control chat tools", () => {
     expect(t.errored()).toBe(true);
   });
 
-  it("refreshes chamber-lenses AND the roster pulse after a successful retire, not when it fails", async () => {
+  it("refreshes chamber-lenses, the roster pulse, and the standing panels after a successful retire, not when it fails", async () => {
     const refreshed: string[] = [];
     const refreshTools = registerTools(
       makeCtx(undefined, sm, async (name) => {
@@ -408,9 +408,15 @@ describe("chamber room-control chat tools", () => {
     );
     refreshed.length = 0;
     // A successful retire refreshes the index AND the roster (its "Live views" count
-    // drops with the lens) — without a wired brief seam no gate turn runs.
+    // drops with the lens), plus the standing panels — Activity always, and the Digest
+    // because a removal would otherwise leave it naming a gone lens.
     await retire.execute({ id: "refresh-lens" }, makeToolCtx().ctx);
-    expect(refreshed).toEqual(["chamber-lenses", "chamber-roster"]);
+    expect(refreshed).toEqual([
+      "chamber-lenses",
+      "chamber-roster",
+      "chamber-activity",
+      "chamber-digest",
+    ]);
     // ...a failed one (unknown id) does not.
     refreshed.length = 0;
     const failed = makeToolCtx();
@@ -868,10 +874,10 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     expect((await readMinds(mindsDir())).some((m) => m.slug === "ghost")).toBe(false);
   });
 
-  it("refreshes the chamber-roster workflow after a successful scaffold", async () => {
+  it("refreshes the chamber-roster and chamber-activity workflows after a successful scaffold", async () => {
     // Wire a recording refreshWorkflow through registerTools, then drive the genesis
-    // tool it returns: a successful write must re-run the bound roster collector so a
-    // new Mind appears promptly, not only on the 120s cadence.
+    // tool it returns: a successful write must re-run the bound roster AND activity
+    // collectors so a new Mind appears promptly, not only on the 120s cadence.
     const refreshed: string[] = [];
     const refreshTools = registerTools(
       makeCtx(undefined, sm, async (name) => {
@@ -892,7 +898,7 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
       t.ctx,
     );
     expect(t.errored()).toBe(false);
-    expect(refreshed).toEqual(["chamber-roster"]);
+    expect(refreshed).toEqual(["chamber-roster", "chamber-activity"]);
   });
 
   it("does not refresh when the scaffold fails (slug collision)", async () => {

@@ -148,6 +148,16 @@ const roomViewEntries = new Map<
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
 // fail-soft: undefined on an older harness, where the index falls back to cadence.
 let refreshWorkflow: RibContext["refreshWorkflow"];
+
+// Fan a Chamber mutation out to the derived STANDING panels, which were otherwise
+// cadence-only. Activity is deterministic + free, so every mutation refreshes it; a
+// removal also re-runs the gated Digest so its board can't keep naming a gone entity
+// (the gate no-ops when the fingerprint is unchanged). The Briefing delta is left to
+// its own attention gate.
+async function refreshStandingPanels(opts: { removed?: boolean } = {}): Promise<void> {
+  await refreshWorkflow?.("chamber-activity")?.catch(() => {});
+  if (opts.removed) await refreshWorkflow?.("chamber-digest")?.catch(() => {});
+}
 // The host projects lookup, captured in registerTools and cleared in dispose (like
 // refreshWorkflow). Undefined on a harness that predates RibContext.getProjects,
 // where a projectId is rejected at start (fail closed) rather than targeting nothing.
@@ -232,7 +242,14 @@ function queueRoomRetentionSweep(): void {
 
 async function runRoomRetentionSweep(root: string): Promise<void> {
   try {
-    await sweepClosedRooms(root);
+    const { removed } = await sweepClosedRooms(root);
+    // A sweep that actually pruned rooms changed the store — refresh the index and the
+    // standing panels (like the user-initiated room-delete) so an evicted room stops
+    // showing instead of lingering until the 120s cadence.
+    if (removed.length > 0) {
+      await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+      await refreshStandingPanels({ removed: true });
+    }
   } catch (e) {
     console.error(`[rib-chamber] room retention sweep failed: ${errText(e)}`);
   }
@@ -1464,6 +1481,7 @@ function ensureLoop(slug: string): void {
       // pulse counts/for-you update promptly. Both fire-and-forget — never thrown.
       void evaluateBriefGate().catch(() => {});
       void refreshWorkflow?.("chamber-roster")?.catch(() => {});
+      void refreshStandingPanels();
     }
   })();
 }
@@ -1834,6 +1852,7 @@ async function startRoom(
     // it so the new active session appears promptly instead of on the next cadence
     // (mirrors the end-of-room refresh). Fail-soft, never thrown.
     void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    void refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
     // The reserved slot never opened — release it and drop any partial panel.
@@ -1879,6 +1898,7 @@ async function stopRoom(slug: string): Promise<RibActionResult> {
     // The room is now a closed session — refresh the index so it appears as a card
     // (fail-soft; cadence covers an older harness without the seam).
     await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2002,6 +2022,7 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
     if (lastSlug === slug) lastSlug = undefined;
     reconcileRoomPanels();
     await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    await refreshStandingPanels({ removed: true });
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2089,6 +2110,7 @@ async function retireLensAction(action: RibAction): Promise<RibActionResult> {
     // The retired lens drops from the roster pulse's "Live views" count too — refresh
     // it so the count matches the just-updated index (mirrors the emit path).
     await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+    await refreshStandingPanels({ removed: true });
     return { ok: true, data: { id, key: lensKey(id) } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2188,6 +2210,7 @@ async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
       // deterministic collectors), fail-soft like the emit/retire paths.
       await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
       await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+      await refreshStandingPanels();
       return { ok: true, data: { id, key } };
     } catch (e) {
       return { ok: false, error: errText(e) };
@@ -2311,6 +2334,8 @@ async function retireAction(action: RibAction): Promise<RibActionResult> {
   try {
     await retireMind(mindsDir(), slug);
     invalidateRoster(); // a Mind is gone — drop it from the cached roster
+    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+    await refreshStandingPanels({ removed: true });
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2487,6 +2512,8 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         // promptly instead of waiting on the 120s cadence. Fail-soft (the seam
         // resolves on error and is absent on an older harness) — never throw.
         await refreshWorkflow?.("chamber-roster");
+        // A new Mind is additive — route Activity through the seam (no digest turn).
+        await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug, name: record.name }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_genesis failed: ${errText(e)}`, true);
@@ -2548,6 +2575,7 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         // so its pulse updates. Both fire-and-forget — never thrown past the publish.
         void evaluateBriefGate().catch(() => {});
         void refreshWorkflow?.("chamber-roster")?.catch(() => {});
+        await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);
@@ -2667,6 +2695,7 @@ function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefin
         // The retired lens drops from the roster pulse's "Live views" count too —
         // refresh it so the count matches the just-updated index (mirrors emit).
         await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+        await refreshStandingPanels({ removed: true });
         emitResult(ctx, JSON.stringify({ ok: true, key: lensKey(id) }));
       } catch (e) {
         emitResult(ctx, `chamber_retire_lens failed: ${errText(e)}`, true);

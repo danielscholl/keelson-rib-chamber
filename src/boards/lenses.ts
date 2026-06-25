@@ -55,7 +55,7 @@ export function buildLensesIndexBoard(lenses: readonly LensRecord[]): CanvasBoar
 // maintaining-Mind as a "by" field, the change note as the reason line), the
 // server-stamped freshness as a field, and two actions — Open (the primary,
 // non-destructive verb the host renders inline; the live key always resolves) and
-// Retire (a destructive overflow action with a typed irreversible confirm). The id
+// Retire (a destructive overflow action with a confirm dialog). The id
 // rides both action payloads + the dot hash. Each provenance bit is fail-soft:
 // absent on the record means absent on the card.
 function cardFor(lens: LensRecord) {
@@ -86,8 +86,6 @@ function cardFor(lens: LensRecord) {
         destructive: true,
         payload: { id: lens.id },
         confirm: {
-          irreversible: true,
-          subject: lens.id,
           title: "Retire lens",
           body: `Retire ${title}? This permanently removes the lens.`,
           confirmLabel: "Retire",

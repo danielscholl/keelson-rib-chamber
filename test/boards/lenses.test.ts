@@ -142,7 +142,7 @@ describe("buildLensesIndexBoard cards", () => {
     expect(open?.confirm).toBeUndefined();
   });
 
-  test("Retire follows — a destructive overflow action with a typed irreversible confirm", () => {
+  test("Retire follows — a destructive overflow action with a simple confirm", () => {
     const actions = cards(buildLensesIndexBoard([lens({ id: "release-risks" })]))[0]?.actions ?? [];
     expect(actions).toHaveLength(2);
     const retire = actions.find((a) => a.type === "retire-lens");
@@ -154,8 +154,8 @@ describe("buildLensesIndexBoard cards", () => {
       destructive: true,
       payload: { id: "release-risks" },
     });
-    expect(retire?.confirm?.irreversible).toBe(true);
-    expect(retire?.confirm?.subject).toBe("release-risks");
+    expect(retire?.confirm?.irreversible).toBeUndefined();
+    expect(retire?.confirm?.subject).toBeUndefined();
     expect(retire?.confirm?.confirmLabel).toBe("Retire");
     expect(retire?.confirm?.cancelLabel).toBe("Cancel");
   });

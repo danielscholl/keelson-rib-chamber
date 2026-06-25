@@ -166,7 +166,7 @@ describe("buildRosterBoard populated", () => {
     expect(JSON.stringify(buildRosterBoard([mind({ slug: "ada" })]))).toContain("ada");
   });
 
-  test("each card.actions has a destructive Retire with a typed irreversible confirm", () => {
+  test("each card.actions has a destructive Retire with a simple confirm", () => {
     const board = buildRosterBoard([mind({ slug: "ada", name: "Ada" })]);
     const retire = cards(board)[0]?.actions?.find((a) => a.type === "retire");
     expect(retire).toMatchObject({
@@ -177,8 +177,9 @@ describe("buildRosterBoard populated", () => {
       destructive: true,
       payload: { slug: "ada" },
     });
-    expect(retire?.confirm?.irreversible).toBe(true);
-    expect(retire?.confirm?.subject).toBe("ada");
+    expect(retire?.confirm?.irreversible).toBeUndefined();
+    expect(retire?.confirm?.subject).toBeUndefined();
+    expect(retire?.confirm?.confirmLabel).toBe("Retire");
   });
 
   test("each card.actions leads with a non-destructive Enter carrying the slug", () => {
