@@ -11,6 +11,7 @@ import type {
   ToolDefinition,
 } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
+import { readDigest } from "../src/digest-store.ts";
 import rib, { MAX_ACTIVE_ROOMS } from "../src/index.ts";
 import { listLenses } from "../src/lens-store.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
@@ -185,8 +186,9 @@ afterAll(async () => {
 describe("chamber room-control chat tools", () => {
   let openedSlug = "";
 
-  it("registers the genesis + lens seams always, plus the room-control tools with the seams", () => {
+  it("registers the genesis + digest + lens seams always, plus the room-control tools with the seams", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "chamber_emit_digest",
       "chamber_emit_genesis",
       "chamber_emit_lens",
       "chamber_emit_lens_html",
@@ -196,8 +198,8 @@ describe("chamber room-control chat tools", () => {
       "chamber_room_status",
       "chamber_room_stop",
     ]);
-    // No runAgentTurn -> no driver -> no room tools, but the genesis write seam and
-    // the lens publish + retire seams (which need only the snapshot manager +
+    // No runAgentTurn -> no driver -> no room tools, but the genesis + digest write
+    // seams and the lens publish + retire seams (which need only the snapshot manager +
     // registerRegion) are still there.
     expect(
       registerTools(makeCtx(undefined, sm))
@@ -205,16 +207,20 @@ describe("chamber room-control chat tools", () => {
         .sort(),
     ).toEqual(
       [
+        "chamber_emit_digest",
         "chamber_emit_genesis",
         "chamber_emit_lens",
         "chamber_emit_lens_html",
         "chamber_retire_lens",
       ].sort(),
     );
-    // Without registerRegion the lens seam is withheld fail-closed — only genesis.
-    expect(registerTools(makeCtx(undefined, undefined)).map((t) => t.name)).toEqual([
-      "chamber_emit_genesis",
-    ]);
+    // Without registerRegion the lens seam is withheld fail-closed — but genesis and
+    // digest (which only write to disk, no snapshot seam) remain.
+    expect(
+      registerTools(makeCtx(undefined, undefined))
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["chamber_emit_digest", "chamber_emit_genesis"]);
   });
 
   it("chamber_emit_lens publishes a board and reports its key", async () => {
@@ -907,6 +913,37 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     );
     expect(t.errored()).toBe(true);
     expect(refreshed).toEqual([]);
+  });
+});
+
+describe("chamber_emit_digest (standing-digest write seam)", () => {
+  it("is advertised as state-changing", () => {
+    expect(tool("chamber_emit_digest").state_changing).toBe(true);
+  });
+
+  it("persists the board and stamps it with the current chamber fingerprint", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_digest").execute(
+      { board: { view: "board", title: "Digest", sections: [] } },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const rec = await readDigest();
+    expect(rec?.board.title).toBe("Digest");
+    // The suite seeded Minds, so the chamber is non-empty and the fingerprint non-trivial.
+    expect(rec?.fingerprint).toBeTruthy();
+  });
+
+  it("fails closed on a non-board payload, leaving the prior board untouched", async () => {
+    const good = makeToolCtx();
+    await tool("chamber_emit_digest").execute(
+      { board: { view: "board", title: "Keep", sections: [] } },
+      good.ctx,
+    );
+    const t = makeToolCtx();
+    await tool("chamber_emit_digest").execute({ board: { view: "board" } }, t.ctx);
+    expect(t.errored()).toBe(true);
+    expect((await readDigest())?.board.title).toBe("Keep");
   });
 });
 
