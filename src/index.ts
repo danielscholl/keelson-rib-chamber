@@ -1830,6 +1830,10 @@ async function startRoom(
     // region); reconcile so the surface keeps every active room plus the most-recent.
     reconcileRoomPanels();
     ensureLoop(slug);
+    // The sessions index is a separate snapshot from the room's own panel — refresh
+    // it so the new active session appears promptly instead of on the next cadence
+    // (mirrors the end-of-room refresh). Fail-soft, never thrown.
+    void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
     return { ok: true, data: { slug } };
   } catch (e) {
     // The reserved slot never opened — release it and drop any partial panel.
