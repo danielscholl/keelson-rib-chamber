@@ -1432,6 +1432,14 @@ async function validateStart(
       error: `unknown Mind(s): ${missing.join(", ")} — genesis them first or check the roster`,
     };
   }
+  // `manager` is a magentic-only role; reject it for any other strategy rather than
+  // silently dropping a dead field (the same guard moderator/synthesizer get).
+  if (strategy !== "magentic" && config.manager) {
+    return {
+      ok: false,
+      error: `${strategy} has no manager — \`manager\` is only for the magentic strategy`,
+    };
+  }
   // group-chat needs a moderator Mind that routes but never speaks: it must be a
   // real Mind and NOT in the speaker pool (so isValidNominee rejects nominating it
   // and the board never counts it as a speaker — see docs/design/phase3-rooms.md §1).

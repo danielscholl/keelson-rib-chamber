@@ -304,15 +304,25 @@ function isRoom(value: unknown): value is Room {
   );
 }
 
-// Parse a ledger.json, tolerant of a missing/corrupt/torn file (degrades to
-// undefined like parseRoomJson) — a half-written ledger can't crash the driver,
-// and a non-magentic room simply has no file.
+// Parse a ledger.json. A missing file (no magentic room yet) or a corrupt/torn one
+// degrades to undefined; a REAL read failure (EACCES/EIO) is rethrown rather than
+// masked. The ledger has no append-only backstop, so a silent undefined here would
+// make the driver reset to a fresh ledger and overwrite a valid one — fail closed on
+// an I/O error instead, distinct from the genuinely-absent or malformed cases.
 async function parseLedgerJson(path: string): Promise<TaskLedger | undefined> {
+  let raw: string;
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    raw = await readFile(path, "utf8");
+  } catch (e) {
+    if (isNodeError(e) && (e.code === "ENOENT" || e.code === "ENOTDIR")) return undefined;
+    throw e;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
     return isTaskLedger(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
+  } catch (e) {
+    if (e instanceof SyntaxError) return undefined; // corrupt/torn JSON — tolerant
+    throw e;
   }
 }
 
@@ -324,6 +334,7 @@ function isTaskLedger(value: unknown): value is TaskLedger {
     typeof l.goal === "string" &&
     typeof l.manager === "string" &&
     (l.status === "planning" || l.status === "executing" || l.status === "done") &&
+    typeof l.updatedAt === "string" &&
     Array.isArray(l.tasks) &&
     l.tasks.every(isLedgerTask)
   );
@@ -335,10 +346,14 @@ function isLedgerTask(value: unknown): boolean {
   return (
     typeof t.id === "string" &&
     typeof t.description === "string" &&
+    (t.assignee === undefined || typeof t.assignee === "string") &&
     (t.status === "pending" ||
       t.status === "in-progress" ||
       t.status === "completed" ||
-      t.status === "failed")
+      t.status === "failed") &&
+    (t.result === undefined || typeof t.result === "string") &&
+    typeof t.createdAt === "string" &&
+    typeof t.updatedAt === "string"
   );
 }
 

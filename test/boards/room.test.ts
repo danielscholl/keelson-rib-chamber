@@ -388,19 +388,20 @@ describe("buildRoomBoard — magentic plan + manager", () => {
     expect(plan.items[0]?.trailing).toBe("completed · did it");
   });
 
-  test("no Plan section for a magentic room with an empty or absent ledger", () => {
+  test("no Plan section without a ledger; an empty ledger shows 'No tasks yet'", () => {
     const absent = buildRoomBoard(room({ strategy: "magentic", config: { manager: "mgr" } }), []);
     expect(absent.sections.some((s) => s.kind === "rows" && s.title?.startsWith("Plan"))).toBe(
       false,
     );
+    // A persisted-but-empty ledger still surfaces its state (the reopen path loads it).
     const empty = buildRoomBoard(
       room({ strategy: "magentic", config: { manager: "mgr" } }),
       [],
       ledger([]),
     );
-    expect(empty.sections.some((s) => s.kind === "rows" && s.title?.startsWith("Plan"))).toBe(
-      false,
-    );
+    const plan = empty.sections.find((s) => s.kind === "rows" && s.title?.startsWith("Plan"));
+    if (plan?.kind !== "rows") throw new Error("expected a Plan section for an empty ledger");
+    expect(plan.items).toEqual([{ glyph: "neutral", text: "No tasks yet" }]);
   });
 
   test("a manager turn reads as a distinct accent chip + icon", () => {

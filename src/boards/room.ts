@@ -52,8 +52,15 @@ export function buildRoomBoard(
 // trailing. Empty (no section) for a non-magentic room or a ledger with no tasks yet.
 // The section title carries the plan's overall status so progress reads at a glance.
 function buildPlanSection(ledger: TaskLedger | undefined): CanvasBoardView["sections"] {
-  if (!ledger || ledger.tasks.length === 0) return [];
-  return [{ kind: "rows", title: `Plan · ${ledger.status}`, items: ledger.tasks.map(taskRow) }];
+  if (!ledger) return [];
+  // A persisted-but-empty ledger (a fresh plan, or a manager that closed the goal with
+  // no tasks) still shows its state — the reopen path loads ledger.json precisely to
+  // surface that, so an empty plan must not render identically to a non-magentic room.
+  const items: FeedItem[] =
+    ledger.tasks.length > 0
+      ? ledger.tasks.map(taskRow)
+      : [{ glyph: "neutral", text: "No tasks yet" }];
+  return [{ kind: "rows", title: `Plan · ${ledger.status}`, items }];
 }
 
 const TASK_ICON: Record<LedgerTask["status"], string> = {

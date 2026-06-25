@@ -57,7 +57,7 @@ start fields live in [Tools and commands](../../reference/tools-and-commands/).
 
 ## Choose a strategy
 
-A strategy decides who speaks next. Chamber ships five:
+A strategy decides who speaks next. Chamber ships six:
 
 - **sequential** rotates one speaker per turn, round-robin. The default.
 - **concurrent** runs a whole round at once, every participant in parallel.
@@ -65,6 +65,8 @@ A strategy decides who speaks next. Chamber ships five:
 - **open-floor** is unmoderated: each speaker nominates the next, and votes end it.
 - **review** is a two-Mind, single-pass critique. The two Minds must be pinned to
   different providers, enforced when the room starts.
+- **magentic** is manager-led: a manager Mind plans a task ledger and delegates each
+  task to a worker, replanning until the goal is met.
 
 Each strategy has its own required config and routing rules.
 [Strategies](../../reference/strategies/) is the authoritative contract; this
@@ -123,6 +125,6 @@ Past rooms are kept as bounded history, so the index does not grow without limit
 ## Related
 
 - [Rooms and strategies](../../concepts/rooms/): the driver-as-router model behind a room.
-- [Strategies](../../reference/strategies/): the contract for each of the five strategies.
+- [Strategies](../../reference/strategies/): the contract for each of the six strategies.
 - [Tools and commands](../../reference/tools-and-commands/): full schemas for the room chat tools.
 - [Author a Mind](../author-a-mind/): create the participants a room runs.
