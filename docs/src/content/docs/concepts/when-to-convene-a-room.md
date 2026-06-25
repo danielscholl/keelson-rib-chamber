@@ -1,6 +1,6 @@
 ---
 title: When to convene a room
-description: The decisions a single agent cannot check on its own, and which of the five strategies fits each one.
+description: The decisions a single agent cannot check on its own, and which of the six strategies fits each one.
 sidebar:
   order: 2
 ---
@@ -46,7 +46,7 @@ deterministic half; Chamber adds the deliberative one.
 
 ## Which strategy fits the decision
 
-The five strategies are five shapes of conversation. Pick by the kind of thinking
+The six strategies are six shapes of conversation. Pick by the kind of thinking
 you want, not by the count of minds.
 
 - **Sequential** runs one speaker per turn, round-robin. Reach for it when each
@@ -57,6 +57,11 @@ you want, not by the count of minds.
 - **Group-chat** hands routing to a moderator that shapes the discussion toward a
   decision and closes it. Reach for it when you want a panel driven to one
   recommendation with someone keeping it on track.
+- **Magentic** puts a manager in charge: it decomposes the goal into a task ledger
+  and delegates each task to a worker, replanning until the goal is met. Reach for
+  it when the work splits into parallel pieces you want *built*, not just discussed.
+  The manager keeps the workers from covering the same ground, so the room returns
+  the most complete, least-redundant result for a decompose-and-build job.
 - **Open-floor** lets the speakers route themselves and stop when enough of them
   vote to end. Reach for it for open brainstorming with no one in charge.
 - **Review** is a single cross-vendor pass: one provider's model authors, another's
@@ -81,7 +86,7 @@ not need a second mind, one agent is cheaper and just as good.
   room hardening a real plan.
 - [Rooms and strategies](../rooms/): how the driver routes turns and why strategies
   stay pure.
-- [Room strategies](../../reference/strategies/): the exact contract for all five
+- [Room strategies](../../reference/strategies/): the exact contract for all six
   strategies.
 - [Keelson workflows](https://danielscholl.github.io/keelson/docs/concepts/workflows/):
   the deterministic half a room complements.
