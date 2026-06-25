@@ -1,5 +1,5 @@
 import { stripControlJson } from "./routing.ts";
-import type { MindSlug, TurnEntry } from "./types.ts";
+import type { MindSlug, TaskLedger, TurnEntry } from "./types.ts";
 
 // Cap on history turns carried in a prompt (and the status-tool view): unbounded
 // history grows prompt cost linearly per turn (worse under concurrent rounds, which
@@ -169,6 +169,75 @@ export function buildReviewPrompt(input: {
     input.coding
       ? "You are the reviewer, from a different vendor than the author. The author edited files in the repository at your working directory — read the files they changed (and run or build them, if your tools allow) to review the ACTUAL change against the contract, not the summary alone: correctness, gaps, and risks. Give a clear verdict (approve or request changes); report your findings concisely, in character. Do not rewrite the author's change yourself."
       : "You are the reviewer, from a different vendor than the author. Review ONLY the artifact above against the contract — correctness, gaps, and risks — and give a clear verdict (approve or request changes). Do not rewrite it; report your findings concisely, in character.",
+  );
+  return parts.join("\n\n");
+}
+
+// The magentic ledger rendered for the manager's prompt: a numbered list of tasks
+// with their status, assignee, and any outcome note, so the manager plans against
+// what is already done/failed/pending. Empty before the first plan. Pure.
+function renderLedger(ledger: TaskLedger | undefined): string {
+  if (!ledger || ledger.tasks.length === 0) return "No tasks planned yet.";
+  return ledger.tasks
+    .map((t, i) => {
+      const who = t.assignee ? ` (${t.assignee})` : "";
+      const note = t.result ? `: ${t.result}` : "";
+      return `${i + 1}. [${t.status}] ${t.description}${who}${note}`;
+    })
+    .join("\n");
+}
+
+// The manager's prompt for a magentic `manage` turn: the goal, the plan so far (the
+// ledger), the workers' progress, and the worker roster, then an instruction to
+// (re)plan or close by ending with a single trailing JSON object — the SAME "plan"/
+// "done" actions parseMagenticPlan reads and stripControlJson removes, so prompt,
+// parser, and stripper never drift. Deliberation prose stays visible on the board;
+// only the trailing JSON is stripped from the next prompt's context. Always non-empty.
+export function buildManagerPrompt(input: {
+  topic?: string;
+  ledger?: TaskLedger;
+  transcript: readonly TurnEntry[];
+  workers: readonly MindSlug[];
+  directionInjection?: string;
+}): string {
+  const parts: string[] = [];
+  const topic = input.topic?.trim();
+  if (topic) parts.push(`Goal: ${topic}`);
+  parts.push(`Plan so far:\n\n${renderLedger(input.ledger)}`);
+  const context = renderTranscript(input.transcript);
+  if (context.length > 0) parts.push(`Workers' progress so far:\n\n${context}`);
+  parts.push(`Workers you may assign: ${input.workers.join(", ")}.`);
+  if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
+  parts.push(
+    "You are the manager. Break the goal into concrete, independently-assignable tasks and assign each to a worker — or, if work is underway, review the progress above and revise the plan. List only NEW tasks to add: a completed task shown above need not be repeated, and a failed one may be retried as a new task. END your reply with ONE JSON object on its own line:\n" +
+      '{"action":"plan","tasks":[{"description":"<what to do>","assignee":"<worker>"}]} to (re)plan, ' +
+      'or {"action":"done","summary":"<outcome>"} when the goal is met. Pick assignee from the workers above.',
+  );
+  return parts.join("\n\n");
+}
+
+// The worker's prompt for a magentic `assign` turn: the goal and the team's progress,
+// then the single assigned task and an instruction to do it (in a coding room, to do
+// the real work in the repo, not describe it). No routing JSON — the manager owns the
+// plan. Always non-empty.
+export function buildWorkerPrompt(input: {
+  topic?: string;
+  task: string;
+  transcript: readonly TurnEntry[];
+  directionInjection?: string;
+  coding?: boolean;
+}): string {
+  const parts = promptPreamble({
+    topic: input.topic,
+    transcript: input.transcript,
+    emptyContext: "No work has been done yet — you are starting.",
+  });
+  parts.push(`Your assigned task:\n\n${input.task}`);
+  if (input.directionInjection) parts.push(`[director]: ${input.directionInjection}`);
+  parts.push(
+    input.coding
+      ? "You are a worker on this team. Complete YOUR assigned task above by doing the real work in the repository at your working directory — edit and run the files, don't just describe the change. Report what you did and the outcome concisely, in character. Do not emit any routing JSON; the manager tracks the plan."
+      : "You are a worker on this team. Complete YOUR assigned task above. Report what you did and the outcome concisely, in character. Do not emit any routing JSON; the manager tracks the plan.",
   );
   return parts.join("\n\n");
 }

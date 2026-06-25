@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
 import type { RoomStore } from "./ports.ts";
-import type { MindSlug, Room, TurnEntry } from "./types.ts";
+import type { MindSlug, Room, TaskLedger, TurnEntry } from "./types.ts";
 
 export const DEFAULT_CLOSED_ROOM_RETENTION = 25;
 
@@ -63,6 +63,7 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
   const roomDir = (slug: MindSlug) => join(roomsRoot, slug);
   const roomFile = (slug: MindSlug) => join(roomDir(slug), "room.json");
   const transcriptFile = (slug: MindSlug) => join(roomDir(slug), "transcript.jsonl");
+  const ledgerFile = (slug: MindSlug) => join(roomDir(slug), "ledger.json");
 
   return {
     async loadRoom(slug) {
@@ -106,6 +107,22 @@ export function createFileRoomStore(roomsRoot: string): RoomStore {
         }
       }
       return entries;
+    },
+
+    async loadLedger(slug) {
+      assertSafeSlug(slug);
+      return parseLedgerJson(ledgerFile(slug));
+    },
+
+    async saveLedger(slug, ledger) {
+      assertSafeSlug(slug);
+      await mkdir(roomDir(slug), { recursive: true });
+      // Rewritten on every manage/assign turn; unique temp + atomic rename so a
+      // crash mid-write can't tear it and concurrent writers can't share one temp
+      // (mirrors saveRoom).
+      const tmp = `${ledgerFile(slug)}.${++writeSeq}.tmp`;
+      await writeFile(tmp, `${JSON.stringify(ledger, null, 2)}\n`);
+      await rename(tmp, ledgerFile(slug));
     },
 
     async deleteRoom(slug) {
@@ -284,6 +301,59 @@ function isRoom(value: unknown): value is Room {
     typeof r.turnBudget === "number" &&
     typeof r.turnIndex === "number" &&
     typeof r.createdAt === "string"
+  );
+}
+
+// Parse a ledger.json. A missing file (no magentic room yet) or a corrupt/torn one
+// degrades to undefined; a REAL read failure (EACCES/EIO) is rethrown rather than
+// masked. The ledger has no append-only backstop, so a silent undefined here would
+// make the driver reset to a fresh ledger and overwrite a valid one — fail closed on
+// an I/O error instead, distinct from the genuinely-absent or malformed cases.
+async function parseLedgerJson(path: string): Promise<TaskLedger | undefined> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (e) {
+    if (isNodeError(e) && (e.code === "ENOENT" || e.code === "ENOTDIR")) return undefined;
+    throw e;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isTaskLedger(parsed) ? parsed : undefined;
+  } catch (e) {
+    if (e instanceof SyntaxError) return undefined; // corrupt/torn JSON — tolerant
+    throw e;
+  }
+}
+
+function isTaskLedger(value: unknown): value is TaskLedger {
+  if (typeof value !== "object" || value === null) return false;
+  const l = value as Record<string, unknown>;
+  return (
+    typeof l.roomSlug === "string" &&
+    typeof l.goal === "string" &&
+    typeof l.manager === "string" &&
+    (l.status === "planning" || l.status === "executing" || l.status === "done") &&
+    typeof l.updatedAt === "string" &&
+    Array.isArray(l.tasks) &&
+    l.tasks.every(isLedgerTask)
+  );
+}
+
+function isLedgerTask(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const t = value as Record<string, unknown>;
+  return (
+    typeof t.id === "string" &&
+    typeof t.description === "string" &&
+    (t.assignee === undefined || typeof t.assignee === "string") &&
+    (t.status === "pending" ||
+      t.status === "in-progress" ||
+      t.status === "completed" ||
+      t.status === "failed") &&
+    (t.result === undefined || typeof t.result === "string") &&
+    typeof t.createdAt === "string" &&
+    typeof t.updatedAt === "string"
   );
 }
 

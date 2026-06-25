@@ -55,7 +55,7 @@ synthesizer turn is driver-emitted, not strategy-emitted, in the current code.
 
 ## The registry
 
-The five shipped strategies are registered by name in one record:
+The six shipped strategies are registered by name in one record:
 
 ```ts
 export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
@@ -64,14 +64,15 @@ export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
   "group-chat": groupChat,
   "open-floor": openFloor,
   review,
+  magentic,
 };
 ```
 
-`RoomStrategyName` is the union of those five literals:
+`RoomStrategyName` is the union of those six literals:
 
 ```ts
 export type RoomStrategyName =
-  | "sequential" | "concurrent" | "group-chat" | "open-floor" | "review";
+  | "sequential" | "concurrent" | "group-chat" | "open-floor" | "review" | "magentic";
 ```
 
 `getStrategy(name)` resolves a strategy by an **own-property** check
@@ -81,9 +82,9 @@ let a crafted name slip through to crash the loop later. An unregistered name
 throws `strategy "${name}" is not implemented`. The record is `Partial`, so a
 union member that has no entry is a registry gap, not a type error.
 
-## The five strategies
+## The six strategies
 
-All five start with the same structural guards, in order, each returning
+All six start with the same structural guards, in order, each returning
 `{ kind: "end" }`: room not `active`, empty participant roster (review uses fewer
 than two), and `turnIndex` at or past `turnBudget`. After the guards, each
 decides differently.
@@ -95,6 +96,7 @@ decides differently.
 | `group-chat` | | Returns `moderate` to the configured moderator; ends if there is none. | moderator |
 | `open-floor` | | Seeds with the least-spoken participant (else `participants[0]`). | none |
 | `review` | | Author at turn 0, reviewer at turn 1, then ends. | author, reviewer |
+| `magentic` | | Manager plans a task ledger; `manage` to replan, `assign` a pending task to a worker, end when the plan closes. | manager |
 
 ### sequential
 
@@ -141,6 +143,19 @@ reviewer is `participants[1]`. The two must be **pinned to different providers**
 enforced when the room starts, so the review is genuinely a second vendor's eyes.
 The strategy itself is pure rhythm by `turnIndex`; the provider check runs at
 room start, not in the strategy.
+
+### magentic
+
+Manager-led and ledger-driven. A non-participant **manager** (`RoomConfig.manager`,
+like the moderator) plans a persisted **task ledger**; the workers are
+`room.participants`. The strategy is pure rhythm over the room and the ledger: a
+closed plan ends, no ledger yet returns `{ kind: "manage" }` so the manager plans,
+a pending task returns `{ kind: "assign", mind, taskId }` for its assignee (the
+named worker, else the least-spoken one), and a plan whose tasks have all settled
+but is not closed hands back to the manager to replan. Parsing the manager's
+`plan`/`done` directive, writing the ledger, and settling each task all live in the
+driver. The ledger persists as `ledger.json` beside the transcript and survives a
+restart; `turnBudget` bounds the loop like every other strategy.
 
 ## The pure / driver split
 

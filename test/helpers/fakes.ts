@@ -8,13 +8,14 @@ import type {
 } from "../../src/agent-turn.ts";
 import { assertSafeSlug } from "../../src/genesis.ts";
 import type { RoomPublisher, RoomStore } from "../../src/ports.ts";
-import type { MindSlug, Room, TurnEntry } from "../../src/types.ts";
+import type { MindSlug, Room, TaskLedger, TurnEntry } from "../../src/types.ts";
 
 // In-memory RoomStore. Returns copies on read so a test can't mutate stored
 // state by reference (catches accidental aliasing in the driver).
 export function makeFakeStore() {
   const rooms = new Map<MindSlug, Room>();
   const transcripts = new Map<MindSlug, TurnEntry[]>();
+  const ledgers = new Map<MindSlug, TaskLedger>();
   const store: RoomStore = {
     async loadRoom(slug) {
       const room = rooms.get(slug);
@@ -38,9 +39,17 @@ export function makeFakeStore() {
       if (!rooms.has(slug)) throw new Error(`room '${slug}' not found`);
       rooms.delete(slug);
       transcripts.delete(slug);
+      ledgers.delete(slug);
+    },
+    async loadLedger(slug) {
+      const ledger = ledgers.get(slug);
+      return ledger ? structuredClone(ledger) : undefined;
+    },
+    async saveLedger(slug, ledger) {
+      ledgers.set(slug, structuredClone(ledger));
     },
   };
-  return { store, rooms, transcripts };
+  return { store, rooms, transcripts, ledgers };
 }
 
 // Recording RoomPublisher. Every published view is asserted valid against

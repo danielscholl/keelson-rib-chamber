@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildManagerPrompt,
   buildModeratorPrompt,
   buildOpenFloorPrompt,
   buildReviewPrompt,
   buildSynthesisPrompt,
   buildTurnEntry,
   buildTurnPrompt,
+  buildWorkerPrompt,
   renderTranscript,
   TRANSCRIPT_WINDOW_TURNS,
 } from "../src/transcript.ts";
-import type { TurnEntry } from "../src/types.ts";
+import type { TaskLedger, TurnEntry } from "../src/types.ts";
 
 const entry = (over: Partial<TurnEntry> = {}): TurnEntry => ({
   messageId: "m",
@@ -264,5 +266,62 @@ describe("buildTurnEntry", () => {
     });
     expect(e.aborted).toBe(true);
     expect(e.round).toBe(2);
+  });
+});
+
+describe("buildManagerPrompt", () => {
+  test("non-empty; lists workers and the plan/done vocabulary, empty plan reads as such", () => {
+    const p = buildManagerPrompt({ transcript: [], workers: ["alice", "bob"] });
+    expect(p.trim().length).toBeGreaterThan(0);
+    expect(p).toContain("alice, bob");
+    expect(p).toContain('"action":"plan"');
+    expect(p).toContain('"action":"done"');
+    expect(p).toContain("No tasks planned yet");
+  });
+
+  test("carries the goal, the ledger tasks with status, and the stripped progress", () => {
+    const ledger: TaskLedger = {
+      roomSlug: "r",
+      goal: "ship it",
+      manager: "mgr",
+      status: "executing",
+      tasks: [
+        {
+          id: "t1",
+          description: "build parser",
+          assignee: "alice",
+          status: "completed",
+          result: "done",
+          createdAt: "t",
+          updatedAt: "t",
+        },
+      ],
+      updatedAt: "t",
+    };
+    const p = buildManagerPrompt({
+      topic: "ship it",
+      ledger,
+      transcript: [entry({ from: "alice", parts: [{ text: "built it" }] })],
+      workers: ["alice", "bob"],
+    });
+    expect(p).toContain("Goal: ship it");
+    expect(p).toContain("[completed] build parser (alice)");
+    expect(p).toContain("alice: built it");
+  });
+});
+
+describe("buildWorkerPrompt", () => {
+  test("carries the assigned task and forbids routing JSON", () => {
+    const p = buildWorkerPrompt({ task: "wire the api", transcript: [] });
+    expect(p.trim().length).toBeGreaterThan(0);
+    expect(p).toContain("wire the api");
+    expect(p.toLowerCase()).toContain("do not emit any routing json");
+  });
+
+  test("coding mode points the worker at the repo; plain mode does not", () => {
+    const plain = buildWorkerPrompt({ task: "x", transcript: [] });
+    const coding = buildWorkerPrompt({ task: "x", transcript: [], coding: true });
+    expect(coding.toLowerCase()).toContain("repository at your working directory");
+    expect(plain.toLowerCase()).not.toContain("repository at your working directory");
   });
 });

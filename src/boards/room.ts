@@ -1,12 +1,16 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
 import { speakerCounts, stripControlJson } from "../routing.ts";
-import type { MindSlug, Room, TurnEntry } from "../types.ts";
+import type { LedgerTask, MindSlug, Room, TaskLedger, TurnEntry } from "../types.ts";
 
-// Pure: a room + its transcript -> a canvas `board` (a `rows` feed, one row per
-// turn, plus a participant `segments` header). Validated against canvasViewSchema
-// in tests.
-export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): CanvasBoardView {
+// Pure: a room + its transcript (+ a magentic task ledger, when one applies) -> a
+// canvas `board` (a `rows` feed, one row per turn, plus a participant `segments`
+// header). Validated against canvasViewSchema in tests.
+export function buildRoomBoard(
+  room: Room,
+  transcript: readonly TurnEntry[],
+  ledger?: TaskLedger,
+): CanvasBoardView {
   // Same fold the routing engine uses, so the board's per-speaker counts can never
   // drift from the anti-monopoly cap / close gate.
   const counts = speakerCounts(transcript);
@@ -22,6 +26,10 @@ export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): Ca
     ? [{ kind: "rows", title: "Topic", items: [{ glyph: "brand", text: topic }] }]
     : [];
 
+  // The magentic plan, when this is a magentic room — between the topic and the feed
+  // so an operator reads the goal, then the plan, then the discussion.
+  const planSection = buildPlanSection(ledger);
+
   return {
     view: "board",
     title: room.name,
@@ -30,12 +38,60 @@ export function buildRoomBoard(room: Room, transcript: readonly TurnEntry[]): Ca
       chip: `${room.turnIndex}/${room.turnBudget}`,
       ...(segments.length > 0 ? { segments } : {}),
     },
-    // The topic banner, the transcript feed, then board-baked controls. Each
-    // action carries the room slug as payload (a static actions[] button can't),
-    // so onAction routes to the right room. Payload-required controls have to
-    // live here, not in the rib's static actions list — those dispatch type-only.
-    sections: [...topicSection, { kind: "rows", items }, roomControls(room)],
+    // The topic banner, the plan (magentic only), the transcript feed, then
+    // board-baked controls. Each action carries the room slug as payload (a static
+    // actions[] button can't), so onAction routes to the right room. Payload-required
+    // controls have to live here, not in the rib's static actions list — those
+    // dispatch type-only.
+    sections: [...topicSection, ...planSection, { kind: "rows", items }, roomControls(room)],
   };
+}
+
+// The magentic task ledger as a board section: one row per task — the status as a
+// tone glyph + a leading icon, the assignee as a chip, any outcome note in the
+// trailing. Empty (no section) for a non-magentic room or a ledger with no tasks yet.
+// The section title carries the plan's overall status so progress reads at a glance.
+function buildPlanSection(ledger: TaskLedger | undefined): CanvasBoardView["sections"] {
+  if (!ledger) return [];
+  // A persisted-but-empty ledger (a fresh plan, or a manager that closed the goal with
+  // no tasks) still shows its state — the reopen path loads ledger.json precisely to
+  // surface that, so an empty plan must not render identically to a non-magentic room.
+  const items: FeedItem[] =
+    ledger.tasks.length > 0
+      ? ledger.tasks.map(taskRow)
+      : [{ glyph: "neutral", text: "No tasks yet" }];
+  return [{ kind: "rows", title: `Plan · ${ledger.status}`, items }];
+}
+
+const TASK_ICON: Record<LedgerTask["status"], string> = {
+  pending: "○",
+  "in-progress": "◐",
+  completed: "●",
+  failed: "✗",
+};
+
+function taskRow(task: LedgerTask): FeedItem {
+  const tone = taskTone(task.status);
+  return {
+    glyph: tone,
+    icon: TASK_ICON[task.status],
+    ...(task.assignee ? { chip: { label: task.assignee, tone } } : {}),
+    text: task.description,
+    trailing: task.result ? `${task.status} · ${task.result}` : task.status,
+  };
+}
+
+function taskTone(status: LedgerTask["status"]): CanvasTone {
+  switch (status) {
+    case "completed":
+      return "ok";
+    case "failed":
+      return "error";
+    case "in-progress":
+      return "info";
+    default:
+      return "neutral"; // pending
+  }
 }
 
 // The controls section: while a room is active, a per-participant "Call on
@@ -110,6 +166,32 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.coding ? { coding: room.coding } : {}),
           },
         },
+        {
+          // Re-open as a manager-led magentic room: a `fields` form collects the
+          // manager slug (a Mind NOT among participants — it plans the task ledger
+          // and delegates), merged flat into the payload. Start validation rejects a
+          // manager that is also a participant.
+          type: "room-start",
+          label: "Start magentic",
+          glyph: "❖",
+          payload: {
+            name: room.name,
+            strategy: "magentic",
+            participants: room.participants,
+            turnBudget: room.turnBudget,
+            ...(room.topic ? { topic: room.topic } : {}),
+            ...(room.projectId ? { projectId: room.projectId } : {}),
+            ...(room.coding ? { coding: room.coding } : {}),
+          },
+          fields: [
+            {
+              name: "manager",
+              label: "Manager (a Mind not in the room)",
+              placeholder: "mind-slug",
+              required: true,
+            },
+          ],
+        },
       ],
     };
   }
@@ -117,12 +199,18 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
     kind: "actions",
     title: "Controls",
     items: [
-      ...room.participants.map((p) => ({
-        type: "room-inject",
-        label: `Call on ${p}`,
-        glyph: "↳",
-        payload: { slug: room.slug, nextSpeaker: p },
-      })),
+      // "Call on <slug>" is a one-shot nextSpeaker override — meaningful for the
+      // discussion strategies, but magentic routes by the manager's ledger, so a
+      // manual call-on would run an off-plan turn that settles no task and burns a
+      // budget tick. Offer only Stop there; steer the manager with a director note.
+      ...(room.strategy === "magentic"
+        ? []
+        : room.participants.map((p) => ({
+            type: "room-inject",
+            label: `Call on ${p}`,
+            glyph: "↳",
+            payload: { slug: room.slug, nextSpeaker: p },
+          }))),
       {
         type: "room-stop",
         label: "Stop",
@@ -146,6 +234,7 @@ type FeedItem = Extract<CanvasBoardView["sections"][number], { kind: "rows" }>["
 function buildFeed(room: Room, transcript: readonly TurnEntry[]): FeedItem[] {
   const moderator = room.config?.moderator;
   const synthesizer = room.config?.synthesizer;
+  const manager = room.config?.manager;
   const items: FeedItem[] = [];
   let prevRound: number | undefined;
   for (const entry of transcript) {
@@ -155,7 +244,7 @@ function buildFeed(room: Room, transcript: readonly TurnEntry[]): FeedItem[] {
       }
       prevRound = entry.round;
     }
-    items.push(turnRow(entry, moderator, synthesizer));
+    items.push(turnRow(entry, moderator, synthesizer, manager));
   }
   const end = terminationMarker(room);
   if (end) items.push(end);
@@ -166,6 +255,7 @@ function turnRow(
   entry: TurnEntry,
   moderator: MindSlug | undefined,
   synthesizer: MindSlug | undefined,
+  manager: MindSlug | undefined,
 ): FeedItem {
   const text = turnText(entry);
   const trailing = entry.aborted ? `${entry.at} · aborted` : entry.at;
@@ -183,6 +273,18 @@ function turnRow(
       glyph: "brand",
       chip: { label: entry.from, tone: "brand" },
       icon: "◆",
+      text,
+      trailing,
+    };
+  }
+  // The magentic manager — a non-participant facilitator, like the moderator — reads
+  // distinctly from worker chatter (a room is magentic OR moderated, never both, so
+  // the two checks never collide).
+  if (entry.from === manager) {
+    return {
+      glyph: "accent",
+      chip: { label: entry.from, tone: "accent" },
+      icon: "❖",
       text,
       trailing,
     };

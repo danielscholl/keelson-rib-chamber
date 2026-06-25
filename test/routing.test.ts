@@ -5,6 +5,7 @@ import {
   endVoteRatio,
   extractTrailingJsonObject,
   leastSpoken,
+  parseMagenticPlan,
   parseModeratorDecision,
   parseNomination,
   roundOf,
@@ -311,5 +312,58 @@ describe("endVoteRatio (current standing, not an accumulating tally)", () => {
     ];
     expect(endVoteRatio(transcript, ["a", "b"])).toBe(0.5); // ghost not counted
     expect(endVoteRatio(transcript, [])).toBe(0);
+  });
+});
+
+describe("CONTROL_ACTIONS covers the magentic vocabulary", () => {
+  test("includes plan and done so the stripper removes a manager's trailing JSON", () => {
+    expect(CONTROL_ACTIONS.has("plan")).toBe(true);
+    expect(CONTROL_ACTIONS.has("done")).toBe(true);
+    // The board / next-prompt history strips a manager's trailing plan tail.
+    expect(
+      stripControlJson('Here is the plan.\n{"action":"plan","tasks":[{"description":"x"}]}'),
+    ).toBe("Here is the plan.");
+  });
+});
+
+describe("parseMagenticPlan", () => {
+  test("parses a plan with tasks and assignees from the trailing object", () => {
+    const text =
+      'I will split this up.\n{"action":"plan","tasks":[{"description":"build parser","assignee":"alice"},{"description":"wire api","assignee":"bob"}]}';
+    expect(parseMagenticPlan(text)).toEqual({
+      action: "plan",
+      tasks: [
+        { description: "build parser", assignee: "alice" },
+        { description: "wire api", assignee: "bob" },
+      ],
+    });
+  });
+
+  test("parses a done directive with a summary", () => {
+    expect(parseMagenticPlan('All shipped.\n{"action":"done","summary":"complete"}')).toEqual({
+      action: "done",
+      tasks: [],
+      summary: "complete",
+    });
+  });
+
+  test("drops a task with no description and trims whitespace", () => {
+    const text = '{"action":"plan","tasks":[{"description":"  do it  "},{"assignee":"x"}]}';
+    expect(parseMagenticPlan(text)).toEqual({ action: "plan", tasks: [{ description: "do it" }] });
+  });
+
+  test("tolerates worker/mind synonyms for the assignee key", () => {
+    expect(
+      parseMagenticPlan('{"action":"plan","tasks":[{"description":"a","worker":"bob"}]}'),
+    ).toEqual({ action: "plan", tasks: [{ description: "a", assignee: "bob" }] });
+  });
+
+  test("returns null for a non-magentic trailing object or plain prose", () => {
+    expect(parseMagenticPlan("just talking, no directive")).toBeNull();
+    expect(parseMagenticPlan('routing\n{"action":"close"}')).toBeNull();
+  });
+
+  test("ignores a recognized object mid-prose (not a genuine tail)", () => {
+    expect(parseMagenticPlan('{"action":"plan","tasks":[]} and then more prose')).toBeNull();
   });
 });
