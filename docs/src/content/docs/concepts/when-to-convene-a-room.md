@@ -59,8 +59,8 @@ you want, not by the count of minds.
   recommendation with someone keeping it on track.
 - **Magentic** puts a manager in charge: it decomposes the goal into a task ledger
   and delegates each task to a worker, replanning until the goal is met. Reach for
-  it when the work splits into parallel pieces you want *built*, not just discussed —
-  the manager keeps the workers from covering the same ground, so the room returns
+  it when the work splits into parallel pieces you want *built*, not just discussed.
+  The manager keeps the workers from covering the same ground, so the room returns
   the most complete, least-redundant result for a decompose-and-build job.
 - **Open-floor** lets the speakers route themselves and stop when enough of them
   vote to end. Reach for it for open brainstorming with no one in charge.
