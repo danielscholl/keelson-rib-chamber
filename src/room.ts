@@ -1,5 +1,6 @@
 import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
+import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
 import {
   allHeardInCycle,
@@ -9,20 +10,24 @@ import {
   endVoteRatio,
   leastSpoken,
   type ModeratorDecision,
+  parseMagenticPlan,
   parseModeratorDecision,
   parseNomination,
   roundOf,
   speakerCounts,
 } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
+import { magentic } from "./strategies/magentic.ts";
 import { openFloor } from "./strategies/open-floor.ts";
 import {
+  buildManagerPrompt,
   buildModeratorPrompt,
   buildOpenFloorPrompt,
   buildReviewPrompt,
   buildSynthesisPrompt,
   buildTurnEntry,
   buildTurnPrompt,
+  buildWorkerPrompt,
 } from "./transcript.ts";
 import type {
   Mind,
@@ -31,6 +36,8 @@ import type {
   RoomConfig,
   RoomStrategyName,
   StrategyStep,
+  TaskLedger,
+  TaskStatus,
   TurnEntry,
 } from "./types.ts";
 
@@ -216,7 +223,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   async function persistAndPublish(room: Room): Promise<void> {
     await deps.store.saveRoom(room);
     const transcript = await loadCachedTranscript(room.slug);
-    await deps.publisher.publish(room.slug, buildRoomBoard(room, transcript));
+    // A magentic room carries a task ledger; load it so the board renders the plan.
+    // Other strategies have none (loadLedger -> undefined), so the board omits the
+    // section. Cheap (a small JSON read), and keeps the board the one surface the
+    // ledger reaches the operator through.
+    const ledger =
+      room.strategy === "magentic" ? await deps.store.loadLedger(room.slug) : undefined;
+    await deps.publisher.publish(room.slug, buildRoomBoard(room, transcript, ledger));
   }
 
   // Commit a still-active room, unless a newer generation has superseded this op.
@@ -369,10 +382,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         const transcript = await loadCachedTranscript(slug);
         // open-floor's routing (end-vote close + peer nomination) is driver-side
         // parsing, so it goes through decideOpenFloor rather than the pure strategy.
-        decision =
-          room.strategy === "open-floor"
-            ? decideOpenFloor(room, transcript)
-            : getStrategy(room.strategy)({ room, transcript });
+        // magentic decides over the task ledger too, so it is loaded and passed in.
+        if (room.strategy === "open-floor") {
+          decision = decideOpenFloor(room, transcript);
+        } else if (room.strategy === "magentic") {
+          const ledger = await deps.store.loadLedger(slug);
+          decision = magentic({ room, transcript, ledger });
+        } else {
+          decision = getStrategy(room.strategy)({ room, transcript });
+        }
       }
 
       // (3) execute. commitTerminal / runSpeakTurn report "is the room still
@@ -405,6 +423,27 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         const active = await runParallelTurn(
           room,
           decision.minds,
+          override.directionInjection,
+          controller,
+          gen,
+        );
+        return active ? "advanced" : "ended";
+      }
+      if (decision.kind === "manage") {
+        const active = await runManageTurn(
+          room,
+          decision.mind,
+          override.directionInjection,
+          controller,
+          gen,
+        );
+        return active ? "advanced" : "ended";
+      }
+      if (decision.kind === "assign") {
+        const active = await runAssignTurn(
+          room,
+          decision.mind,
+          decision.taskId,
           override.directionInjection,
           controller,
           gen,
@@ -476,9 +515,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     mind: Mind,
     prompt: string,
     controller: AbortController,
-  ): Promise<{ text: string; aborted: boolean } | "disposed"> {
+  ): Promise<{ text: string; aborted: boolean; errored: boolean } | "disposed"> {
     let text: string;
     let aborted: boolean;
+    // Whether the turn errored or timed out (distinct from an operator abort). The
+    // magentic assign path reads it to mark a task failed vs completed; the other
+    // callers ignore it (an errored turn already surfaces via its error text).
+    let errored = false;
     // The authored soul is the turn's identity; fall back to the roster tagline when
     // a Mind has no readable SOUL.md so the turn still runs in character. Skip the
     // (async, file-backed) read entirely if a stop/dispose already landed.
@@ -532,6 +575,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       }
       const result = await turn.result;
       aborted = result.status === "aborted" || controller.signal.aborted;
+      errored = result.status === "error" || result.status === "timeout";
       text =
         result.status === "error" || result.status === "timeout"
           ? (result.error ?? result.text ?? `turn ${result.status}`)
@@ -540,7 +584,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // Shutdown landed during the (uncancellable) turn — drop the late result so
     // nothing is appended or published after the rib is disposed.
     if (disposed) return "disposed";
-    return { text, aborted };
+    return { text, aborted, errored };
   }
 
   // Build an agent-authored transcript entry (a Mind's turn) with driver-stamped
@@ -958,6 +1002,127 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     );
   }
 
+  // A magentic manage step: the manager (re)plans the task ledger. Recovers any task
+  // left in-progress by a crash (the serial gate means none is live during a manage
+  // turn), runs the manager turn, then applies its parsed plan/done directive to the
+  // ledger — appending new tasks or closing the plan. One turn per step, like the
+  // single-speaker path; the ledger is persisted alongside the room state under the
+  // commit's write lock (commitLedgerTurn).
+  async function runManageTurn(
+    room: Room,
+    managerSlug: MindSlug,
+    directionInjection: string | undefined,
+    controller: AbortController,
+    gen: number,
+  ): Promise<boolean> {
+    const manager = await resolveMindOrFailClosed(room, managerSlug, gen);
+    if (!manager) return false;
+    const loaded =
+      (await deps.store.loadLedger(room.slug)) ??
+      freshLedger(room.slug, room.topic ?? "", managerSlug, now);
+    const ledger = failStuckTasks(loaded, { now });
+    const prompt = buildManagerPrompt({
+      ...(room.topic ? { topic: room.topic } : {}),
+      ledger,
+      transcript: await loadCachedTranscript(room.slug),
+      workers: room.participants,
+      ...(directionInjection ? { directionInjection } : {}),
+    });
+    const turn = await runOneTurn(room, manager, prompt, controller);
+    if (turn === "disposed") return false;
+    const nextLedger = applyManagerPlan(ledger, parseMagenticPlan(turn.text), room.participants, {
+      now,
+      newId,
+    });
+    return await commitLedgerTurn(room, manager, turn, nextLedger, gen);
+  }
+
+  // A magentic assign step: one worker executes one task. Marks the task in-progress
+  // and publishes first (so the board shows the worker is on it before a possibly long
+  // turn freezes it), runs the worker, then settles the task — completed, or failed if
+  // the turn errored/timed out so the manager replans on its next turn. An operator
+  // stop (aborted) closes the room in commitLedgerTurn, like every other turn.
+  async function runAssignTurn(
+    room: Room,
+    workerSlug: MindSlug,
+    taskId: string,
+    directionInjection: string | undefined,
+    controller: AbortController,
+    gen: number,
+  ): Promise<boolean> {
+    const worker = await resolveMindOrFailClosed(room, workerSlug, gen);
+    if (!worker) return false;
+    const base =
+      (await deps.store.loadLedger(room.slug)) ??
+      freshLedger(room.slug, room.topic ?? "", room.config?.manager ?? workerSlug, now);
+    const task = base.tasks.find((t) => t.id === taskId);
+    // Mark in-progress and publish the board (room state unchanged, so turnIndex does
+    // not advance). Generation-gated like every room write — a stop racing it skips.
+    const inProgress = setTaskStatus(base, taskId, "in-progress", { now });
+    await withLock(room.slug, async () => {
+      if (generationOf(room.slug) !== gen) return;
+      await deps.store.saveLedger(room.slug, inProgress);
+      const transcript = await loadCachedTranscript(room.slug);
+      await deps.publisher.publish(room.slug, buildRoomBoard(room, transcript, inProgress));
+    });
+    const prompt = buildWorkerPrompt({
+      ...(room.topic ? { topic: room.topic } : {}),
+      task: task?.description ?? "Complete the next step toward the goal.",
+      transcript: await loadCachedTranscript(room.slug),
+      ...(directionInjection ? { directionInjection } : {}),
+      ...(room.coding ? { coding: true } : {}),
+    });
+    const turn = await runOneTurn(room, worker, prompt, controller);
+    if (turn === "disposed") return false;
+    // The serial gate means nothing else wrote the ledger during the turn, so settle
+    // from the in-progress copy. An aborted or errored turn did not finish its task —
+    // only a clean turn completes it; a failed task lets the manager retry on replan.
+    const status: TaskStatus = turn.aborted || turn.errored ? "failed" : "completed";
+    const nextLedger = setTaskStatus(
+      inProgress,
+      taskId,
+      status,
+      { now },
+      summarizeOutcome(turn.text),
+    );
+    return await commitLedgerTurn(room, worker, turn, nextLedger, gen);
+  }
+
+  // Append a manager/worker turn, persist the ledger it produced, and advance the room
+  // under the write lock — the magentic counterpart to commitTurn (which has no ledger
+  // to persist). The ledger save is generation-gated exactly like the room write, so a
+  // stop/restart racing the commit drops both. An aborted turn -> stopped, the budget
+  // reached -> done, else still active. Returns whether the room remains active.
+  async function commitLedgerTurn(
+    room: Room,
+    mind: Mind,
+    turn: { text: string; aborted: boolean; errored: boolean },
+    nextLedger: TaskLedger,
+    gen: number,
+  ): Promise<boolean> {
+    await appendEntry(
+      room.slug,
+      gen,
+      buildAgentEntry(room.slug, room.turnIndex, mind.slug, turn, room.round),
+    );
+    return await withLock(room.slug, async () => {
+      const current = (await deps.store.loadRoom(room.slug)) ?? room;
+      if (generationOf(room.slug) === gen) await deps.store.saveLedger(room.slug, nextLedger);
+      const advanced: Room = {
+        ...current,
+        turnIndex: current.turnIndex + 1,
+        round: await roundAfter(room.slug, current),
+      };
+      if (turn.aborted) {
+        return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
+      }
+      if (advanced.turnIndex >= advanced.turnBudget) {
+        return await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
+      }
+      return await commitActive(room.slug, gen, advanced);
+    });
+  }
+
   async function inject(slug: MindSlug, input: RoomInjectInput): Promise<boolean> {
     // Capture before the load so a terminal step that bumps the generation during
     // it makes this late inject drop its write rather than reactivate the room.
@@ -1050,4 +1215,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
 function defaultNewId(): () => string {
   let n = 0;
   return () => `turn-${(++n).toString(36)}-${Date.now().toString(36)}`;
+}
+
+// A short, single-line outcome note for a settled magentic task, stamped into the
+// ledger so the manager's next prompt and the board carry the gist without the whole
+// turn text. Empty output reads as "(no output)".
+function summarizeOutcome(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  if (trimmed.length === 0) return "(no output)";
+  return trimmed.length > 160 ? `${trimmed.slice(0, 159)}…` : trimmed;
 }

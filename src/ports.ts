@@ -1,6 +1,6 @@
 import type { CanvasView } from "@keelson/shared";
 import type { RunAgentTurn } from "./agent-turn.ts";
-import type { MindSlug, Room, TurnEntry } from "./types.ts";
+import type { MindSlug, Room, TaskLedger, TurnEntry } from "./types.ts";
 
 export type { RunAgentTurn };
 
@@ -13,10 +13,15 @@ export interface RoomStore {
   saveRoom(room: Room): Promise<void>;
   appendTranscript(slug: MindSlug, entry: TurnEntry): Promise<void>;
   loadTranscript(slug: MindSlug): Promise<readonly TurnEntry[]>;
-  // Remove a room's directory (room.json + transcript). Fails closed: rejects an
-  // unsafe slug and throws when the room is absent (mirrors retireMind), so a
-  // delete of an already-gone room surfaces rather than claiming success.
+  // Remove a room's directory (room.json + transcript + ledger). Fails closed:
+  // rejects an unsafe slug and throws when the room is absent (mirrors retireMind),
+  // so a delete of an already-gone room surfaces rather than claiming success.
   deleteRoom(slug: MindSlug): Promise<void>;
+  // The magentic task ledger, beside room.json under rooms/<slug>/. A non-magentic
+  // room has none, so loadLedger degrades to undefined (tolerant of a
+  // missing/corrupt file like loadRoom). saveLedger rewrites it atomically.
+  loadLedger(slug: MindSlug): Promise<TaskLedger | undefined>;
+  saveLedger(slug: MindSlug, ledger: TaskLedger): Promise<void>;
 }
 
 // Publish seam. The driver composes the finished board and hands it over with the

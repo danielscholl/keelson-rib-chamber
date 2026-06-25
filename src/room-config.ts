@@ -7,6 +7,7 @@ import type { RoomConfig } from "./types.ts";
 export interface RoomConfigInput {
   moderator?: string;
   synthesizer?: string;
+  manager?: string;
   minRounds?: number;
   maxSpeakerRepeats?: number;
   endVoteThreshold?: number;
@@ -17,6 +18,7 @@ export function roomConfigFromFlat(payload: Record<string, unknown>): RoomConfig
   return {
     moderator: asNonEmptyString(payload.moderator) || undefined,
     synthesizer: asNonEmptyString(payload.synthesizer) || undefined,
+    manager: asNonEmptyString(payload.manager) || undefined,
     minRounds: typeof payload.minRounds === "number" ? payload.minRounds : undefined,
     maxSpeakerRepeats:
       typeof payload.maxSpeakerRepeats === "number" ? payload.maxSpeakerRepeats : undefined,
@@ -34,6 +36,7 @@ export function flatFromRoomConfig(
   return {
     ...(config.moderator ? { moderator: config.moderator } : {}),
     ...(config.synthesizer ? { synthesizer: config.synthesizer } : {}),
+    ...(config.manager ? { manager: config.manager } : {}),
     ...(typeof config.minRounds === "number" ? { minRounds: config.minRounds } : {}),
     ...(typeof config.maxSpeakerRepeats === "number"
       ? { maxSpeakerRepeats: config.maxSpeakerRepeats }

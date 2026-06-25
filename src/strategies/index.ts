@@ -1,6 +1,7 @@
 import type { RoomStrategyName, Strategy } from "../types.ts";
 import { concurrent } from "./concurrent.ts";
 import { groupChat } from "./group-chat.ts";
+import { magentic } from "./magentic.ts";
 import { openFloor } from "./open-floor.ts";
 import { review } from "./review.ts";
 import { sequential } from "./sequential.ts";
@@ -10,12 +11,16 @@ import { sequential } from "./sequential.ts";
 // once). group-chat is the moderator-routed Phase 3 strategy; open-floor is the
 // unmoderated one (each speaker nominates the next, the driver does the routing).
 // review is the two-Mind, single-pass cross-vendor review (author then reviewer).
+// magentic is the manager-led task ledger: a non-participant manager plans and
+// delegates to the worker participants, the driver settles each task, the manager
+// replans until done (the driver reads the ledger the strategy decides over).
 export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
   sequential,
   concurrent,
   "group-chat": groupChat,
   "open-floor": openFloor,
   review,
+  magentic,
 };
 
 export function getStrategy(name: RoomStrategyName): Strategy {
@@ -27,4 +32,4 @@ export function getStrategy(name: RoomStrategyName): Strategy {
   return strategy;
 }
 
-export { concurrent, groupChat, openFloor, review, sequential };
+export { concurrent, groupChat, magentic, openFloor, review, sequential };

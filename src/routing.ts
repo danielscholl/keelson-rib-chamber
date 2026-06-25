@@ -4,7 +4,17 @@ import type { MindSlug, TurnEntry } from "./types.ts";
 // parsers, and the prompt text that tells agents what to emit. One source of
 // truth so the stripper and a parser can never disagree on what counts as a
 // control directive.
-export const CONTROL_ACTIONS = new Set<string>(["nominate", "pass", "end", "direct", "close"]);
+export const CONTROL_ACTIONS = new Set<string>([
+  "nominate",
+  "pass",
+  "end",
+  "direct",
+  "close",
+  // magentic manager directives — listed here so the history stripper removes a
+  // manager's trailing plan/done JSON, keeping the parser/stripper invariant.
+  "plan",
+  "done",
+]);
 
 // group-chat routing defaults (chamber/pi-chamber sourced). minRounds is the
 // participation floor before a moderator may close; maxSpeakerRepeats is the
@@ -103,6 +113,7 @@ function parseTrailingControl(
 
 const MODERATOR_ACTIONS = new Set<string>(["direct", "close"]);
 const NOMINATION_ACTIONS = new Set<string>(["nominate", "pass", "end"]);
+const MAGENTIC_ACTIONS = new Set<string>(["plan", "done"]);
 
 // A moderator's routing decision, parsed driver-side from its turn. The wire
 // form is a trailing JSON object — the SAME object stripControlJson removes from
@@ -133,6 +144,48 @@ export function parseModeratorDecision(text: string): ModeratorDecision | null {
     ...(nextTrimmed ? { nextSpeaker: nextTrimmed } : {}),
     ...(directionTrimmed ? { direction: directionTrimmed } : {}),
   };
+}
+
+// A magentic manager's directive, parsed driver-side from its turn — the same
+// trailing-JSON / strip discipline as parseModeratorDecision: its actions "plan"
+// and "done" are members of CONTROL_ACTIONS, so whatever the parser routes the
+// stripper removes from rendered history, no route-but-don't-strip leak. `plan`
+// carries the tasks to append to the ledger (each an objective with an optional
+// assignee); `done` closes the plan (optionally with a summary). A trailing object
+// that is not a magentic directive returns null and is treated as ordinary prose.
+export interface MagenticTaskSpec {
+  description: string;
+  assignee?: MindSlug;
+}
+
+export interface MagenticPlan {
+  action: "plan" | "done";
+  tasks: MagenticTaskSpec[];
+  summary?: string;
+}
+
+export function parseMagenticPlan(text: string): MagenticPlan | null {
+  const match = parseTrailingControl(text, MAGENTIC_ACTIONS);
+  if (!match) return null;
+  const { parsed } = match;
+  const action = parsed.action as "plan" | "done";
+  if (action === "done") {
+    const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+    return { action: "done", tasks: [], ...(summary ? { summary } : {}) };
+  }
+  const rawTasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+  const tasks: MagenticTaskSpec[] = [];
+  for (const raw of rawTasks) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const o = raw as Record<string, unknown>;
+    const description = typeof o.description === "string" ? o.description.trim() : "";
+    if (!description) continue;
+    // Tolerate the snake/camel/synonym keys a manager might emit for the assignee.
+    const rawAssignee = o.assignee ?? o.worker ?? o.mind;
+    const assignee = typeof rawAssignee === "string" ? rawAssignee.trim() : "";
+    tasks.push({ description, ...(assignee ? { assignee } : {}) });
+  }
+  return { action: "plan", tasks };
 }
 
 // Count how many turns each Mind has authored. Folds over agent entries only

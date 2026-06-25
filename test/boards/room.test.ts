@@ -86,18 +86,28 @@ describe("buildRoomBoard", () => {
     ]);
   });
 
-  test("a closed room offers Start-again + Start group-chat + Start open-floor", () => {
+  test("a closed room offers Start-again + Start group-chat + open-floor + magentic", () => {
     for (const status of ["stopped", "done"] as const) {
       const board = buildRoomBoard(room({ status, participants: ["a", "b"], turnBudget: 6 }), []);
       expect(canvasViewSchema.safeParse(board).success).toBe(true);
       const actions = board.sections.find((s) => s.kind === "actions");
       if (actions?.kind !== "actions") throw new Error("no actions section");
-      expect(actions.items.map((i) => i.type)).toEqual(["room-start", "room-start", "room-start"]);
+      expect(actions.items.map((i) => i.type)).toEqual([
+        "room-start",
+        "room-start",
+        "room-start",
+        "room-start",
+      ]);
       expect(actions.items.map((i) => i.label)).toEqual([
         "Start again",
         "Start group-chat",
         "Start open-floor",
+        "Start magentic",
       ]);
+      // Start magentic collects the manager via a field (a Mind not in the room).
+      const magentic = actions.items.find((i) => i.label === "Start magentic");
+      expect(magentic?.fields?.map((f) => f.name)).toEqual(["manager"]);
+      expect(magentic?.payload).toMatchObject({ strategy: "magentic" });
       // Start again — no slug (the server assigns a fresh one per start).
       expect(actions.items[0]?.payload).toMatchObject({ turnBudget: 6, participants: ["a", "b"] });
     }
@@ -327,5 +337,101 @@ describe("buildRoomBoard", () => {
     const row = feedOf(board).find((i) => i.chip?.label === "a");
     expect(row?.text).toBe("Ship the narrow gate.");
     expect(row?.text).not.toContain("nominate");
+  });
+});
+
+describe("buildRoomBoard — magentic plan + manager", () => {
+  const ledger = (tasks: import("../../src/types.ts").LedgerTask[]) => ({
+    roomSlug: "r",
+    goal: "g",
+    manager: "mgr",
+    status: "executing" as const,
+    tasks,
+    updatedAt: "t",
+  });
+  const t = (
+    over: Partial<import("../../src/types.ts").LedgerTask>,
+  ): import("../../src/types.ts").LedgerTask => ({
+    id: "t1",
+    description: "build it",
+    status: "pending",
+    createdAt: "t",
+    updatedAt: "t",
+    ...over,
+  });
+
+  test("renders a Plan section: one row per task, status glyph + assignee chip", () => {
+    const board = buildRoomBoard(
+      room({ strategy: "magentic", config: { manager: "mgr" }, topic: "ship it" }),
+      [],
+      ledger([
+        t({
+          id: "t1",
+          description: "build parser",
+          assignee: "alice",
+          status: "completed",
+          result: "did it",
+        }),
+        t({ id: "t2", description: "wire api", assignee: "bob", status: "in-progress" }),
+        t({ id: "t3", description: "write tests", status: "pending" }),
+      ]),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const plan = board.sections.find((s) => s.kind === "rows" && s.title?.startsWith("Plan"));
+    if (plan?.kind !== "rows") throw new Error("expected a Plan section");
+    expect(plan.title).toBe("Plan · executing");
+    expect(plan.items.map((i) => [i.text, i.chip?.label, i.glyph])).toEqual([
+      ["build parser", "alice", "ok"],
+      ["wire api", "bob", "info"],
+      ["write tests", undefined, "neutral"],
+    ]);
+    expect(plan.items[0]?.trailing).toBe("completed · did it");
+  });
+
+  test("no Plan section for a magentic room with an empty or absent ledger", () => {
+    const absent = buildRoomBoard(room({ strategy: "magentic", config: { manager: "mgr" } }), []);
+    expect(absent.sections.some((s) => s.kind === "rows" && s.title?.startsWith("Plan"))).toBe(
+      false,
+    );
+    const empty = buildRoomBoard(
+      room({ strategy: "magentic", config: { manager: "mgr" } }),
+      [],
+      ledger([]),
+    );
+    expect(empty.sections.some((s) => s.kind === "rows" && s.title?.startsWith("Plan"))).toBe(
+      false,
+    );
+  });
+
+  test("a manager turn reads as a distinct accent chip + icon", () => {
+    const board = buildRoomBoard(
+      room({ strategy: "magentic", config: { manager: "mgr" } }),
+      [
+        entry({ from: "mgr", parts: [{ text: "here is the plan" }] }),
+        entry({ from: "a", parts: [{ text: "did it" }] }),
+      ],
+      ledger([t({})]),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const feed = board.sections.find((s) => s.kind === "rows" && s.title === undefined);
+    if (feed?.kind !== "rows") throw new Error("expected the feed");
+    expect(feed.items.find((i) => i.chip?.label === "mgr")).toMatchObject({
+      glyph: "accent",
+      icon: "❖",
+    });
+  });
+
+  test("an active magentic room offers Stop but no per-worker Call-on", () => {
+    const board = buildRoomBoard(
+      room({ strategy: "magentic", status: "active", config: { manager: "mgr" } }),
+      [],
+      ledger([t({})]),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const actions = board.sections.find((s) => s.kind === "actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    // The manager routes by the ledger, so a manual "Call on <worker>" override is
+    // suppressed — only Stop remains.
+    expect(actions.items.map((i) => i.type)).toEqual(["room-stop"]);
   });
 });

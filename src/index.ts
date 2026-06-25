@@ -1588,6 +1588,40 @@ async function validateStart(
     }
     return { ok: true, participants: deduped };
   }
+  // magentic is manager-led: a non-participant manager Mind plans a task ledger and
+  // delegates to the participant workers (parallel to group-chat's moderator). It
+  // needs a manager Mind that is real and NOT among the ≥2 workers, and — like the
+  // other facilitated modes — rejects a stray moderator/synthesizer rather than
+  // silently dropping it, so a reused payload's dead field is explained.
+  if (strategy === "magentic") {
+    const manager = config.manager;
+    if (!manager) {
+      return { ok: false, error: "magentic needs a manager Mind — set `manager`" };
+    }
+    if (!isValidParticipant(manager)) {
+      return { ok: false, error: "manager must be a safe Mind slug (not director/system)" };
+    }
+    if (!known.has(manager)) {
+      return {
+        ok: false,
+        error: `unknown manager Mind: ${manager} — genesis it first or check the roster`,
+      };
+    }
+    if (deduped.includes(manager)) {
+      return {
+        ok: false,
+        error:
+          "the manager must not also be a worker — it plans and delegates, it does not execute tasks",
+      };
+    }
+    if (config.moderator) {
+      return { ok: false, error: "magentic has no moderator — the manager routes the work" };
+    }
+    if (config.synthesizer) {
+      return { ok: false, error: "magentic has no synthesizer — the manager closes the plan" };
+    }
+    return { ok: true, participants: deduped, config: { manager } };
+  }
   return { ok: true, participants: deduped };
 }
 
@@ -1624,6 +1658,7 @@ async function startRoom(
       synthesizer: input.synthesizer,
       maxSpeakerRepeats: input.maxSpeakerRepeats,
       endVoteThreshold: input.endVoteThreshold,
+      manager: input.manager,
     },
     input.projectId,
     input.coding,
@@ -1882,7 +1917,11 @@ async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
     const store = createFileRoomStore(roomsDir());
     const room = await store.loadRoom(resolved.slug);
     if (!room) return { ok: false, error: `room '${resolved.slug}' not found` };
-    const board = buildRoomBoard(room, await store.loadTranscript(resolved.slug));
+    const transcript = await store.loadTranscript(resolved.slug);
+    // A magentic room's plan lives in its ledger; load it so a reopened closed room
+    // renders the Plan section, not just the transcript (the live board does the same).
+    const ledger = room.strategy === "magentic" ? await store.loadLedger(resolved.slug) : undefined;
+    const board = buildRoomBoard(room, transcript, ledger);
     await ensureRoomViewPublisher(sm, resolved.slug).publish(board);
     return {
       ok: true,
@@ -2186,10 +2225,11 @@ const roomStartSchema = z.object({
   // run Bash/Edit/Write/Read, confined to the project root. Requires `projectId`.
   coding: z.boolean().optional(),
   // Routing config. `strategy` defaults to sequential; `moderator` is required
-  // (and validated) only for "group-chat"; `endVoteThreshold` tunes "open-floor"'s
-  // close. All optional so a plain two-Mind room needs none of them.
+  // (and validated) only for "group-chat"; `manager` for "magentic"; `endVoteThreshold`
+  // tunes "open-floor"'s close. All optional so a plain two-Mind room needs none of them.
   strategy: z.string().optional(),
   moderator: z.string().optional(),
+  manager: z.string().optional(),
   synthesizer: z.string().optional(),
   minRounds: z.number().int().min(1).optional(),
   maxSpeakerRepeats: z.number().int().min(1).optional(),
@@ -2482,7 +2522,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. For a cross-vendor review set strategy:"review" with exactly two participants pinned to different providers — the first authors an artifact, the second (a different vendor) reviews it. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).',
+        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. For a cross-vendor review set strategy:"review" with exactly two participants pinned to different providers — the first authors an artifact, the second (a different vendor) reviews it. For a manager-led project set strategy:"magentic" and a `manager` Mind slug (a Mind NOT among participants — it plans a task ledger, delegates each task to a worker, and replans until the goal is met); the participants are the workers (at least two). State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).',
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,
@@ -2497,11 +2537,14 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
         const confirm = parsed.data.confirm ?? false;
         const moderator = (parsed.data.moderator ?? "").trim() || undefined;
-        // A `moderator` with no explicit strategy means a moderated room — infer
-        // group-chat so validateStart enforces its rules and the dry-run label below
-        // matches what actually starts (an explicit strategy still wins).
+        const manager = (parsed.data.manager ?? "").trim() || undefined;
+        // A `moderator` — or a `manager` — with no explicit strategy infers the
+        // matching facilitated mode (group-chat / magentic) so validateStart enforces
+        // its rules and the dry-run label below matches what actually starts (an
+        // explicit strategy still wins; moderator takes precedence if both are set).
         const strategy =
-          (parsed.data.strategy ?? "").trim() || (moderator ? "group-chat" : "sequential");
+          (parsed.data.strategy ?? "").trim() ||
+          (moderator ? "group-chat" : manager ? "magentic" : "sequential");
         const synthesizer = (parsed.data.synthesizer ?? "").trim() || undefined;
         const minRounds = parsed.data.minRounds;
         const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;
@@ -2517,6 +2560,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           strategy,
           {
             moderator,
+            manager,
             synthesizer,
             minRounds,
             maxSpeakerRepeats,
@@ -2545,9 +2589,11 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const modeNote =
           strategy === "group-chat" && moderator
             ? ` (group-chat, moderated by ${moderator})`
-            : strategy === "review"
-              ? ` (review: ${valid.participants[0]} reviewed by ${valid.participants[1]})`
-              : "";
+            : strategy === "magentic" && manager
+              ? ` (magentic: ${manager} manages ${valid.participants.length} worker${valid.participants.length === 1 ? "" : "s"})`
+              : strategy === "review"
+                ? ` (review: ${valid.participants[0]} reviewed by ${valid.participants[1]})`
+                : "";
         // validateStart confirmed the project resolves; name it so the operator sees
         // the repo the turns will run against.
         const projectNote = projectId
@@ -2576,6 +2622,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           projectId,
           coding,
           moderator,
+          manager,
           synthesizer,
           minRounds,
           maxSpeakerRepeats,

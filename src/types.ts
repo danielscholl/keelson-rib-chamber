@@ -38,7 +38,13 @@ export interface TurnEntry {
   at: string;
 }
 
-export type RoomStrategyName = "sequential" | "concurrent" | "group-chat" | "open-floor" | "review";
+export type RoomStrategyName =
+  | "sequential"
+  | "concurrent"
+  | "group-chat"
+  | "open-floor"
+  | "review"
+  | "magentic";
 
 export interface RoomConfig {
   moderator?: MindSlug;
@@ -48,6 +54,10 @@ export interface RoomConfig {
   // Anti-monopoly cap: a moderator pick at/over this many prior turns is
   // redirected to the least-spoken participant, so routing can't fixate.
   maxSpeakerRepeats?: number;
+  // The magentic manager: a non-participant Mind that plans the task ledger and
+  // delegates to the participant workers. Parallel to `moderator` — it drives the
+  // room but is never counted as a speaker. Required for the "magentic" strategy.
+  manager?: MindSlug;
 }
 
 // One-shot director overrides, consumed and cleared before the next turn.
@@ -87,11 +97,46 @@ export interface Room {
   createdAt: string;
 }
 
+// The magentic task ledger — the manager's plan the room drives to completion.
+// Persisted as ledger.json beside room.json / transcript.jsonl; the driver is its
+// sole writer (a manager turn (re)plans it, a worker turn settles its one task).
+export type TaskStatus = "pending" | "in-progress" | "completed" | "failed";
+
+export interface LedgerTask {
+  id: string;
+  description: string;
+  // The worker assigned to execute it. Validated against room.participants when the
+  // manager's plan is parsed; an unassigned/invalid task routes to the least-spoken
+  // worker at assign time.
+  assignee?: MindSlug;
+  status: TaskStatus;
+  // A short outcome note stamped when the task settles (completed/failed).
+  result?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskLedger {
+  roomSlug: MindSlug;
+  // The goal the manager decomposes — the room topic.
+  goal: string;
+  // The managing Mind (room.config.manager), so the ledger is self-describing.
+  manager: MindSlug;
+  // planning: no tasks yet; executing: open tasks remain; done: the manager closed
+  // the plan (goal met, or nothing left to do).
+  status: "planning" | "executing" | "done";
+  tasks: LedgerTask[];
+  updatedAt: string;
+}
+
 export type StrategyStep =
   | { kind: "speak"; mind: MindSlug }
   | { kind: "speak-parallel"; minds: readonly MindSlug[] }
   | { kind: "moderate"; mind: MindSlug }
   | { kind: "synthesize"; mind: MindSlug }
+  // magentic: the manager (re)plans the ledger; a worker executes one assigned task.
+  | { kind: "manage"; mind: MindSlug }
+  | { kind: "assign"; mind: MindSlug; taskId: string }
   | { kind: "end" };
 
 // What a strategy decides over. Richer than the room alone because group-chat's
@@ -103,6 +148,10 @@ export type StrategyStep =
 export interface StrategyInput {
   room: Room;
   transcript: readonly TurnEntry[];
+  // The magentic task ledger, when the room runs that strategy — the state the
+  // manager plans over and the workers execute against. Absent for every other
+  // strategy (they decide over room + transcript alone).
+  ledger?: TaskLedger;
 }
 
 export type Strategy = (input: StrategyInput) => StrategyStep;
