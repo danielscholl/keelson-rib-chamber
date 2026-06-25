@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.9.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.8.2...v0.9.0) (2026-06-25)
+
+
+### Added
+
+* **activity:** add chamber-activity standing lens and collector ([#127](https://github.com/danielscholl/keelson-rib-chamber/issues/127)) ([a5bb2a8](https://github.com/danielscholl/keelson-rib-chamber/commit/a5bb2a85e334bc4d13ac61370fab54693c6ef398))
+* **coding:** opt-in coding capability tier for room turns ([#125](https://github.com/danielscholl/keelson-rib-chamber/issues/125)) ([94df358](https://github.com/danielscholl/keelson-rib-chamber/commit/94df358337b387afd768eea4f32bb4dd6f6ea18d))
+* **digest:** add watermark-gated standing digest lens ([#129](https://github.com/danielscholl/keelson-rib-chamber/issues/129)) ([9042fdc](https://github.com/danielscholl/keelson-rib-chamber/commit/9042fdc27a79beba9e86f88318857a8dc1827284))
+* **genesis:** surface authored Mind slug and name in output ([#108](https://github.com/danielscholl/keelson-rib-chamber/issues/108)) ([f366124](https://github.com/danielscholl/keelson-rib-chamber/commit/f366124e4855c39297f7c7b77ae7062f06de89e2))
+* **lens:** add html canvas lens ([#123](https://github.com/danielscholl/keelson-rib-chamber/issues/123)) ([ac288e5](https://github.com/danielscholl/keelson-rib-chamber/commit/ac288e5c928445bc24086170aebfcfe6a32c4d10))
+* **lens:** append-note write-back action for lenses ([#121](https://github.com/danielscholl/keelson-rib-chamber/issues/121)) ([7aec957](https://github.com/danielscholl/keelson-rib-chamber/commit/7aec957f60d6a07b5d6f072aa79c70c58907fafc))
+* **magentic:** add manager-led task-ledger room strategy ([#128](https://github.com/danielscholl/keelson-rib-chamber/issues/128)) ([232c66d](https://github.com/danielscholl/keelson-rib-chamber/commit/232c66dbe45b84d36c02511d2215b5773c58af52))
+* **room:** coding review points the reviewer at the repo ([#126](https://github.com/danielscholl/keelson-rib-chamber/issues/126)) ([4c3684a](https://github.com/danielscholl/keelson-rib-chamber/commit/4c3684ae4b1f2cc5e4f87939d101a4fafcd6b8fc))
+* **room:** target a room at a keelson project (per-room cwd) ([#122](https://github.com/danielscholl/keelson-rib-chamber/issues/122)) ([670156e](https://github.com/danielscholl/keelson-rib-chamber/commit/670156e347b56b1244e801a52a7ef211188c0a3b))
+* set a Mind's model without hand-editing mind.json ([#109](https://github.com/danielscholl/keelson-rib-chamber/issues/109)) ([19d6f81](https://github.com/danielscholl/keelson-rib-chamber/commit/19d6f81380b171acaa1dc5170742cd0500b28c56))
+
+
+### Fixed
+
+* **brief:** tolerate fenced or prose-wrapped JSON in brief turn reply ([#110](https://github.com/danielscholl/keelson-rib-chamber/issues/110)) ([63ce2aa](https://github.com/danielscholl/keelson-rib-chamber/commit/63ce2aab335ab94fe0ff6256faff8d1466c62b02))
+
+
+### Documentation
+
+* add lens verdict-board and app-diff to the Cosmos tutorial ([#107](https://github.com/danielscholl/keelson-rib-chamber/issues/107)) ([d743b44](https://github.com/danielscholl/keelson-rib-chamber/commit/d743b447e365e3b8a6dd54100a996b3ff4054c99))
+* add value page and a Cosmos contract-review tutorial ([#106](https://github.com/danielscholl/keelson-rib-chamber/issues/106)) ([4f02ebf](https://github.com/danielscholl/keelson-rib-chamber/commit/4f02ebfcba5ac0d0f61285bfa3bd89066aec9edd))
+* correctness pass across the tiers and a CI drift guard ([#113](https://github.com/danielscholl/keelson-rib-chamber/issues/113)) ([9b6168d](https://github.com/danielscholl/keelson-rib-chamber/commit/9b6168df981b07565ae5880c446ddd943bfbf644))
+* remove the superseded product PRD and repoint references ([#99](https://github.com/danielscholl/keelson-rib-chamber/issues/99)) ([d467605](https://github.com/danielscholl/keelson-rib-chamber/commit/d467605afe5427fd4083df57f5a526539d531726))
+* resequence overview and concepts to lead with value ([#111](https://github.com/danielscholl/keelson-rib-chamber/issues/111)) ([0412c85](https://github.com/danielscholl/keelson-rib-chamber/commit/0412c85a513cb089ff72de28e974574ee94192b7))
+* sync architecture docs with shipped state ([#101](https://github.com/danielscholl/keelson-rib-chamber/issues/101)) ([fea937f](https://github.com/danielscholl/keelson-rib-chamber/commit/fea937f61ba55e11b41ae230ec2d1a6ed3ec456b))
+* tighten boundary claims in the concepts tier ([#112](https://github.com/danielscholl/keelson-rib-chamber/issues/112)) ([ef0bcbe](https://github.com/danielscholl/keelson-rib-chamber/commit/ef0bcbe59ae8972ca675398a02bf26f121048df4))
+* tighten user-facing docs to Chamber's capabilities ([#102](https://github.com/danielscholl/keelson-rib-chamber/issues/102)) ([325cf77](https://github.com/danielscholl/keelson-rib-chamber/commit/325cf7710cc204249b9aaf72462d9f42bd242cde))
+
 ## [0.8.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.8.1...v0.8.2) (2026-06-23)
 
 
