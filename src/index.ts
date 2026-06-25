@@ -31,8 +31,15 @@ import {
   codingToolPool,
   KNOWN_CAPABILITY_SLUGS,
 } from "./capabilities.ts";
-import { buildChamberState, type ChamberDelta, diffAgainstWatermark } from "./chamber-state.ts";
+import {
+  buildChamberState,
+  type ChamberDelta,
+  chamberFingerprint,
+  diffAgainstWatermark,
+  readChamberRecords,
+} from "./chamber-state.ts";
 import { buildSeedFor } from "./compose.ts";
+import { writeDigest } from "./digest-store.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import {
   CHAMBER_SURFACE_ID,
@@ -84,6 +91,10 @@ const ROSTER_KEY = "rib:chamber:roster";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
 const ACTIVITY_KEY = "rib:chamber:activity";
+const DIGEST_KEY = "rib:chamber:digest";
+// The standing-digest write seam, referenced by both the tool registration and the
+// chamber-digest workflow's author node (allowed_tools) — one source of truth.
+const DIGEST_TOOL_NAME = "chamber_emit_digest";
 // The snapshot-only key family the Rooms index `Open` focuses (see roomOpenAction).
 // Per-slug so two clients opening two different closed rooms get independent boards
 // in their drawers instead of colliding on one shared key (active rooms / lenses use
@@ -538,6 +549,15 @@ const LENSES_COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", impor
 // The activity collector, resolved the same way (see ROSTER_COLLECTOR). It reads
 // all three stores, so the bash node bakes in the data home (not a single store dir).
 const ACTIVITY_COLLECTOR = fileURLToPath(new URL("../bin/collect-activity.ts", import.meta.url));
+// The standing-digest collectors, resolved the same way (see ROSTER_COLLECTOR). The
+// gate reads all three stores + the digest, so it bakes in the data home (not a single
+// store dir); the publish collector reads the digest store from the same home.
+const DIGEST_GATE_COLLECTOR = fileURLToPath(
+  new URL("../bin/collect-digest-gate.ts", import.meta.url),
+);
+const DIGEST_PUBLISH_COLLECTOR = fileURLToPath(
+  new URL("../bin/collect-digest-publish.ts", import.meta.url),
+);
 
 // POSIX single-quote: wrap a value and escape any embedded quote so a path
 // (spaces, `$`, backticks, backslashes) reaches `bash -c` literally — never
@@ -644,6 +664,28 @@ Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, reas
   - scope (optional): the board's kind in a word or two — e.g. "status board", "timeline", "checklist".
   - reason (optional): a short note on what this authoring changed (e.g. "added two new risks") — omit it on a first author.
 Supply scope/reason only when you can name them truthfully; never invent provenance. Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
+
+// The standing-digest authoring prompt: one agent turn synthesizes the Chamber's
+// current shape into a canvas board and calls chamber_emit_digest to persist it. No
+// $ARGUMENTS — the digest is scheduler-driven, so the gate hands it the live state via
+// $gate.output.summary. Distinct from the Briefing (the delta footer): this is a
+// standing synthesis of what IS, not what just changed.
+const DIGEST_WF_PROMPT = `You are authoring the standing DIGEST for Keelson's Chamber — a multi-agent operating layer (genesis agents, agent-to-agent rooms, agent-authored lenses). The digest is a one-screen canvas \`board\` view that gives an operator the current shape of the Chamber at a glance, rendered live on the Chamber surface with no hand-coded UI. It re-composes only when the Chamber changes, so write an honest synthesis of the state below — NOT a changelog of what just happened (the Briefing footer covers deltas).
+
+Current Chamber state:
+$gate.output.summary
+
+Compose ONE canvas board synthesizing this state — what exists, what is active, what it adds up to. Be honest: name only what is in the state above; do NOT invent Minds, rooms, lenses, users, or metrics you cannot see. If the Chamber is sparse, say so plainly rather than padding.
+
+The board shape:
+  { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
+Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
+Use 2-4 Section kinds, in a sensible order:
+  - stats: { "kind":"stats", "title"?:string, "items":[{ "label":string, "value":string|number, "sub"?:string, "tone"?:Tone }] }
+  - rows:  { "kind":"rows", "title"?:string, "items":[{ "text":string, "glyph"?:Tone, "trailing"?:string }] }
+  - cards: { "kind":"cards", "title"?:string, "items":[{ "title":string, "pill"?:{ "label":string, "tone"?:Tone }, "fields"?:[{ "label"?:string, "value":string|number }], "footnote"?:string }] }
+
+Then call the chamber_emit_digest tool EXACTLY ONCE with { board }: the canvas board object above. Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the digest you authored.`;
 
 // The rib's slash commands for the harness command registry (GET /api/commands).
 // /mind opens a Mind as a seeded chat; /genesis authors a new Mind from a brief.
@@ -764,6 +806,7 @@ const rib: Rib = {
     { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
     { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
     { key: ACTIVITY_KEY, canvasKind: "view", title: "Activity" },
+    { key: DIGEST_KEY, canvasKind: "view", title: "Digest" },
     { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
   ],
@@ -830,15 +873,26 @@ const rib: Rib = {
                 key: ACTIVITY_KEY,
                 workflow: "chamber-activity",
                 title: "Activity",
-                // The standing lens this rib ships: a cheap deterministic collector
-                // that recomputes the pulse + recent-events feed from disk, so the
-                // host scheduler refreshes it on cadence with NO tab open. Cost-safe
-                // by construction — a disk read, never a paid agent turn (an
-                // agent-turn standing lens would instead have to be watermark-gated
-                // like the Briefing).
+                // The DETERMINISTIC arm of the standing-lens cost guard: a cheap
+                // collector that recomputes the pulse + recent-events feed from disk, so
+                // the host scheduler refreshes it on cadence with NO tab open — a disk
+                // read, never a paid turn. Its agent-turn counterpart is Digest below.
                 cadenceMs: 120_000,
                 collapsible: true,
                 glyph: { char: "↻", tone: "info" },
+              },
+              {
+                key: DIGEST_KEY,
+                workflow: "chamber-digest",
+                title: "Digest",
+                // The AGENT-TURN arm of the standing-lens cost guard: an agent
+                // re-authors this standing board, but only when the Chamber's structural
+                // fingerprint advances. The scheduler refreshes it on cadence (a cheap
+                // gate + re-publish disk read), yet it spends a turn ONLY on a real
+                // change — the Briefing's watermark gate, generalized onto the scheduler.
+                cadenceMs: 120_000,
+                collapsible: true,
+                glyph: { char: "✶", tone: "brand" },
               },
             ],
           },
@@ -960,6 +1014,65 @@ const rib: Rib = {
       validate: expectView(ACTIVITY_KEY, "board"),
     },
     {
+      // The digest producer (the chamber-activity sibling, agent-turn arm): a
+      // SELF-GATING bound workflow that re-authors a standing digest board with an
+      // agent turn, but spends that turn only when the Chamber changed. `gate` (a cheap
+      // bash read) emits { dirty, summary }; `author` runs ONLY when dirty (its `when:`),
+      // composing the board from the gate's summary and persisting it via
+      // chamber_emit_digest (which advances the fingerprint); `publish` always runs
+      // (trigger_rule all_done) and re-reads the store to drive the key — so the key
+      // refreshes every tick (composedAt stays live) while a paid turn fires only on a
+      // real change. The host scheduler runs the whole workflow on cadence, no tab open.
+      definition: {
+        name: "chamber-digest",
+        description:
+          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it; the panel re-publishes from disk each tick. Auto-refreshed on cadence, but spends a turn only when the Chamber changed. NOT for: the deterministic Activity feed, the delta Briefing footer, or authoring a Mind/room/lens.',
+        nodes: [
+          {
+            id: "gate",
+            // Out-of-process (a bash node), so bake the resolved data home in —
+            // captured in registerTools, which runs before this (see the roster
+            // collector). Emits { dirty, summary }; NO output_schema, so it stays text
+            // output and never republishes to the key — it only drives `when:` and feeds
+            // the author its source via $gate.output.summary.
+            bash: `bun ${shQuote(DIGEST_GATE_COLLECTOR)} ${shQuote(chamberDataHome())}`,
+          },
+          {
+            id: "author",
+            depends_on: ["gate"],
+            // The cost guard: the paid turn runs ONLY when the gate saw a change. A
+            // false/absent dirty (a quiet tick, or a failed gate) skips this node — no
+            // turn — so a quiet Chamber never spends one.
+            when: "$gate.output.dirty == 'true'",
+            prompt: DIGEST_WF_PROMPT,
+            // chamber_emit_digest validates the board fail-closed; fail_on_tool_error
+            // surfaces a bad authoring as a FAILED author node (visible in the run's
+            // node rows) rather than a SUCCEEDED turn that wrote nothing. The run itself
+            // is not failed — the always-on publish below rescues it (trigger_rule
+            // all_done), so a transient bad turn never errors the scheduled run, and the
+            // un-advanced fingerprint drives a re-author on the next tick.
+            fail_on_tool_error: true,
+            // Rib tools are default-off in workflow prompt nodes; opt in to the single
+            // write seam by name (and nothing else).
+            allowed_tools: [DIGEST_TOOL_NAME],
+          },
+          {
+            id: "publish",
+            depends_on: ["author"],
+            // all_done, not the default all_success: publish must run whether author ran
+            // (dirty), was skipped (quiet), or failed — so the key re-publishes the
+            // cached board every tick and self-heals a failed authoring (the fingerprint
+            // stays un-advanced, so the next tick re-authors).
+            trigger_rule: "all_done",
+            bash: `bun ${shQuote(DIGEST_PUBLISH_COLLECTOR)} ${shQuote(chamberDataHome())}`,
+            output_schema: { type: "object", required: ["view", "sections"] },
+          },
+        ],
+      },
+      bindSnapshotKey: DIGEST_KEY,
+      validate: expectView(DIGEST_KEY, "board"),
+    },
+    {
       // Genesis as a workflow: one prompt turn authors the soul and calls
       // chamber_emit_genesis to persist it. No bindSnapshotKey/validate — genesis
       // writes files (the roster collector reflects them), it does not publish a
@@ -1036,6 +1149,10 @@ const rib: Rib = {
     // collector (republishing the roster), not just the 120s cadence. Optional and
     // fail-soft: undefined on an older harness, where genesis falls back to cadence.
     const genesisTool = makeGenesisTool(ctx.refreshWorkflow);
+    // The digest write seam is always available, like genesis: it only writes the
+    // digest store (no snapshot/turn seam needed), and the chamber-digest workflow's
+    // author node opts in to it by name.
+    const digestTool = makeDigestTool();
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
     const run = ctx.runAgentTurn;
@@ -1144,9 +1261,15 @@ const rib: Rib = {
       // sharing the same driver + store this hook just built. Returned only when
       // the seams are present (no driver -> no tools), mirroring how the actions
       // fail closed.
-      return [genesisTool, ...lensTools, ...htmlLensTools, ...roomControlTools(roomStore)];
+      return [
+        genesisTool,
+        digestTool,
+        ...lensTools,
+        ...htmlLensTools,
+        ...roomControlTools(roomStore),
+      ];
     }
-    return [genesisTool, ...lensTools, ...htmlLensTools];
+    return [genesisTool, digestTool, ...lensTools, ...htmlLensTools];
   },
 
   // Retire a Mind (removes it, then refreshes the roster — the OSDU
@@ -2424,6 +2547,51 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+const digestEmitSchema = z.object({
+  board: canvasBoardViewSchema,
+});
+
+// Standing-digest write seam: the chamber-digest workflow's author node composes a
+// canvas board synthesizing the Chamber's current state and calls this tool to persist
+// it. The tool validates the board fail-closed (the schema), stamps it with the current
+// chamber fingerprint (so the gate reads the digest as current and runs no further turn
+// until the next change), and writes it atomically. The publish node then re-reads the
+// store to drive the bound key.
+function makeDigestTool(): ToolDefinition {
+  return {
+    name: DIGEST_TOOL_NAME,
+    description:
+      "Internal write-seam for the chamber-digest workflow: persist the standing digest board the author turn composed. The workflow's gate-conditioned author node calls this once with { board } when the Chamber changed; this tool validates the board fail-closed, stamps it with the current chamber fingerprint, and writes it so the digest panel refreshes. The chamber-digest workflow (run on cadence by the host scheduler) is the entry point — don't call this directly.",
+    inputSchema: digestEmitSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = digestEmitSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_emit_digest: ${parsed.error.message}`, true);
+        return;
+      }
+      try {
+        // Stamp the fingerprint from a fresh read at persist time (the same reduction
+        // the gate uses) so the gate goes quiet after this authoring. The read is taken
+        // at turn END: a structural change landing DURING the (short) author turn is
+        // captured by the fingerprint but not by this board, so it surfaces on the next
+        // structural change rather than immediately — acceptable eventual consistency
+        // for a standing panel, and the common no-mid-turn-change case is exact. (The
+        // out-of-process gate/turn split is why we don't cheaply stamp the gate's
+        // pre-turn fingerprint here, the way the in-process Briefing gate does.)
+        const { minds, rooms, lenses } = await readChamberRecords();
+        await writeDigest({
+          board: parsed.data.board,
+          fingerprint: chamberFingerprint(minds, rooms, lenses),
+        });
+        emitResult(ctx, JSON.stringify({ ok: true }));
+      } catch (e) {
+        emitResult(ctx, `chamber_emit_digest failed: ${errText(e)}`, true);
       }
     },
   };

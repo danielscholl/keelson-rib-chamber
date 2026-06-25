@@ -81,15 +81,18 @@ describe("rib-chamber", () => {
 
   it("registers only the genesis write seam without the agent-turn + snapshot seams", () => {
     // A ctx missing getSnapshotManager + runAgentTurn must not build the room
-    // driver — no room-control tools, no room wiring side effect — but the genesis
-    // tool (driver-free, a workflow write seam) is always registered.
+    // driver — no room-control tools, no room wiring side effect — but the genesis and
+    // digest tools (driver-free workflow write seams) are always registered.
     const ctx = {
       getExec: () => ({
         runJSON: async () => ({ ok: true as const, data: undefined }),
         runText: async () => ({ ok: true as const, data: "" }),
       }),
     } as unknown as RibContext;
-    expect((rib.registerTools?.(ctx) ?? []).map((t) => t.name)).toEqual(["chamber_emit_genesis"]);
+    expect((rib.registerTools?.(ctx) ?? []).map((t) => t.name).sort()).toEqual([
+      "chamber_emit_digest",
+      "chamber_emit_genesis",
+    ]);
   });
 
   it("declares the static html lens view while board lens views stay runtime", () => {
@@ -180,6 +183,21 @@ describe("rib-chamber", () => {
     // a fixed-key bound producer is the only standing-lens form the scheduler sees.
     expect(activity?.cadenceMs).toBeGreaterThanOrEqual(30_000);
     expect(activity?.collapsible).toBe(true);
+  });
+
+  it("declares the Digest standing-lens view", () => {
+    const keys = (rib.views ?? []).map((v) => v.key);
+    expect(keys).toContain("rib:chamber:digest");
+  });
+
+  it("ships the Digest standing column — workflow-bound and cadence-refreshed (agent-turn arm)", () => {
+    const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) => r.columns);
+    const digest = cols.find((c) => c.key === "rib:chamber:digest");
+    expect(digest?.workflow).toBe("chamber-digest");
+    // Same static-region cadence contract as Activity — the scheduler refreshes the
+    // fixed-key bound producer tab-closed; the gate keeps a quiet tick cheap.
+    expect(digest?.cadenceMs).toBeGreaterThanOrEqual(30_000);
+    expect(digest?.collapsible).toBe(true);
   });
 
   it("contributes the chamber-activity collector workflow bound to the activity key", () => {

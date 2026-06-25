@@ -5,13 +5,17 @@ import { join } from "node:path";
 import type { CanvasBoardView } from "@keelson/shared";
 import {
   buildChamberState,
+  buildDigestSource,
   type ChamberState,
+  chamberFingerprint,
   diffAgainstWatermark,
+  hasDigestContent,
+  reduceChamberState,
 } from "../src/chamber-state.ts";
-import { createFileLensStore } from "../src/lens-store.ts";
+import { createFileLensStore, type LensRecord } from "../src/lens-store.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
-import type { Room } from "../src/types.ts";
+import type { Mind, Room } from "../src/types.ts";
 import type { Watermark } from "../src/watermark-store.ts";
 
 const board: CanvasBoardView = { view: "board", title: "x", sections: [] };
@@ -164,5 +168,149 @@ describe("diffAgainstWatermark", () => {
       emptyWatermark({ ackedEndedRooms: ["r1"], lensFingerprints: { a: "t1" } }),
     );
     expect(delta.hasSubstance).toBe(false);
+  });
+});
+
+describe("chamberFingerprint", () => {
+  const mind = (slug: string): Mind => ({ slug, name: slug, role: "r", persona: "p" });
+  const lens = (id: string, updatedAt: string): LensRecord => ({ id, board, updatedAt });
+
+  test("is stable for the same records", () => {
+    const minds = [mind("ada")];
+    const rooms = [makeRoom({ slug: "r1", status: "done" })];
+    const lenses = [lens("a", "t1")];
+    expect(chamberFingerprint(minds, rooms, lenses)).toBe(chamberFingerprint(minds, rooms, lenses));
+  });
+
+  test("is order-independent across Minds, rooms, and lenses", () => {
+    const a = chamberFingerprint(
+      [mind("ada"), mind("bo")],
+      [makeRoom({ slug: "r1", status: "done" }), makeRoom({ slug: "r2", status: "active" })],
+      [lens("x", "t1"), lens("y", "t2")],
+    );
+    const b = chamberFingerprint(
+      [mind("bo"), mind("ada")],
+      [makeRoom({ slug: "r2", status: "active" }), makeRoom({ slug: "r1", status: "done" })],
+      [lens("y", "t2"), lens("x", "t1")],
+    );
+    expect(a).toBe(b);
+  });
+
+  test("a Mind swap with the SAME count changes the fingerprint (identity, not counts)", () => {
+    // The cost-gate regression guard: retiring one Mind and creating another keeps the
+    // count at 1 but must still re-author — so the fingerprint keys on slugs, not counts.
+    expect(chamberFingerprint([mind("alice")], [], [])).not.toBe(
+      chamberFingerprint([mind("bob")], [], []),
+    );
+  });
+
+  test("a rename (same slug, different name) changes the fingerprint — the rendered name", () => {
+    // buildDigestSource shows the name, so a slug-stable rename must re-author rather than
+    // leave a stale name in the digest (no rename path exists today, but the fingerprint
+    // captures everything rendered so a future one stays correct).
+    const before: Mind = { slug: "ada", name: "Ada", role: "r", persona: "p" };
+    const after: Mind = { slug: "ada", name: "Ada Lovelace", role: "r", persona: "p" };
+    expect(chamberFingerprint([before], [], [])).not.toBe(chamberFingerprint([after], [], []));
+  });
+
+  test("an active room swapped for a different active room changes the fingerprint", () => {
+    expect(chamberFingerprint([], [makeRoom({ slug: "r1", status: "active" })], [])).not.toBe(
+      chamberFingerprint([], [makeRoom({ slug: "r2", status: "active" })], []),
+    );
+  });
+
+  test("a room going active -> ended changes the fingerprint", () => {
+    expect(chamberFingerprint([], [makeRoom({ slug: "r1", status: "active" })], [])).not.toBe(
+      chamberFingerprint([], [makeRoom({ slug: "r1", status: "done" })], []),
+    );
+  });
+
+  test("a lens whose updatedAt advanced changes the fingerprint", () => {
+    expect(chamberFingerprint([], [], [lens("a", "t1")])).not.toBe(
+      chamberFingerprint([], [], [lens("a", "t2")]),
+    );
+  });
+
+  test("ignores per-turn churn — rooms differing only in turnIndex match", () => {
+    // The cost floor: a live room's turnIndex advances every turn but must NOT re-author.
+    expect(
+      chamberFingerprint([], [makeRoom({ slug: "live", status: "active", turnIndex: 1 })], []),
+    ).toBe(
+      chamberFingerprint([], [makeRoom({ slug: "live", status: "active", turnIndex: 99 })], []),
+    );
+  });
+});
+
+describe("hasDigestContent", () => {
+  const state = (over: Partial<ChamberState> = {}): ChamberState => ({
+    mindCount: 0,
+    activeRoomCount: 0,
+    endedRoomSlugs: [],
+    liveLensCount: 0,
+    lensFingerprints: {},
+    ...over,
+  });
+
+  test("an empty chamber has no content (so the gate withholds a paid turn)", () => {
+    expect(hasDigestContent(state())).toBe(false);
+  });
+
+  test("any of minds / active rooms / ended rooms / lenses counts as content", () => {
+    expect(hasDigestContent(state({ mindCount: 1 }))).toBe(true);
+    expect(hasDigestContent(state({ activeRoomCount: 1 }))).toBe(true);
+    expect(hasDigestContent(state({ endedRoomSlugs: ["r1"] }))).toBe(true);
+    expect(hasDigestContent(state({ liveLensCount: 1 }))).toBe(true);
+  });
+});
+
+describe("buildDigestSource", () => {
+  const mind = (name: string): Mind => ({
+    slug: name.toLowerCase(),
+    name,
+    role: "r",
+    persona: "p",
+  });
+  const lens = (id: string, title: string): LensRecord => ({
+    id,
+    board: { view: "board", title, sections: [] },
+    updatedAt: "t1",
+  });
+
+  test("names the Minds, active/ended rooms, and lenses on disk", () => {
+    const summary = buildDigestSource(
+      [mind("Ada"), mind("Bo")],
+      [
+        makeRoom({ slug: "live", name: "Standup", status: "active" }),
+        makeRoom({ slug: "retro", name: "Retro", status: "done" }),
+      ],
+      [lens("release-risks", "Release Risks")],
+    );
+    expect(summary).toContain("Minds (2): Ada, Bo");
+    expect(summary).toContain("Active rooms (1): Standup");
+    expect(summary).toContain("Ended rooms (1): Retro (done)");
+    expect(summary).toContain("Lenses (1): Release Risks");
+  });
+
+  test("an empty chamber reads as 'none' in every category (honest, no fabrication)", () => {
+    const summary = buildDigestSource([], [], []);
+    expect(summary).toContain("Minds (0): none");
+    expect(summary).toContain("Active rooms (0): none");
+    expect(summary).toContain("Ended rooms (0): none");
+    expect(summary).toContain("Lenses (0): none");
+  });
+});
+
+describe("reduceChamberState", () => {
+  test("reduces records the same way buildChamberState does (pure, no IO)", () => {
+    const result = reduceChamberState(
+      [{ slug: "ada", name: "Ada", role: "r", persona: "p" }],
+      [makeRoom({ slug: "live", status: "active" }), makeRoom({ slug: "done", status: "done" })],
+      [{ id: "f", board, updatedAt: "t1" }],
+    );
+    expect(result.mindCount).toBe(1);
+    expect(result.activeRoomCount).toBe(1);
+    expect(result.endedRoomSlugs).toEqual(["done"]);
+    expect(result.liveLensCount).toBe(1);
+    expect(result.lensFingerprints).toEqual({ f: "t1" });
   });
 });
