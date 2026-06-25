@@ -271,9 +271,14 @@ describe("magentic driver", () => {
     await driver.step("demo"); // manage -> plan
     const assignStep = driver.step("demo"); // assign alice -> in flight
     await scripted.secondStarted;
+    // The task is in-progress while the worker turn runs.
+    expect((await store.loadLedger("demo"))?.tasks[0]?.status).toBe("in-progress");
     await driver.stop("demo");
     await assignStep;
     expect((await store.loadRoom("demo"))?.status).toBe("stopped");
+    // The stop settles the in-progress task so a reopened board shows no phantom live
+    // work (a stopped room has no manage turn to recover it).
+    expect((await store.loadLedger("demo"))?.tasks[0]?.status).toBe("failed");
   });
 
   test("an assign step publishes in-progress before it settles to completed", async () => {

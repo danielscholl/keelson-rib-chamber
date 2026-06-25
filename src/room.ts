@@ -1197,6 +1197,18 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       bumpGeneration(slug);
       controllers.get(slug)?.abort();
       clearActive(slug);
+      // A magentic worker turn marks its task in-progress before running; an operator
+      // stop here would otherwise strand it in-progress on disk — the aborted settle is
+      // generation-gated away, and a stopped room never runs another manage turn to
+      // recover it, so a reopened board would show phantom live work. Settle it as the
+      // room closes, the same interrupted->failed sweep a manage turn does on resume.
+      if (room.strategy === "magentic") {
+        const ledger = await deps.store.loadLedger(slug);
+        if (ledger) {
+          const swept = failStuckTasks(ledger, { now });
+          if (swept !== ledger) await deps.store.saveLedger(slug, swept);
+        }
+      }
       await persistAndPublish({ ...room, status: "stopped", pending: undefined });
     });
     releaseSlugState(slug);
