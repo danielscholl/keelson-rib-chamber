@@ -130,7 +130,7 @@ function pulseSection(pulse: RosterPulse): CanvasBoardView["sections"][number] {
 // One Mind -> one card: a hashed identity dot, the role in a single pill, persona
 // (and model when set) as fields, and two actions — Enter (the primary verb, a
 // non-destructive action the host renders inline on the card) and Retire (a
-// destructive overflow action with a typed irreversible confirm gate). The slug
+// destructive overflow action with a confirm dialog). The slug
 // rides both action payloads + the dot hash.
 function cardFor(mind: Mind) {
   const fields: { label: string; value: string }[] = [
@@ -175,8 +175,6 @@ function cardFor(mind: Mind) {
         destructive: true,
         payload: { slug: mind.slug },
         confirm: {
-          irreversible: true,
-          subject: mind.slug,
           title: "Retire Mind",
           body: `Retire ${mind.name}? This permanently deletes the Mind and its SOUL.`,
           confirmLabel: "Retire",

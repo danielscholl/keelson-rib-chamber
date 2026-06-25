@@ -36,7 +36,7 @@ export function buildRoomsIndexBoard(rooms: readonly Room[]): CanvasBoardView {
 // `<status> · <turnIndex>/<turnBudget>` progress in a status-toned pill, and
 // participants + the started-relative time as fields. A CLOSED room adds an Open
 // (focuses its transcript in the canvas drawer) and a destructive Delete (overflow,
-// typed-irreversible confirm). An ACTIVE room is status-only: it is already live in
+// a confirm dialog). An ACTIVE room is status-only: it is already live in
 // its inline panel, so a frozen drawer snapshot would just go stale beside it (and
 // the delete handler refuses a live room anyway).
 function cardFor(room: Room) {
@@ -77,8 +77,6 @@ function deleteAction(room: Room) {
     destructive: true,
     payload: { slug: room.slug },
     confirm: {
-      irreversible: true,
-      subject: room.slug,
       title: "Delete room",
       body: `Delete ${room.name}? This permanently removes the session and its transcript.`,
       confirmLabel: "Delete",

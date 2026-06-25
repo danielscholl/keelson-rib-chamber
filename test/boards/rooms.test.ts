@@ -128,7 +128,7 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(card?.fields?.some((f) => f.label === "ended")).toBe(false);
   });
 
-  test("each card has an inline Open then a destructive Delete with a typed irreversible confirm", () => {
+  test("each card has an inline Open then a destructive Delete with a simple confirm", () => {
     const board = buildRoomsIndexBoard([room({ slug: "room-1", name: "Q3 priorities" })]);
     const actions = cards(board)[0]?.actions ?? [];
     expect(actions).toHaveLength(2);
@@ -149,8 +149,8 @@ describe("buildRoomsIndexBoard closed sessions", () => {
       destructive: true,
       payload: { slug: "room-1" },
     });
-    expect(del?.confirm?.irreversible).toBe(true);
-    expect(del?.confirm?.subject).toBe("room-1");
+    expect(del?.confirm?.irreversible).toBeUndefined();
+    expect(del?.confirm?.subject).toBeUndefined();
     expect(del?.confirm?.confirmLabel).toBe("Delete");
     expect(del?.confirm?.cancelLabel).toBe("Cancel");
   });
