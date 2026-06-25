@@ -65,6 +65,14 @@ describe("magentic strategy", () => {
     expect(magentic(input({ ledger: l }))).toEqual({ kind: "end" });
   });
 
+  test("a closed plan with NO tasks -> end (the done check precedes the empty guard)", () => {
+    // A manager that declared done / planned nothing on turn 0 settles to done + [].
+    // The empty-ledger guard must not re-trigger a manage turn and loop to budget.
+    expect(magentic(input({ ledger: ledger({ status: "done", tasks: [] }) }))).toEqual({
+      kind: "end",
+    });
+  });
+
   test("a pending task -> assign to its assignee", () => {
     const l = ledger({ tasks: [task({ id: "t1", assignee: "bob" })] });
     expect(magentic(input({ ledger: l }))).toEqual({ kind: "assign", mind: "bob", taskId: "t1" });

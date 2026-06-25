@@ -115,6 +115,19 @@ describe("magentic driver", () => {
     expect(await h.store.loadTranscript("demo")).toHaveLength(4);
   });
 
+  test("a manager that declares done immediately closes the room without draining budget", async () => {
+    // Regression: a done/empty plan on turn 0 settles the ledger to done + []; the
+    // strategy must end the room, not re-run a paid manage turn every step to budget.
+    const h = harness([{ text: doneTail("nothing to do") }]);
+    await h.driver.start(START); // turnBudget 8
+    expect(await h.driver.step("demo")).toBe("advanced"); // the single manage turn
+    expect((await h.store.loadLedger("demo"))?.status).toBe("done");
+    expect(await h.driver.step("demo")).toBe("ended"); // closes — no second manage
+    expect((await h.store.loadRoom("demo"))?.status).toBe("done");
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(1); // exactly ONE paid turn
+    expect(await h.store.loadTranscript("demo")).toHaveLength(1);
+  });
+
   test("replans on a failed (errored) task — the room continues", async () => {
     const h = harness([
       { text: planTail([{ description: "wire the api", assignee: "alice" }]) }, // manage

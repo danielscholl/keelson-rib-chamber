@@ -17,8 +17,8 @@ export function resolveAssignee(
 // The magentic strategy: a manager-led task ledger drives the room. Pure rhythm over
 // room + ledger — it never parses the manager's text or spawns a turn (the driver's
 // manage/assign branches do that):
-//   - no ledger / no tasks yet                -> the manager plans (manage)
 //   - the manager closed the plan (done)      -> end
+//   - no ledger / no tasks yet                -> the manager plans (manage)
 //   - a pending task                          -> a worker executes it (assign)
 //   - tasks remain but none pending (settled) -> the manager reviews / replans
 // Ends on the structural cases (closed / no workers / budget reached). The manager
@@ -30,8 +30,12 @@ export const magentic: Strategy = ({ room, transcript, ledger }) => {
   if (room.turnIndex >= room.turnBudget) return { kind: "end" };
   const manager = room.config?.manager;
   if (!manager) return { kind: "end" }; // validateStart guarantees one — defensive
+  // A closed plan ends — checked BEFORE the empty-ledger guard, because a manager that
+  // declared done (or planned nothing) on its first turn settles to status "done" with
+  // an empty task list; the empty-guard would otherwise re-run a paid manage turn every
+  // step until the budget drains rather than closing the room.
+  if (ledger?.status === "done") return { kind: "end" };
   if (!ledger || ledger.tasks.length === 0) return { kind: "manage", mind: manager };
-  if (ledger.status === "done") return { kind: "end" };
   const pending = ledger.tasks.find((t) => t.status === "pending");
   if (pending) {
     const assignee = resolveAssignee(pending, room.participants, transcript);
