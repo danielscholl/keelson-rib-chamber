@@ -25,8 +25,9 @@ seam is absent rather than degrading silently.
 | `getSnapshotManager` | publish boards to `rib:chamber:*` keys | lens and room publishing are unavailable |
 | `registerRegion` | add a live room or lens panel at runtime | lenses and live room panels are unavailable |
 | `getDataDir` | a writable per-rib home for Minds, rooms, and lenses | falls back to a resolved per-rib data directory |
+| `getProjects` | resolve a targeted project's root path for coding room turns | coding rooms reject a targeted project id at start (fail closed); project targeting is unavailable |
 
-A fifth seam, `refreshWorkflow`, lets an index republish on demand instead of
+A sixth seam, `refreshWorkflow`, lets an index republish on demand instead of
 waiting on its cadence; without it the rib falls back to cadence-only refresh. The
 rib also contributes workflows whose nodes bind a snapshot key and a fail-closed
 `validate`, so a producer's output is gated before it reaches a trusted renderer.

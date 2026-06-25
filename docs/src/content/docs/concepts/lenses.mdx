@@ -40,7 +40,8 @@ differs from the others by author and update model:
 | Room board | The room driver | Show the attributed conversation | Updated after each committed turn |
 | Lens | A Mind or the lens workflow | Preserve an interpretation or a decision | Re-authored explicitly under a stable id |
 | Briefing | The rib's attention gate plus one agent turn | Surface newly ended rooms or changed lenses | Runs only when its watermark finds new substance |
-| Roster and index boards | Deterministic collectors | Show persistent Chamber state | Cadence or explicit refresh |
+| Digest | Watermark-gated agent turn | Standing synthesis of current Chamber state | Runs only when fingerprint detects a change since last digest |
+| Roster, Activity, and index boards | Deterministic collectors | Show persistent Chamber state | Cadence or explicit refresh |
 
 ## The board, and the pipeline it rides
 
@@ -66,7 +67,9 @@ Each lens is keyed by a short subject id, and each new subject gets its own pane
 on the Chamber surface. Re-authoring the same subject updates that panel in place
 rather than adding another. A lens is a persistent published view, not a background
 monitor: it changes only when a Mind or workflow authors the same id again, never on
-its own. The rib sets no fixed limit on how many lenses can exist; the harness
+its own. One exception: if a lens was authored with a `lens-note` action attached,
+an operator can append a note to it directly from its panel without re-authoring
+the full board. The rib sets no fixed limit on how many lenses can exist; the harness
 enforces a per-surface ceiling.
 
 ## Provenance the card carries
@@ -80,7 +83,7 @@ each one when present, alongside an "updated" time the server stamps on every wr
 None of it is required, and re-authoring a subject without a field clears whatever
 was there before.
 
-## Two ways to author one
+## Ways to author one
 
 - **As a workflow.** Run `/lens {subject}`, or
   `keelson workflow run chamber-lens "{subject}"`. One turn composes a board for
@@ -89,11 +92,16 @@ was there before.
   mid-room, for example to surface a findings summary after a discussion. A Mind
   with no declared capability is text-only, so this is opt-in per Mind. See
   [Minds and genesis](../minds/) for declaring capabilities.
+- **As an HTML canvas.** A Mind (or any tool call) can invoke `chamber_emit_lens_html`
+  with a literal HTML string. This publishes to the fixed key `rib:chamber:lens-html`,
+  renders in a sandboxed iframe on the Chamber surface under the Lenses group, and is
+  not per-subject: re-publishing replaces the single shared panel. Unlike board-type
+  lenses it is not persisted to the lens index.
 
 ## Every panel uses the same canvas contract
 
 Every panel on the Chamber surface is a published board, never hand-coded UI, but they
-do not all share an author. A lens and the briefing are agent-authored: an agent turn
+do not all share an author. A lens, the briefing, and the digest are agent-authored: an agent turn
 composes the board. The roster and the live room transcript are deterministic boards a
 collector or the room driver assembles. What they have in common is the contract, not
 the author. Each is a board published to a `rib:chamber:*` key and drawn by the canvas.

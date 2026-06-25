@@ -31,9 +31,9 @@ next; the driver decides who authored a turn. The driver stamps the Mind it actu
 invoked into the entry, and an agent can never assert another speaker. A moderator's
 pick or a peer nomination moves the next speaker, never the authorship of an entry.
 
-## Why the input is `{ room, transcript }`
+## Why the input is `{ room, transcript, ledger? }`
 
-The strategy input is `{ room, transcript }`, not `room` alone. The narrow input
+The strategy input is `{ room, transcript, ledger? }`, not `room` alone. The narrow input
 would have been cleaner, but it is genuinely too thin. The group-chat close gate
 asks whether everyone has spoken enough rounds, and open-floor asks whether the last
 speaker nominated anyone. Both are participation questions the room object does not
@@ -44,6 +44,10 @@ strategy a reader callback or letting it parse the transcript itself, would make
 effectful and reopen the door this split closes. So the strategy gets the transcript
 read-only and may touch it **only** through the pure helpers in `src/routing.ts`
 (`speakerCounts`, `leastSpoken`, and the rest). It still parses nothing.
+
+The optional `ledger` field is the magentic task ledger, passed by the driver only
+when the room runs the magentic strategy, absent for every other strategy, which
+decide over `room` and `transcript` alone.
 
 ## Why `round` is stored, not derived
 

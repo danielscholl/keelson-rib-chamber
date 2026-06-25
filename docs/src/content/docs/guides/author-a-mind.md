@@ -108,6 +108,11 @@ capability. The genesis turn asks for an optional list of capability slugs, so a
 for the `lens` capability in your brief when you want a Mind that visualizes its
 work.
 
+Two additional capabilities apply to coding rooms (rooms started with `coding: true`
+and a `projectId`): `read` lets a Mind read files in the room's project; `code` lets
+it run Bash, Edit, and Write. A coding review room requires the author Mind to declare
+`code` and the reviewer Mind to declare at least `read`.
+
 The vocabulary is curated, so declaring anything unknown is dropped. Declaring
 nothing keeps the Mind conversation-only. A capability scopes what a Mind may do
 inside a room turn; it never makes the Mind reach a tool the room does not already

@@ -14,9 +14,9 @@ how they take turns, challenge each other, or review work across providers. The
 harness stays domain-free, so all of the multi-agent machinery lives in the rib,
 and it ships **zero React** into the trusted SPA.
 
-> Status: **experimental.** Genesis, rooms (five turn strategies: **sequential**,
-> **concurrent**, moderated **group-chat**, unmoderated **open-floor**, and
-> cross-vendor **review**), and agent-authored lenses all work today —
+> Status: **experimental.** Genesis, rooms (six turn strategies: **sequential**,
+> **concurrent**, moderated **group-chat**, unmoderated **open-floor**,
+> cross-vendor **review**, and manager-led **magentic**), and agent-authored lenses all work today —
 > driven from chat tools, the Chamber surface, or workflows. The contract is
 > still alpha. See the [documentation site](https://danielscholl.github.io/keelson-rib-chamber/)
 > for the model, the guides, and the contract.
@@ -24,7 +24,7 @@ and it ships **zero React** into the trusted SPA.
 ## What it adds
 
 - **Genesis** — author persistent agents (Minds) on demand from a freeform brief.
-- **Rooms** — run multi-agent conversations under five turn strategies: **sequential**, **concurrent**, moderated **group-chat**, unmoderated **open-floor**, and a cross-vendor **review**; steer them live (call on a speaker, inject a direction, stop).
+- **Rooms** — run multi-agent conversations under six turn strategies: **sequential**, **concurrent**, moderated **group-chat**, unmoderated **open-floor**, a cross-vendor **review**, and manager-led **magentic**; steer them live (call on a speaker, inject a direction, stop).
 - **Lenses** — a Mind authors its own canvas board on a subject (a risk view, a verdict, a status), rendered through Keelson's canvas with no hand-coded UI. The roster, the Rooms index, and the live transcript are deterministic boards the rib builds, not lenses.
 - **Zero trusted React** — every view renders through the canvas contract, not UI shipped from the rib.
 
@@ -53,7 +53,7 @@ keelson stop && keelson start
 
 | | |
 |---|---|
-| Chamber | `0.8.x` |
+| Chamber | `0.9.x` |
 | Keelson shared contract | `@keelson/shared >= 0.12.0` (peer dependency) |
 | Tested against | Keelson `main` (CI tracks the latest harness) |
 | Status | Experimental — the `Rib` contract it builds on is still pre-1.0 |
