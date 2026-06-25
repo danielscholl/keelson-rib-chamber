@@ -2664,6 +2664,18 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         // nomination ("Alice" vs "alice", a typo, a non-participant) as sent.
         if (callOn) {
           const room = await store.loadRoom(slug);
+          // magentic routes turns by the manager's ledger, so a forced speaker would run
+          // an off-plan turn that settles no task (step() also ignores the override for
+          // magentic) — reject it here and point the operator at `direction`, which steers
+          // the manager, instead of reporting a dropped nomination as sent.
+          if (room?.strategy === "magentic") {
+            emitResult(
+              ctx,
+              "chamber_room_say: a magentic room routes turns by its manager — use `direction` to steer the plan, not `callOn`.",
+              true,
+            );
+            return;
+          }
           if (!room?.participants.includes(callOn)) {
             emitResult(
               ctx,

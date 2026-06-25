@@ -128,6 +128,43 @@ describe("magentic driver", () => {
     expect(await h.store.loadTranscript("demo")).toHaveLength(1);
   });
 
+  test("an errored manage turn retries instead of closing the room as a false done", async () => {
+    const h = harness([
+      { text: "boom", status: "error" }, // manage turn 0 errors before planning
+      { text: planTail([{ description: "do it", assignee: "alice" }]) }, // manage retry succeeds
+      { text: "did it" }, // assign alice
+      { text: doneTail() }, // manage -> done
+    ]);
+    await h.driver.start(START);
+    await h.driver.step("demo"); // manage errors -> ledger preserved, room stays active
+    expect((await h.store.loadRoom("demo"))?.status).toBe("active");
+    expect((await h.store.loadLedger("demo"))?.status).not.toBe("done"); // not a false success
+    await h.driver.step("demo"); // manage retry -> plans t1
+    expect((await h.store.loadLedger("demo"))?.tasks).toHaveLength(1);
+    await h.driver.step("demo"); // assign alice
+    await h.driver.step("demo"); // manage -> done
+    expect(await h.driver.step("demo")).toBe("ended");
+    expect((await h.store.loadRoom("demo"))?.status).toBe("done");
+  });
+
+  test("a nextSpeaker override is ignored for a magentic room (the manager routes)", async () => {
+    const h = harness([
+      { text: planTail([{ description: "do it", assignee: "alice" }]) }, // manage -> t1(alice)
+      { text: "did it" }, // the ledger assign (alice), not a forced bob turn
+    ]);
+    await h.driver.start(START);
+    await h.driver.step("demo"); // manage -> t1(alice) pending
+    await h.driver.inject("demo", { nextSpeaker: "bob" }); // a stale board / raw-API override
+    await h.driver.step("demo"); // runs the ledger assign (alice/t1), NOT bob
+    expect((await h.store.loadLedger("demo"))?.tasks[0]).toMatchObject({
+      assignee: "alice",
+      status: "completed",
+    });
+    const transcript = await h.store.loadTranscript("demo");
+    const lastAgent = [...transcript].reverse().find((e) => e.role === "agent");
+    expect(lastAgent?.from).toBe("alice"); // bob never got an off-plan turn
+  });
+
   test("replans on a failed (errored) task — the room continues", async () => {
     const h = harness([
       { text: planTail([{ description: "wire the api", assignee: "alice" }]) }, // manage

@@ -373,10 +373,17 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         });
       }
 
-      // (2) decide: a valid nextSpeaker override wins; otherwise the strategy
-      // picks over the room and the transcript (the round cursor is room.round).
+      // (2) decide: a valid nextSpeaker override wins; otherwise the strategy picks
+      // over the room and the transcript (the round cursor is room.round). magentic is
+      // exempt — its turns are routed by the manager's ledger, so a director "call on
+      // <worker>" must not force an off-plan speak turn (the chat tool rejects it too;
+      // this is the shared-path guard against a stale board action or a raw API inject).
       let decision: StrategyStep;
-      if (override.nextSpeaker !== undefined && isValidNominee(override.nextSpeaker, room)) {
+      if (
+        room.strategy !== "magentic" &&
+        override.nextSpeaker !== undefined &&
+        isValidNominee(override.nextSpeaker, room)
+      ) {
         decision = { kind: "speak", mind: override.nextSpeaker };
       } else {
         const transcript = await loadCachedTranscript(slug);
@@ -1030,10 +1037,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
     const turn = await runOneTurn(room, manager, prompt, controller);
     if (turn === "disposed") return false;
-    const nextLedger = applyManagerPlan(ledger, parseMagenticPlan(turn.text), room.participants, {
-      now,
-      newId,
-    });
+    // An errored/timed-out manage turn produced no real plan — its text is an error
+    // string, so parseMagenticPlan is null and applyManagerPlan would derive "done" on a
+    // fresh/exhausted ledger, closing the room as a false success. Preserve the ledger
+    // instead so the strategy retries the manager next step (bounded by turnBudget); only
+    // a clean turn's directive advances the plan.
+    const nextLedger = turn.errored
+      ? ledger
+      : applyManagerPlan(ledger, parseMagenticPlan(turn.text), room.participants, { now, newId });
     return await commitLedgerTurn(room, manager, turn, nextLedger, gen);
   }
 
