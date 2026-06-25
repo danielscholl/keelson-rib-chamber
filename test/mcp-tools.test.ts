@@ -265,11 +265,26 @@ describe("chamber_room_delete refuses an active room (stop it first)", () => {
   let liveTools: readonly ToolDefinition[];
   let abort: ReturnType<typeof abortableRunAgentTurn>;
   let openedSlug = "";
+  let liveHome: string;
 
   beforeAll(async () => {
-    // A real active room needs the driver: the abortable fake holds the first turn in
-    // flight so the started room stays active across the assertions.
+    // Isolate this suite in its own home so a real driver-started active room never
+    // shares state with the disk-seeded `room-live` the list-tool suite uses. The
+    // abortable fake holds the first turn in flight so the room stays active across
+    // the assertions.
     await rib.dispose?.();
+    liveHome = await mkdtemp(join(tmpdir(), "chamber-mcp-live-"));
+    setChamberDataHome(join(liveHome, "chamber"));
+    for (const [slug, name] of [
+      ["alice", "Alice"],
+      ["bob", "Bob"],
+    ] as [string, string][]) {
+      await scaffoldMind(
+        mindsDir(),
+        { slug, name, role: "debater", voice: "plain", persona: `You are ${name}.`, createdAt: at },
+        `${name}'s soul.`,
+      );
+    }
     abort = abortableRunAgentTurn();
     liveTools = registerTools(makeCtx({ run: abort.run, sm: fakeSnapshotManager() }));
     const start = makeToolCtx();
@@ -279,6 +294,13 @@ describe("chamber_room_delete refuses an active room (stop it first)", () => {
     );
     openedSlug = start.out().match(/Opened room "([^"]+)"/)?.[1] ?? "";
     await abort.started;
+  });
+
+  afterAll(async () => {
+    await rib.dispose?.();
+    // Restore the shared home so the file-level afterAll tears down the right tree.
+    setChamberDataHome(join(workspace, "chamber"));
+    await rm(liveHome, { recursive: true, force: true });
   });
 
   it("refuses while active, then deletes once stopped", async () => {
@@ -296,5 +318,51 @@ describe("chamber_room_delete refuses an active room (stop it first)", () => {
     await tool(liveTools, "chamber_room_delete").execute({ room: openedSlug }, del.ctx);
     expect(del.errored()).toBe(false);
     expect((await listRooms(roomsDir())).some((r) => r.slug === openedSlug)).toBe(false);
+  });
+});
+
+describe("list tools stay valid JSON when the result is capped", () => {
+  let bigHome: string;
+
+  beforeAll(async () => {
+    await rib.dispose?.();
+    bigHome = await mkdtemp(join(tmpdir(), "chamber-mcp-big-"));
+    setChamberDataHome(join(bigHome, "chamber"));
+    // Several Minds with very long taglines push the serialized list past the 16 KB
+    // tool-result budget, so the tool must omit rows rather than truncate the JSON.
+    const long = "x".repeat(7000);
+    for (let i = 0; i < 5; i++) {
+      await scaffoldMind(
+        mindsDir(),
+        {
+          slug: `big-${i}`,
+          name: `Big ${i}`,
+          role: "filler",
+          voice: "plain",
+          persona: long,
+          createdAt: at,
+        },
+        "soul",
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await rib.dispose?.();
+    setChamberDataHome(join(workspace, "chamber"));
+    await rm(bigHome, { recursive: true, force: true });
+  });
+
+  it("omits rows instead of emitting unparseable JSON", async () => {
+    const listTools = registerTools(makeCtx());
+    const t = makeToolCtx();
+    await tool(listTools, "chamber_list_minds").execute({}, t.ctx);
+    expect(t.errored()).toBe(false);
+    // The result must parse — boundedText would have truncated this mid-string.
+    const out = JSON.parse(t.out()) as { count: number; omitted?: number; minds: unknown[] };
+    expect(out.count).toBe(5); // total still reported
+    expect(out.minds.length).toBeLessThan(5); // some rows omitted to stay in budget
+    expect(out.omitted).toBe(5 - out.minds.length);
+    expect(t.out().length).toBeLessThanOrEqual(16_100);
   });
 });

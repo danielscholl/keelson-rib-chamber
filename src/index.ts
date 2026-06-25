@@ -2719,6 +2719,26 @@ function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefin
 // provider advertises empty rather than absent (z.toJSONSchema needs an object).
 const noToolInputSchema = z.object({});
 
+// Emit a list payload that stays valid JSON under the tool-result budget: keep rows
+// until the next would push the serialized result over the cap, then report the
+// omitted count. boundedText would instead truncate the serialized string —
+// unparseable JSON exactly when the cap bites — so the list tools use this.
+function emitJsonList<T>(ctx: ToolContext, key: string, rows: readonly T[]): void {
+  const build = (kept: readonly T[]): string =>
+    JSON.stringify({
+      count: rows.length,
+      ...(kept.length < rows.length ? { omitted: rows.length - kept.length } : {}),
+      [key]: kept,
+    });
+  let kept: T[] = [];
+  for (const row of rows) {
+    const next = [...kept, row];
+    if (kept.length > 0 && build(next).length > MAX_TOOL_RESULT_CHARS) break;
+    kept = next;
+  }
+  emitResult(ctx, build(kept));
+}
+
 function makeListMindsTool(): ToolDefinition {
   return {
     name: "chamber_list_minds",
@@ -2738,7 +2758,7 @@ function makeListMindsTool(): ToolDefinition {
           ...(m.provider ? { provider: m.provider } : {}),
           ...(m.tools && m.tools.length > 0 ? { tools: m.tools } : {}),
         }));
-        emitResult(ctx, boundedText(JSON.stringify({ count: rows.length, minds: rows })));
+        emitJsonList(ctx, "minds", rows);
       } catch (e) {
         emitResult(ctx, `chamber_list_minds failed: ${errText(e)}`, true);
       }
@@ -2774,7 +2794,7 @@ function makeListRoomsTool(): ToolDefinition {
           ...(r.projectId ? { projectId: r.projectId } : {}),
           ...(r.coding ? { coding: true } : {}),
         }));
-        emitResult(ctx, boundedText(JSON.stringify({ count: rows.length, rooms: rows })));
+        emitJsonList(ctx, "rooms", rows);
       } catch (e) {
         emitResult(ctx, `chamber_list_rooms failed: ${errText(e)}`, true);
       }
@@ -2799,7 +2819,7 @@ function makeListLensesTool(): ToolDefinition {
           ...(l.maintainingMind ? { maintainingMind: l.maintainingMind } : {}),
           ...(l.reason ? { reason: l.reason } : {}),
         }));
-        emitResult(ctx, boundedText(JSON.stringify({ count: rows.length, lenses: rows })));
+        emitJsonList(ctx, "lenses", rows);
       } catch (e) {
         emitResult(ctx, `chamber_list_lenses failed: ${errText(e)}`, true);
       }
