@@ -73,6 +73,17 @@ A Mind authoring mid-room sees the full emit tool, so it can set `maintainingMin
 to sign the lens with its own name. That is the one place that field is normally
 filled.
 
+## Let viewers annotate a lens
+
+A board can let a viewer append a short note to the lens without re-authoring it.
+Include an `actions` section in the board with one action whose `type` is
+`"lens-note"`, `payload` is `{ id: "<this-lens-id>" }`, and a single multiline
+field named `note`. Submitting the form appends the note to the lens's board in
+place (no agent turn, no cost).
+
+This is a deterministic write-back, not a re-prompt. The annotation does not
+promote the standing briefing (that path is reserved for Mind-authored substance).
+
 ## Retire one
 
 A lens is always retireable. Use the **Retire** action on the lens card, or call

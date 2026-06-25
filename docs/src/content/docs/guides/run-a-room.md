@@ -52,8 +52,11 @@ chamber_room_start({
 ```
 
 `participants` is required and needs at least two distinct Minds. `topic`,
-`strategy`, and `turnBudget` are optional. The tool schema and the full set of
-start fields live in [Tools and commands](../../reference/tools-and-commands/).
+`strategy`, and `turnBudget` are optional. To target the room at a keelson
+project, pass `projectId`; add `coding: true` to opt into the coding tier so
+Minds with the `code` capability can run Bash/Edit/Write, and Minds with `read` can
+run the Read tool, confined to the project root. The tool schema and the full set of start fields
+live in [Tools and commands](../../reference/tools-and-commands/).
 
 ## Choose a strategy
 

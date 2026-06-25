@@ -1,6 +1,6 @@
 ---
 title: Room strategies
-description: The pure strategy contract, the five shipped strategies, and the routing knobs that tune them
+description: The pure strategy contract, the six shipped strategies, and the routing knobs that tune them
 sidebar:
   order: 5
 ---
@@ -21,10 +21,11 @@ export type Strategy = (input: StrategyInput) => StrategyStep;
 export interface StrategyInput {
   room: Room;
   transcript: readonly TurnEntry[];
+  ledger?: TaskLedger; // populated only for magentic rooms
 }
 ```
 
-The input is `{ room, transcript }` and nothing else. The round cursor lives on
+The input is `{ room, transcript }` and, for magentic rooms, `ledger`. The round cursor lives on
 `room.round` (the authoritative count, not `turnIndex % participants`), so a
 strategy reads it there. The transcript is needed because some strategies decide
 on participation history, which the room object alone does not carry.
@@ -37,6 +38,8 @@ export type StrategyStep =
   | { kind: "speak-parallel"; minds: readonly MindSlug[] }
   | { kind: "moderate"; mind: MindSlug }
   | { kind: "synthesize"; mind: MindSlug }
+  | { kind: "manage"; mind: MindSlug }
+  | { kind: "assign"; mind: MindSlug; taskId: string }
   | { kind: "end" };
 ```
 
@@ -46,6 +49,8 @@ export type StrategyStep =
 | `speak-parallel` | `minds` | Run a whole round at once, fanned out. |
 | `moderate` | `mind` | Hand control to a moderator Mind. |
 | `synthesize` | `mind` | Run a synthesizer to write a closing turn. |
+| `manage` | `mind` | Hand control to the manager Mind to (re)plan the task ledger. |
+| `assign` | `mind`, `taskId` | Assign a pending ledger task to the named worker Mind. |
 | `end` | none | Close the room. |
 
 :::note
@@ -159,7 +164,7 @@ restart; `turnBudget` bounds the loop like every other strategy.
 
 ## The pure / driver split
 
-A strategy reads only `room` and `transcript` and returns a `StrategyStep`. It
+A strategy reads `room`, `transcript`, and (for magentic rooms) `ledger`, and returns a `StrategyStep`. It
 performs no I/O, calls no provider, never reads an agent's reply, and never parses
 free text. Everything with side effects, running turns, parsing the routing tail,
 validating a pick against `room.participants`, and spawning, lives in the driver

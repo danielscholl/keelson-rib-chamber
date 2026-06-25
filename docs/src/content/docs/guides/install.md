@@ -84,9 +84,9 @@ intended first step. See [Author a Mind](../author-a-mind/) for that path.
 ## Confirm the rib is wired
 
 `keelson` reports a rib's readiness through its `authStatus`. Chamber reads
-**wired** once three conditions hold: its data home is writable, and the
+**wired** once four conditions hold: its data home is writable, and the
 harness has handed it the snapshot-manager, agent-turn, and region-registration
-seams. When all three are present the status reads:
+seams. When all four are present the status reads:
 
 ```text
 rooms & lenses wired; provider resolved at turn time

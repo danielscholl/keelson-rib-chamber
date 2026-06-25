@@ -43,31 +43,40 @@ contract change that breaks this rib turns CI red here.
 
 The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
 
-- **Views + a surface** — three agent-authored snapshot keys
-  (`rib:chamber:roster`, `rib:chamber:room`, `rib:chamber:brief`) bound to the
-  canvas renderer, and the **Chamber** nav surface that lays them out. No
-  hand-coded UI: every view is a board a producer publishes.
+- **Views + a surface** — seven static snapshot keys
+  (`rib:chamber:roster`, `rib:chamber:rooms`, `rib:chamber:lenses`,
+  `rib:chamber:activity`, `rib:chamber:digest`, `rib:chamber:lens-html`,
+  `rib:chamber:brief`) plus dynamic per-room (`rib:chamber:room:<slug>` for live rooms,
+  `rib:chamber:room-view:<slug>` for the drawer view) and per-lens keys, bound to the
+  canvas renderer, and the **Chamber** nav surface that
+  lays them out. No hand-coded UI: every view is a board a producer publishes.
 - **Workflows** (`contributeWorkflows`) — `chamber-roster` / `chamber-rooms` /
-  `chamber-lenses` (deterministic collectors that read the data home), `chamber-lens`
-  (one agent turn that authors a lens board), and `chamber-genesis` (one agent turn
-  that authors a Mind's SOUL.md and persists it via the `chamber_emit_genesis` write
-  seam). The **Briefing** (`rib:chamber:brief`) is NOT a workflow — it is the rib-owned
+  `chamber-lenses` / `chamber-activity` (deterministic collectors that read the data
+  home), `chamber-lens` (one agent turn that authors a lens board), `chamber-genesis`
+  (one agent turn that authors a Mind's SOUL.md and persists it via the
+  `chamber_emit_genesis` write seam), and `chamber-digest` (self-gating: a gate bash
+  node reads the Chamber fingerprint, an agent-turn author node runs only when the
+  fingerprint advanced, and an always-on publish node re-reads the store every tick —
+  so the Digest board stays live but a paid turn fires only on a real change). The **Briefing** (`rib:chamber:brief`) is NOT a workflow — it is the rib-owned
   attention gate (`evaluateBriefGate`, `src/chamber-state.ts` + `src/watermark-store.ts`):
   a room ending or a lens changing promotes it to one agent-authored board, gated
   fail-closed against a persisted watermark so a quiet Chamber runs no paid turn.
-- **Tools** (`registerTools`) — the genesis write seam is always present; the
-  room-control chat tools (`chamber_room_start` / `_say` / `_stop` / `_status`)
-  and the room driver are built **only when** the host provides the agent-turn
-  (`runAgentTurn`) and snapshot-manager seams. Absent those, room actions fail
-  closed.
+- **Tools** (`registerTools`) — the genesis and digest write seams are always
+  present; five management tools are also always present: `chamber_list_minds`,
+  `chamber_list_rooms`, `chamber_list_lenses` (read-only), `chamber_retire_mind`, and
+  `chamber_room_delete`. The room-control chat tools (`chamber_room_start` / `_say` /
+  `_stop` / `_status`) and the room driver are built **only when** the host provides
+  the agent-turn (`runAgentTurn`) and snapshot-manager seams. Absent those, room
+  actions fail closed.
 - **Actions** (`onAction`) — `enter-mind`, `retire`, and the payload-carrying
   `room-start` / `room-inject` / `room-stop` board actions.
 - **Agents + commands** — every Mind is enterable as a keelson agent
-  (`listAgents` / `resolveAgent`); `/mind` opens a Mind as a seeded chat and
-  `/genesis` runs the chamber-genesis workflow.
+  (`listAgents` / `resolveAgent`); `/mind` opens a Mind as a seeded chat,
+  `/genesis` authors a new Mind from a brief, and `/lens <subject>` authors a
+  canvas lens board on a subject.
 
 Orchestration **strategies** (`src/strategies/`: `sequential`, `group-chat`,
-`open-floor`, `concurrent`, registered in `index.ts`) are **pure** — they read
+`open-floor`, `concurrent`, `review`, `magentic`, registered in `index.ts`) are **pure** — they read
 room state and return the next turn decision (`speak` / `end`). They do no I/O
 and know nothing about providers or the host; the **driver** (`src/room.ts`)
 owns turns, persistence, and publishing.

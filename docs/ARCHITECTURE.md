@@ -16,7 +16,7 @@ renderer); this rib adds the generative half and ships no React into the SPA.
 |---|---|
 | [Concepts](https://danielscholl.github.io/keelson-rib-chamber/concepts/) | The model: Minds, rooms and strategies, lenses, and when to convene a room. |
 | [Design](https://danielscholl.github.io/keelson-rib-chamber/design/) | Decision records and the Keelson base seams the rib builds on: the agent-turn seam, communication and identity, rooms and strategies, per-Mind capabilities, and agent-authored lenses. |
-| [Reference](https://danielscholl.github.io/keelson-rib-chamber/reference/) | The exact contract: the Chamber surface, the `rib:chamber:*` snapshot keys, the five workflows, the chat tools and commands, the five room strategies, and the on-disk data. |
+| [Reference](https://danielscholl.github.io/keelson-rib-chamber/reference/) | The exact contract: the Chamber surface, the `rib:chamber:*` snapshot keys, the seven workflows, the chat tools and commands, the six room strategies, and the on-disk data. |
 | [Guides](https://danielscholl.github.io/keelson-rib-chamber/guides/) | Task recipes: install and remove the rib, author a Mind, run a room, author a lens. |
 
 Build the docs locally with `cd docs && bun install && bun run build`.

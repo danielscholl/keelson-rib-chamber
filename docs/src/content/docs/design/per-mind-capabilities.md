@@ -13,8 +13,12 @@ which is the room default, never the full tool surface.
 
 `Mind.tools` is a list of capability **slugs**, not raw tool names. A slug is an
 entry in a small curated vocabulary that maps to one or more concrete tools. Today
-that vocabulary has a single entry, `lens`, which authorizes `chamber_emit_lens`.
-A Mind that wants to author a lens mid-room declares `lens`; a Mind that declares
+that vocabulary has three entries: `lens` (authorizes `chamber_emit_lens`), `read`
+(authorizes `Read`), and `code` (authorizes `Bash`, `Edit`, `Write`). `read` and
+`code` are only active in coding rooms: in a standard room they resolve to
+nothing because the room-safe pool does not include filesystem/exec tools. A Mind
+that wants to author a lens mid-room declares `lens`; a coding-room Mind that
+needs to read or edit files declares `read` or `code`; a Mind that declares
 nothing gets an empty tool rail and can only speak.
 
 The room supplies the ceiling. A room is given a room-safe pool of tool names it
@@ -65,7 +69,7 @@ else is simply absent.
 
 - [Tools and commands](../../reference/tools-and-commands/): the tools a slug can
   resolve to, with their schemas.
-- [Agent-authored lenses](../agent-authored-lenses/): the only capability today,
-  and what `chamber_emit_lens` publishes.
+- [Agent-authored lenses](../agent-authored-lenses/): the built-in lens
+  capability, and what `chamber_emit_lens` publishes.
 - [Rib contract](https://danielscholl.github.io/keelson/docs/reference/rib-contract/):
   the harness seams a rib's tools are registered through.

@@ -13,7 +13,7 @@ live in the rib's own source, and adding one is three edits and a test.
 
 The good news is that a strategy is the easiest kind of code to write, because the
 contract forbids almost everything. No I/O, no provider calls, no text parsing.
-You read two values and return one of five shapes. That is the whole job.
+You read two or three values and return one of seven shapes. That is the whole job.
 
 ## The contract
 
@@ -25,10 +25,11 @@ export type Strategy = (input: StrategyInput) => StrategyStep;
 export interface StrategyInput {
   room: Room;
   transcript: readonly TurnEntry[];
+  ledger?: TaskLedger; // present only when the room runs the magentic strategy
 }
 ```
 
-You receive `{ room, transcript }` and nothing else. You return one `StrategyStep`,
+You receive `{ room, transcript }`. If the room runs the magentic strategy, `ledger` (a `TaskLedger`) is also present; for every other strategy it is absent. You return one `StrategyStep`,
 the decision union:
 
 ```ts
@@ -37,6 +38,8 @@ export type StrategyStep =
   | { kind: "speak-parallel"; minds: readonly MindSlug[] }
   | { kind: "moderate"; mind: MindSlug }
   | { kind: "synthesize"; mind: MindSlug }
+  | { kind: "manage"; mind: MindSlug }
+  | { kind: "assign"; mind: MindSlug; taskId: string }
   | { kind: "end" };
 ```
 
@@ -44,6 +47,8 @@ export type StrategyStep =
 - `speak-parallel` names a set of Minds to run as one parallel round.
 - `moderate` hands control to a moderator Mind, which routes rather than debates.
 - `synthesize` asks for a closing summary turn.
+- `manage` hands control to the manager Mind to (re)plan the task ledger. Used by the magentic strategy; a non-magentic strategy need not return it.
+- `assign` assigns a pending ledger task to the named worker Mind. Also magentic-specific.
 - `end` closes the room. It carries no field.
 
 One note on `synthesize`: it is part of the type, but none of the shipped
@@ -53,7 +58,7 @@ driver to run it (more on that below).
 
 ## The pure rule
 
-A strategy may read only `room` and `transcript`, and it must return a
+A strategy may read `room` and `transcript` (and, for the magentic strategy, `ledger`), and it must return a
 `StrategyStep`. That is the entire surface. It performs no I/O, talks to no
 provider, never reads an agent's reply, and never parses free text. Routing-tail
 parsing, validation, and spawning all live in the driver and in `src/routing.ts`.
@@ -134,6 +139,7 @@ export type RoomStrategyName =
   | "group-chat"
   | "open-floor"
   | "review"
+  | "magentic"
   | "one-round";
 ```
 
@@ -144,6 +150,7 @@ object literal. Quote the key if it contains a hyphen, matching `"group-chat"` a
 `"open-floor"`.
 
 ```ts
+import { magentic } from "./magentic.ts";
 import { oneRound } from "./one-round.ts";
 
 export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
@@ -152,6 +159,7 @@ export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
   "group-chat": groupChat,
   "open-floor": openFloor,
   review,
+  magentic,
   "one-round": oneRound,
 };
 ```
@@ -237,7 +245,8 @@ hang CI.
 
 The strategy emits a `kind`; the driver executes it. For `speak`,
 `speak-parallel`, and `end`, that execution already exists, so a strategy that
-returns only those is complete after the three edits and a test. But if your
+returns only those is complete after the three edits and a test. For `manage`
+and `assign`, the driver execution exists for the magentic strategy. But if your
 strategy returns `moderate` or `synthesize`, or relies on a routing tail (a
 moderator's pick, a peer nomination, an end vote), the matching execution and
 fallback live in the driver and in `src/routing.ts`, not in the strategy. The pure

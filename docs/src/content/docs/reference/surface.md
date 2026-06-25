@@ -20,8 +20,8 @@ The surface has a stable identity:
 
 ## Standing layout
 
-The surface declares four standing regions: a header, one row of two columns,
-and a footer. Each binds a snapshot key. The three collectors carry a workflow
+The surface declares six standing regions: a header, one row of four columns,
+and a footer. Each binds a snapshot key. The four collectors carry a workflow
 binding and a 120000 ms cadence so they self-populate on open and refresh
 without being hammered. The Briefing footer has no workflow: it is rib-driven,
 seeded with a quiet board at boot and republished only by the attention gate.
@@ -31,6 +31,8 @@ seeded with a quiet board at boot and republished only by the attention gate.
 | Header | `rib:chamber:roster` | `chamber-roster` | 120000 | no | `◇` brand |
 | Row, column 1 | `rib:chamber:rooms` | `chamber-rooms` | 120000 | yes | `▦` brand |
 | Row, column 2 | `rib:chamber:lenses` | `chamber-lenses` | 120000 | yes | `✦` accent |
+| Row, column 3 | `rib:chamber:activity` | `chamber-activity` | 120000 | yes | `↻` info |
+| Row, column 4 | `rib:chamber:digest` | `chamber-digest` | 120000 | yes | `✶` brand |
 | Footer | `rib:chamber:brief` | none (rib-driven) | none | yes | `❖` brand |
 
 The Rooms index lists active rooms first, as status-only cards, then closed
@@ -78,14 +80,17 @@ independent boards instead of colliding on one shared key.
 
 ## Canvas views
 
-The surface declares four canvas views, all of `canvasKind` `view`. These bind
-the standing keys to the canvas renderer; data arrives when the producers run.
+The surface declares seven canvas views. These bind the standing keys to the
+canvas renderer; data arrives when the producers run.
 
 | Key | `canvasKind` | Title |
 |---|---|---|
 | `rib:chamber:roster` | `view` | Roster |
 | `rib:chamber:rooms` | `view` | Rooms |
 | `rib:chamber:lenses` | `view` | Lenses |
+| `rib:chamber:activity` | `view` | Activity |
+| `rib:chamber:digest` | `view` | Digest |
+| `rib:chamber:lens-html` | `html` | HTML Lens |
 | `rib:chamber:brief` | `view` | Briefing |
 
 The per-instance keys (`room:{slug}`, `lens:{id}`, `room-view:{slug}`) are not
@@ -103,7 +108,7 @@ for the substrate the keys live on.
 
 ## Related
 
-- [Workflows](../workflows/): the collectors that fill the three standing keys.
+- [Workflows](../workflows/): the collectors that fill the four standing keys.
 - [Data on disk](../data-on-disk/): the board shapes each producer emits.
 - [Rooms and strategies](../../concepts/rooms/): why a live room is its own panel.
 - [Lenses](../../concepts/lenses/): why each lens is its own per-id key.

@@ -19,12 +19,13 @@ relative to that home.
 ├── lenses/
 │   └── {id}/
 ├── room-draft.json
+├── digest.json
 └── brief-watermark.json
 ```
 
-The three subdirectories hold one entry per Mind, room, and lens. The two
-JSON files at the home root are small singletons: the Convene draft and the
-briefing watermark.
+The three subdirectories hold one entry per Mind, room, and lens. The three
+JSON files at the home root are small singletons: the Convene draft, the
+standing digest, and the briefing watermark.
 
 ## A Mind
 
@@ -71,13 +72,14 @@ slug.
 
 ## A room
 
-A room lives in `rooms/{slug}/` as two files: current state and an append-only
-log.
+A room lives in `rooms/{slug}/` as two or three files depending on strategy:
+current state, an append-only log, and, for magentic rooms, a task ledger.
 
 ```text
 rooms/{slug}/
 ├── room.json
-└── transcript.jsonl
+├── transcript.jsonl
+└── ledger.json          # magentic rooms only
 ```
 
 `room.json` is the `Room` record, rewritten each turn and read directly. It is
@@ -123,6 +125,11 @@ a turn can never assert another speaker's identity, and a director message is
 forced to `from: "director"` regardless of payload. `round` and `aborted` are
 optional. Closed-room retention keeps the newest 25 closed rooms and prunes
 older ones; active rooms are always kept.
+
+`ledger.json` is present only for magentic rooms. It persists the `TaskLedger`
+(the manager's goal, status, and task list) and is the sole durable artifact
+the magentic driver needs to resume after a restart. Non-magentic rooms have no
+ledger file.
 
 ## A lens
 
@@ -179,6 +186,25 @@ re-authored lens reads as changed. `briefPromoted` tracks whether the footer
 currently holds a promoted briefing (`true`) or the quiet board (`false`). A
 missing or torn file reads as empty, so a cold start treats everything as new
 and unpromoted.
+
+## digest.json
+
+The digest record drives the standing digest panel. It stores the last
+agent-authored board and the Chamber fingerprint it was authored against:
+
+```json
+{
+  "board": { "view": "board", "title": "Digest", "sections": [] },
+  "fingerprint": "…"
+}
+```
+
+The `chamber-digest` workflow gate diffs a fresh fingerprint against this to
+decide whether the Chamber's state advanced since the last authoring; the
+publish collector reads the board back to refresh the bound key every tick. A
+missing or torn file degrades to null: the gate sees a changed subject and
+the publish collector falls back to the cold-start board, following the same
+fail-soft contract as `brief-watermark.json`.
 
 ## The board payload
 

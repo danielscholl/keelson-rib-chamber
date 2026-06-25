@@ -51,9 +51,11 @@ A Mind is its identity first, its tools second.
 - **Model** is optional. A Mind can pin its own provider and model, so a panel can
   reason with genuinely different engines. Unpinned, it runs on the session's
   provider.
-- **Capabilities** are an explicit, curated set of slugs (today, the `lens`
-  capability) that scope what the Mind may do inside a room. Declaring nothing keeps
-  the Mind text-only, the room default.
+- **Capabilities** are an explicit, curated set of slugs that scope what the Mind may do
+  inside a room: `lens` (author a live canvas board mid-room), `read` (read files in the
+  room's project, coding rooms only), and `code` (edit files and run commands in the
+  room's project, coding rooms only). Declaring nothing keeps the Mind text-only, the
+  room default.
 
 Identity is at the Mind level, and capabilities are not addressable. Only a Mind is a
 participant you can put in a room or address in a transcript. A tool, a workflow, an
@@ -61,7 +63,8 @@ MCP server, or another rib is a capability a Mind invokes during its turn, behin
 harness permission layer, never a participant in its own right. A Mind can never
 reach a tool the room does not already permit, even through a hand-edited record. See
 [Lenses](../lenses/) for what the `lens` capability authorizes, and
-[Rooms and strategies](../rooms/) for how a turn's tool rail is scoped.
+[Per-Mind capabilities](../../design/per-mind-capabilities/) for how `read` and `code`
+enter the pool only when `room.coding` is enabled.
 
 ## Genesis: authoring a Mind from a brief
 
