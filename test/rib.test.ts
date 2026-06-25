@@ -79,10 +79,11 @@ describe("rib-chamber", () => {
     expect(cols).not.toContain("rib:chamber:room");
   });
 
-  it("registers only the genesis write seam without the agent-turn + snapshot seams", () => {
-    // A ctx missing getSnapshotManager + runAgentTurn must not build the room
-    // driver — no room-control tools, no room wiring side effect — but the genesis and
-    // digest tools (driver-free workflow write seams) are always registered.
+  it("registers the always-on seams without the agent-turn + snapshot seams", () => {
+    // A ctx missing getSnapshotManager + runAgentTurn must not build the room driver
+    // — no room-control tools, no room wiring side effect — but the always-on tools
+    // (the genesis/digest workflow write seams, the read-only list tools, and the
+    // retire-mind/delete-room cleanup tools, all driver-free disk ops) are registered.
     const ctx = {
       getExec: () => ({
         runJSON: async () => ({ ok: true as const, data: undefined }),
@@ -92,6 +93,11 @@ describe("rib-chamber", () => {
     expect((rib.registerTools?.(ctx) ?? []).map((t) => t.name).sort()).toEqual([
       "chamber_emit_digest",
       "chamber_emit_genesis",
+      "chamber_list_lenses",
+      "chamber_list_minds",
+      "chamber_list_rooms",
+      "chamber_retire_mind",
+      "chamber_room_delete",
     ]);
   });
 

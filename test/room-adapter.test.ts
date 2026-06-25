@@ -155,20 +155,26 @@ afterAll(async () => {
 describe("room adapter — fails closed without the seams", () => {
   it("does not register the room snapshot or build the driver when runAgentTurn is absent", async () => {
     const { sm, registered } = fakeSnapshotManager();
-    // The driver-free seams — genesis + digest (writes) and lens (publish, given the
-    // snapshot + registerRegion seams makeCtx supplies) — wire up without runAgentTurn;
-    // the room-control tools additionally need it.
+    // The driver-free seams — genesis + digest (writes), the read-only list tools, the
+    // retire-mind/delete-room cleanup tools, and lens (publish, given the snapshot +
+    // registerRegion seams makeCtx supplies) — wire up without runAgentTurn; the
+    // room-control tools additionally need it.
     expect(
       registerTools(makeCtx({ sm }))
         .map((t) => t.name)
         .sort(),
     ).toEqual(
       [
+        "chamber_room_delete",
         "chamber_emit_digest",
         "chamber_emit_genesis",
         "chamber_emit_lens",
         "chamber_emit_lens_html",
+        "chamber_list_lenses",
+        "chamber_list_minds",
+        "chamber_list_rooms",
         "chamber_retire_lens",
+        "chamber_retire_mind",
       ].sort(),
     );
     expect(registered.some((k) => k.startsWith("rib:chamber:room"))).toBe(false);

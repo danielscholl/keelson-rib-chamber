@@ -186,21 +186,27 @@ afterAll(async () => {
 describe("chamber room-control chat tools", () => {
   let openedSlug = "";
 
-  it("registers the genesis + digest + lens seams always, plus the room-control tools with the seams", () => {
+  it("registers the always-on seams (genesis/digest + list/cleanup), plus the lens and room tools with their seams", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "chamber_emit_digest",
       "chamber_emit_genesis",
       "chamber_emit_lens",
       "chamber_emit_lens_html",
+      "chamber_list_lenses",
+      "chamber_list_minds",
+      "chamber_list_rooms",
       "chamber_retire_lens",
+      "chamber_retire_mind",
+      "chamber_room_delete",
       "chamber_room_say",
       "chamber_room_start",
       "chamber_room_status",
       "chamber_room_stop",
     ]);
-    // No runAgentTurn -> no driver -> no room tools, but the genesis + digest write
-    // seams and the lens publish + retire seams (which need only the snapshot manager +
-    // registerRegion) are still there.
+    // No runAgentTurn -> no driver -> no room-control tools, but the always-on seams
+    // (genesis + digest writes, the read-only list tools, and the retire-mind /
+    // delete-room cleanup tools) plus the lens publish + retire seams (which need only
+    // the snapshot manager + registerRegion) are still there.
     expect(
       registerTools(makeCtx(undefined, sm))
         .map((t) => t.name)
@@ -211,16 +217,30 @@ describe("chamber room-control chat tools", () => {
         "chamber_emit_genesis",
         "chamber_emit_lens",
         "chamber_emit_lens_html",
+        "chamber_list_lenses",
+        "chamber_list_minds",
+        "chamber_list_rooms",
         "chamber_retire_lens",
+        "chamber_retire_mind",
+        "chamber_room_delete",
       ].sort(),
     );
-    // Without registerRegion the lens seam is withheld fail-closed — but genesis and
-    // digest (which only write to disk, no snapshot seam) remain.
+    // Without the snapshot/registerRegion seams the lens tools are withheld fail-closed,
+    // but the always-on seams (genesis/digest writes + the list and cleanup tools, which
+    // only touch disk) remain.
     expect(
       registerTools(makeCtx(undefined, undefined))
         .map((t) => t.name)
         .sort(),
-    ).toEqual(["chamber_emit_digest", "chamber_emit_genesis"]);
+    ).toEqual([
+      "chamber_emit_digest",
+      "chamber_emit_genesis",
+      "chamber_list_lenses",
+      "chamber_list_minds",
+      "chamber_list_rooms",
+      "chamber_retire_mind",
+      "chamber_room_delete",
+    ]);
   });
 
   it("chamber_emit_lens publishes a board and reports its key", async () => {
