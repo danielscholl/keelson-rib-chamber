@@ -1170,6 +1170,10 @@ const rib: Rib = {
     // digest store (no snapshot/turn seam needed), and the chamber-digest workflow's
     // author node opts in to it by name.
     const digestTool = makeDigestTool();
+    // Like genesis and digest, the list and cleanup tools need only the disk paths
+    // captured above, so they are always available — independent of the snapshot/turn seams.
+    const readTools = [makeListMindsTool(), makeListRoomsTool(), makeListLensesTool()];
+    const cleanupTools = [makeRetireMindTool(), makeRoomDeleteTool()];
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
     const run = ctx.runAgentTurn;
@@ -1281,12 +1285,14 @@ const rib: Rib = {
       return [
         genesisTool,
         digestTool,
+        ...readTools,
+        ...cleanupTools,
         ...lensTools,
         ...htmlLensTools,
         ...roomControlTools(roomStore),
       ];
     }
-    return [genesisTool, digestTool, ...lensTools, ...htmlLensTools];
+    return [genesisTool, digestTool, ...readTools, ...cleanupTools, ...lensTools, ...htmlLensTools];
   },
 
   // Retire a Mind (removes it, then refreshes the roster — the OSDU
@@ -2699,6 +2705,182 @@ function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefin
         emitResult(ctx, JSON.stringify({ ok: true, key: lensKey(id) }));
       } catch (e) {
         emitResult(ctx, `chamber_retire_lens failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+// Tools are the only chamber surface an MCP client reaches — a board action is not —
+// so the read-only list tools and the cleanup verbs (retire a Mind, delete an ended
+// room, otherwise board-action-only) are registered here, making the genesis ->
+// convene -> read transcript -> clean up lifecycle drivable over MCP, not only the SPA.
+
+// No input — the list tools take none. A bare object schema keeps the params the
+// provider advertises empty rather than absent (z.toJSONSchema needs an object).
+const noToolInputSchema = z.object({});
+
+function makeListMindsTool(): ToolDefinition {
+  return {
+    name: "chamber_list_minds",
+    description:
+      "List the Chamber's Minds (the agent roster): each Mind's slug, name, role, tagline, and any pinned model/provider and capability tools. Read-only. Use it to see which agents exist before convening a room. NOT for creating a Mind (run the chamber-genesis workflow) or retiring one (chamber_retire_mind).",
+    inputSchema: noToolInputSchema,
+    state_changing: false,
+    async execute(_input, ctx) {
+      try {
+        const minds = await readMinds(mindsDir());
+        const rows = minds.map((m) => ({
+          slug: m.slug,
+          name: m.name,
+          role: m.role,
+          tagline: m.persona,
+          ...(m.model ? { model: m.model } : {}),
+          ...(m.provider ? { provider: m.provider } : {}),
+          ...(m.tools && m.tools.length > 0 ? { tools: m.tools } : {}),
+        }));
+        emitResult(ctx, boundedText(JSON.stringify({ count: rows.length, minds: rows })));
+      } catch (e) {
+        emitResult(ctx, `chamber_list_minds failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+function makeListRoomsTool(): ToolDefinition {
+  return {
+    name: "chamber_list_rooms",
+    description:
+      "List the Chamber's rooms — active sessions first, then ended ones — with each room's slug, name, status, strategy, participants, and turn progress. Read-only. Use it to find a room to read in detail with chamber_room_status, or to delete with chamber_room_delete. NOT for starting, steering, or stopping a room (chamber_room_start / _say / _stop).",
+    inputSchema: noToolInputSchema,
+    state_changing: false,
+    async execute(_input, ctx) {
+      try {
+        const rooms = await listRooms(roomsDir());
+        // listRooms is newest-first; surface active rooms ahead of finished ones
+        // (the sessions-index convention), preserving the createdAt order within each.
+        const ordered = [
+          ...rooms.filter((r) => r.status === "active"),
+          ...rooms.filter((r) => r.status !== "active"),
+        ];
+        const rows = ordered.map((r) => ({
+          slug: r.slug,
+          name: r.name,
+          status: r.status,
+          strategy: r.strategy,
+          participants: r.participants,
+          turn: r.turnIndex,
+          turnBudget: r.turnBudget,
+          ...(r.topic ? { topic: r.topic } : {}),
+          ...(r.projectId ? { projectId: r.projectId } : {}),
+          ...(r.coding ? { coding: true } : {}),
+        }));
+        emitResult(ctx, boundedText(JSON.stringify({ count: rows.length, rooms: rows })));
+      } catch (e) {
+        emitResult(ctx, `chamber_list_rooms failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+function makeListLensesTool(): ToolDefinition {
+  return {
+    name: "chamber_list_lenses",
+    description:
+      "List the Chamber's living lenses (agent-authored canvas boards), newest first: each lens's id, when it was last updated, and any provenance (scope, maintaining Mind, reason). Read-only. NOT for authoring a lens (run the chamber-lens workflow) or retiring one (chamber_retire_lens).",
+    inputSchema: noToolInputSchema,
+    state_changing: false,
+    async execute(_input, ctx) {
+      try {
+        const lenses = await listLenses(lensesDir());
+        const rows = lenses.map((l) => ({
+          id: l.id,
+          updatedAt: l.updatedAt,
+          ...(l.scope ? { scope: l.scope } : {}),
+          ...(l.maintainingMind ? { maintainingMind: l.maintainingMind } : {}),
+          ...(l.reason ? { reason: l.reason } : {}),
+        }));
+        emitResult(ctx, boundedText(JSON.stringify({ count: rows.length, lenses: rows })));
+      } catch (e) {
+        emitResult(ctx, `chamber_list_lenses failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+const mindRetireSchema = z.object({ slug: z.string().min(1).max(64) });
+
+// Mind retire seam: delete a Mind's record + SOUL.md, then refresh the roster and
+// standing panels — the same mutate-then-refresh path the `retire` board action
+// takes, exposed as a tool so an MCP client can retire a Mind (the minds noun
+// otherwise has no management tool). retireMind asserts a safe slug and throws when
+// the Mind is absent, so the refresh runs only after a real delete.
+function makeRetireMindTool(): ToolDefinition {
+  return {
+    name: "chamber_retire_mind",
+    description:
+      "Retire a Mind: permanently remove an agent's record and SOUL.md from the roster. `slug` is the Mind's identifier (see chamber_list_minds). Fails closed if no such Mind exists. NOT for retiring a lens (chamber_retire_lens).",
+    inputSchema: mindRetireSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = mindRetireSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_retire_mind: ${parsed.error.message}`, true);
+        return;
+      }
+      const slug = parsed.data.slug.trim();
+      try {
+        await retireMind(mindsDir(), slug);
+        invalidateRoster();
+        await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+        await refreshStandingPanels({ removed: true });
+        emitResult(ctx, JSON.stringify({ ok: true, slug }));
+      } catch (e) {
+        emitResult(ctx, `chamber_retire_mind failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+const roomDeleteSchema = z.object({ room: z.string().min(1) });
+
+// Room delete seam: remove an ended room's directory (room.json + transcript +
+// ledger), drop its panel, and refresh the sessions index — the same path the
+// room-delete board action takes, exposed as a tool so an MCP client can clean up a
+// finished room. Refuses an active room (stop it first); deleteRoom asserts a safe
+// slug and throws when the room is absent, so this fails closed.
+function makeRoomDeleteTool(): ToolDefinition {
+  return {
+    name: "chamber_room_delete",
+    description:
+      "Delete an ended Chamber room: permanently remove its record, transcript, and ledger. `room` is the room slug (see chamber_list_rooms). Stop an active room with chamber_room_stop before deleting it; fails closed if no such room exists. NOT for stopping a running room.",
+    inputSchema: roomDeleteSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = roomDeleteSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_room_delete: ${parsed.error.message}`, true);
+        return;
+      }
+      const slug = parsed.data.room.trim();
+      if (activeRooms.has(slug)) {
+        emitResult(
+          ctx,
+          "chamber_room_delete: stop the room before deleting it (chamber_room_stop).",
+          true,
+        );
+        return;
+      }
+      try {
+        await createFileRoomStore(roomsDir()).deleteRoom(slug);
+        // Drop any lingering most-recent pin/panel for the deleted room (mirrors the
+        // board action), then refresh the index card away — fail-soft on the seam.
+        if (lastSlug === slug) lastSlug = undefined;
+        reconcileRoomPanels();
+        await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+        await refreshStandingPanels({ removed: true });
+        emitResult(ctx, JSON.stringify({ ok: true, slug }));
+      } catch (e) {
+        emitResult(ctx, `chamber_room_delete failed: ${errText(e)}`, true);
       }
     },
   };
