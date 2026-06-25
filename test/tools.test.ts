@@ -1093,3 +1093,33 @@ describe("chamber_room_start — coding review capability guard", () => {
     expect(t.out()).toContain("review: scribe reviewed by critic");
   });
 });
+
+describe("chamber_room_start refreshes the sessions index", () => {
+  const refreshed: string[] = [];
+  beforeAll(async () => {
+    // Fresh driver + a held first turn so the started room stays active (no end-of-room
+    // refresh fires during the assertion), plus a recording refreshWorkflow capturing
+    // which collectors the start path re-runs.
+    await rib.dispose?.();
+    refreshed.length = 0;
+    abort = abortableRunAgentTurn();
+    tools = registerTools(
+      makeCtx(abort.run, sm, async (name) => {
+        refreshed.push(name);
+      }),
+    );
+  });
+
+  it("re-runs the chamber-rooms collector on a successful start", async () => {
+    // The room's own panel registers on start, but the sessions index is a separate
+    // bound snapshot — startRoom must re-run its collector so a new active session
+    // shows promptly, not only on the next cadence (mirrors the end-of-room refresh).
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], turnBudget: 4, confirm: true },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(refreshed).toContain("chamber-rooms");
+  });
+});
