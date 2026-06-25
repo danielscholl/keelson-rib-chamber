@@ -2,7 +2,7 @@
 title: Author a room strategy
 description: Write a new pure strategy, register it, and unit-test it, the capstone of the Chamber tutorial rail
 sidebar:
-  order: 5
+  order: 6
 ---
 
 You have run a room and moderated one. Now you will write the part that decides

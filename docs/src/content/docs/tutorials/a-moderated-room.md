@@ -131,9 +131,11 @@ not the same model grading its own work. See the
 
 You have now run two more routing shapes, the moderated `group-chat` and the
 unmoderated `open-floor`, and steered a live room as director. With the
-sequential room from before, that is three of the five strategies driven
-first-hand; `concurrent` (a parallel round) and `review` (the cross-vendor pass
-above) round out the set, in the [strategies reference](../../reference/strategies/).
+sequential room from before, that is three of the six strategies driven
+first-hand; `concurrent` (a parallel round), `review` (the cross-vendor pass
+above), and `magentic` (a manager-led build, in
+[One manager, many tasks](../one-manager-many-tasks/)) round out the set. The
+[strategies reference](../../reference/strategies/) has all six.
 The capstone shows you how to write a routing policy of your own, a pure decision
 the rib drives through the same seam these strategies use. Head to
 [author your own room strategy](../author-a-room-strategy/).
@@ -143,4 +145,4 @@ the rib drives through the same seam these strategies use. Head to
 - [Author your own room strategy](../author-a-room-strategy/): the capstone, a pure strategy you write.
 - [Your first room](../your-first-room/): the sequential room this page builds on.
 - [Rooms and strategies](../../concepts/rooms/): why the driver routes and strategies stay pure.
-- [Strategies reference](../../reference/strategies/): the exact contract for all five strategies.
+- [Strategies reference](../../reference/strategies/): the exact contract for all six strategies.

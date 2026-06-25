@@ -110,7 +110,7 @@ it can never change who authored a turn or admit a Mind the room did not start w
 
 ## Related
 
-- [Room strategies](../../reference/strategies/): the exact contract, the five strategies, and the routing knobs.
+- [Room strategies](../../reference/strategies/): the exact contract, the six strategies, and the routing knobs.
 - [Author a room strategy](../../tutorials/author-a-room-strategy/): the capstone walkthrough built on this split.
 - [Rooms](../../concepts/rooms/): the driver-as-router model, end to end.
 - [Communication and identity](../communication-and-identity/): why a Mind, not a capability, is an addressable speaker.
