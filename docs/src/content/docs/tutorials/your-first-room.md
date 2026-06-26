@@ -53,7 +53,7 @@ If you would rather write your own, run genesis directly. Give it a short brief
 and it decides the rest:
 
 ```bash
-keelson workflow run chamber-genesis "A blunt staff engineer who argues for the
+keelson workflow run chamber-genesis --arguments "A blunt staff engineer who argues for the
 simplest thing that works"
 ```
 

@@ -117,7 +117,7 @@ the spread matters more than the match. Pin from the card's **Set model…** act
 (`model` required, `provider` optional), or pre-pin at authoring time:
 
 ```text
-keelson workflow run chamber-genesis "an adversarial contract skeptic who stress-tests API and data contracts" --inputs model=gpt-5.5 --inputs provider=copilot
+keelson workflow run chamber-genesis --arguments "an adversarial contract skeptic who stress-tests API and data contracts" --inputs model=gpt-5.5 --inputs provider=copilot
 ```
 
 The pin is optional. The room runs with every Mind on one model; different models
@@ -294,7 +294,7 @@ the decision is not a flat file you remember to open but a panel that stays put,
 with its provenance built in. Author one:
 
 ```sh
-keelson workflow run chamber-lens "Cosmos contract review: the five changes, each with its status and the Mind that forced it"
+keelson workflow run chamber-lens --arguments "Cosmos contract review: the five changes, each with its status and the Mind that forced it"
 ```
 
 or type `/lens {subject}` in chat. One agent turn composes the board and publishes

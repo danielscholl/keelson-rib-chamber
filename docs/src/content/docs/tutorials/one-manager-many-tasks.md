@@ -67,7 +67,7 @@ orchestration and reasoning). Pin from a card's **Set model…** action, or pre-
 at authoring time:
 
 ```text
-keelson workflow run chamber-genesis "a visual design engineer who owns the look: layout, palette, type, and rendering" --inputs model=gemini-3.1-pro-preview --inputs provider=copilot
+keelson workflow run chamber-genesis --arguments "a visual design engineer who owns the look: layout, palette, type, and rendering" --inputs model=gemini-3.1-pro-preview --inputs provider=copilot
 ```
 
 None of it is required; the room runs with everyone on one model. The pins just put
