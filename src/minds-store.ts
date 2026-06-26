@@ -209,9 +209,16 @@ export async function writeMemory(mindsRoot: string, slug: string, text: string)
 // reads the log anyway, so older lines earn no keep.
 export const LOG_MAX_ENTRIES = 50;
 
+// Per-entry character cap. LOG_MAX_ENTRIES bounds the COUNT; this bounds each bullet —
+// together they cap log.md's size (and the chat composer's re-read of it) regardless
+// of caller. Set above the reflection caller's own line cap so a normal journal line
+// is never clipped; it only fences a pathological entry.
+export const LOG_ENTRY_CAP = 280;
+
 // Append one timestamped line to a Mind's log.md and trim to the last LOG_MAX_ENTRIES
 // entries. Fails closed on an unsafe slug or a missing Mind. The line is collapsed to
-// a single physical line so one entry stays one bullet.
+// a single physical line so one entry stays one bullet, and capped so a runaway line
+// can't bloat the journal.
 export async function appendLog(
   mindsRoot: string,
   slug: string,
@@ -221,11 +228,15 @@ export async function appendLog(
   assertSafeSlug(slug);
   const dir = join(mindsRoot, slug);
   if (!(await exists(dir))) throw new Error(`mind '${slug}' not found`);
-  const entry = `- ${at} — ${line.replace(/\s+/g, " ").trim()}`;
+  const entry = `- ${at} — ${line.replace(/\s+/g, " ").trim()}`.slice(0, LOG_ENTRY_CAP);
   let existing: string;
   try {
     existing = await readFile(join(dir, "log.md"), "utf8");
-  } catch {
+  } catch (e) {
+    // Only a missing log starts fresh; a permission/I/O error must surface, or the
+    // next append would rewrite log.md from just this entry and drop the whole
+    // journal — the same fail-closed discipline as the room/lens stores.
+    if (!isNodeError(e) || e.code !== "ENOENT") throw e;
     existing = "# Log\n";
   }
   const lines = existing.split("\n");
@@ -233,6 +244,12 @@ export async function appendLog(
   const bullets = lines.filter((l) => l.trimStart().startsWith("- "));
   const kept = [...bullets, entry].slice(-LOG_MAX_ENTRIES);
   await writeFile(join(dir, "log.md"), `${header}\n\n${kept.join("\n")}\n`);
+}
+
+// A Node fs error carrying an errno `code`, so a not-found read can be told apart from
+// a real I/O/permission failure (mirrors the room/lens stores' guard of the same name).
+function isNodeError(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error && "code" in value;
 }
 
 // stat, not readdir: readdir only succeeds on a directory, so a non-directory

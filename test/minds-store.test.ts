@@ -6,6 +6,7 @@ import { canvasViewSchema } from "@keelson/shared";
 import { buildRosterBoard } from "../src/boards/roster.ts";
 import {
   appendLog,
+  LOG_ENTRY_CAP,
   LOG_MAX_ENTRIES,
   listMindRecords,
   MEMORY_DOC_CAP,
@@ -308,6 +309,14 @@ describe("appendLog", () => {
     // the newest survives; the oldest (the genesis line) aged out
     expect(log).toContain(`entry ${LOG_MAX_ENTRIES + 9}`);
     expect(log).not.toContain("genesis");
+  });
+
+  test("caps a runaway entry at LOG_ENTRY_CAP characters", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity.");
+    await appendLog(root, "scout", "x".repeat(LOG_ENTRY_CAP * 2), "2026-06-26T00:00:00.000Z");
+    const log = (await readMindDoc(root, "scout", "log.md")) ?? "";
+    const entry = log.split("\n").find((l) => l.includes("xxxx")) ?? "";
+    expect(entry.length).toBe(LOG_ENTRY_CAP);
   });
 
   test("fails closed on a missing Mind and an unsafe slug", async () => {
