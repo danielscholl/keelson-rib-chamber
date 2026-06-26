@@ -61,6 +61,18 @@ than ending on the last reply.
 Same room, and have Sage write a closing summary when it wraps.
 ```
 
+:::caution[If a room will not start]
+A few starts get rejected, all for the same kind of reason. If a `group-chat`
+start is refused, your moderator is probably also in the speaker list; a
+moderator routes and never debates, so it has to sit outside the speakers. If an
+`open-floor` start is refused, you named a moderator or synthesizer, which that
+strategy does not allow; drop them and let the speakers route themselves. A
+`review` room refuses to start unless its two Minds are pinned to different
+providers, so the critique is a genuine second vendor's read. And if any room
+ends mid-discussion, it hit its turn budget; convene again with a higher
+`turnBudget` (the ceiling is 50).
+:::
+
 ## Convene an unmoderated room
 
 Sometimes you do not want a Mind in charge of routing. In an `open-floor` room
@@ -164,6 +176,15 @@ You have now driven or seen most of the shapes. The reach-for-it guide:
 The split that matters most: `group-chat` and `open-floor` talk something out,
 `magentic` divides work up, `review` checks one thing with fresh eyes. Pick by the
 verb, not the vibe.
+
+## What you proved
+
+A room's routing is something you choose, not something fixed. You handed it to a
+moderator that drove a `group-chat` to a close, took it away entirely and let an
+`open-floor` converge on a vote, and then seized it live as the director, calling
+on a Mind, injecting a direction, and dropping a line into the transcript. Same
+Minds, same seam; only the turn policy changed. That policy is the one piece of a
+room you have used but never written, which is exactly what the capstone fixes.
 
 ## Where to go next
 
