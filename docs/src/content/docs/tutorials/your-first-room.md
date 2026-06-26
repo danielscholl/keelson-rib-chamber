@@ -15,6 +15,13 @@ the harness you already have running. Open it and find the Roster. A fresh
 workspace shows no Minds yet, just a few starter archetypes waiting to be
 authored. That is your starting point.
 
+:::note[Before you start]
+A running keelson server with Chamber installed, open to the Chamber surface.
+That is the whole prerequisite: this is the entry tutorial, so it starts from an
+empty workspace with no Minds yet. Genesis runs one paid agent turn per Mind, and
+each room turn is a paid agent call, so expect to spend a few tokens.
+:::
+
 ## Author two Minds
 
 A room needs at least two participants, and a participant is always a Mind. So

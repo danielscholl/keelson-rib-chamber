@@ -12,8 +12,12 @@ routing to a moderator, then take routing away entirely, then steer a live room
 yourself. By the end you can pick the strategy that fits the conversation you
 want and bend it while it runs.
 
-You need two or more Minds on disk. If you do not have them yet, author a couple
-first, then come back.
+:::note[Before you start]
+A running keelson server with Chamber installed, and
+[your first room](../your-first-room/) behind you. You need two or more Minds on
+disk; if you do not have them yet, author a couple first, then come back. Every
+room turn is a paid agent call, so expect to spend a few tokens.
+:::
 
 ## Convene a moderated room
 
@@ -133,15 +137,22 @@ You have now run two more routing shapes, the moderated `group-chat` and the
 unmoderated `open-floor`, and steered a live room as director. With the
 sequential room from before, that is three of the six strategies driven
 first-hand; `concurrent` (a parallel round), `review` (the cross-vendor pass
-above), and `magentic` (a manager-led build, in
-[One manager, many tasks](../one-manager-many-tasks/)) round out the set. The
+above), and `magentic` (a manager-led build) round out the set, and the
 [strategies reference](../../reference/strategies/) has all six.
-The capstone shows you how to write a routing policy of your own, a pure decision
-the rib drives through the same seam these strategies use. Head to
-[author your own room strategy](../author-a-room-strategy/).
+
+You have the routing shapes; the next two tutorials put them to work on a real
+build before you write any code. In
+[Many minds, one plan](../many-minds-one-plan/) you convene a moderated room to
+red-team a plan and catch the defects a linear pipeline ships; in
+[One manager, many tasks](../one-manager-many-tasks/) you run a magentic room to
+produce a plan with no gaps and no overlap. Then the capstone,
+[author your own room strategy](../author-a-room-strategy/), has you write a
+routing policy of your own, a pure decision the rib drives through the same seam
+these six use.
 
 ## Related
 
+- [Many minds, one plan](../many-minds-one-plan/): the next step, these strategies on a real plan.
 - [Author your own room strategy](../author-a-room-strategy/): the capstone, a pure strategy you write.
 - [Your first room](../your-first-room/): the sequential room this page builds on.
 - [Rooms and strategies](../../concepts/rooms/): why the driver routes and strategies stay pure.

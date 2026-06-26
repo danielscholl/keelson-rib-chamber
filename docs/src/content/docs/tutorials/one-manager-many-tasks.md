@@ -169,8 +169,16 @@ non-redundant: the contract a build can implement cleanly, assembled by a room
 instead of a single planner who would have gone deep in one place and thin
 everywhere else.
 
+You have now driven the room shapes that matter: a sequential analysis, a
+moderated discussion, an unmoderated floor, and a manager-led build. The capstone
+is the one tutorial that touches code. In
+[author your own room strategy](../author-a-room-strategy/) you write the pure
+routing policy the driver consults every turn, the same seam all six shipped
+strategies plug into.
+
 ## Related
 
+- [Author a room strategy](../author-a-room-strategy/): the capstone, write the routing policy these rooms run on.
 - [When to convene a room](../../concepts/when-to-convene-a-room/): which of the six strategies fits which decision.
 - [Many minds, one plan](../many-minds-one-plan/): the sibling job, *review* a plan with a moderated room rather than *produce* one with a manager.
 - [Run a room](../../guides/run-a-room/): the operator how-to once you know the shape.

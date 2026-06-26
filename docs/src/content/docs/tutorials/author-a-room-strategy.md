@@ -5,8 +5,9 @@ sidebar:
   order: 6
 ---
 
-You have run a room and moderated one. Now you will write the part that decides
-who speaks. A **strategy** is the turn policy for a room: a small, pure function
+You have run rooms, moderated one, and put them to work on real plans. Now you
+will write the part that decides who speaks. A **strategy** is the turn policy for
+a room: a small, pure function
 the driver consults every turn to ask "who is next?" This is the capstone, and it
 is the one tutorial that touches code. Chamber is a Keelson rib, so its strategies
 live in the rib's own source, and adding one is three edits and a test.
