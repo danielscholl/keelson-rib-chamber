@@ -27,7 +27,9 @@ one of the speakers, so its turns do not land in the back-and-forth you are
 trying to shape.
 
 Ask in chat to start a `group-chat` room with a moderator that is not in the
-speaker list:
+speaker list. Ada, Bex, Cyrus, and Quill below stand in for Minds you authored,
+so swap in your own names; naming them in plain language lets Chamber resolve the
+slugs:
 
 ```text
 Start a group-chat room with Ada, Bex, and Cyrus debating the rollback plan,

@@ -89,9 +89,14 @@ and starts nothing. When you are ready, confirm:
 ```
 
 You name the participants by slug, give a topic, and set `confirm: true` to
-actually launch. Strategy defaults to sequential, so you can leave it off. The
-turn budget defaults to eight; you can pass `turnBudget` to raise or lower it,
-up to a ceiling of fifty.
+actually launch. The two slugs above are placeholders: genesis names your Minds
+and derives each slug from the name it chose, so `staff-engineer` is whatever
+genesis actually called yours (the slug is the name lowercased, with spaces as
+hyphens). If you would rather not track slugs, the Convene composer picks Minds
+by name and never asks for one, and in chat you can name the Minds in plain
+language and let Chamber resolve the slugs for you. Strategy defaults to
+sequential, so you can leave it off. The turn budget defaults to eight; you can
+pass `turnBudget` to raise or lower it, up to a ceiling of fifty.
 
 :::note
 Every room turn is a billed agent call. That is why starting from chat confirms
