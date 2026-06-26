@@ -624,6 +624,22 @@ export async function runReflectionForRoom(
   // The deterministic, free cost guard: a Mind reflects only if it spoke at least one
   // substantive, non-aborted turn. A silent participant (and a room nobody spoke in)
   // learned nothing, so it spends no turn — the headline cost invariant.
+  //
+  // Reflect for every agent-speaker the room KNOWS, not just its participants: a
+  // facilitator Mind (a group-chat moderator/synthesizer or a magentic manager) lives
+  // in room.config, not room.participants, yet authors `role: "agent"` turns — so it
+  // must reflect on a room it actually shaped. Bound to the room's configured Minds so
+  // a stray entry can't summon a reflection; the roster lookup below skips a since-
+  // retired one. Only buildAgentEntry emits `role: "agent"`, always keyed by a Mind
+  // slug, so `spoke` holds Mind slugs alone (never a director/system authority).
+  const known = new Set(
+    [
+      ...room.participants,
+      room.config?.moderator,
+      room.config?.synthesizer,
+      room.config?.manager,
+    ].filter((slug): slug is string => Boolean(slug)),
+  );
   const spoke = new Set(
     transcript
       .filter(
@@ -631,7 +647,7 @@ export async function runReflectionForRoom(
       )
       .map((e) => e.from),
   );
-  const reflectors = room.participants.filter((slug) => spoke.has(slug));
+  const reflectors = [...spoke].filter((slug) => known.has(slug));
   if (reflectors.length === 0) return;
   const roster = await resolveMinds();
   // renderTranscript windows to the last N turns, strips routing/control JSON, and

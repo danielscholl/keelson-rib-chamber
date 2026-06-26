@@ -120,6 +120,33 @@ describe("reflection gate (close-only memory curation)", () => {
     expect(requests[0]?.prompt).toContain("Curate your long-term memory");
   });
 
+  test("a facilitator Mind that spoke but is not a participant still reflects", async () => {
+    await seedMinds();
+    // A group-chat moderator/synthesizer or a magentic manager lives in room.config,
+    // not room.participants, yet authors `role: "agent"` turns — so it must curate
+    // memory on a room it shaped, even though neither named participant spoke.
+    await scaffoldMind(
+      mindsDir(),
+      {
+        slug: "mod",
+        name: "mod",
+        role: "moderator",
+        voice: "v",
+        persona: "I am mod.",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      "soul mod",
+    );
+    const { run, requests } = scriptedRunAgentTurn([{ text: reply("# m\n\n- mod learned") }]);
+    rib.registerTools?.(makeCtx(run));
+    await runReflectionForRoom(
+      makeRoom({ participants: ["ada", "bo"], config: { moderator: "mod" } }),
+      [agentEntry("mod", "Routing: ada, you're up next.")],
+    );
+    expect(requests).toHaveLength(1);
+    expect(await readMindDoc(mindsDir(), "mod", "memory.md")).toContain("mod learned");
+  });
+
   test("a valid reply consolidates memory.md and appends a log line", async () => {
     await seedMinds();
     const { run } = scriptedRunAgentTurn([
