@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.0...v0.10.1) (2026-06-26)
+
+
+### Documentation
+
+* document how minds remember across rooms ([#137](https://github.com/danielscholl/keelson-rib-chamber/issues/137)) ([6b7a1de](https://github.com/danielscholl/keelson-rib-chamber/commit/6b7a1deef456b41ff26ecb0aaf6b065d016e8b05))
+* rework the chamber tutorial rail (decouple, self-contain, real artifacts) ([#140](https://github.com/danielscholl/keelson-rib-chamber/issues/140)) ([4ea431a](https://github.com/danielscholl/keelson-rib-chamber/commit/4ea431aa7db82639c5cd25b20ad9361d78b2bee1))
+
 ## [0.10.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.9.0...v0.10.0) (2026-06-26)
 
 
