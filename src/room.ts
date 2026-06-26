@@ -48,10 +48,18 @@ export interface RoomDriverDeps {
   // Resolve persona/model/tools by slug. A function (not a port) — the roster is
   // Phase 1 / genesis territory; the driver only needs to look minds up.
   minds: () => Promise<readonly Mind[]> | readonly Mind[];
-  // Resolve a Mind's authored SOUL.md by slug, used as the turn system prompt so
-  // the speaker behaves like its genesis-authored self. Falls back to the roster
-  // tagline (Mind.persona) when absent, so omitting this keeps a thin persona.
-  readSoul?: (slug: MindSlug) => Promise<string | undefined> | string | undefined;
+  // Compose a Mind's turn system prompt by slug: its authored SOUL plus the durable
+  // memory + operating rules it has accumulated, so a speaker carries what it has
+  // learned into the room instead of starting from a static soul each turn. Falls
+  // back to the roster tagline (Mind.persona) when absent, so omitting this keeps a
+  // thin persona.
+  composeTurnSystem?: (mind: Mind) => Promise<string> | string;
+  // Fired once when a room leaves "active" (done/stopped), with the room and its
+  // final transcript. The rib hangs the close-only reflection pass off this — a
+  // gated, fire-and-forget paid turn per participating Mind. The driver neither
+  // awaits nor observes it (a close must never block or fail on reflection), so the
+  // reflection policy + cost gating stay rib-side, next to the briefing gate.
+  onRoomClosed?: (room: Room, transcript: readonly TurnEntry[]) => void;
   // Neutral working dir for agent turns. Without it the turn inherits the
   // server's cwd, leaking the host repo's ambient context (git state, files)
   // into the conversation; pointing it at the Chamber data home isolates that.
@@ -144,6 +152,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   // and the board. Without it each turn re-parsed the whole file twice (prompt +
   // board), which is quadratic over a room's life. Evicted when the room closes.
   const transcripts = new Map<MindSlug, TurnEntry[]>();
+
+  // Rooms whose close has already been signaled to onRoomClosed, so the reflection
+  // pass fires at most once per room even though a terminal commit and an operator
+  // stop can both reach a close. A fresh slug per start means this never needs
+  // clearing within a lifetime.
+  const notifiedClosed = new Set<MindSlug>();
 
   function clearActive(slug: MindSlug): void {
     activeRooms.delete(slug);
@@ -241,6 +255,20 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return true;
   }
 
+  // Signal a room's close to the rib (the reflection pass), once, fire-and-forget.
+  // Reads the final transcript from disk (the source of truth — the in-memory cache
+  // may already be released) and hands it over. Never awaited and never throws into
+  // the caller, so a close is never delayed or failed by reflection.
+  function notifyClosed(room: Room): void {
+    if (!deps.onRoomClosed || notifiedClosed.has(room.slug)) return;
+    notifiedClosed.add(room.slug);
+    const onClosed = deps.onRoomClosed;
+    void deps.store
+      .loadTranscript(room.slug)
+      .then((transcript) => onClosed(room, transcript))
+      .catch(() => {});
+  }
+
   // Commit a room leaving the active state (done/stopped). Bumps the generation so
   // any other in-flight op on this room becomes stale and skips its own write,
   // then releases the in-memory transcript. Always returns false (not active).
@@ -250,6 +278,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     clearActive(slug);
     await persistAndPublish(room);
     releaseSlugState(slug);
+    // The room is now persisted closed — let the rib reflect on it (gated, off the
+    // hot path). Fire-and-forget: a close never waits on or fails from reflection.
+    notifyClosed(room);
     return false;
   }
 
@@ -529,12 +560,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // magentic assign path reads it to mark a task failed vs completed; the other
     // callers ignore it (an errored turn already surfaces via its error text).
     let errored = false;
-    // The authored soul is the turn's identity; fall back to the roster tagline when
-    // a Mind has no readable SOUL.md so the turn still runs in character. Skip the
+    // The composed identity (authored soul + the Mind's durable memory & rules) is
+    // the turn's system prompt; fall back to the roster tagline when a Mind has no
+    // composer or no readable soul so the turn still runs in character. Skip the
     // (async, file-backed) read entirely if a stop/dispose already landed.
     const system = controller.signal.aborted
       ? mind.persona
-      : (await deps.readSoul?.(mind.slug))?.trim() || mind.persona;
+      : (await deps.composeTurnSystem?.(mind))?.trim() || mind.persona;
     // Re-check AFTER the SOUL read: a stop/dispose can land before OR during it, and
     // a turn must not be invoked with an already-aborted signal — in a concurrent
     // round that would fan out N wasted agent calls. Finalize as aborted instead, so
@@ -1210,6 +1242,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         }
       }
       await persistAndPublish({ ...room, status: "stopped", pending: undefined });
+      // An operator stop closes the room here (not via commitTerminal), so signal
+      // the close from this path too — reflection fires for the Minds that spoke
+      // before the stop (notifyClosed dedupes if a terminal commit raced it). Pass
+      // the same shape that was just persisted (pending cleared), not the pre-stop room.
+      notifyClosed({ ...room, status: "stopped", pending: undefined });
     });
     releaseSlugState(slug);
   }

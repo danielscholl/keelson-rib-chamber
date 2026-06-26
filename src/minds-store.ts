@@ -181,6 +181,77 @@ export async function setMindModel(
   await writeFile(join(dir, "mind.json"), `${JSON.stringify(rec, null, 2)}\n`);
 }
 
+// The hard cap on a Mind's memory.md, enforced at the reflection write seam. The
+// room/chat composer budgets the whole system prompt to MIND_PROMPT_BUDGET, of
+// which the soul is the protected core; capping memory well under that keeps a
+// populated memory from crowding identity out on read. A reflection that returns
+// more is rejected (the prior memory stands; the next close retries), not silently
+// truncated — so the on-disk doc always matches what was authored.
+export const MEMORY_DOC_CAP = 4000;
+
+// Overwrite a Mind's memory.md with the reflection's consolidated text. The text
+// is the WHOLE new document — reflection revises in place rather than appending, so
+// the store never merges. Fails closed: unsafe slug, missing Mind, or over-cap text
+// all throw, leaving the prior memory untouched.
+export async function writeMemory(mindsRoot: string, slug: string, text: string): Promise<void> {
+  assertSafeSlug(slug);
+  const dir = join(mindsRoot, slug);
+  if (!(await exists(dir))) throw new Error(`mind '${slug}' not found`);
+  const body = text.trim();
+  if (body.length > MEMORY_DOC_CAP) {
+    throw new Error(`memory exceeds ${MEMORY_DOC_CAP} chars (got ${body.length})`);
+  }
+  await writeFile(join(dir, "memory.md"), ensureTrailingNewline(body));
+}
+
+// Keep only the most recent entries so a Mind's journal can't grow without bound:
+// reflection appends one line per room it closes, and the chat composer only tail-
+// reads the log anyway, so older lines earn no keep.
+export const LOG_MAX_ENTRIES = 50;
+
+// Per-entry character cap. LOG_MAX_ENTRIES bounds the COUNT; this bounds each bullet —
+// together they cap log.md's size (and the chat composer's re-read of it) regardless
+// of caller. Set above the reflection caller's own line cap so a normal journal line
+// is never clipped; it only fences a pathological entry.
+export const LOG_ENTRY_CAP = 280;
+
+// Append one timestamped line to a Mind's log.md and trim to the last LOG_MAX_ENTRIES
+// entries. Fails closed on an unsafe slug or a missing Mind. The line is collapsed to
+// a single physical line so one entry stays one bullet, and capped so a runaway line
+// can't bloat the journal.
+export async function appendLog(
+  mindsRoot: string,
+  slug: string,
+  line: string,
+  at: string,
+): Promise<void> {
+  assertSafeSlug(slug);
+  const dir = join(mindsRoot, slug);
+  if (!(await exists(dir))) throw new Error(`mind '${slug}' not found`);
+  const entry = `- ${at} — ${line.replace(/\s+/g, " ").trim()}`.slice(0, LOG_ENTRY_CAP);
+  let existing: string;
+  try {
+    existing = await readFile(join(dir, "log.md"), "utf8");
+  } catch (e) {
+    // Only a missing log starts fresh; a permission/I/O error must surface, or the
+    // next append would rewrite log.md from just this entry and drop the whole
+    // journal — the same fail-closed discipline as the room/lens stores.
+    if (!isNodeError(e) || e.code !== "ENOENT") throw e;
+    existing = "# Log\n";
+  }
+  const lines = existing.split("\n");
+  const header = lines[0]?.startsWith("#") ? lines[0] : "# Log";
+  const bullets = lines.filter((l) => l.trimStart().startsWith("- "));
+  const kept = [...bullets, entry].slice(-LOG_MAX_ENTRIES);
+  await writeFile(join(dir, "log.md"), `${header}\n\n${kept.join("\n")}\n`);
+}
+
+// A Node fs error carrying an errno `code`, so a not-found read can be told apart from
+// a real I/O/permission failure (mirrors the room/lens stores' guard of the same name).
+function isNodeError(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error && "code" in value;
+}
+
 // stat, not readdir: readdir only succeeds on a directory, so a non-directory
 // entry at the path would read as absent and silently bypass the collision /
 // not-found guards.

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   buildSeedFor,
   composeMindSystemPrompt,
+  composeRoomSystemPrompt,
   ENTER_OPENING_PROMPT,
   MIND_PROMPT_BUDGET,
 } from "../src/compose.ts";
@@ -113,6 +114,50 @@ describe("composeMindSystemPrompt", () => {
     const prompt = await composeMindSystemPrompt(root, mind());
     expect(prompt.length).toBeLessThanOrEqual(MIND_PROMPT_BUDGET);
     expect(prompt).toContain("## Direct-chat operating rules");
+  });
+});
+
+describe("composeRoomSystemPrompt", () => {
+  test("stacks the SOUL identity plus memory and rules, with NO chat footer or log", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nI am Scout, a relentless researcher.");
+    await writeFile(
+      join(root, "scout", "memory.md"),
+      "# Working memory\n\nPrefers primary sources.",
+    );
+    await writeFile(join(root, "scout", "rules.md"), "# Rules\n\nNever pad a thin answer.");
+    const prompt = await composeRoomSystemPrompt(root, mind());
+    expect(prompt).toContain("## Identity");
+    expect(prompt).toContain("relentless researcher");
+    expect(prompt).toContain("## Durable memory");
+    expect(prompt).toContain("Prefers primary sources.");
+    expect(prompt).toContain("## Operating rules");
+    expect(prompt).toContain("Never pad a thin answer.");
+    // A room turn is framed by the turn prompt, not the direct-chat footer; and the
+    // episodic log is the chat view's, not a room turn's.
+    expect(prompt).not.toContain("## Direct-chat operating rules");
+    expect(prompt).not.toContain("## Recent log");
+  });
+
+  test("omits template memory and rules for a fresh Mind (identity only)", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity body.");
+    const prompt = await composeRoomSystemPrompt(root, mind());
+    expect(prompt).toContain("Identity body.");
+    expect(prompt).not.toContain("## Durable memory");
+    expect(prompt).not.toContain("## Operating rules");
+  });
+
+  test("falls back to the roster persona when SOUL.md is missing", async () => {
+    const prompt = await composeRoomSystemPrompt(root, mind({ persona: "Fallback identity." }));
+    expect(prompt).toContain("Fallback identity.");
+    expect(prompt).not.toContain("## Direct-chat operating rules");
+  });
+
+  test("stays within the seed budget even with a giant memory", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity body.");
+    await writeFile(join(root, "scout", "memory.md"), `# Working memory\n\n${"m".repeat(20000)}`);
+    const prompt = await composeRoomSystemPrompt(root, mind());
+    expect(prompt.length).toBeLessThanOrEqual(MIND_PROMPT_BUDGET);
+    expect(prompt).toContain("## Identity"); // identity is never dropped
   });
 });
 

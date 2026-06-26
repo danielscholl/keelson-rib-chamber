@@ -20,40 +20,41 @@ const DIRECT_CHAT_RULES = [
   "- Use tools normally when needed; keep tool calls and results visible in the conversation.",
 ].join("\n");
 
-// A Mind + its on-disk soul files -> one direct-chat system prompt, <= the seed
-// budget. Identity (SOUL, falling back to the roster persona) and the operating
-// footer are protected; durable memory, rules, and the log tail fill the rest in
-// that priority, the log truncating first, then dropping, before any section
-// above it is touched.
-export async function composeMindSystemPrompt(mindsRoot: string, mind: Mind): Promise<string> {
-  const soulDoc = (await readMindDoc(mindsRoot, mind.slug, "SOUL.md"))?.trim();
-  const soul = soulDoc && soulDoc.length > 0 ? soulDoc : mind.persona.trim();
-  const memory = substance(await readMindDoc(mindsRoot, mind.slug, "memory.md"));
-  const rules = substance(await readMindDoc(mindsRoot, mind.slug, "rules.md"));
-  const log = substance(await readMindDoc(mindsRoot, mind.slug, "log.md"));
+interface PromptSection {
+  title: string;
+  text: string | undefined;
+  // A flex section is tail-truncated to fit the remaining budget rather than
+  // dropped whole; a non-flex section is included only if it fits intact.
+  flex: boolean;
+}
 
-  const header = `# ${mind.name}`;
-  const footer = `## Direct-chat operating rules\n\n${DIRECT_CHAT_RULES}`;
+// The budgeted stacking core both composers share: a protected identity header +
+// body (head-truncated only if it alone overflows), then each section in priority
+// order — included whole if it fits, tail-truncated if flex, dropped otherwise —
+// and an optional protected footer. Clamped to the seed budget either way.
+function stackMindPrompt(opts: {
+  name: string;
+  identity: string;
+  sections: readonly PromptSection[];
+  footer?: string;
+}): string {
+  const header = `# ${opts.name}`;
   const sep = "\n\n";
+  const footerCost = opts.footer ? sep.length + opts.footer.length : 0;
 
-  // Protected core. If header+identity+footer alone overflow, head-truncate the
-  // soul body (keep the identity opening).
-  const overhead =
-    header.length + sep.length + "## Identity\n\n".length + sep.length + footer.length;
-  let body = soul;
+  // Protected core. If header+identity(+footer) alone overflow, head-truncate the
+  // identity body (keep its opening).
+  const overhead = header.length + sep.length + "## Identity\n\n".length + footerCost;
+  let body = opts.identity;
   if (overhead + body.length > MIND_PROMPT_BUDGET) {
     body =
       body.slice(0, Math.max(0, MIND_PROMPT_BUDGET - overhead - TRUNCATION.length)) + TRUNCATION;
   }
 
   const parts = [header, `## Identity\n\n${body}`];
-  let used = parts.join(sep).length + sep.length + footer.length;
+  let used = parts.join(sep).length + footerCost;
 
-  for (const [title, text, flex] of [
-    ["Durable memory", memory, false],
-    ["Operating rules", rules, false],
-    ["Recent log", log, true],
-  ] as const) {
+  for (const { title, text, flex } of opts.sections) {
     if (!text) continue;
     const section = `## ${title}\n\n${text}`;
     const cost = sep.length + section.length;
@@ -70,9 +71,70 @@ export async function composeMindSystemPrompt(mindsRoot: string, mind: Mind): Pr
     }
   }
 
-  parts.push(footer);
+  if (opts.footer) parts.push(opts.footer);
   const out = parts.join(sep);
   return out.length > MIND_PROMPT_BUDGET ? out.slice(0, MIND_PROMPT_BUDGET) : out;
+}
+
+// The protected identity body both composers share: the authored SOUL, falling
+// back to the roster persona when there is no readable soul.
+async function composeIdentity(mindsRoot: string, mind: Mind): Promise<string> {
+  const soulDoc = (await readMindDoc(mindsRoot, mind.slug, "SOUL.md"))?.trim();
+  return soulDoc && soulDoc.length > 0 ? soulDoc : mind.persona.trim();
+}
+
+// The durable-memory + operating-rules section pair both composers stack onto the
+// identity (each contributes only once it carries real content past the seed
+// placeholder). The chat composer layers the log tail and footer on top.
+async function memoryAndRulesSections(mindsRoot: string, mind: Mind): Promise<PromptSection[]> {
+  return [
+    {
+      title: "Durable memory",
+      text: substance(await readMindDoc(mindsRoot, mind.slug, "memory.md")),
+      flex: false,
+    },
+    {
+      title: "Operating rules",
+      text: substance(await readMindDoc(mindsRoot, mind.slug, "rules.md")),
+      flex: false,
+    },
+  ];
+}
+
+// A Mind + its on-disk soul files -> one direct-chat system prompt, <= the seed
+// budget. Identity (SOUL, falling back to the roster persona) and the operating
+// footer are protected; durable memory, rules, and the log tail fill the rest in
+// that priority, the log truncating first, then dropping, before any section
+// above it is touched.
+export async function composeMindSystemPrompt(mindsRoot: string, mind: Mind): Promise<string> {
+  return stackMindPrompt({
+    name: mind.name,
+    identity: await composeIdentity(mindsRoot, mind),
+    sections: [
+      ...(await memoryAndRulesSections(mindsRoot, mind)),
+      {
+        title: "Recent log",
+        text: substance(await readMindDoc(mindsRoot, mind.slug, "log.md")),
+        flex: true,
+      },
+    ],
+    footer: `## Direct-chat operating rules\n\n${DIRECT_CHAT_RULES}`,
+  });
+}
+
+// A Mind + its memory -> the system prompt for ONE room turn. Identity (SOUL,
+// falling back to the roster persona) plus the Mind's durable memory and operating
+// rules — what it has LEARNED and how it has decided to behave — so a Mind carries
+// its growth into a room instead of starting amnesiac each turn (the close-only
+// reflection pass is what fills memory.md). No direct-chat footer (the room turn
+// prompt frames the turn) and no log tail (the episodic journal is for the chat
+// view); same budget and empty-placeholder handling as the chat composer.
+export async function composeRoomSystemPrompt(mindsRoot: string, mind: Mind): Promise<string> {
+  return stackMindPrompt({
+    name: mind.name,
+    identity: await composeIdentity(mindsRoot, mind),
+    sections: await memoryAndRulesSections(mindsRoot, mind),
+  });
 }
 
 // The seed both entry points (the roster Enter action and the /mind agent

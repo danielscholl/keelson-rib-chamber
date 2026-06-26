@@ -733,7 +733,15 @@ describe("room adapter — project targeting", () => {
   // is a participant's scaffolded soul — before asserting their cwd.
   const SOULS = new Set(["Alice's soul.", "Bob's soul."]);
   const roomTurnsSince = (before: number) =>
-    turns.requests.slice(before).filter((r) => SOULS.has(r.system ?? ""));
+    turns.requests
+      .slice(before)
+      // A room speaking turn's system is the COMPOSED identity (soul + memory + rules),
+      // so it EMBEDS a known soul rather than equalling it. It is also NOT the close-only
+      // reflection pass — which runs in-character too but withholds tools (allowedTools:
+      // []) and runs at the neutral home, not the project root.
+      .filter(
+        (r) => [...SOULS].some((s) => (r.system ?? "").includes(s)) && r.allowedTools === undefined,
+      );
   let snap: ReturnType<typeof fakeSnapshotManager>;
   let turns: ReturnType<typeof scriptedRunAgentTurn>;
   beforeAll(() => {

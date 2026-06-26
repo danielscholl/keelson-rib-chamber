@@ -5,13 +5,19 @@ import { join } from "node:path";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildRosterBoard } from "../src/boards/roster.ts";
 import {
+  appendLog,
+  LOG_ENTRY_CAP,
+  LOG_MAX_ENTRIES,
   listMindRecords,
+  MEMORY_DOC_CAP,
   type MindRecord,
+  readMindDoc,
   readMinds,
   readSoul,
   retireMind,
   scaffoldMind,
   setMindModel,
+  writeMemory,
 } from "../src/minds-store.ts";
 
 let root: string;
@@ -250,5 +256,71 @@ describe("readSoul", () => {
   // room turn falls back to the tagline instead of rejecting the in-flight step.
   test("returns undefined (does not throw) for an unsafe slug", async () => {
     expect(await readSoul(root, "../escape")).toBeUndefined();
+  });
+});
+
+describe("writeMemory", () => {
+  test("overwrites memory.md with the consolidated text (revise, not append)", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity.");
+    await writeMemory(root, "scout", "# Working memory\n\n- Learned X.");
+    expect(await readMindDoc(root, "scout", "memory.md")).toContain("Learned X.");
+    // A second write REPLACES the first (consolidation), it does not append.
+    await writeMemory(root, "scout", "# Working memory\n\n- Learned Y.");
+    const memory = await readMindDoc(root, "scout", "memory.md");
+    expect(memory).toContain("Learned Y.");
+    expect(memory).not.toContain("Learned X.");
+  });
+
+  test("rejects over-cap text (fail closed), leaving the prior memory untouched", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity.");
+    await writeMemory(root, "scout", "kept memory");
+    await expect(writeMemory(root, "scout", "x".repeat(MEMORY_DOC_CAP + 1))).rejects.toThrow(
+      /exceeds/,
+    );
+    expect(await readMindDoc(root, "scout", "memory.md")).toContain("kept memory");
+  });
+
+  test("fails closed on a missing Mind and an unsafe slug", async () => {
+    await expect(writeMemory(root, "ghost", "x")).rejects.toThrow(/not found/);
+    await expect(writeMemory(root, "../escape", "x")).rejects.toThrow();
+  });
+});
+
+describe("appendLog", () => {
+  test("appends a timestamped, single-line entry under the header", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity.");
+    await appendLog(root, "scout", "reviewed the\nrelease  plan", "2026-06-26T00:00:00.000Z");
+    const log = await readMindDoc(root, "scout", "log.md");
+    expect(log).toContain("# Log");
+    // a multi-line / multi-space entry is collapsed to one bullet line
+    expect(log).toContain("- 2026-06-26T00:00:00.000Z — reviewed the release plan");
+    // the genesis line is still present
+    expect(log).toContain("genesis");
+  });
+
+  test("bounds the journal to the most recent LOG_MAX_ENTRIES entries", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity.");
+    for (let i = 0; i < LOG_MAX_ENTRIES + 10; i++) {
+      await appendLog(root, "scout", `entry ${i}`, "2026-06-26T00:00:00.000Z");
+    }
+    const log = (await readMindDoc(root, "scout", "log.md")) ?? "";
+    const bullets = log.split("\n").filter((l) => l.startsWith("- "));
+    expect(bullets.length).toBe(LOG_MAX_ENTRIES);
+    // the newest survives; the oldest (the genesis line) aged out
+    expect(log).toContain(`entry ${LOG_MAX_ENTRIES + 9}`);
+    expect(log).not.toContain("genesis");
+  });
+
+  test("caps a runaway entry at LOG_ENTRY_CAP characters", async () => {
+    await scaffoldMind(root, record(), "# Scout\n\nIdentity.");
+    await appendLog(root, "scout", "x".repeat(LOG_ENTRY_CAP * 2), "2026-06-26T00:00:00.000Z");
+    const log = (await readMindDoc(root, "scout", "log.md")) ?? "";
+    const entry = log.split("\n").find((l) => l.includes("xxxx")) ?? "";
+    expect(entry.length).toBe(LOG_ENTRY_CAP);
+  });
+
+  test("fails closed on a missing Mind and an unsafe slug", async () => {
+    await expect(appendLog(root, "ghost", "x", "t")).rejects.toThrow(/not found/);
+    await expect(appendLog(root, "../escape", "x", "t")).rejects.toThrow();
   });
 });
