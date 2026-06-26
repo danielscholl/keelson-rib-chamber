@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.10.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.9.0...v0.10.0) (2026-06-26)
+
+
+### Added
+
+* **chamber:** expose the room lifecycle as MCP-reachable tools ([#133](https://github.com/danielscholl/keelson-rib-chamber/issues/133)) ([0e28cd5](https://github.com/danielscholl/keelson-rib-chamber/commit/0e28cd5c2a4b92c159e41111829b99a70558e4b0))
+* **chamber:** minds remember across rooms via close-only reflection ([#136](https://github.com/danielscholl/keelson-rib-chamber/issues/136)) ([8a865c8](https://github.com/danielscholl/keelson-rib-chamber/commit/8a865c873ad5783afafe05ef5be9590ec5224c51))
+* **chamber:** standing-panel refresh + one-click delete confirms ([#132](https://github.com/danielscholl/keelson-rib-chamber/issues/132)) ([d46879c](https://github.com/danielscholl/keelson-rib-chamber/commit/d46879c7d31048a7ff4082624fbced9097199e46))
+
+
+### Fixed
+
+* **chamber:** refresh the sessions index when a room starts ([#130](https://github.com/danielscholl/keelson-rib-chamber/issues/130)) ([aef3c22](https://github.com/danielscholl/keelson-rib-chamber/commit/aef3c229f664c12b1e754ee8ab1ba359e13b2665))
+
+
+### Documentation
+
+* **chamber:** add a magentic tutorial; document the sixth strategy ([#134](https://github.com/danielscholl/keelson-rib-chamber/issues/134)) ([db8f601](https://github.com/danielscholl/keelson-rib-chamber/commit/db8f6011e67b01c9922c3ce09a45a42b1cc4c6ae))
+* **magentic:** document magentic strategy and ledger ([#135](https://github.com/danielscholl/keelson-rib-chamber/issues/135)) ([b40da62](https://github.com/danielscholl/keelson-rib-chamber/commit/b40da624195d94461d47cb6b0350cb861e93afec))
+
 ## [0.9.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.8.2...v0.9.0) (2026-06-25)
 
 
