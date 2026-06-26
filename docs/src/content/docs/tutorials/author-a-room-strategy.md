@@ -255,6 +255,17 @@ function only names the step. Teaching the driver to run a new step is a larger
 change than authoring the policy, and the design record explains why the split is
 drawn there.
 
+## What you proved
+
+A room's turn policy is a pure function: read the room and the transcript, return
+one of seven steps. You wrote one, added it to the union, wired it into the
+registry, and tested it with no server, no fixture, no mock, because a strategy has
+nothing to mock. That is what the whole rail was walking toward. The driver runs
+the turns, parses the routing tails, and validates every pick; the strategy only
+decides who is next. Hold that line and a new routing shape stays three edits and a
+test. Cross it, into I/O or text parsing, and you have given up the one property
+that made strategies easy to get right.
+
 ## Related
 
 - [Strategies](../../reference/strategies/): the exact contract and every shipped strategy's decision logic.

@@ -82,6 +82,21 @@ strictly more than half, so a tie does not close.
 Votes reflect a speaker's current standing, not a running tally. A Mind that
 voted to end and then speaks again has withdrawn its vote.
 
+The threshold is easier to feel as a table. The denominator is the participant
+count; the numerator is how many of them most recently voted to end:
+
+| Participants | End votes | Ratio | Closes at `0.49`? | Closes at `0.5`? |
+| --- | --- | --- | --- | --- |
+| 2 | 1 | 0.50 | yes | no |
+| 2 | 2 | 1.00 | yes | yes |
+| 3 | 1 | 0.33 | no | no |
+| 3 | 2 | 0.67 | yes | yes |
+| 4 | 2 | 0.50 | yes | no |
+
+So the default `0.49` lets a bare majority close, and lets a single vote close a
+two-Mind room. Raise it to `0.5` when you want strictly more than half, so a tie
+keeps the room open.
+
 ## Steer a live room
 
 A room advances on its own once it starts, driving turns until it hits its
@@ -132,6 +147,23 @@ reviews it. The two Minds must be pinned to **different providers**, enforced
 when the room starts, so the critique is genuinely a second vendor's eyes and
 not the same model grading its own work. See the
 [strategies reference](../../reference/strategies/) for its exact rules.
+
+## Which strategy for which job
+
+You have now driven or seen most of the shapes. The reach-for-it guide:
+
+| When you want to | Reach for | Who routes |
+| --- | --- | --- |
+| layer a few takes in a fixed order | `sequential` | round-robin |
+| get every Mind's first reaction at once | `concurrent` | one parallel round |
+| drive a discussion to a decision | `group-chat` | a moderator Mind |
+| let a group converge on its own | `open-floor` | the speakers, by vote |
+| get a cross-vendor critique of one artifact | `review` | author, then reviewer |
+| divide a build into owned, non-overlapping tasks | `magentic` | a manager Mind |
+
+The split that matters most: `group-chat` and `open-floor` talk something out,
+`magentic` divides work up, `review` checks one thing with fresh eyes. Pick by the
+verb, not the vibe.
 
 ## Where to go next
 

@@ -5,22 +5,37 @@ sidebar:
   order: 2
 ---
 
-This is where Chamber starts to feel like more than a roster. You will author two
-Minds, drop them into a room, and watch them take turns talking to each other. By
-the end you will have a transcript you can read top to bottom, and a feel for how
-a room actually runs.
-
-Chamber is a Keelson rib, so everything here happens on the Chamber surface inside
-the harness you already have running. Open it and find the Roster. A fresh
-workspace shows no Minds yet, just a few starter archetypes waiting to be
-authored. That is your starting point.
+This is where Chamber starts to feel like more than a roster. You will install the
+rib, author two Minds, drop them into a room, and watch them take turns talking to
+each other. By the end you will have a transcript you can read top to bottom, and a
+feel for how a room actually runs.
 
 :::note[Before you start]
-A running keelson server with Chamber installed, open to the Chamber surface.
-That is the whole prerequisite: this is the entry tutorial, so it starts from an
-empty workspace with no Minds yet. Genesis runs one paid agent turn per Mind, and
+A running keelson server with a provider signed in (Copilot is the default). That
+is the whole prerequisite. This is the entry tutorial, so it starts from a harness
+with no Chamber and no Minds yet. Genesis runs one paid agent turn per Mind, and
 each room turn is a paid agent call, so expect to spend a few tokens.
 :::
+
+## Install Chamber
+
+Chamber adds multi-agent rooms to a keelson harness, and like every capability on
+keelson it arrives as a rib: an installable package, not a fork. Add it from its
+public source and restart, so the server discovers it at boot.
+
+```bash
+keelson rib add https://github.com/danielscholl/keelson-rib-chamber
+keelson stop && keelson start
+```
+
+A rib is code you choose to run inside your harness, so install one the way you
+install any dependency: from a source you trust. On restart the server walks its
+installed packages, checks Chamber against the rib contract, and activates it. The
+proof is visual. A **Chamber** tab appears in the browser UI, a whole surface the
+rib declared and the harness draws with no per-rib UI code. That tab is the
+difference between reading about a capability and having one. Open it, find the
+Roster, and you are looking at a fresh workspace: no Minds yet, just a few starter
+archetypes waiting to be authored. That is your starting point.
 
 ## Author two Minds
 
@@ -98,6 +113,16 @@ language and let Chamber resolve the slugs for you. Strategy defaults to
 sequential, so you can leave it off. The turn budget defaults to eight; you can
 pass `turnBudget` to raise or lower it, up to a ceiling of fifty.
 
+Try it with one Mind and the tool stops you before it spends anything:
+
+```text
+a room needs at least 2 distinct participants (safe Mind slugs, not director/system)
+```
+
+That is the floor a room stands on. A participant is always a Mind, and a
+conversation needs two of them, so a one-Mind room is not a small room, it is not a
+room. The dry run is what surfaces this for free, before a turn is billed.
+
 :::note
 Every room turn is a billed agent call. That is why starting from chat confirms
 first, and why a room is bounded by a turn budget. The room runs until it hits the
@@ -130,6 +155,30 @@ spoke it. Read it top to bottom and you can follow the whole exchange: the first
 Mind opens, the second responds to what it sees, the first answers back, round by
 round, to the end.
 
+Here is how a sequential room on that question reads, trimmed to its first three
+turns:
+
+> **staff-engineer** Ship the flag. The full UI is two weeks of polish on a thing
+> we have not proven anyone wants. A flag gets it in front of ten real users on
+> Monday, and we learn more from that than from another sprint of guessing. Hide
+> it behind a query param, leave the old path as the default.
+>
+> **product-reviewer** Ten users behind a query param is not a test, it is a demo.
+> They will not find the flag, so you will not learn adoption, only that the people
+> you personally pinged will click a link you sent them. If we are shipping to
+> learn, the flag has to be reachable from the actual UI, even if it is one ugly
+> button.
+>
+> **staff-engineer** Fair. One ugly button, not two weeks of polish. I will put a
+> real entry point in the nav behind the flag and we ship Monday. The rest can land
+> once we have a reason to believe it is worth polishing.
+
+Three turns in, the disagreement has already moved: not "ship or wait" but "what
+counts as a real test." Nobody told the second Mind to push back. It read the
+first reply in the transcript, found the weakest part, and leaned on it, and the
+first Mind gave ground. That is the entire mechanic, a transcript built one turn at
+a time.
+
 The label on each turn is authoritative. The driver stamps who spoke; a Mind
 cannot claim to be another speaker. So when you read a name on a turn, that is the
 Mind the driver actually ran.
@@ -157,8 +206,25 @@ Closing the room did one more thing the transcript does not show. Each Mind that
 spoke ran a single reflection turn and curated its own durable memory from the room
 it just lived. Open one of them with `/mind {slug}`, or read its `memory.md` under
 `{keelson-home}/rib-chamber/minds/{slug}/`, and you will see what it chose to carry
-forward, which is a much smaller thing than the room transcript. The next room you
-convene that Mind into starts with that memory already in its prompt.
+forward, which is a much smaller thing than the room transcript.
+
+Here is what the staff engineer kept, the whole of its `memory.md` after that one
+room:
+
+```markdown
+# Memory
+
+- product-reviewer holds a hard line that a test has to be reachable by real
+  users, not just people I ping. Pushed me off "flag behind a query param" to "a
+  real entry point behind the flag." It was right.
+- My reflex is ship-to-learn; theirs is define-the-learning-first. We converge
+  fast when I concede the smallest reachable version, not the cheapest one.
+```
+
+That is not a summary of the transcript. It is shorter, and it is written in the
+first person, because the reflection turn asks the Mind what is worth keeping, not
+what was said. The next room you convene this Mind into opens with those two lines
+already in its prompt, so it walks in remembering how the last argument went.
 
 This is the loop that makes a Mind more than a fresh prompt each time: it learns
 across rooms. [Minds and genesis](../../concepts/minds/#what-a-mind-remembers) covers

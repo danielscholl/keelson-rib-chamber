@@ -23,14 +23,13 @@ manager carve the work into non-overlapping tasks, read back a plan with no gaps
 no overlap, and turned it into a running app.
 
 :::note[Before you start]
-A running keelson server with the Copilot provider signed in, Chamber installed,
-and the earlier room tutorials behind you ([your first room](../your-first-room/)
-and [a moderated room](../a-moderated-room/)). Every room turn is a paid agent call,
-so expect to spend real tokens. You also need a **build brief**: a spec for
-something with separable parts (a UI with a visual layer and an interaction layer,
-an API with separable endpoints). This page uses the Cosmos app brief from the
-keelson [frontend-mix tutorial](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/),
-but any multi-part build works.
+A running keelson server with Copilot signed in, Chamber installed, and the
+earlier room tutorials behind you ([your first room](../your-first-room/) and
+[a moderated room](../a-moderated-room/)). Every room turn is a paid agent call, so
+expect to spend real tokens. You also need a **build brief**: a spec for something
+with separable parts, a UI with a visual layer and an interaction layer, or an API
+with separable endpoints. We use Cosmos, a no-login planetarium; a compact brief is
+printed below, so nothing to fetch. Any multi-part build works.
 :::
 
 ## When one planner leaves holes
@@ -59,18 +58,20 @@ each worker a distinct lane, so the manager has clean seams to cut along:
 Genesis names each Mind from its brief, so yours will get their own names. Note the
 three you get back; you name them when you convene.
 
-The pin below is optional: a magentic room runs fine with every Mind on one model.
-But the design lane is the one that most rewards a UI-strong model, so it is worth
-pinning one there. After genesis, open the design worker's card on the Chamber
-surface and use its **Set model…** action, or pre-pin at authoring time with
-workflow inputs:
+Pinning is optional, but a magentic room is where it pays off most, because the
+lanes have genuinely different shapes. Within one Copilot subscription you can put
+each Mind on the engine that suits its work: a gemini-class model on the design
+lane (visual work is its strength), a gpt-class model on the frontend lane (direct,
+literal coding), and an opus-class model on the manager (the decomposition is pure
+orchestration and reasoning). Pin from a card's **Set model…** action, or pre-pin
+at authoring time:
 
 ```text
 keelson workflow run chamber-genesis "a visual design engineer who owns the look: layout, palette, type, and rendering" --inputs model=gemini-3.1-pro-preview --inputs provider=copilot
 ```
 
-Either way the pin is one optional step; it just makes the lane the design worker
-owns stronger where it matters most.
+None of it is required; the room runs with everyone on one model. The pins just put
+each lane on the engine that fits it.
 
 ## Convene the magentic room
 
@@ -87,10 +88,21 @@ worker must return a buildable spec for its lane (named sections, exact values,
 concrete layout), not a mood board.
 ```
 
-For the Cosmos example, the brief to paste is the full spec the keelson
-[frontend-mix](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/)
-tutorial ships. Starting from chat is a confirm-gated dry run, because every turn is
-billed. Confirm, and the manager takes the first move.
+For the Cosmos example, paste this brief where the topic points. It is short on
+purpose: a magentic room's whole job is to turn a loose brief into a plan with no
+gaps, so leave the seams for the manager to find.
+
+```text
+Cosmos: a no-login planetarium for the curious. A fixed catalog of ~12 real
+objects (planets, moons, stars, a nebula, a galaxy, a black hole), each with a
+name, category, tagline, key stats, and a few "did you know" facts. The mood is
+dark-sky and cinematic; render the universe with CSS, SVG, and gradients, not
+photos. Visitors browse the catalog, open an object for detail, and the home page
+features one object per day. No accounts, no login, all local.
+```
+
+Starting from chat is a confirm-gated dry run, because every turn is billed.
+Confirm, and the manager takes the first move.
 
 ## Watch the manager split the work
 
@@ -123,6 +135,54 @@ covered, it closes the ledger and the room ends; if a lane is thin or a seam was
 missed, it hands back to itself and assigns the gap. The loop is bounded by the turn
 budget like every other room.
 
+The ledger is a real file, not a metaphor. Mid-run, trimmed to two tasks, it reads
+like this (it lives under the room's directory, see
+[Data on disk](../../reference/data-on-disk/)):
+
+```json
+{
+  "roomSlug": "room-7t1a-2",
+  "goal": "Decompose and plan the build of Cosmos, a no-login planetarium.",
+  "manager": "atlas-vance",
+  "status": "executing",
+  "tasks": [
+    {
+      "id": "t1",
+      "description": "Visual foundation: palette, type scale, and the procedural starfield render recipe.",
+      "assignee": "nova-pike",
+      "status": "completed",
+      "result": "Deep-space palette, an Inter/Fraunces pairing, a canvas starfield recipe.",
+      "createdAt": "2026-06-24T15:02:11.004Z",
+      "updatedAt": "2026-06-24T15:03:48.221Z"
+    },
+    {
+      "id": "t2",
+      "description": "Interaction surface: catalog grid, object detail route, and the object-of-day slot.",
+      "assignee": "wren-calder",
+      "status": "in-progress",
+      "createdAt": "2026-06-24T15:02:11.004Z",
+      "updatedAt": "2026-06-24T15:02:11.004Z"
+    }
+  ],
+  "updatedAt": "2026-06-24T15:03:48.221Z"
+}
+```
+
+Two tasks, two owners, two states. The manager wrote it; a worker flips its own row
+to `completed` when its turn lands. `status: "executing"` means open tasks remain,
+and when the last one settles and the goal is covered the manager flips the ledger
+to `done` and the room ends. That row-by-row accounting is the difference between a
+plan and a conversation about a plan.
+
+:::caution[If the plan comes back thin]
+A manager that is also a worker is rejected at start, the same rule a moderator
+follows: name a manager that owns no lane. If a worker returns a mood board instead
+of a buildable spec, the brief did not demand exact values; say so in the topic
+(named sections, hex values, concrete layout, not adjectives). And if the room ends
+with tasks still `pending`, it ran out of budget before the manager could replan;
+convene again with a higher `turnBudget`.
+:::
+
 ## Read the result: coverage without overlap
 
 Lay the workers' turns side by side and you have a single complete spec: every part
@@ -140,20 +200,27 @@ to a build), read the turn straight from the room's transcript on disk. See
 
 ## Build from it
 
-The room is text-only: the Minds plan, you build. Two ways to turn the spec into a
-running app:
+A standard room is text-only: the Minds plan, you build. The plan they leave is a
+contract any build can implement, so you can hand it to whatever pipeline you run.
+But Chamber can also close the loop itself, and that is where a room does something
+a lone planner cannot.
 
-- **Hand it to the keelson build.** Paste the consolidated spec back as `plan.md` and
-  run the [frontend-mix](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/)
-  workflow, the same plan-then-build handoff
-  [Many minds, one plan](../many-minds-one-plan/) uses for its reviewed contract.
-- **Or have a Mind build it.** Author a build-engineer Mind, pinned to a UI-strong
-  model, and convene a room of two with a **turn budget of 1** (see
-  [Run a room](../../guides/run-a-room/) for the budget control): only the first
-  speaker runs, so its single turn is the whole build. Ask it to implement the spec
-  as one self-contained file. That turn *is* the file: read the full turn from the
-  transcript on disk (the [Data on disk](../../reference/data-on-disk/) path),
-  save it as `index.html`, and open it.
+- **Hand the plan to a build pipeline.** The consolidated spec is a `plan.md` in
+  everything but name. Drop it into a project that runs a build workflow and the
+  build implements it, the same plan-then-build handoff
+  [Many minds, one plan](../many-minds-one-plan/) reviews from the other side.
+- **Or let a Mind build it, in a coding room.** A coding room (started with
+  `coding: true`) lifts the text-only default: a Mind that declares the `code`
+  capability can run Read, Edit, Write, and Bash, confined to a project you target
+  when the room starts. Author a build engineer, pin it to a gpt-class model (direct
+  coding is its strength), give it `code`, and convene a coding room pointed at your
+  project. Hand it the manager's plan and ask it to implement the app. Because the
+  room is rooted in your project, the Mind reads not just the plan but whatever build
+  guidance the project ships, and writes the app into the tree inside the room's
+  confinement boundary. (The `keelson-sample` template, for instance, carries a set
+  of `frontend-mix-*` skills a build Mind can open and follow step by step.) See
+  [author a mind](../../guides/author-a-mind/) for the capability slugs and
+  [run a room](../../guides/run-a-room/) for starting a coding room.
 
 Either way, the plan the manager assembled is the contract the build implements.
 Because it has no gaps, the build has nothing to guess at; because it has no overlap,
@@ -183,4 +250,4 @@ strategies plug into.
 - [Many minds, one plan](../many-minds-one-plan/): the sibling job, *review* a plan with a moderated room rather than *produce* one with a manager.
 - [Run a room](../../guides/run-a-room/): the operator how-to once you know the shape.
 - [Room strategies](../../reference/strategies/): magentic's exact contract, the manager, the ledger, and the routing.
-- [One workflow, many models](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/): the keelson build this plan can feed.
+- [Author a mind](../../guides/author-a-mind/): the capability slugs a coding-room build Mind declares.
