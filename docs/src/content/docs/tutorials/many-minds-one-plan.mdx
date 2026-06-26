@@ -9,44 +9,47 @@ import { Image } from "astro:assets";
 import rosterShot from "../../../assets/screenshots/cosmos-roster.png";
 import lensShot from "../../../assets/screenshots/cosmos-lens.png";
 
-The keelson tutorial
-[One workflow, many models](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/)
-builds a real app, Cosmos, with a workflow that routes each phase to a different
-model and hands off through markdown artifacts. Its advice for reading the result
-is "open `plan.md` first," because that file is the contract every later phase
-builds from. One model writes the plan. The build implements it. The validation
-step checks the build against it. That handoff is what makes the pipeline work.
+A model-routing build pipeline is a satisfying thing to watch. One workflow builds
+a whole app by handing each phase to the model that suits it, and the phases never
+share a conversation. They share a file. One model writes a plan, the next builds
+from it, a third checks the build against it. The plan is the contract, and that
+handoff is the trick that lets models which have never met cooperate cleanly.
 
-It is also its blind spot. Nothing in a linear pipeline ever reviews the contract
-itself. A wrong assumption in the plan is not caught downstream, it is implemented
-faithfully and validated against itself, and the whole run finishes green while
-the app is quietly wrong. This tutorial puts a room on the plan before the build,
-and watches it catch what the pipeline cannot.
+It is also where the pipeline goes blind. Nothing in a straight line ever reviews
+the contract itself. A wrong assumption in the plan is not caught downstream; it
+gets implemented faithfully, validated against itself, and the run finishes green
+while the app is quietly wrong. This page puts a room on the plan before any code
+is written, and watches it catch what a single pass cannot.
 
-By the end you will have taken a real `plan.md`, convened a room of Minds to
-red-team its data contract, and produced a hardened contract plus a decision log:
-a before and after you can diff, and a record of which Mind forced each change.
+The plan we red-team is for Cosmos, a no-login planetarium a build pipeline wrote
+from a one-page brief. You do not need to have built it. The contract is printed
+in full below, so the room has something real to chew on either way; if you did
+build something with a model-routing workflow of your own, swap in your `plan.md`
+and review that instead. By the end you will have a hardened contract and a
+decision log: a before and after you can diff, and a record of which Mind forced
+each change.
 
 :::note[Before you start]
-A running keelson server with the Copilot provider signed in, Chamber installed,
-and the two earlier room tutorials behind you ([your first room](../your-first-room/)
-and [a moderated room](../a-moderated-room/)). You also need a `plan.md` to review:
-the keelson
-[frontend-mix tutorial](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/)
-produces one. Every room turn here is a paid agent call, so expect to spend real
+A running keelson server with Copilot signed in, Chamber installed, and the two
+earlier room tutorials behind you ([your first room](../your-first-room/) and
+[a moderated room](../a-moderated-room/)). Nothing to fetch: the contract to
+review is printed below. The catches in this tutorial come from reading one plan
+through several models, so it helps to pin the Minds to a few of the models your
+Copilot plan serves (a gemini, a gpt, and an opus-class model all ride the one
+subscription). On a single model the room still runs, you just get fewer
+independent reads. Every room turn is a paid agent call, so expect to spend real
 tokens.
 :::
 
 ## The plan is a contract no one reviews
 
-`frontend-mix` plans once. A single model writes `plan.md` with three sections,
-and SECTION B is the data and API contract: the database tables, the endpoints,
-the rules. The build implements exactly what SECTION B says, and the validation
-step checks the build against that same plan. So every later phase agrees with the
+The pipeline plans once. A single model writes the plan in three sections, and
+SECTION B is the data and API contract: the database tables, the endpoints, the
+rules. The build implements exactly what SECTION B says, and the validation step
+checks the build against that same plan. So every later phase agrees with the
 plan, and none of them questions it.
 
-Here is the Cosmos contract one real `frontend-mix` run wrote, trimmed to its data
-shape:
+Here is the Cosmos contract one real build wrote, trimmed to its data shape:
 
 ```text
 TABLES
@@ -95,25 +98,29 @@ You also need a moderator to route the discussion and close it, the way
 reuse one you have. Genesis named mine **stoneplan**, **faultline**, and
 **ledger**, with **avery-slate** moderating. Yours will get their own names.
 
-A room is most useful when its Minds do not all think alike. Each Mind can pin its
-own model from the roster card's **Set model…** action, so the panel reasons with
-genuinely different engines.
-Mine ran on three vendors at once:
+A room is most useful when its Minds do not all read alike. Each Mind can pin its
+own model from the roster card's **Set model…** action, so the same contract gets
+read by genuinely different engines. The goal here is spread, not picking a single
+best model: a review wants independent readings, and three models from three
+families disagree in useful ways. Copilot serves all three, so this is one
+subscription, not three.
 
 <figure>
   <Image src={rosterShot} alt="The Chamber roster showing the review panel: Ledger (Backend Realist) on gemini-3.1-pro-preview, Faultline (Contract Skeptic) on gpt-5.5, and Stoneplan (Build Planner) on claude-opus-4.8, each card showing its persona and pinned model." />
-  <figcaption>Figure 1. The review panel on the Chamber roster. Each Mind shows its persona and its pinned model, so the same contract is read by three different reasoning engines at once.</figcaption>
+  <figcaption>Figure 1. The review panel on the Chamber roster. Each Mind shows its persona and its pinned model, so the same contract is read three independent ways, all on one Copilot subscription.</figcaption>
 </figure>
 
-To pin after authoring, open the Mind card's **Set model…** action and set
-`model` (required) and `provider` (optional). You can also pre-pin at authoring
-time with workflow inputs:
+Where a role has a clear bias you can play to it: opus-class models reason and
+orchestrate, which suits the moderator and the defender; a gpt-class model is
+blunt and literal, which is what you want in the skeptic. For a review, though,
+the spread matters more than the match. Pin from the card's **Set model…** action
+(`model` required, `provider` optional), or pre-pin at authoring time:
 
 ```text
-keelson workflow run chamber-genesis "a backend realist who owns persistence and restart behavior" --inputs model=gemini-3.1-pro-preview --inputs provider=copilot
+keelson workflow run chamber-genesis --arguments "an adversarial contract skeptic who stress-tests API and data contracts" --inputs model=gpt-5.5 --inputs provider=copilot
 ```
 
-The pin is optional. The room works with every Mind on one model; different models
+The pin is optional. The room runs with every Mind on one model; different models
 just buy more independent reading.
 
 ## Convene the room on the contract
@@ -133,6 +140,16 @@ field or rule, and converge on a concrete list of changes.
 Starting a room from chat is a dry run until you confirm, because every turn is
 billed. Confirm, and the room opens and runs itself, one Mind per turn, the
 moderator routing and closing when the discussion is done.
+
+:::caution[If the room misbehaves]
+Three things go wrong here, all fixable. If the start is rejected, your moderator
+is probably also in the speaker list; a moderator routes and never debates, so it
+has to sit outside the three reviewers. If the room closes while the contract
+still looks clean, the topic was too polite: tell the skeptic to assume the plan
+is wrong until proven otherwise and to tie every defect to a named field or rule.
+And if it ends mid-argument, it hit the turn budget; a real review runs long, so
+convene with a higher `turnBudget` (the ceiling is 50).
+:::
 
 ## Read the catch
 
@@ -277,7 +294,7 @@ the decision is not a flat file you remember to open but a panel that stays put,
 with its provenance built in. Author one:
 
 ```sh
-keelson workflow run chamber-lens "Cosmos contract review: the five changes, each with its status and the Mind that forced it"
+keelson workflow run chamber-lens --arguments "Cosmos contract review: the five changes, each with its status and the Mind that forced it"
 ```
 
 or type `/lens {subject}` in chat. One agent turn composes the board and publishes
@@ -292,19 +309,22 @@ The board is not hand-written. A Mind composed it the same way it would compose 
 view, and the provenance the room produced (which Mind forced which change) rides
 along as a column. See [Lenses](../../concepts/lenses/) for the capability.
 
-## Rebuild and diff the apps
+## What the fix looks like in code
 
-The contract is better on paper. Now make it better in the browser. Paste the
-hardened contract back as `plan.md` SECTION B and run the build again, the way the
-keelson tutorial diffs two models, except here you are diffing a reviewed contract
-against an unreviewed one.
+The contract is better on paper. It is worth seeing what that buys, because a
+contract edit can feel like paperwork until you watch it move real lines. Here are
+the three places the hardened contract decides differently from the original, the
+spots where the review actually shows up in a build.
 
-A fresh build is non-deterministic, so the scaffolding shifts run to run. Look at the
-three places the contract actually decides; that is where the review shows up.
+(Handing a reviewed contract straight back to the build is the obvious next move.
+Today you fold the changes into the brief and rebuild, or hand the contract to a
+coding-room Mind and let it implement the app itself, which is exactly what
+[One manager, many tasks](../one-manager-many-tasks/) does. A build that re-runs
+from this precise contract is [tracked upstream](https://github.com/danielscholl/keelson/issues/321).)
 
-**The daily object.** The unreviewed build rotates on UTC milliseconds; the reviewed
-build rotates on a calendar date in a configured timezone, with the tie-break the room
-demanded:
+**The daily object.** The original contract rotates on UTC milliseconds; the
+hardened one rotates on a calendar date in a configured timezone, with the
+tie-break the room demanded:
 
 ```ts
 // before
@@ -316,8 +336,8 @@ const dateStr = now.toLocaleDateString("en-CA", { timeZone: process.env.TIMEZONE
 //   SELECT ... FROM objects ORDER BY sort_order, id LIMIT 1 OFFSET ?
 ```
 
-**The reaction table.** The reviewed build materializes the day bucket so the database
-itself enforces one reaction per day:
+**The reaction table.** The hardened contract materializes the day bucket so the
+database itself enforces one reaction per day:
 
 ```diff
 - reaction_log(id, object_id, ip_hash, reacted_at)
@@ -325,9 +345,9 @@ itself enforces one reaction per day:
 + UNIQUE(object_id, ip_hash, utc_day)
 ```
 
-**The reaction write.** The unreviewed build checks, then inserts, then updates: three
-statements a second request can race between. The reviewed build does it in one
-transaction and lets the UNIQUE constraint settle the race:
+**The reaction write.** The original contract invites a check, then an insert, then
+an update: three statements a second request can race between. The hardened one does
+it in a single transaction and lets the UNIQUE constraint settle the race:
 
 ```ts
 // before: a race lives in the gaps
@@ -362,9 +382,14 @@ room review its own fix. As the moderator closed:
 Five changes, none of which a single planning model wrote, all of which it would
 have needed.
 
+That was a room *reviewing* a plan someone else wrote. The next tutorial flips the
+job: in [One manager, many tasks](../one-manager-many-tasks/) a magentic room
+*produces* the plan in the first place, a manager carving the build into lanes so
+the result has no gaps and no overlap.
+
 ## Related
 
 - [When to convene a room](../../concepts/when-to-convene-a-room/): the why behind this exercise.
 - [Convene a moderated room](../a-moderated-room/): the strategy this tutorial runs.
+- [One manager, many tasks](../one-manager-many-tasks/): the sibling job, producing a plan with a magentic room instead of reviewing one.
 - [Run a room](../../guides/run-a-room/): the operator how-to once you know the shape.
-- [One workflow, many models](https://danielscholl.github.io/keelson/docs/tutorials/frontend-mix/): the keelson pipeline this page reviews.

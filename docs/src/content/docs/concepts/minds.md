@@ -95,7 +95,7 @@ because authoring an identity needs words: you describe the agent you want, and 
 agent turn does the rest.
 
 Run it with the `/genesis` command, or with
-`keelson workflow run chamber-genesis "{brief}"`. The turn reads your brief, decides
+`keelson workflow run chamber-genesis --arguments "{brief}"`. The turn reads your brief, decides
 the Mind's name, role, and voice, composes the `SOUL.md` body and a roster tagline,
 and then calls a single write seam to persist the Mind. The prompt asks for an honest
 founding document: it describes who the Mind is and how it speaks, and does not invent

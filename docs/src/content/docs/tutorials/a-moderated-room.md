@@ -12,8 +12,12 @@ routing to a moderator, then take routing away entirely, then steer a live room
 yourself. By the end you can pick the strategy that fits the conversation you
 want and bend it while it runs.
 
-You need two or more Minds on disk. If you do not have them yet, author a couple
-first, then come back.
+:::note[Before you start]
+A running keelson server with Chamber installed, and
+[your first room](../your-first-room/) behind you. You need two or more Minds on
+disk; if you do not have them yet, author a couple first, then come back. Every
+room turn is a paid agent call, so expect to spend a few tokens.
+:::
 
 ## Convene a moderated room
 
@@ -23,7 +27,9 @@ one of the speakers, so its turns do not land in the back-and-forth you are
 trying to shape.
 
 Ask in chat to start a `group-chat` room with a moderator that is not in the
-speaker list:
+speaker list. Ada, Bex, Cyrus, and Quill below stand in for Minds you authored,
+so swap in your own names; naming them in plain language lets Chamber resolve the
+slugs:
 
 ```text
 Start a group-chat room with Ada, Bex, and Cyrus debating the rollback plan,
@@ -76,6 +82,21 @@ strictly more than half, so a tie does not close.
 Votes reflect a speaker's current standing, not a running tally. A Mind that
 voted to end and then speaks again has withdrawn its vote.
 
+The threshold is easier to feel as a table. The denominator is the participant
+count; the numerator is how many of them most recently voted to end:
+
+| Participants | End votes | Ratio | Closes at `0.49`? | Closes at `0.5`? |
+| --- | --- | --- | --- | --- |
+| 2 | 1 | 0.50 | yes | no |
+| 2 | 2 | 1.00 | yes | yes |
+| 3 | 1 | 0.33 | no | no |
+| 3 | 2 | 0.67 | yes | yes |
+| 4 | 2 | 0.50 | yes | no |
+
+So the default `0.49` lets a bare majority close, and lets a single vote close a
+two-Mind room. Raise it to `0.5` when you want strictly more than half, so a tie
+keeps the room open.
+
 ## Steer a live room
 
 A room advances on its own once it starts, driving turns until it hits its
@@ -127,21 +148,45 @@ when the room starts, so the critique is genuinely a second vendor's eyes and
 not the same model grading its own work. See the
 [strategies reference](../../reference/strategies/) for its exact rules.
 
+## Which strategy for which job
+
+You have now driven or seen most of the shapes. The reach-for-it guide:
+
+| When you want to | Reach for | Who routes |
+| --- | --- | --- |
+| layer a few takes in a fixed order | `sequential` | round-robin |
+| get every Mind's first reaction at once | `concurrent` | one parallel round |
+| drive a discussion to a decision | `group-chat` | a moderator Mind |
+| let a group converge on its own | `open-floor` | the speakers, by vote |
+| get a cross-vendor critique of one artifact | `review` | author, then reviewer |
+| divide a build into owned, non-overlapping tasks | `magentic` | a manager Mind |
+
+The split that matters most: `group-chat` and `open-floor` talk something out,
+`magentic` divides work up, `review` checks one thing with fresh eyes. Pick by the
+verb, not the vibe.
+
 ## Where to go next
 
 You have now run two more routing shapes, the moderated `group-chat` and the
 unmoderated `open-floor`, and steered a live room as director. With the
 sequential room from before, that is three of the six strategies driven
 first-hand; `concurrent` (a parallel round), `review` (the cross-vendor pass
-above), and `magentic` (a manager-led build, in
-[One manager, many tasks](../one-manager-many-tasks/)) round out the set. The
+above), and `magentic` (a manager-led build) round out the set, and the
 [strategies reference](../../reference/strategies/) has all six.
-The capstone shows you how to write a routing policy of your own, a pure decision
-the rib drives through the same seam these strategies use. Head to
-[author your own room strategy](../author-a-room-strategy/).
+
+You have the routing shapes; the next two tutorials put them to work on a real
+build before you write any code. In
+[Many minds, one plan](../many-minds-one-plan/) you convene a moderated room to
+red-team a plan and catch the defects a linear pipeline ships; in
+[One manager, many tasks](../one-manager-many-tasks/) you run a magentic room to
+produce a plan with no gaps and no overlap. Then the capstone,
+[author your own room strategy](../author-a-room-strategy/), has you write a
+routing policy of your own, a pure decision the rib drives through the same seam
+these six use.
 
 ## Related
 
+- [Many minds, one plan](../many-minds-one-plan/): the next step, these strategies on a real plan.
 - [Author your own room strategy](../author-a-room-strategy/): the capstone, a pure strategy you write.
 - [Your first room](../your-first-room/): the sequential room this page builds on.
 - [Rooms and strategies](../../concepts/rooms/): why the driver routes and strategies stay pure.

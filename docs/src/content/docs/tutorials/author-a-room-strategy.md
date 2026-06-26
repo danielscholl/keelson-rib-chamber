@@ -5,8 +5,9 @@ sidebar:
   order: 6
 ---
 
-You have run a room and moderated one. Now you will write the part that decides
-who speaks. A **strategy** is the turn policy for a room: a small, pure function
+You have run rooms, moderated one, and put them to work on real plans. Now you
+will write the part that decides who speaks. A **strategy** is the turn policy for
+a room: a small, pure function
 the driver consults every turn to ask "who is next?" This is the capstone, and it
 is the one tutorial that touches code. Chamber is a Keelson rib, so its strategies
 live in the rib's own source, and adding one is three edits and a test.
@@ -253,6 +254,17 @@ fallback live in the driver and in `src/routing.ts`, not in the strategy. The pu
 function only names the step. Teaching the driver to run a new step is a larger
 change than authoring the policy, and the design record explains why the split is
 drawn there.
+
+## What you proved
+
+A room's turn policy is a pure function: read the room and the transcript, return
+one of seven steps. You wrote one, added it to the union, wired it into the
+registry, and tested it with no server, no fixture, no mock, because a strategy has
+nothing to mock. That is what the whole rail was walking toward. The driver runs
+the turns, parses the routing tails, and validates every pick; the strategy only
+decides who is next. Hold that line and a new routing shape stays three edits and a
+test. Cross it, into I/O or text parsing, and you have given up the one property
+that made strategies easy to get right.
 
 ## Related
 
