@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createRoomDriver } from "../../src/room.ts";
-import type { Mind, RoomConfig, RoomStrategyName } from "../../src/types.ts";
+import type { Mind, Room, RoomConfig, RoomStrategyName, TurnEntry } from "../../src/types.ts";
 import {
   abortableRunAgentTurn,
   fixedClock,
@@ -14,6 +14,12 @@ import {
   type TurnScript,
   throwingThenAbortable,
 } from "../helpers/fakes.ts";
+
+// onRoomClosed signals via an async transcript read, so poll briefly for the signal.
+async function waitForLen(arr: readonly unknown[], n: number, ms = 1000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (arr.length < n && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+}
 
 const MINDS: Mind[] = [
   { slug: "a", name: "Ada", role: "agent", persona: "You are Ada." },
@@ -829,7 +835,8 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
   function harness(
     opts: {
       scripts?: TurnScript[];
-      readSoul?: (slug: string) => Promise<string | undefined> | string | undefined;
+      composeTurnSystem?: (mind: Mind) => Promise<string> | string;
+      onRoomClosed?: (room: Room, transcript: readonly TurnEntry[]) => void;
       turnCwd?: string;
     } = {},
   ) {
@@ -841,7 +848,8 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
       publisher: pub.publisher,
       runAgentTurn: turns.run,
       minds: () => MINDS2,
-      ...(opts.readSoul ? { readSoul: opts.readSoul } : {}),
+      ...(opts.composeTurnSystem ? { composeTurnSystem: opts.composeTurnSystem } : {}),
+      ...(opts.onRoomClosed ? { onRoomClosed: opts.onRoomClosed } : {}),
       ...(opts.turnCwd ? { turnCwd: opts.turnCwd } : {}),
       now: fixedClock(),
       newId: seqIds(),
@@ -892,7 +900,9 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
   });
 
   test("CR-2: the turn system prompt is the full soul, not the tagline", async () => {
-    const h = harness({ readSoul: (slug) => `# ${slug}\n\nFull authored soul body for ${slug}.` });
+    const h = harness({
+      composeTurnSystem: (mind) => `# ${mind.slug}\n\nFull authored soul body for ${mind.slug}.`,
+    });
     await h.driver.start({ ...START2, topic: "Topic" });
     await h.driver.step("demo");
     const req = firstRequest(h.turns);
@@ -901,10 +911,35 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
   });
 
   test("CR-2: falls back to the roster tagline when no soul is readable", async () => {
-    const h = harness({ readSoul: () => undefined }); // soul miss
+    const h = harness({ composeTurnSystem: () => "" }); // composer yields nothing -> persona
     await h.driver.start({ ...START2, topic: "Topic" });
     await h.driver.step("demo");
     expect(firstRequest(h.turns).system).toBe("Ada — the tagline.");
+  });
+
+  test("CR-4: signals onRoomClosed once with the final transcript when a room completes", async () => {
+    const closed: Array<{ status: string; turns: number }> = [];
+    const h = harness({
+      onRoomClosed: (room, transcript) =>
+        closed.push({ status: room.status, turns: transcript.length }),
+    });
+    await h.driver.start({ ...START2, turnBudget: 2 });
+    await h.driver.step("demo");
+    await h.driver.step("demo"); // budget reached -> done
+    await waitForLen(closed, 1);
+    await h.driver.step("demo"); // a redundant step on a closed room must not re-signal
+    expect(closed).toHaveLength(1);
+    expect(closed[0]).toEqual({ status: "done", turns: 2 });
+  });
+
+  test("CR-4: signals onRoomClosed when an operator stops the room", async () => {
+    const closed: string[] = [];
+    const h = harness({ onRoomClosed: (room) => closed.push(room.status) });
+    await h.driver.start(START2);
+    await h.driver.step("demo");
+    await h.driver.stop("demo");
+    await waitForLen(closed, 1);
+    expect(closed).toEqual(["stopped"]);
   });
 
   test("CR-3: room turns run in the configured neutral cwd", async () => {
@@ -1616,7 +1651,7 @@ describe("room driver — concurrent (speak-parallel)", () => {
     expect(fake.settledSibling()).toBe(true); // and awaited to settle (not orphaned)
   });
 
-  test("a stop during the SOUL read cancels the round before any agent turn is invoked", async () => {
+  test("a stop during the identity compose cancels the round before any agent turn is invoked", async () => {
     const { store } = makeFakeStore();
     const pub = makeFakePublisher();
     const turns = scriptedRunAgentTurn([{ text: "should not run" }]);
@@ -1633,9 +1668,9 @@ describe("room driver — concurrent (speak-parallel)", () => {
       publisher: pub.publisher,
       runAgentTurn: turns.run,
       minds: () => MINDS,
-      readSoul: async () => {
+      composeTurnSystem: async () => {
         enterSoul();
-        await soulGate; // suspend the round inside the (async) SOUL read
+        await soulGate; // suspend the round inside the (async) identity compose
         return "soul";
       },
       now: fixedClock(),
