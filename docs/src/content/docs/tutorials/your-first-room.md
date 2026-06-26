@@ -139,6 +139,19 @@ That is a full room: two Minds authored, a sequential room run between them, a
 transcript read, and the room stopped. The driver did the routing, the Minds took
 their turns, and the budget kept it bounded.
 
+## What the Minds kept
+
+Closing the room did one more thing the transcript does not show. Each Mind that
+spoke ran a single reflection turn and curated its own durable memory from the room
+it just lived. Open one of them with `/mind {slug}`, or read its `memory.md` under
+`{keelson-home}/rib-chamber/minds/{slug}/`, and you will see what it chose to carry
+forward, which is a much smaller thing than the room transcript. The next room you
+convene that Mind into starts with that memory already in its prompt.
+
+This is the loop that makes a Mind more than a fresh prompt each time: it learns
+across rooms. [Minds and genesis](../../concepts/minds/#what-a-mind-remembers) covers
+what a Mind keeps and why.
+
 Next, convene a moderated room, where a Mind that never speaks decides who does.
 
 ## Related

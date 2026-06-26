@@ -28,9 +28,11 @@ board. One Mind hears another because the previous turn is already in the
 transcript the driver feeds to the next speaker. Addressing a specific Mind is
 advisory routing, never a delivered message.
 
-Each turn is stateless. The driver rebuilds the speaker's context from the room's
-transcript every turn, so a Mind carries no hidden session from one turn to the
-next.
+Each turn is stateless. The driver rebuilds the speaker's context every turn from
+the room's transcript and the Mind's own durable memory and rules, so a Mind carries
+no hidden session from one turn to the next. That memory is files you can read, not a
+live session, and a Mind curates it for itself when the room closes (see
+[Minds and genesis](../minds/)).
 
 ## A strategy controls turn-taking, not thought
 
@@ -117,6 +119,12 @@ room has a turn budget with a hard ceiling, and starting a room from chat is a
 confirm-gated dry run by default: the tool reports what it would run and starts
 nothing until you approve. This keeps an over-large or accidental room from
 launching a runaway sequence of paid turns.
+
+The close spends a little more. When a room ends, each Mind that spoke runs one
+reflection turn to curate its own memory from the room it just lived. That is one
+billed turn per speaker, only for Minds that actually spoke, and it fails closed
+without touching memory if anything goes wrong. See
+[How minds remember](../../design/how-minds-remember/) for the gate and its limits.
 
 ## Many rooms, each its own panel
 
