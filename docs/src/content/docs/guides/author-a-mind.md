@@ -25,7 +25,7 @@ From chat, use the slash command:
 From the CLI, run the workflow directly:
 
 ```bash
-keelson workflow run chamber-genesis "a meticulous release manager who tracks every open PR"
+keelson workflow run chamber-genesis --arguments "a meticulous release manager who tracks every open PR"
 ```
 
 The turn reads your brief, decides the Mind's name, a short role title, and its
