@@ -220,11 +220,11 @@ a lone planner cannot.
   build implements it, the same plan-then-build handoff
   [Many minds, one plan](../many-minds-one-plan/) reviews from the other side.
 - **Or let a Mind build it, in a coding room.** A coding room (started with
-  `coding: true`) lifts the text-only default: a Mind that declares the `code`
-  capability can run Read, Edit, Write, and Bash, confined to a project you target
-  when the room starts. Author a build engineer, pin it to a gpt-class model (direct
-  coding is its strength), give it `code`, and convene a coding room pointed at your
-  project. Hand it the manager's plan and ask it to implement the app. Because the
+  `coding: true`) lifts the text-only default: a Mind that declares the `read` and
+  `code` capabilities can read files and run Bash, Edit, and Write, confined to a
+  project you target when the room starts. Author a build engineer, pin it to a
+  gpt-class model (direct coding is its strength), give it `read` and `code`, and
+  convene a coding room pointed at your project. Hand it the manager's plan and ask it to implement the app. Because the
   room is rooted in your project, the Mind reads not just the plan but whatever build
   guidance the project ships, and writes the app into the tree inside the room's
   confinement boundary. (The `keelson-sample` template, for instance, carries a set
