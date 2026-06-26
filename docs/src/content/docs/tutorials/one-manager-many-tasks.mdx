@@ -5,6 +5,9 @@ sidebar:
   order: 5
 ---
 
+import { Image } from "astro:assets";
+import magenticShot from "../../../assets/figures/magentic-loop.png";
+
 In [Many minds, one plan](../many-minds-one-plan/) a room *reviewed* a plan
 someone else wrote: a moderator drove a panel to red-team a contract and catch its
 defects. This tutorial uses a different shape for the opposite job, *producing* the
@@ -41,6 +44,13 @@ cannot afford: a **gap** the build then has to guess at, and an **overlap** the
 build implements twice. A manager fixes both by *assigning*. It decides the lanes
 up front, and each worker owns exactly one, so coverage is complete and nothing is
 said twice.
+
+The whole room is that one loop, drawn here before you run it:
+
+<figure>
+  <Image src={magenticShot} alt="A flow diagram titled How a magentic room plans. A Manager (plans, never builds) decomposes the goal into a Task ledger of tasks, each assigned to a worker that owns one lane (Design lane, Frontend lane); workers settle their tasks back into the ledger; a coverage check asks whether every task is settled and the goal is covered. If yes the room closes with a complete plan; if no, a dashed loop returns to the manager to replan the gap and assign again." />
+  <figcaption>Figure 1. The magentic loop. The manager decomposes the goal into a ledger and assigns each task to the worker that owns that lane; when the ledger settles it either closes or loops back to replan the gap.</figcaption>
+</figure>
 
 ## Author a manager and workers
 
