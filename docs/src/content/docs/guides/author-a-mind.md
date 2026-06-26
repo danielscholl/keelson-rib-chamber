@@ -63,7 +63,7 @@ A Mind is a directory under the rib's data home,
 | `SOUL.md` | The founding identity, authored by the turn: a **Persona**, a **Mission**, and a **Voice** section. This is the system prompt the Mind runs under. |
 | `mind.json` | The structured roster record: slug, name, role, voice, the one-line tagline, and any declared capabilities. |
 | `AGENT.md` | A seeded operating doctrine: take one turn at a time, stay in character, never claim another speaker's identity. |
-| `memory.md`, `rules.md` | Seeded empty. Ordinary files you edit to give the Mind durable memory and operating rules; nothing writes to them automatically. |
+| `memory.md`, `rules.md` | Seeded empty. `rules.md` is operator-authored. `memory.md` you can edit too, but the Mind also rewrites it for itself when a room closes (see [What a Mind remembers](../../concepts/minds/#what-a-mind-remembers)). |
 | `log.md` | Seeded with one entry recording the genesis. |
 
 The slug is the directory name and the Mind's stable identity everywhere else. It

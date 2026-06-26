@@ -37,9 +37,9 @@ if `mind.json` carries a divergent `slug`, the directory name wins on read.
 | `mind.json` | authored | the `MindRecord` (see below) |
 | `SOUL.md` | authored | a Persona / Mission / Voice document |
 | `AGENT.md` | seeded | operating doctrine for a room turn |
-| `memory.md` | seeded | working memory, starts empty |
-| `rules.md` | seeded | operating rules, starts empty |
-| `log.md` | seeded | a log, with one genesis entry |
+| `memory.md` | seeded, then reflected | durable memory, starts empty; rewritten by the close-only reflection pass |
+| `rules.md` | seeded | operating rules, starts empty; operator-authored only |
+| `log.md` | seeded, then reflected | a log: one genesis entry, one line appended per reflection |
 
 `mind.json` is a `MindRecord`:
 
@@ -59,8 +59,14 @@ if `mind.json` carries a divergent `slug`, the directory name wins on read.
 via workflow inputs, and the roster **Set model…** action can update or clear the
 pin later. `tools` is an optional array of capability slugs, written only when
 non-empty. `SOUL.md` holds the three named sections. `memory.md` and `rules.md`
-are seeded empty and stay empty until you edit them: they are ordinary
-operator-edited files, and nothing writes to them automatically.
+are seeded as empty templates and `log.md` with a single genesis line; all three
+are ordinary inspectable files you can edit. `memory.md` and `log.md` are also
+written by the rib: when a room closes, each Mind that spoke runs a reflection turn
+that rewrites its `memory.md` in place and appends one line to `log.md` (see
+[How minds remember](../../design/how-minds-remember/)). `rules.md` is
+operator-authored only, never written by reflection. `memory.md` is capped at 4000
+characters, and a reflection that would exceed the cap is rejected with the prior
+memory kept; `log.md` keeps the newest 50 entries, each at most 280 characters.
 
 ### Slug rules
 
@@ -232,4 +238,5 @@ build these boards from the records above and publish them on its
 - [The Chamber surface](../surface/): the snapshot keys these records publish to.
 - [Minds and genesis](../../concepts/minds/): how a Mind directory is authored.
 - [Rooms and strategies](../../concepts/rooms/): how the transcript is written.
+- [How minds remember](../../design/how-minds-remember/): what rewrites `memory.md` and appends to `log.md`.
 - [Keelson snapshots](https://danielscholl.github.io/keelson/docs/reference/snapshots/): the canvas board contract and renderer.

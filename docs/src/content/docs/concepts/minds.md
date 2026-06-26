@@ -36,10 +36,11 @@ Keelson conversation, which follows Keelson's chat and provider-session semantic
 :::
 
 That distinction is the room's trust model. Because a room turn is rebuilt every time,
-what a Mind brings to it is exactly what you can read in its soul and the transcript,
-with nothing accumulating invisibly between turns. It also makes the
-[driver-as-router](../rooms/) model easy to follow later: the driver holds the state,
-and the Mind is invoked into it.
+what a Mind brings to it is exactly what you can read: its soul, its durable memory, and
+the transcript, with nothing accumulating invisibly between turns. Its memory does grow
+across rooms, but only through an explicit reflection pass that writes a file you can
+read, never a hidden session. It also makes the [driver-as-router](../rooms/) model easy
+to follow later: the driver holds the state, and the Mind is invoked into it.
 
 ## What defines a Mind
 
@@ -65,6 +66,27 @@ reach a tool the room does not already permit, even through a hand-edited record
 [Lenses](../lenses/) for what the `lens` capability authorizes, and
 [Per-Mind capabilities](../../design/per-mind-capabilities/) for how `read` and `code`
 enter the pool only when `room.coding` is enabled.
+
+## What a Mind remembers
+
+A Mind carries durable memory across rooms. Its `memory.md` holds what it has learned,
+and its `rules.md` holds how it has decided to operate. Both are folded into the system
+prompt of every room turn, alongside its identity, so a Mind does not start each room
+amnesiac and an attributable perspective stays consistent across the rooms you convene
+it into.
+
+You do not have to maintain that memory by hand. When a room closes, each Mind that
+spoke runs one reflection turn over what it just lived and curates its own `memory.md`:
+it keeps the few durable facts worth carrying into a different room and drops the rest.
+The read into a turn costs nothing; the write is a single billed turn at the close.
+Identity never changes this way. Reflection writes memory, never the `SOUL.md` that
+defines the Mind.
+
+You can still read, edit, or prune `memory.md` and `rules.md` yourself at any time, the
+same as any other file in the directory. See
+[How minds remember](../../design/how-minds-remember/) for why reflection runs only at
+the close and how it fails closed, and [Data on disk](../../reference/data-on-disk/) for
+the files and their size caps.
 
 ## Genesis: authoring a Mind from a brief
 
@@ -111,12 +133,14 @@ Each Mind is a directory under the rib's data home,
   a one-line tagline, an optional model and provider pin, and any capability slugs the
   Mind declared.
 - `AGENT.md` is a short operating doctrine, seeded at genesis.
-- `memory.md`, `rules.md`, and `log.md` are working documents. Genesis seeds them
+- `memory.md`, `rules.md`, and `log.md` are working documents, seeded at genesis
   (memory and rules as empty templates, the log with a single genesis line). They are
-  ordinary inspectable files you edit, not a hidden memory the agent writes to itself:
-  nothing updates them between turns. Operator-authored content in them is folded into
-  the system prompt when you open the Mind in a direct chat, durable memory and rules
-  first, then the recent log.
+  ordinary inspectable files you can read, edit, or prune. `memory.md` and `log.md` are
+  also written by the Mind itself: a room's close runs a reflection pass that rewrites
+  `memory.md` and appends a line to `log.md` (see
+  [What a Mind remembers](#what-a-mind-remembers)). `rules.md` is operator-authored only.
+  A Mind's durable memory and rules are folded into its room turns and into a direct
+  chat; the recent log is folded into the direct chat.
 
 Because a Mind is just files, it is cheap to create, easy to inspect, and versionable
 in git. The slug is the directory name and the Mind's stable identity everywhere else:
