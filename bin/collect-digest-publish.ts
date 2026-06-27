@@ -15,23 +15,28 @@ import { hasDigestContent, readChamberRecords, reduceChamberState } from "../src
 import { readDigest, resolveDigestPublishBoard } from "../src/digest-store.ts";
 import { chamberDataHome } from "../src/paths.ts";
 
-async function main() {
-  const home = process.argv[2]?.trim() || chamberDataHome();
-  const record = await readDigest(home).catch(() => null);
-  // Suppress a stored board only when the stores confirm an empty chamber; a read error
-  // leaves hasContent true so a transient fault never blanks a populated digest.
-  let hasContent = true;
+// Whether the live chamber holds any Mind/room/lens. A store read error assumes content,
+// so a transient fault never blanks a populated digest — suppression is for a confirmed
+// empty chamber only.
+async function chamberHasContent(home: string): Promise<boolean> {
   try {
     const { minds, rooms, lenses } = await readChamberRecords({
       mindsDir: join(home, "minds"),
       roomsDir: join(home, "rooms"),
       lensesDir: join(home, "lenses"),
     });
-    hasContent = hasDigestContent(reduceChamberState(minds, rooms, lenses));
+    return hasDigestContent(reduceChamberState(minds, rooms, lenses));
   } catch {
-    hasContent = true;
+    return true;
   }
-  process.stdout.write(JSON.stringify(resolveDigestPublishBoard(record, hasContent)));
+}
+
+async function main() {
+  const home = process.argv[2]?.trim() || chamberDataHome();
+  const record = await readDigest(home).catch(() => null);
+  process.stdout.write(
+    JSON.stringify(resolveDigestPublishBoard(record, await chamberHasContent(home))),
+  );
 }
 
 await main();
