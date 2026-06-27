@@ -102,15 +102,34 @@ describe("collect-digest-gate", () => {
 });
 
 describe("collect-digest-publish", () => {
-  test("emits the stored board when a digest exists", async () => {
+  test("emits the stored board while the chamber has content", async () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-digest-publish-"));
     try {
+      await seedMind(home, "ada", "Ada");
       const board: CanvasBoardView = { view: "board", title: "Authored", sections: [] };
       await writeDigest({ board, fingerprint: "fp" }, home);
       const { out, code } = await run(PUBLISH, home);
       expect(code).toBe(0);
       const published = JSON.parse(out) as CanvasBoardView;
       expect(published.title).toBe("Authored");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to the cold board once the chamber empties (no stale population)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-digest-publish-"));
+    try {
+      // A board authored when Minds existed, persisted; the Minds are then gone (empty
+      // store). The gate won't re-author an empty chamber, so the publish tick must not
+      // keep showing the stale board that still names them.
+      const board: CanvasBoardView = { view: "board", title: "Authored", sections: [] };
+      await writeDigest({ board, fingerprint: "stale" }, home);
+      const { out, code } = await run(PUBLISH, home);
+      expect(code).toBe(0);
+      const published = JSON.parse(out) as CanvasBoardView;
+      expect(published.title).not.toBe("Authored");
+      expect(out).toContain("Warming up");
     } finally {
       await rm(home, { recursive: true, force: true });
     }

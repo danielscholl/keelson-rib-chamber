@@ -8,6 +8,7 @@ import {
   type DigestRecord,
   digestFile,
   readDigest,
+  resolveDigestPublishBoard,
   writeDigest,
 } from "../src/digest-store.ts";
 
@@ -81,5 +82,20 @@ describe("digest store", () => {
     expect(cold.view).toBe("board");
     expect(cold.title).toBe("Digest");
     expect(cold.sections.length).toBeGreaterThan(0);
+  });
+
+  describe("resolveDigestPublishBoard", () => {
+    test("keeps the stored board while the chamber has content", () => {
+      expect(resolveDigestPublishBoard(record(), true)).toBe(board);
+    });
+
+    test("falls back to the cold board once the chamber is empty", () => {
+      expect(resolveDigestPublishBoard(record(), false)).toEqual(coldStartDigestBoard());
+    });
+
+    test("cold board when no digest exists, regardless of content", () => {
+      expect(resolveDigestPublishBoard(null, true)).toEqual(coldStartDigestBoard());
+      expect(resolveDigestPublishBoard(null, false)).toEqual(coldStartDigestBoard());
+    });
   });
 });
