@@ -46,6 +46,19 @@ export function coldStartDigestBoard(): CanvasBoardView {
   };
 }
 
+// Which board the publish tick emits. The persisted board is the last agent-authored
+// synthesis, but the gate withholds a re-author once the chamber empties (hasDigestContent
+// false → no paid turn), so a stored board would otherwise keep naming Minds/rooms/lenses
+// that are gone. When the live chamber has no content, fall back to the cold board so the
+// panel can't assert a stale population; a populated chamber keeps its authored board.
+export function resolveDigestPublishBoard(
+  record: DigestRecord | null,
+  hasContent: boolean,
+): CanvasBoardView {
+  if (!hasContent) return coldStartDigestBoard();
+  return record?.board ?? coldStartDigestBoard();
+}
+
 // Tolerant read: a missing/corrupt/torn file — or one missing the board or fingerprint —
 // degrades to null (cold start) rather than throwing, the same fail-soft contract
 // readWatermark / readMinds keep. The board is only structurally checked here (an
