@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.1...v0.10.2) (2026-06-27)
+
+
+### Fixed
+
+* **digest:** cold-start the digest board once the chamber empties ([#143](https://github.com/danielscholl/keelson-rib-chamber/issues/143)) ([4007dc2](https://github.com/danielscholl/keelson-rib-chamber/commit/4007dc2d213c6a3b3ed54aa2016bd7ea33bfe4f6))
+
+
+### Documentation
+
+* add what you proved sections to moderated-room and first-room ([#141](https://github.com/danielscholl/keelson-rib-chamber/issues/141)) ([b7acd90](https://github.com/danielscholl/keelson-rib-chamber/commit/b7acd906c49da06b692f50e8f695adf17a8e0458))
+
 ## [0.10.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.0...v0.10.1) (2026-06-26)
 
 
