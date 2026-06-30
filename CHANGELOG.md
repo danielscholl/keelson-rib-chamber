@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.2...v0.10.3) (2026-06-30)
+
+
+### Documentation
+
+* add upstream copyright line to Chamber NOTICE ([#144](https://github.com/danielscholl/keelson-rib-chamber/issues/144)) ([4257d7c](https://github.com/danielscholl/keelson-rib-chamber/commit/4257d7c3b4f71e5ada981c426f42b298da09de7e))
+
 ## [0.10.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.1...v0.10.2) (2026-06-27)
 
 
