@@ -34,14 +34,14 @@ Into an installed Keelson (the managed home at `~/.keelson`):
 
 ```bash
 keelson rib add https://github.com/danielscholl/keelson-rib-chamber
-keelson start
+keelson restart
 ```
 
 To remove it later, uninstall by its rib id and restart:
 
 ```bash
 keelson rib remove chamber
-keelson stop && keelson start
+keelson restart
 ```
 
 ## Requirements
