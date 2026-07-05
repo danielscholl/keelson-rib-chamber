@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { CanvasBoardView } from "@keelson/shared";
 import { createRoomDriver } from "../../src/room.ts";
 import type { Mind, Room, RoomConfig, RoomStrategyName, TurnEntry } from "../../src/types.ts";
 import {
@@ -19,6 +20,19 @@ import {
 async function waitForLen(arr: readonly unknown[], n: number, ms = 1000): Promise<void> {
   const deadline = Date.now() + ms;
   while (arr.length < n && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+}
+
+// The debate feed lives nested inside the columns section's main (first) column,
+// as its one rows section — not a top-level board.sections entry. Throws (never
+// silently degrades to []) when that shape is missing, so a regression that
+// stops emitting the columns/rows section fails loudly instead of reading as
+// "correctly empty".
+function debateRows(board: CanvasBoardView) {
+  const columns = board.sections.find((s) => s.kind === "columns");
+  if (columns?.kind !== "columns") throw new Error("expected a columns section");
+  const feed = columns.columns[0]?.sections[0];
+  if (feed?.kind !== "rows") throw new Error("expected the debate feed");
+  return feed.items;
 }
 
 const MINDS: Mind[] = [
@@ -120,8 +134,7 @@ describe("room driver — lifecycle", () => {
     expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(0);
     const reopened = h.pub.last();
     if (reopened?.view !== "board") throw new Error("expected a board view");
-    const reopenedRows = reopened.sections.find((s) => s.kind === "rows");
-    expect(reopenedRows?.kind === "rows" ? reopenedRows.items : []).toHaveLength(0);
+    expect(debateRows(reopened)).toHaveLength(0);
 
     await h.driver.step("demo");
     expect(h.turns.requests[1]?.prompt ?? "").not.toContain("old done reply");
@@ -138,8 +151,7 @@ describe("room driver — lifecycle", () => {
     await h.driver.start(START);
     const reopened = h.pub.last();
     if (reopened?.view !== "board") throw new Error("expected a board view");
-    const reopenedRows = reopened.sections.find((s) => s.kind === "rows");
-    expect(reopenedRows?.kind === "rows" ? reopenedRows.items : []).toHaveLength(0);
+    expect(debateRows(reopened)).toHaveLength(0);
 
     await h.driver.step("demo");
     expect(h.turns.requests[0]?.prompt ?? "").not.toContain("old director note");
@@ -662,13 +674,14 @@ describe("room driver — settle (I/O + reservation)", () => {
     await stepP;
     const last = pub.last();
     if (last?.view !== "board") throw new Error("expected a board view");
-    const rows = last.sections.find((s) => s.kind === "rows");
-    const texts = rows?.kind === "rows" ? rows.items.map((i) => i.text) : [];
+    const texts = debateRows(last).map((i) => i.text);
     // Exact ordered rows: the concurrently-injected director note (appended first,
-    // mid-turn) then the turn's reply. Asserting the full ordered sequence — not an
-    // order/count-insensitive toContain — catches a cache/disk divergence (a
-    // double-counted or mis-ordered entry) the looser check would miss.
-    expect(texts).toEqual(["director note", "agent reply"]);
+    // mid-turn, uncarried by any round), a "Round 1" divider (the agent reply is
+    // the first round-stamped entry), then the turn's reply. Asserting the full
+    // ordered sequence — not an order/count-insensitive toContain — catches a
+    // cache/disk divergence (a double-counted or mis-ordered entry) the looser
+    // check would miss.
+    expect(texts).toEqual(["director note", "Round 1", "agent reply"]);
   });
 
   test("concurrent starts of different slugs both open (no shared reservation)", async () => {
@@ -776,9 +789,12 @@ describe("room driver — driver-API soundness", () => {
     expect(await fresh).toBe("advanced");
     const last = pub.last();
     if (last?.view !== "board") throw new Error("expected a board view");
-    const rows = last.sections.find((s) => s.kind === "rows");
-    const items = rows?.kind === "rows" ? rows.items : [];
-    expect(items).toHaveLength(1); // only the fresh reply — the stale entry was gated out
+    const items = debateRows(last);
+    // A "Round 1" divider (the fresh reply is the generation's first round-stamped
+    // entry) plus the one fresh reply — the stale entry was gated out. The fake
+    // always settles "STALE-GEN1" regardless of which turn released it; only its
+    // PROMPT (asserted above) proves the stale reply never entered this context.
+    expect(items.map((i) => i.text)).toEqual(["Round 1", "STALE-GEN1"]);
   });
 
   test("a stale turn that drained to disk before a same-slug restart is not pulled into the new room", async () => {
@@ -808,8 +824,7 @@ describe("room driver — driver-API soundness", () => {
     // resumed turnIndex both start clean.
     const last = pub.last();
     if (last?.view !== "board") throw new Error("expected a board view");
-    const rows = last.sections.find((s) => s.kind === "rows");
-    const items = rows?.kind === "rows" ? rows.items : [];
+    const items = debateRows(last);
     expect(items).toHaveLength(0); // fresh room, no carried-over history
     expect((await store.loadRoom("demo"))?.turnIndex).toBe(0);
   });
@@ -1606,8 +1621,7 @@ describe("room driver — concurrent (speak-parallel)", () => {
     const last = h.pub.last();
     if (last?.view !== "board") throw new Error("expected a board view");
     expect(last.header?.status?.label).toBe("stopped");
-    const rows = last.sections.find((s) => s.kind === "rows");
-    const items = rows?.kind === "rows" ? rows.items : [];
+    const items = debateRows(last);
     // The gen-1 batch was gated out of the board — the only feed row is the
     // termination marker the stopped frame carries.
     expect(items).toHaveLength(1);

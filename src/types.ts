@@ -2,7 +2,38 @@
 // Rib-internal types — only canvas boards cross the wire, so these stay plain TS
 // (no Zod). None exist in @keelson/shared; they are defined here.
 
+import type { CanvasTone, TokenUsage } from "@keelson/shared";
+
 export type MindSlug = string;
+
+export const IDENTITY_SLOT_COUNT = 5;
+
+// The host's reserved identity tones (keelson#390), in slot order. A Mind keeps
+// one hue for life (assigned at genesis, persisted on the record); anything
+// without a valid slot folds to neutral + name — never a hash, never a status
+// hue. Mirrors squad's IDENTITY_SLOT_TONES so the two ribs agree on the ramp.
+export const IDENTITY_SLOT_TONES: readonly CanvasTone[] = [
+  "id-blue",
+  "id-amber",
+  "id-teal",
+  "id-rose",
+  "id-olive",
+];
+
+export function identityToneForSlot(slot: number | undefined): CanvasTone {
+  return typeof slot === "number" &&
+    Number.isInteger(slot) &&
+    slot >= 0 &&
+    slot < IDENTITY_SLOT_COUNT
+    ? IDENTITY_SLOT_TONES[slot]!
+    : "neutral";
+}
+
+export function identitySlotForIndex(index: number): number {
+  const slot = Math.trunc(index);
+  if (!Number.isFinite(slot)) return 0;
+  return Math.min(Math.max(0, slot), IDENTITY_SLOT_COUNT - 1);
+}
 
 // The two non-Mind authorities that may author a transcript entry. The driver is
 // the sole authority for `from`; an agent never self-asserts identity.
@@ -24,6 +55,11 @@ export interface Mind {
   // Capability slugs this Mind may invoke — NOT C1 tool descriptors. Omitting
   // tools yields a text-only turn (the room default).
   tools?: readonly string[];
+  // The Mind's host identity-tone slot (keelson#390), assigned once at genesis
+  // in author order and persisted — never reassigned, never hashed per render.
+  // Absent on a Mind authored before this field existed; identityToneForSlot
+  // folds that to neutral rather than inventing a slot retroactively.
+  identitySlot?: number;
 }
 
 export interface TurnEntry {
@@ -36,6 +72,11 @@ export interface TurnEntry {
   parts: { text: string }[];
   aborted?: boolean;
   at: string;
+  // The turn's token usage, straight from RibAgentTurnResult.usage — absent when
+  // the provider reported none (a text-only stream, an aborted/pre-stream
+  // failure) or on a turn recorded before this field existed. Additive: the
+  // board sums whatever entries carry it rather than requiring a complete set.
+  usage?: TokenUsage;
 }
 
 export type RoomStrategyName =

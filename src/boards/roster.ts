@@ -1,44 +1,24 @@
 import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
-import { stableHash } from "../genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
-import type { Mind } from "../types.ts";
+import { identityToneForSlot, type Mind } from "../types.ts";
 
-// The full canvas tone ramp, used to give each Mind a deterministic identity dot
-// hashed from its slug — a stable per-Mind hue, not a status.
-const DOT_TONES = [
-  "ok",
-  "warn",
-  "error",
-  "info",
-  "caution",
-  "brand",
-  "accent",
-  "neutral",
-] as const satisfies readonly CanvasTone[];
-
-// stableHash returns a base-36 string; parsing it back at radix 36 recovers the
-// integer to mod across the ramp, so distinct slugs spread across the tones.
-function dotFor(slug: string): CanvasTone {
-  return DOT_TONES[Number.parseInt(stableHash(slug), 36) % DOT_TONES.length]!;
-}
-
-// The Chamber pulse, the optional `stats` section the roster leads with: the one
-// "for you" signal (a waiting briefing) plus the three at-a-glance counts. Built by
-// both the in-process gate and the out-of-process roster collector from one
-// buildChamberState read, so it stays a plain shape here (no store import).
+// The Chamber pulse: the one "for you" signal (a waiting briefing) the roster
+// leads with. The three at-a-glance counts a prior version carried here (active
+// rooms, live lenses, minds) each already read once elsewhere — the roster's own
+// header chip, the Rooms region's header, the Lenses region's header — so
+// repeating them here was the "4 minds in six places" finding; this pulse says
+// only the one fact nothing else surfaces.
 export interface RosterPulse {
   forYou: boolean;
-  activeRooms: number;
-  liveLenses: number;
-  minds: number;
 }
 
 // Pure: a roster of Minds -> a canvas `board`. Zero Minds renders a cold-start
 // launchpad (author the first Mind); >=1 renders one card per Mind (Enter inline,
 // Retire in the overflow) plus the Convene-a-room composer at >=2. `draftExcluded`
 // is the server-side draft (deselected slugs) the chips reflect — absent/empty means
-// all Minds selected. `pulse`, when present, leads the board with a calm stats
-// section (the Chamber pulse); omitted keeps the historical no-stats shape.
+// all Minds selected. `pulse`, when present AND waiting, leads the board with one
+// quiet line; omitted or quiet renders no pulse section at all — an idle Chamber
+// shows nothing rather than a row of empty tiles.
 // Validated against canvasViewSchema in tests; the producer never parses (validation
 // lives at the binding edge).
 export function buildRosterBoard(
@@ -81,16 +61,24 @@ export function buildRosterBoard(
             placeholder: "What should they discuss? (optional)",
             multiline: true,
           },
+          // Free text, not a picker — a board action field has no select widget.
+          // conveneAction resolves it by id OR name against the host's project
+          // list (the same "id or name" convention squad's tools use), so the
+          // room's `projectId` gets stamped without a new host affordance.
+          {
+            name: "project",
+            label: "Project (optional)",
+            placeholder: "name or id — leave blank for none",
+          },
         ],
       });
     }
     sections.push({ kind: "actions", title: "Convene a room", items });
   }
 
-  // The pulse leads the board: a Mind's first read is "is anything waiting for me?",
-  // so the for-you signal and the three counts sit above the cards. Calm by design —
-  // a zero count tones neutral so an idle Chamber doesn't shout.
-  if (pulse) sections.unshift(pulseSection(pulse));
+  // The one waiting-for-you signal, when true — a Mind's first read is "is
+  // anything waiting for me?" — leads the board. Nothing renders when quiet.
+  if (pulse?.forYou) sections.unshift(forYouSection());
 
   return {
     view: "board",
@@ -106,32 +94,18 @@ export function buildRosterBoard(
   };
 }
 
-// The pulse `stats` section: exactly four calm items. "For you" reads "1 waiting"
-// (brand) when a briefing is promoted, "—" (neutral) otherwise; the three counts
-// tone bright when non-zero and neutral when zero so an idle Chamber stays quiet.
-function pulseSection(pulse: RosterPulse): CanvasBoardView["sections"][number] {
-  const toned = (n: number, tone: CanvasTone): CanvasTone => (n > 0 ? tone : "neutral");
+function forYouSection(): CanvasBoardView["sections"][number] {
   return {
-    kind: "stats",
-    items: [
-      {
-        label: "For you",
-        value: pulse.forYou ? "1 waiting" : "—",
-        sub: "Briefing",
-        tone: pulse.forYou ? ("brand" as CanvasTone) : ("neutral" as CanvasTone),
-      },
-      { label: "Active work", value: pulse.activeRooms, tone: toned(pulse.activeRooms, "ok") },
-      { label: "Live views", value: pulse.liveLenses, tone: toned(pulse.liveLenses, "accent") },
-      { label: "Team", value: pulse.minds, tone: toned(pulse.minds, "brand") },
-    ],
+    kind: "rows",
+    items: [{ glyph: "brand", text: "A briefing is waiting for you.", trailing: "Briefing" }],
   };
 }
 
-// One Mind -> one card: a hashed identity dot, the role in a single pill, persona
+// One Mind -> one card: its host identity-tone dot (keelson#390, assigned once
+// at genesis — see identityToneForSlot), the role in a single pill, persona
 // (and model when set) as fields, and two actions — Enter (the primary verb, a
 // non-destructive action the host renders inline on the card) and Retire (a
-// destructive overflow action with a confirm dialog). The slug
-// rides both action payloads + the dot hash.
+// destructive overflow action with a confirm dialog).
 function cardFor(mind: Mind) {
   const fields: { label: string; value: string }[] = [
     { label: "persona", value: truncate(mind.persona) },
@@ -139,7 +113,7 @@ function cardFor(mind: Mind) {
   if (mind.model) fields.push({ label: "model", value: mind.model });
   return {
     title: mind.name,
-    dot: dotFor(mind.slug),
+    dot: identityToneForSlot(mind.identitySlot),
     pill: { label: mind.role.trim() || "Mind" },
     fields,
     actions: [

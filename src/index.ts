@@ -83,11 +83,14 @@ import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "./room-dra
 import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, deriveRoomName, listRooms, sweepClosedRooms } from "./room-store.ts";
-import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
+import type { OutcomeSplit } from "./room-text.ts";
+import { splitOutcome } from "./room-text.ts";
+import { DEFAULT_END_VOTE_THRESHOLD, stripControlJson } from "./routing.ts";
 import { GENESIS_STARTERS } from "./starters.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
 import type { Mind, Room, RoomConfig, RoomStrategyName, TurnEntry } from "./types.ts";
+import { identitySlotForIndex } from "./types.ts";
 import { readWatermark, writeWatermark } from "./watermark-store.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
@@ -174,6 +177,20 @@ function resolveProject(projectId: string): Project | undefined {
 }
 function resolveProjectRoot(projectId: string): string | undefined {
   return resolveProject(projectId)?.rootPath;
+}
+function resolveProjectName(projectId: string): string | undefined {
+  return resolveProject(projectId)?.name;
+}
+// A free-text project reference (id or name, case-insensitive) resolved against
+// the host's project list — the same "id or name" convention squad's tools use
+// for project selection, since a board action field is free text, not a picker.
+function resolveProjectByNameOrId(input: string): Project | undefined {
+  const projects = getProjects?.() ?? [];
+  const trimmed = input.trim();
+  return (
+    projects.find((p) => p.id === trimmed) ??
+    projects.find((p) => p.name.toLowerCase() === trimmed.toLowerCase())
+  );
 }
 // The briefing gate's seams + state, captured in registerTools (the only hook with
 // the full ctx). The publisher routes the brief board to BRIEF_KEY; briefRunAgentTurn
@@ -1509,6 +1526,7 @@ const rib: Rib = {
         onRoomClosed,
         turnCwd: chamberDataHome(),
         resolveProjectRoot,
+        resolveProjectName,
         // When the lens seam is wired, let a Mind author a lens mid-room: the C1
         // turn seam resolves this name to the rib's registered chamber_emit_lens
         // def and projects it to the provider. Without it, room turns stay text-only.
@@ -1575,6 +1593,10 @@ const rib: Rib = {
         return roomDeleteAction(action);
       case "room-open":
         return roomOpenAction(action);
+      case "outcome-copy":
+        return outcomeCopyAction(action);
+      case "outcome-explore":
+        return outcomeExploreAction(action);
       case "retire-lens":
         return retireLensAction(action);
       case "lens-open":
@@ -2219,12 +2241,21 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
     return { ok: false, error: errText(e) };
   }
   const topic = asNonEmptyString(payload.topic) || undefined;
+  const projectInput = asNonEmptyString(payload.project);
+  const projectId = projectInput ? resolveProjectByNameOrId(projectInput)?.id : undefined;
+  if (projectInput && !projectId) {
+    return {
+      ok: false,
+      error: `unknown project "${projectInput}" — pick a project from the host's project list`,
+    };
+  }
   const res = await startRoom({
     name: deriveRoomName(topic, displayNames),
     strategy: "sequential",
     participants,
     turnBudget: DEFAULT_ROOM_TURN_BUDGET,
     topic,
+    ...(projectId ? { projectId } : {}),
   });
   if (res.ok) {
     await clearDraft().catch(() => {});
@@ -2329,11 +2360,81 @@ async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
     // A magentic room's plan lives in its ledger; load it so a reopened closed room
     // renders the Plan section, not just the transcript (the live board does the same).
     const ledger = room.strategy === "magentic" ? await store.loadLedger(resolved.slug) : undefined;
-    const board = buildRoomBoard(room, transcript, ledger);
+    const minds = await resolveMinds();
+    const projectName = room.projectId ? resolveProjectName(room.projectId) : undefined;
+    const board = buildRoomBoard(room, transcript, ledger, minds, projectName ?? room.projectId);
     await ensureRoomViewPublisher(sm, resolved.slug).publish(board);
     return {
       ok: true,
       data: { effect: "open-canvas", key: roomViewKey(resolved.slug), title: room.name },
+    };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+// Load a room's synthesized outcome document (the last agent turn, split at its
+// own `---`/`##` boundary — see room-text.ts). An error names why there isn't
+// one yet (no such room, or a room that hasn't produced a document) rather than
+// silently degrading, since both outcome actions are refused without one.
+async function loadRoomOutcome(
+  slug: string,
+): Promise<{ room: Room; outcome: OutcomeSplit } | { error: string }> {
+  const store = createFileRoomStore(roomsDir());
+  const room = await store.loadRoom(slug);
+  if (!room) return { error: `room '${slug}' not found` };
+  const transcript = await store.loadTranscript(slug);
+  const last = [...transcript].reverse().find((e) => e.role === "agent");
+  const text = last ? stripControlJson(last.parts.map((p) => p.text).join("\n")) : "";
+  const { outcome } = splitOutcome(text);
+  if (!outcome) return { error: `room '${slug}' has no synthesized outcome document yet` };
+  return { room, outcome };
+}
+
+// Copy the room's outcome document as markdown. The outcome card's field sets
+// this as its `copyAction` (canvas.ts): the host fetches it on click and writes
+// the returned string straight to the clipboard, so the full document never
+// rides the board payload — the same seam osdu's credential reveal uses.
+async function outcomeCopyAction(action: RibAction): Promise<RibActionResult> {
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  try {
+    const found = await loadRoomOutcome(resolved.slug);
+    if ("error" in found) return { ok: false, error: found.error };
+    return { ok: true, data: `## ${found.outcome.title}\n\n${found.outcome.body}` };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+// openChatSeedSchema's systemPrompt cap (@keelson/shared). OUTCOME_SEED_BUDGET
+// is headroom reserved for the framing preamble so the document body is
+// truncated by US in the common case; MAX_SEED_PROMPT is a hard backstop on
+// the FINAL assembled string (mirrors compose.ts's stackMindPrompt, which
+// every other seed-builder goes through) — a room with an unusually long
+// explicit name (roomStartSchema.name carries no length cap) must not blow
+// past the schema's own max and turn Explore-in-chat into a raw validation
+// error.
+const MAX_SEED_PROMPT = 8000;
+const OUTCOME_SEED_BUDGET = 7500;
+
+// Explore the outcome in a fresh chat — the same surface→chat handoff every ✦
+// "Explore in chat" verb uses (mirrors enterMindAction): seed a new
+// conversation with the document so the operator can interrogate it or draft
+// the next artifact from it.
+async function outcomeExploreAction(action: RibAction): Promise<RibActionResult> {
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  try {
+    const found = await loadRoomOutcome(resolved.slug);
+    if ("error" in found) return { ok: false, error: found.error };
+    const { room, outcome } = found;
+    const preamble = `The room "${room.name}" produced this outcome document. Help the operator explore it, answer questions about it, or draft the next artifact from it.\n\n## ${outcome.title}\n\n`;
+    const body = outcome.body.slice(0, Math.max(0, OUTCOME_SEED_BUDGET - preamble.length));
+    const systemPrompt = `${preamble}${body}`.slice(0, MAX_SEED_PROMPT);
+    return {
+      ok: true,
+      data: { effect: "open-chat", seed: { systemPrompt, name: outcome.title.slice(0, 80) } },
     };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2745,6 +2846,10 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
           : [];
         const model = rawModel?.trim();
         const provider = rawProvider?.trim();
+        // A Mind takes the next identity slot after the current roster, in author
+        // order — so a hand-authored genesis doesn't stack every Mind on slot 0
+        // (mirrors squad's member cast).
+        const existingCount = (await resolveMinds()).length;
         const record: MindRecord = {
           slug: slugify(name),
           name,
@@ -2754,6 +2859,7 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
           // authored tagline trimmed, not hard-cut.
           persona: tagline.trim(),
           createdAt: new Date().toISOString(),
+          identitySlot: identitySlotForIndex(existingCount),
           ...(model ? { model } : {}),
           ...(model && provider ? { provider } : {}),
           ...(knownTools.length > 0 ? { tools: knownTools } : {}),

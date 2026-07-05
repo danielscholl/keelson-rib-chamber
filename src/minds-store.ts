@@ -21,6 +21,10 @@ export interface MindRecord {
   provider?: string;
   tools?: readonly string[];
   createdAt: string;
+  // The Mind's host identity-tone slot (keelson#390), assigned once at genesis
+  // and persisted — see types.ts's identityToneForSlot. Absent on a Mind
+  // authored before this field existed.
+  identitySlot?: number;
 }
 
 const SEED_DOCS: Record<string, (r: MindRecord) => string> = {
@@ -90,6 +94,7 @@ export async function listMindRecords(
         ...(Array.isArray(rec.tools) && rec.tools.length > 0
           ? { tools: rec.tools.filter((t): t is string => typeof t === "string") }
           : {}),
+        ...(typeof rec.identitySlot === "number" ? { identitySlot: rec.identitySlot } : {}),
       });
     } catch {
       // skip non-Mind dirs / unreadable records
@@ -112,6 +117,7 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
     ...(r.model ? { model: r.model } : {}),
     ...(r.provider ? { provider: r.provider } : {}),
     ...(r.tools && r.tools.length > 0 ? { tools: r.tools } : {}),
+    ...(typeof r.identitySlot === "number" ? { identitySlot: r.identitySlot } : {}),
   }));
 }
 

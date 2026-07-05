@@ -1,3 +1,4 @@
+import type { TokenUsage } from "@keelson/shared";
 import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
 import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
@@ -69,6 +70,11 @@ export interface RoomDriverDeps {
   // means targeting is unavailable. NB: this sets cwd, not a filesystem boundary —
   // confinement is a separate host seam.
   resolveProjectRoot?: (projectId: string) => string | undefined;
+  // Resolve a room's targeted project to its display name, for the board's scope
+  // stat — a separate accessor from resolveProjectRoot (a path) so the board never
+  // renders a filesystem path as the operator-facing scope label. Omitted keeps a
+  // scoped room's chip showing the raw projectId as a fallback.
+  resolveProjectName?: (projectId: string) => string | undefined;
   // Tool names every room turn may invoke, forwarded as the turn's `tools` (the
   // C1 seam resolves them to the rib's registered defs). The rib decides what is
   // safe for a room turn — today the lens write seam, so a Mind can author a lens
@@ -129,6 +135,20 @@ export interface RoomDriver {
 }
 
 export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
+  // The most recently resolved roster, stashed as a side effect of the EXISTING
+  // per-turn deps.minds() calls below (never a new one of its own) — starts
+  // empty (a fresh room's first publish, before any turn, has no speaker to
+  // tone anyway). persistAndPublish reads this SYNCHRONOUSLY so a board publish
+  // never gains a new await on deps.minds(): several tests deliberately gate
+  // that seam to test turn-suspension timing, and publishing happens far more
+  // often than a turn resolves — awaiting it there would race those gates.
+  let cachedMinds: readonly Mind[] = [];
+  async function fetchMinds(): Promise<readonly Mind[]> {
+    const minds = await deps.minds();
+    cachedMinds = minds;
+    return minds;
+  }
+
   const controllers = new Map<MindSlug, AbortController>();
   // Rooms with a turn in flight. The serial gate: one turn at a time per room, so
   // two fire-and-return room-next calls cannot race the same turnIndex.
@@ -243,7 +263,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // ledger reaches the operator through.
     const ledger =
       room.strategy === "magentic" ? await deps.store.loadLedger(room.slug) : undefined;
-    await deps.publisher.publish(room.slug, buildRoomBoard(room, transcript, ledger));
+    const projectName = room.projectId ? deps.resolveProjectName?.(room.projectId) : undefined;
+    await deps.publisher.publish(
+      room.slug,
+      buildRoomBoard(room, transcript, ledger, cachedMinds, projectName ?? room.projectId),
+    );
   }
 
   // Commit a still-active room, unless a newer generation has superseded this op.
@@ -509,7 +533,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     gen: number,
     roster?: readonly Mind[],
   ): Promise<Mind | undefined> {
-    const minds = roster ?? (await deps.minds());
+    const minds = roster ?? (await fetchMinds());
     const mind = minds.find((m) => m.slug === mindSlug);
     if (mind) return mind;
     await appendEntry(
@@ -553,13 +577,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     mind: Mind,
     prompt: string,
     controller: AbortController,
-  ): Promise<{ text: string; aborted: boolean; errored: boolean } | "disposed"> {
+  ): Promise<
+    { text: string; aborted: boolean; errored: boolean; usage?: TokenUsage } | "disposed"
+  > {
     let text: string;
     let aborted: boolean;
     // Whether the turn errored or timed out (distinct from an operator abort). The
     // magentic assign path reads it to mark a task failed vs completed; the other
     // callers ignore it (an errored turn already surfaces via its error text).
     let errored = false;
+    let usage: TokenUsage | undefined;
     // The composed identity (authored soul + the Mind's durable memory & rules) is
     // the turn's system prompt; fall back to the roster tagline when a Mind has no
     // composer or no readable soul so the turn still runs in character. Skip the
@@ -619,11 +646,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         result.status === "error" || result.status === "timeout"
           ? (result.error ?? result.text ?? `turn ${result.status}`)
           : result.text;
+      usage = result.usage;
     }
     // Shutdown landed during the (uncancellable) turn — drop the late result so
     // nothing is appended or published after the rib is disposed.
     if (disposed) return "disposed";
-    return { text, aborted, errored };
+    return { text, aborted, errored, ...(usage ? { usage } : {}) };
   }
 
   // Build an agent-authored transcript entry (a Mind's turn) with driver-stamped
@@ -635,7 +663,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     roomSlug: MindSlug,
     turnIndex: number,
     fromSlug: MindSlug,
-    reply: { text: string; aborted: boolean },
+    reply: { text: string; aborted: boolean; usage?: TokenUsage },
     round: number,
   ): TurnEntry {
     return buildTurnEntry({
@@ -648,6 +676,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       round,
       messageId: newId(),
       at: now().toISOString(),
+      ...(reply.usage ? { usage: reply.usage } : {}),
     });
   }
 
@@ -670,11 +699,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     text: string,
     aborted: boolean,
     gen: number,
+    usage?: TokenUsage,
   ): Promise<boolean> {
     await appendEntry(
       room.slug,
       gen,
-      buildAgentEntry(room.slug, room.turnIndex, mind.slug, { text, aborted }, room.round),
+      buildAgentEntry(room.slug, room.turnIndex, mind.slug, { text, aborted, usage }, room.round),
     );
     return await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
@@ -753,7 +783,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     );
     const turn = await runOneTurn(room, mind, prompt, controller);
     if (turn === "disposed") return false;
-    return await commitTurn(room, mind, turn.text, turn.aborted, gen);
+    return await commitTurn(room, mind, turn.text, turn.aborted, gen, turn.usage);
   }
 
   // A concurrent round: run the round's speakers at once — each prompted from the
@@ -786,7 +816,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // Resolve every speaker up front against ONE roster read; an unknown one fails
     // the whole room closed (the single-speaker discipline) rather than running a
     // partial round.
-    const roster = await deps.minds();
+    const roster = await fetchMinds();
     const minds: Mind[] = [];
     for (const slug of slugs) {
       const mind = await resolveMindOrFailClosed(room, slug, gen, roster);
@@ -800,7 +830,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       directionInjection,
     );
     const turns = minds.map((m) => runOneTurn(room, m, prompt, controller));
-    let results: ({ text: string; aborted: boolean } | "disposed")[];
+    let results: ({ text: string; aborted: boolean; usage?: TokenUsage } | "disposed")[];
     try {
       results = await Promise.all(turns);
     } catch (err) {
@@ -814,7 +844,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       throw err;
     }
     if (results.some((r) => r === "disposed")) return false; // torn down mid-round
-    const replies = results as { text: string; aborted: boolean }[];
+    const replies = results as { text: string; aborted: boolean; usage?: TokenUsage }[];
 
     // One lock for the whole batch: append every reply in participant order, indices
     // running from the re-loaded current.turnIndex; the room then advances to that
@@ -879,7 +909,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
     const modTurn = await runOneTurn(room, moderator, modPrompt, controller);
     if (modTurn === "disposed") return false;
-    const modActive = await commitTurn(room, moderator, modTurn.text, modTurn.aborted, gen);
+    const modActive = await commitTurn(
+      room,
+      moderator,
+      modTurn.text,
+      modTurn.aborted,
+      gen,
+      modTurn.usage,
+    );
     if (!modActive) return false; // aborted/stopped, budget -> done, or superseded
 
     // Re-load so the speaker/synthesis turn advances from the moderator's commit,
@@ -923,7 +960,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
     const spkTurn = await runOneTurn(room, speakerMind, spkPrompt, controller);
     if (spkTurn === "disposed") return false;
-    return await commitTurn(afterMod, speakerMind, spkTurn.text, spkTurn.aborted, gen);
+    return await commitTurn(
+      afterMod,
+      speakerMind,
+      spkTurn.text,
+      spkTurn.aborted,
+      gen,
+      spkTurn.usage,
+    );
   }
 
   // The driver's speaker pick for a moderate step: the moderator's validated
@@ -1000,7 +1044,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   ): Promise<boolean> {
     const synthSlug = room.config?.synthesizer;
     if (synthSlug) {
-      const minds = await deps.minds();
+      const minds = await fetchMinds();
       const synth = minds.find((m) => m.slug === synthSlug);
       if (synth) {
         // Skip only if a stop superseded before synthesis starts (no phantom entry
@@ -1020,7 +1064,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
             room.slug,
             room.turnIndex,
             synth.slug,
-            { text: turn.text, aborted: turn.aborted },
+            { text: turn.text, aborted: turn.aborted, usage: turn.usage },
             room.round,
           ),
         );
@@ -1106,7 +1150,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       if (generationOf(room.slug) !== gen) return;
       await deps.store.saveLedger(room.slug, inProgress);
       const transcript = await loadCachedTranscript(room.slug);
-      await deps.publisher.publish(room.slug, buildRoomBoard(room, transcript, inProgress));
+      const projectName = room.projectId ? deps.resolveProjectName?.(room.projectId) : undefined;
+      await deps.publisher.publish(
+        room.slug,
+        buildRoomBoard(room, transcript, inProgress, cachedMinds, projectName ?? room.projectId),
+      );
     });
     const prompt = buildWorkerPrompt({
       ...(room.topic ? { topic: room.topic } : {}),
@@ -1139,7 +1187,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   async function commitLedgerTurn(
     room: Room,
     mind: Mind,
-    turn: { text: string; aborted: boolean; errored: boolean },
+    turn: { text: string; aborted: boolean; errored: boolean; usage?: TokenUsage },
     nextLedger: TaskLedger,
     gen: number,
   ): Promise<boolean> {
