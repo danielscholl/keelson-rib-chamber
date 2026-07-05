@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.3...v0.11.0) (2026-07-05)
+
+
+### Added
+
+* **board:** recompose the room view as a debate + decisions layout ([#151](https://github.com/danielscholl/keelson-rib-chamber/issues/151)) ([980212b](https://github.com/danielscholl/keelson-rib-chamber/commit/980212b87c469e53fcf312752825dff3e94737ea))
+
 ## [0.10.3](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.2...v0.10.3) (2026-06-30)
 
 
