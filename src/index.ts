@@ -2407,9 +2407,15 @@ async function outcomeCopyAction(action: RibAction): Promise<RibActionResult> {
   }
 }
 
-// Headroom under openChatSeedSchema's 8000-char systemPrompt cap, reserved for
-// the framing sentence so a long document is truncated by US, not by a schema
-// rejection that would surface as a raw validation error to the operator.
+// openChatSeedSchema's systemPrompt cap (@keelson/shared). OUTCOME_SEED_BUDGET
+// is headroom reserved for the framing preamble so the document body is
+// truncated by US in the common case; MAX_SEED_PROMPT is a hard backstop on
+// the FINAL assembled string (mirrors compose.ts's stackMindPrompt, which
+// every other seed-builder goes through) — a room with an unusually long
+// explicit name (roomStartSchema.name carries no length cap) must not blow
+// past the schema's own max and turn Explore-in-chat into a raw validation
+// error.
+const MAX_SEED_PROMPT = 8000;
 const OUTCOME_SEED_BUDGET = 7500;
 
 // Explore the outcome in a fresh chat — the same surface→chat handoff every ✦
@@ -2425,12 +2431,10 @@ async function outcomeExploreAction(action: RibAction): Promise<RibActionResult>
     const { room, outcome } = found;
     const preamble = `The room "${room.name}" produced this outcome document. Help the operator explore it, answer questions about it, or draft the next artifact from it.\n\n## ${outcome.title}\n\n`;
     const body = outcome.body.slice(0, Math.max(0, OUTCOME_SEED_BUDGET - preamble.length));
+    const systemPrompt = `${preamble}${body}`.slice(0, MAX_SEED_PROMPT);
     return {
       ok: true,
-      data: {
-        effect: "open-chat",
-        seed: { systemPrompt: `${preamble}${body}`, name: outcome.title.slice(0, 80) },
-      },
+      data: { effect: "open-chat", seed: { systemPrompt, name: outcome.title.slice(0, 80) } },
     };
   } catch (e) {
     return { ok: false, error: errText(e) };

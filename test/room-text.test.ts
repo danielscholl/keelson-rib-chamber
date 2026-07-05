@@ -84,7 +84,25 @@ describe("flattenMarkdown", () => {
   });
 
   test("passes short text through unchanged (module cap)", () => {
-    expect(flattenMarkdown("plain text").length).toBeLessThanOrEqual(4000);
+    expect(flattenMarkdown("plain text")).toBe("plain text");
+  });
+
+  test("never exceeds max even when the continuation note itself wouldn't fit", () => {
+    const long = "word ".repeat(200);
+    // The note text alone is ~45 chars — a max below that leaves no room for it.
+    const flattened = flattenMarkdown(long, 20);
+    expect(flattened.length).toBeLessThanOrEqual(20);
+    expect(flattened).not.toContain("continues");
+  });
+
+  test("never mistakes a bare asterisk (arithmetic, a glob) for italic emphasis", () => {
+    expect(flattenMarkdown("The throughput is 2 * 3 * 4 workers per shift.")).toBe(
+      "The throughput is 2 * 3 * 4 workers per shift.",
+    );
+    expect(flattenMarkdown("Match every *.ts file.")).toBe("Match every *.ts file.");
+    expect(flattenMarkdown("the *complete* set-membership oracle")).toBe(
+      "the complete set-membership oracle",
+    );
   });
 });
 
@@ -146,6 +164,17 @@ describe("parseDecisionMarkers", () => {
   test("empty on text with no markers", () => {
     expect(parseDecisionMarkers("just an ordinary turn")).toEqual([]);
   });
+
+  test("back-to-back markers with no prose between them degrade to an empty gist, never bleeding into the next marker", () => {
+    const text = [
+      "**Q1 — Ship it. Pinned.**",
+      "**Q2 — Timeline. Pinned.**",
+      "**Q3 — Owner. Pinned.**",
+    ].join("\n");
+    const markers = parseDecisionMarkers(text);
+    expect(markers.map((m) => m.gist)).toEqual(["", "", ""]);
+    expect(markers.map((m) => m.question)).toEqual([1, 2, 3]);
+  });
 });
 
 describe("splitOutcome", () => {
@@ -203,5 +232,50 @@ describe("splitOutcome", () => {
     expect(receipt.criteria).toBe(2);
     expect(receipt.hasTestPlan).toBe(true);
     expect(receipt.hasOutOfScope).toBe(true);
+  });
+
+  test("outcomeReceipt's negative branches: an absent section reads as absent, never inherited from a fully-populated fixture", () => {
+    const sparse = "**Q1 — Ship it.** Done.";
+    const receipt = outcomeReceipt(sparse);
+    expect(receipt.criteria).toBeUndefined();
+    expect(receipt.hasTestPlan).toBe(false);
+    expect(receipt.hasOutOfScope).toBe(false);
+  });
+
+  test("a heading that negates its own label reads as absent, not present", () => {
+    const body = [
+      "**Q1 — Ship it.** Done.",
+      "",
+      "### No test plan needed for this decision",
+      "",
+      "### No acceptance criteria defined yet",
+      "- placeholder",
+      "- placeholder",
+    ].join("\n");
+    const receipt = outcomeReceipt(body);
+    expect(receipt.hasTestPlan).toBe(false);
+    expect(receipt.criteria).toBeUndefined();
+  });
+
+  test("finds the LAST --- / ## boundary, not the first, when the turn uses an earlier one for its own sub-heading", () => {
+    const text = [
+      "Some debate prose leading into an aside.",
+      "",
+      "---",
+      "",
+      "## Why not doubly so",
+      "",
+      "A mid-argument aside, not the real document.",
+      "",
+      "---",
+      "",
+      "## Pinned Design — the real synthesis",
+      "",
+      "The actual outcome content.",
+    ].join("\n");
+    const split = splitOutcome(text);
+    expect(split.outcome?.title).toBe("Pinned Design — the real synthesis");
+    expect(split.outcome?.body).toBe("The actual outcome content.");
+    expect(split.debate).toContain("Why not doubly so");
   });
 });

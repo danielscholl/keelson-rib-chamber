@@ -23,12 +23,16 @@ async function waitForLen(arr: readonly unknown[], n: number, ms = 1000): Promis
 }
 
 // The debate feed lives nested inside the columns section's main (first) column,
-// as its one rows section — not a top-level board.sections entry.
+// as its one rows section — not a top-level board.sections entry. Throws (never
+// silently degrades to []) when that shape is missing, so a regression that
+// stops emitting the columns/rows section fails loudly instead of reading as
+// "correctly empty".
 function debateRows(board: CanvasBoardView) {
   const columns = board.sections.find((s) => s.kind === "columns");
-  if (columns?.kind !== "columns") return [];
+  if (columns?.kind !== "columns") throw new Error("expected a columns section");
   const feed = columns.columns[0]?.sections[0];
-  return feed?.kind === "rows" ? feed.items : [];
+  if (feed?.kind !== "rows") throw new Error("expected the debate feed");
+  return feed.items;
 }
 
 const MINDS: Mind[] = [

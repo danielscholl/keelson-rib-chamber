@@ -71,11 +71,15 @@ export function sumTurnUsage(
   return any ? { inputTokens, outputTokens } : undefined;
 }
 
+// The italic pattern requires no whitespace just inside either delimiter (the
+// CommonMark left/right-flanking rule, simplified) — without it, ordinary
+// prose using a bare `*` for multiplication or a glob ("2 * 3 workers",
+// "*.ts") reads as an emphasis span and the asterisks vanish.
 function stripInlineMarks(s: string): string {
   return s
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
-    .replace(/(?<!\*)\*(?!\*)([^*\n]+)\*(?!\*)/g, "$1");
+    .replace(/(?<!\*)\*(?!\*)(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g, "$1");
 }
 
 function truncate(s: string, max: number): string {
@@ -102,7 +106,11 @@ export function flattenMarkdown(text: string, max = 4000): string {
   if (flattened.length <= max) return flattened;
   const noteFor = (n: number) => `\n\n— continues · full text ${n.toLocaleString()} chars —`;
   const note = noteFor(flattened.length);
-  const budget = Math.max(0, max - note.length);
+  // The note itself doesn't fit within `max` (only reachable at a pathologically
+  // small max) — hard-truncate with no footer rather than append a note whose
+  // own length would push the result past the caller's cap.
+  if (note.length >= max) return flattened.slice(0, max);
+  const budget = max - note.length;
   const cut = flattened.slice(0, budget);
   const lastBreak = Math.max(cut.lastIndexOf("\n\n"), cut.lastIndexOf(". "));
   const clipped = lastBreak > budget * 0.6 ? cut.slice(0, lastBreak + 1) : cut;
@@ -154,15 +162,20 @@ const DECISION_MARKER = /\*\*Q(\d+)\s*—\s*(.+?)\.\s*Pinned(?:\s+\w+)?\.\*\*/g;
 // Every decision marker in `text`, in the order they appear, each paired with
 // the gist — the first sentence of the paragraph immediately following the
 // marker (the room writes the marker as its own standalone line, then argues
-// the decision in the next paragraph).
+// the decision in the next paragraph). The gist scan is bounded to end at the
+// NEXT marker (back-to-back markers with no prose between them yield an empty
+// gist rather than bleeding into the next marker's own raw text).
 export function parseDecisionMarkers(text: string): DecisionMarker[] {
+  const matches = [...text.matchAll(DECISION_MARKER)];
   const out: DecisionMarker[] = [];
-  for (const m of text.matchAll(DECISION_MARKER)) {
+  matches.forEach((m, i) => {
     const question = Number(m[1]);
     const title = (m[2] ?? "").trim();
-    if (!title || m.index === undefined || !Number.isFinite(question)) continue;
-    out.push({ question, title, gist: firstSentence(text.slice(m.index + m[0].length), 110) });
-  }
+    if (!title || m.index === undefined || !Number.isFinite(question)) return;
+    const start = m.index + m[0].length;
+    const end = matches[i + 1]?.index ?? text.length;
+    out.push({ question, title, gist: firstSentence(text.slice(start, end), 110) });
+  });
   return out;
 }
 
@@ -184,16 +197,23 @@ export interface OutcomeSplit {
 // (see the design review). Returns `{ debate: text }` with no `outcome` when
 // the turn carries no such boundary — an in-progress room, or one whose last
 // turn is ordinary debate — so the board renders no Outcome card, unchanged
-// from a room authored before this convention existed.
-const OUTCOME_BOUNDARY = /\n+-{3,}\s*\n+##\s+([^\n]+)\n+([\s\S]*)$/;
+// from a room authored before this convention existed. Uses the LAST such
+// boundary in the text, not the first: a turn that structures its own prose
+// with an earlier `---`/`##` aside (a sub-argument heading, say) must not have
+// that aside mistaken for the closing document.
+const OUTCOME_BOUNDARY_OPEN = /\n+-{3,}\s*\n+##\s+([^\n]+)\n+/g;
 
 export function splitOutcome(text: string): { debate: string; outcome?: OutcomeSplit } {
-  const match = OUTCOME_BOUNDARY.exec(text);
-  if (!match) return { debate: text };
-  const title = (match[1] ?? "").trim();
-  const body = (match[2] ?? "").trim();
+  OUTCOME_BOUNDARY_OPEN.lastIndex = 0;
+  let last: RegExpExecArray | undefined;
+  let match: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: the idiomatic exec-loop shape
+  while ((match = OUTCOME_BOUNDARY_OPEN.exec(text)) !== null) last = match;
+  if (!last || last.index === undefined) return { debate: text };
+  const title = (last[1] ?? "").trim();
+  const body = text.slice(last.index + last[0].length).trim();
   if (!title || !body) return { debate: text };
-  return { debate: text.slice(0, match.index).trim(), outcome: { title, body } };
+  return { debate: text.slice(0, last.index).trim(), outcome: { title, body } };
 }
 
 const OUTCOME_QUESTION = /\*\*Q(\d+)\s*—/g;
@@ -219,24 +239,41 @@ export interface OutcomeReceipt {
 
 // The outcome card's receipt line — a mechanical contract check against the
 // document's own section headings (### Acceptance criteria / Test plan /
-// Out-of-scope), never an authored claim.
+// Out-of-scope), never an authored claim. A heading that itself negates the
+// thing it names ("### No test plan needed") must not count as delivering
+// it — findHeading rejects a match whose heading line reads as a negation.
 export function outcomeReceipt(body: string): OutcomeReceipt {
-  const criteriaSection = extractSection(body, /###[^\n]*Acceptance criteria[^\n]*\n/i);
+  const criteriaSection = findHeading(body, /acceptance criteria/i);
   const criteria = criteriaSection
-    ? criteriaSection.split("\n").filter((l) => /^\s*[-*]\s+/.test(l)).length
+    ? criteriaSection.body.split("\n").filter((l) => /^\s*[-*]\s+/.test(l)).length
     : undefined;
   return {
     decisions: parseOutcomeQuestions(body).length,
     ...(criteria ? { criteria } : {}),
-    hasTestPlan: /###[^\n]*test plan/i.test(body),
-    hasOutOfScope: /###[^\n]*out-of-scope|###[^\n]*out of scope/i.test(body),
+    hasTestPlan: Boolean(findHeading(body, /test plan/i)),
+    hasOutOfScope: Boolean(findHeading(body, /out-of-scope|out of scope/i)),
   };
 }
 
-function extractSection(body: string, headingPattern: RegExp): string | undefined {
-  const match = headingPattern.exec(body);
+// A heading line that negates its own label — "No test plan needed", "No
+// acceptance criteria defined" — reads as the label's ABSENCE, not its
+// presence; only the text strictly before the label on the heading line is
+// checked, so a body sentence like "not applicable" further down the section
+// can't retroactively negate a heading that plainly names the section.
+const NEGATES_LABEL = /\b(no|not|none|n\/a)\s*$/i;
+
+function findHeading(body: string, label: RegExp): { heading: string; body: string } | undefined {
+  // Wrap label.source in a non-capturing group: several labels (e.g.
+  // "out-of-scope|out of scope") are themselves an alternation, which would
+  // otherwise split the surrounding "###[^\n]* ... [^\n]*\n" pattern apart at
+  // the `|` instead of joining inside it.
+  const headingLine = new RegExp(`###[^\\n]*(?:${label.source})[^\\n]*\\n`, "i");
+  const match = headingLine.exec(body);
   if (!match || match.index === undefined) return undefined;
+  const labelMatch = new RegExp(label.source, "i").exec(match[0]);
+  const before = labelMatch ? match[0].slice(0, labelMatch.index) : match[0];
+  if (NEGATES_LABEL.test(before.replace(/^#{1,6}\s*/, "").trim())) return undefined;
   const rest = body.slice(match.index + match[0].length);
   const next = /\n###\s+/.exec(rest);
-  return (next ? rest.slice(0, next.index) : rest).trim();
+  return { heading: match[0], body: (next ? rest.slice(0, next.index) : rest).trim() };
 }

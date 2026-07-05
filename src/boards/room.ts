@@ -76,7 +76,10 @@ export function buildRoomBoard(
   const decisions = collectDecisions(transcript, textFor);
   const roundDecisions = groupByRound(decisions);
 
-  const topicSection = buildTopicSection(room.topic, decisions.length);
+  // Distinct questions, not raw marker count — a re-pinned question must count
+  // once here too, or the topic's "produces N decisions" tail disagrees with
+  // the Decisions rail's own deduped "N decided" metric below it.
+  const topicSection = buildTopicSection(room.topic, distinctQuestionCount(decisions));
   const vitalsSection = buildVitalsSection(transcript, projectLabel);
   const planSection = buildPlanSection(ledger);
 
@@ -135,9 +138,16 @@ function effectiveRawText(entry: TurnEntry): string {
   return stripControlJson(entry.parts.map((p) => p.text).join("\n"));
 }
 
+// The last agent entry eligible to carry a synthesized outcome document.
+// Excludes an aborted turn — its (partial) text is never trustworthy content:
+// turnRow already masks an aborted turn's text behind a bare "(aborted)"
+// placeholder, so treating its partial text as a completed, checkmarked
+// Outcome document (or scanning it for decision markers) would contradict
+// what the debate column itself shows for that very turn.
 function findLastAgentIndex(transcript: readonly TurnEntry[]): number {
   for (let i = transcript.length - 1; i >= 0; i--) {
-    if (transcript[i]?.role === "agent") return i;
+    const entry = transcript[i];
+    if (entry?.role === "agent" && !entry.aborted) return i;
   }
   return -1;
 }
@@ -388,13 +398,15 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
 // Every decision marker in the transcript, resolved to where it landed — the
 // round, the author, and its transcript position (so a turn row can look up
 // exactly what IT decided, and a round divider can list what ITS round decided).
+// Skips an aborted turn: its (partial) text is masked to "(aborted)" in the
+// debate row itself, so it must not surface as a settled decision either.
 function collectDecisions(
   transcript: readonly TurnEntry[],
   textFor: (entry: TurnEntry, index: number) => string,
 ): RailEntry[] {
   const out: RailEntry[] = [];
   transcript.forEach((entry, index) => {
-    if (entry.role !== "agent") return;
+    if (entry.role !== "agent" || entry.aborted) return;
     for (const marker of parseDecisionMarkers(textFor(entry, index))) {
       out.push({ ...marker, round: entry.round, authorSlug: entry.from, turnIndex: index });
     }
@@ -402,15 +414,21 @@ function collectDecisions(
   return out;
 }
 
+function distinctQuestionCount(decisions: readonly RailEntry[]): number {
+  return new Set(decisions.map((d) => d.question)).size;
+}
+
+// One question per round, deduped — a question re-pinned twice within the
+// same round (a correction) must still name it once in that round's divider.
 function groupByRound(decisions: readonly RailEntry[]): Map<number, number[]> {
-  const map = new Map<number, number[]>();
+  const map = new Map<number, Set<number>>();
   for (const d of decisions) {
     if (d.round === undefined) continue;
-    const existing = map.get(d.round);
-    if (existing) existing.push(d.question);
-    else map.set(d.round, [d.question]);
+    const set = map.get(d.round) ?? new Set<number>();
+    set.add(d.question);
+    map.set(d.round, set);
   }
-  return map;
+  return new Map([...map].map(([round, set]) => [round, [...set]]));
 }
 
 function debateColumnTitle(transcript: readonly TurnEntry[]): string {
@@ -580,11 +598,24 @@ function buildDecisionsSection(
   outcome: OutcomeSplit | undefined,
 ): RowsSection | undefined {
   if (decisions.length === 0) return undefined;
-  const decidedCount = new Set(decisions.map((d) => d.question)).size;
+  // A question re-pinned more than once (a correction) keeps only its LATEST
+  // pin in the rail — one row per question, in first-decided order — so the
+  // rail's row count always agrees with the "N decided" metric above it.
+  const latestByQuestion = new Map<number, RailEntry>();
+  for (const d of decisions) latestByQuestion.set(d.question, d); // last write wins
+  const order: number[] = [];
+  const seenQuestions = new Set<number>();
+  for (const d of decisions) {
+    if (seenQuestions.has(d.question)) continue;
+    seenQuestions.add(d.question);
+    order.push(d.question);
+  }
+  const deduped = order.map((q) => latestByQuestion.get(q)!);
+  const decidedCount = deduped.length;
   const totalCount = outcome ? parseOutcomeQuestions(outcome.body).length : 0;
   const metric =
     totalCount > 0 ? `${decidedCount} of ${totalCount} decided` : `${decidedCount} decided`;
-  const items: FeedItem[] = decisions.map((d) => {
+  const items: FeedItem[] = deduped.map((d) => {
     const mind = mindBySlug.get(d.authorSlug);
     const tone = mind ? identityToneForSlot(mind.identitySlot) : "info";
     return {

@@ -430,7 +430,11 @@ describe("buildRoomBoard", () => {
     // facts riding beside the debate; vitals must never use it.
     expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
     const row = vitalsRow(board);
-    expect(row?.text).toBe("6 min · 17:26 → 17:32");
+    // Computed via clockTime, not hardcoded — clockTime renders in the runtime's
+    // local time zone, so a literal "17:26" would only pass in UTC.
+    expect(row?.text).toBe(
+      `6 min · ${clockTime("2026-01-01T17:26:00.000Z")} → ${clockTime("2026-01-01T17:32:00.000Z")}`,
+    );
   });
 
   test("no vitals row at all when there are no turns and no scope", () => {
@@ -515,7 +519,7 @@ describe("buildRoomBoard — decisions rail and outcome", () => {
     }),
   ];
 
-  test("collects decisions into a rail rail section, tone by author", () => {
+  test("collects decisions into a rail section, tone by author", () => {
     const board = buildRoomBoard(room({ participants: ["a", "b"] }), decidedTranscript, undefined, [
       mind({ slug: "a", name: "Ada", identitySlot: 0 }),
       mind({ slug: "b", name: "Bo", identitySlot: 1 }),
@@ -544,6 +548,36 @@ describe("buildRoomBoard — decisions rail and outcome", () => {
     const board = buildRoomBoard(room({ participants: ["a", "b"] }), decidedTranscript);
     const row = debateItems(board).find((i) => i.chip?.label === "a");
     expect(row?.trailing).toContain("Q1 decided");
+  });
+
+  test("an aborted turn's decision-marker-shaped text is never counted as a decision", () => {
+    const board = buildRoomBoard(room(), [
+      entry({
+        from: "a",
+        round: 0,
+        aborted: true,
+        parts: [{ text: "**Q1 — Ship it. Pinned.**\n\nDone." }],
+      }),
+    ]);
+    // No Decisions rail, no "Qn decided" badge, and no "decides Qn" round head —
+    // matches the debate row's own "(aborted)" treatment for the same turn.
+    expect(decisionsSectionOf(board)).toBeUndefined();
+    const row = debateItems(board).find((i) => i.chip?.label === "a");
+    expect(row?.trailing).not.toContain("decided");
+    expect(debateItems(board).find((i) => i.text.startsWith("Round"))?.text).toBe("Round 1");
+  });
+
+  test("a decision authored before the room had a round cursor renders with no round suffix", () => {
+    const board = buildRoomBoard(room(), [
+      entry({
+        from: "a",
+        round: undefined,
+        parts: [{ text: "**Q1 — Ship it. Pinned.**\n\nDone." }],
+      }),
+    ]);
+    const section = decisionsSectionOf(board);
+    if (section?.kind !== "rows") throw new Error("expected the Decisions section");
+    expect(section.items[0]?.trailing).toBe("a");
   });
 
   test("splits the outcome document out of the last turn into an Outcome card", () => {

@@ -790,3 +790,111 @@ describe("room adapter — project targeting", () => {
     expect(reqs.every((r) => r.cwd === chamberDataHome())).toBe(true);
   });
 });
+
+describe("room adapter — outcome-copy / outcome-explore", () => {
+  // Neither action touches the driver or a snapshot manager — both read the
+  // room straight off disk — so a bare makeCtx() with no run/sm is enough.
+  const OUTCOME_TEXT = [
+    "**Q1 — Ship it. Pinned.**",
+    "",
+    "Agreed by all.",
+    "",
+    "---",
+    "",
+    "## Pinned Design — the synthesis",
+    "",
+    "**Q1 — Ship it.** Full agreement.",
+    "",
+    "### Acceptance criteria",
+    "- It ships.",
+  ].join("\n");
+
+  async function seedRoomWithOutcome(slug: string): Promise<void> {
+    const store = createFileRoomStore(roomsDir());
+    await store.saveRoom({
+      slug,
+      name: "Outcome room",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: "done",
+      turnBudget: 1,
+      turnIndex: 1,
+      round: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } satisfies Room);
+    await store.appendTranscript(slug, {
+      messageId: "m1",
+      roomSlug: slug,
+      turnIndex: 0,
+      from: "bob",
+      role: "agent",
+      parts: [{ text: OUTCOME_TEXT }],
+      at: "2026-01-01T00:05:00.000Z",
+    });
+  }
+
+  it("outcome-copy returns the reconstructed markdown document verbatim", async () => {
+    await seedRoomWithOutcome("copy-me");
+    const res = await onAction({ type: "outcome-copy", payload: { slug: "copy-me" } }, makeCtx());
+    expect(res).toEqual({
+      ok: true,
+      data: "## Pinned Design — the synthesis\n\n**Q1 — Ship it.** Full agreement.\n\n### Acceptance criteria\n- It ships.",
+    });
+  });
+
+  it("outcome-explore opens a chat seeded with the document, named from its title", async () => {
+    await seedRoomWithOutcome("explore-me");
+    const res = await onAction(
+      { type: "outcome-explore", payload: { slug: "explore-me" } },
+      makeCtx(),
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const data = res.data as { effect: string; seed: { systemPrompt: string; name: string } };
+    expect(data.effect).toBe("open-chat");
+    expect(data.seed.name).toBe("Pinned Design — the synthesis");
+    expect(data.seed.systemPrompt).toContain("Outcome room");
+    expect(data.seed.systemPrompt).toContain("Full agreement.");
+    expect(data.seed.systemPrompt.length).toBeLessThanOrEqual(8000);
+  });
+
+  for (const type of ["outcome-copy", "outcome-explore"]) {
+    it(`${type} fails closed on an unknown room`, async () => {
+      const res = await onAction({ type, payload: { slug: "ghost-room" } }, makeCtx());
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error).toContain("not found");
+    });
+
+    it(`${type} fails closed on a room with no synthesized outcome yet`, async () => {
+      const store = createFileRoomStore(roomsDir());
+      await store.saveRoom({
+        slug: "no-outcome",
+        name: "No outcome",
+        strategy: "sequential",
+        participants: ["alice", "bob"],
+        status: "active",
+        turnBudget: 4,
+        turnIndex: 1,
+        round: 0,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      } satisfies Room);
+      await store.appendTranscript("no-outcome", {
+        messageId: "m1",
+        roomSlug: "no-outcome",
+        turnIndex: 0,
+        from: "alice",
+        role: "agent",
+        parts: [{ text: "just ordinary debate, no document yet" }],
+        at: "2026-01-01T00:00:01.000Z",
+      });
+      const res = await onAction({ type, payload: { slug: "no-outcome" } }, makeCtx());
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error).toContain("no synthesized outcome document yet");
+    });
+
+    it(`${type} requires payload { slug }`, async () => {
+      const res = await onAction({ type, payload: {} }, makeCtx());
+      expect(res.ok).toBe(false);
+    });
+  }
+});
