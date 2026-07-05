@@ -460,6 +460,38 @@ describe("room adapter — convene composer (draft-set + convene)", () => {
     expect([...(await readDraftExclusion())]).toEqual([]);
   });
 
+  it("the Debate shape starts a group-chat room, resolving the moderator by name + parsing turns", async () => {
+    const store = createFileRoomStore(roomsDir());
+    // A moderator never speaks, so exclude it from the draft; alice + bob remain.
+    await onAction({ type: "draft-set", payload: { slug: "mod" } }, makeCtx());
+    const res = await onAction(
+      { type: "convene", payload: { strategy: "group-chat", moderator: "Mod", turns: "4" } },
+      makeCtx({ sm: snap.sm }),
+    );
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
+    const room = await store.loadRoom(slug);
+    expect(room?.strategy).toBe("group-chat");
+    expect(room?.config?.moderator).toBe("mod"); // "Mod" resolved to its slug
+    expect(room?.turnBudget).toBe(4); // "4" parsed from the free-text turns field
+    expect([...(room?.participants ?? [])].sort()).toEqual(["alice", "bob"]);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    // A successful convene resets the draft back to all-selected.
+    expect([...(await readDraftExclusion())]).toEqual([]);
+  });
+
+  it("the Debate shape fails closed on a moderator that names no Mind", async () => {
+    await onAction({ type: "draft-set", payload: { slug: "mod" } }, makeCtx());
+    const res = await onAction(
+      { type: "convene", payload: { strategy: "group-chat", moderator: "ghost" } },
+      makeCtx({ sm: snap.sm }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("moderator");
+    // The draft survives a failed convene (mod stays excluded).
+    expect([...(await readDraftExclusion())]).toEqual(["mod"]);
+  });
+
   it("convene fails closed at < 2 selected and leaves the draft intact", async () => {
     // Exclude alice and bob, leaving only mod selected — below the 2-speaker floor.
     await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());

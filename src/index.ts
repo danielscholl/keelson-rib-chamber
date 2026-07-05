@@ -90,7 +90,7 @@ import { GENESIS_STARTERS } from "./starters.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
 import type { Mind, Room, RoomConfig, RoomStrategyName, TurnEntry } from "./types.ts";
-import { identitySlotForIndex } from "./types.ts";
+import { IDENTITY_SLOT_COUNT, nextFreeSlot } from "./types.ts";
 import { readWatermark, writeWatermark } from "./watermark-store.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
@@ -190,6 +190,18 @@ function resolveProjectByNameOrId(input: string): Project | undefined {
   return (
     projects.find((p) => p.id === trimmed) ??
     projects.find((p) => p.name.toLowerCase() === trimmed.toLowerCase())
+  );
+}
+
+// Resolve a Convene composer's moderator/manager field (free text, id or name,
+// case-insensitive) to a Mind slug — the same convention the project field uses,
+// since a board action field is free text, not a picker. Returns the slug or
+// undefined; the caller surfaces an unresolvable value rather than dropping it.
+function resolveMindByNameOrId(minds: readonly Mind[], input: string): string | undefined {
+  const trimmed = input.trim();
+  return (
+    minds.find((m) => m.slug === trimmed)?.slug ??
+    minds.find((m) => m.name.toLowerCase() === trimmed.toLowerCase())?.slug
   );
 }
 // The briefing gate's seams + state, captured in registerTools (the only hook with
@@ -860,24 +872,19 @@ const BRIEF_TURN_TIMEOUT_MS = 60_000;
 // The briefing turn's prompt: an agent authors a canvas `board` rendered on the
 // Chamber surface with no hand-coded UI. The gate appends a delta block (the rooms
 // that ended / lenses that changed since the last briefing) so the briefing reports
-// what is NEW, not just what Chamber is. Tools are withheld so it composes from this.
-const BRIEF_PROMPT = `You are the editor of "Chamber" — Keelson's multi-agent operating layer (genesis agents, agent-to-agent rooms, agent-authored lenses). Compose a one-screen operator BRIEFING and return it as a single canvas \`board\` view.
+// what is NEW — a count is not news. Tools are withheld so it composes from this.
+const BRIEF_PROMPT = `You are the editor of "Chamber" — Keelson's multi-agent operating layer (Minds you author, agent-to-agent Rooms, agent-authored Lenses). Compose a short operator BRIEFING of what is NEW since the operator last looked, and return it as a single canvas \`board\` view rendered directly on the Chamber surface with no hand-coded UI.
 
-This is a live demonstration that an agent can author its own lens: your JSON is validated fail-closed and rendered directly on the Chamber surface, with no hand-coded UI. Do NOT invent clusters, users, or external metrics you cannot see — write an honest briefing about Chamber: what it is, what is live, and what is next.
+Lead with the change: a Room that ended and what it settled, a Lens a Mind authored or updated and what it now says. Be honest — write only what the delta below names; do NOT invent clusters, users, metrics, or a room's contents you cannot see, and do NOT restate how many Minds / Rooms / Lenses exist (the surface already shows those structurally — a count is not news).
 
 Return ONE JSON object of this shape:
   { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
 Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
-Use 3-4 Section kinds, in a sensible order:
-  - stats:    { "kind": "stats", "title"?: string, "items": [{ "label": string, "value": string|number, "sub"?: string, "tone"?: Tone }] }
-  - segments: { "kind": "segments", "title"?: string, "items": [{ "label": string, "n": number, "tone"?: Tone }] }
-  - rows:     { "kind": "rows", "title"?: string, "items": [{ "text": string, "glyph"?: Tone, "trailing"?: string }] }
-  - cards:    { "kind": "cards", "title"?: string, "items": [{ "title": string, "pill"?: { "label": string, "tone"?: Tone }, "fields"?: [{ "label"?: string, "value": string|number }], "footnote"?: string }] }
+Use 1-2 Section kinds, in a sensible order:
+  - rows:  { "kind": "rows", "title"?: string, "items": [{ "text": string, "glyph"?: Tone, "trailing"?: string }] }
+  - cards: { "kind": "cards", "title"?: string, "items": [{ "title": string, "pill"?: { "label": string, "tone"?: Tone }, "fields"?: [{ "label"?: string, "value": string|number }], "footnote"?: string }] }
 
-Keep it tight: a status pill, ~3 KPI stats, a 3-5 item "rows" list (what's live / what's next), and 2-3 explanatory cards. Concise, editorial copy.
-
-Example — copy this structure exactly, replace the content:
-{ "view":"board","title":"Chamber Briefing","header":{"status":{"label":"Phase 0 · lens proof","tone":"brand"}},"sections":[{"kind":"stats","title":"Pulse","items":[{"label":"Minds","value":0,"sub":"genesis lands Phase 1","tone":"neutral"},{"label":"Rooms","value":0,"sub":"Phase 2","tone":"neutral"},{"label":"Lenses","value":1,"sub":"this briefing","tone":"ok"}]},{"kind":"rows","title":"Status","items":[{"text":"Agent-authored briefing lens","glyph":"ok","trailing":"live"},{"text":"Genesis + roster","glyph":"info","trailing":"next"},{"text":"Two-agent room","glyph":"neutral","trailing":"Phase 2"}]},{"kind":"cards","title":"What this proves","items":[{"title":"An agent authored this view","pill":{"label":"lens","tone":"brand"},"fields":[{"label":"key","value":"rib:chamber:brief"}],"footnote":"No hand-coded UI — the board came from an agent turn through Keelson's canvas."}]}] }`;
+Keep it tight: a status pill naming how much is new (e.g. "2 new"), then a short "rows" list — one line per ended Room or changed Lens, in the operator's language, with the outcome or gist. Add a card only when one change earns a sentence of interpretation. Concise, editorial copy.`;
 
 // Genesis as a workflow: one agent turn reads a freeform brief, authors the SOUL.md
 // body + a roster tagline, and persists the Mind by calling the chamber_emit_genesis
@@ -934,12 +941,12 @@ Supply scope/reason only when you can name them truthfully; never invent provena
 // $ARGUMENTS — the digest is scheduler-driven, so the gate hands it the live state via
 // $gate.output.summary. Distinct from the Briefing (the delta footer): this is a
 // standing synthesis of what IS, not what just changed.
-const DIGEST_WF_PROMPT = `You are authoring the standing DIGEST for Keelson's Chamber — a multi-agent operating layer (genesis agents, agent-to-agent rooms, agent-authored lenses). The digest is a one-screen canvas \`board\` view that gives an operator the current shape of the Chamber at a glance, rendered live on the Chamber surface with no hand-coded UI. It re-composes only when the Chamber changes, so write an honest synthesis of the state below — NOT a changelog of what just happened (the Briefing footer covers deltas).
+const DIGEST_WF_PROMPT = `You are authoring the standing DIGEST for Keelson's Chamber — a multi-agent operating layer (Minds you author, agent-to-agent Rooms, agent-authored Lenses). The digest is a one-screen canvas \`board\` view that tells an operator what the bench's work ADDS UP TO, rendered live on the Chamber surface with no hand-coded UI. It re-composes only when the Chamber changes, so write an honest SYNTHESIS of the state below — NOT a changelog of what just happened (the Briefing covers deltas), and NOT a restatement of how many Minds / Rooms / Lenses exist (the surface shows those structurally — a count is not a synthesis).
 
 Current Chamber state:
 $gate.output.summary
 
-Compose ONE canvas board synthesizing this state — what exists, what is active, what it adds up to. Be honest: name only what is in the state above; do NOT invent Minds, rooms, lenses, users, or metrics you cannot see. If the Chamber is sparse, say so plainly rather than padding.
+Compose ONE canvas board that INTERPRETS this state: what is this team working on, what has it produced, what is the one thing worth noticing. Be honest: name only what is in the state above; do NOT invent Minds, rooms, lenses, users, or metrics you cannot see. If the Chamber is sparse, keep the digest to a sentence or two rather than padding it to fill sections.
 
 The board shape:
   { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
@@ -1241,10 +1248,11 @@ const rib: Rib = {
         nodes: [
           {
             id: "collect",
-            // Out-of-process (a bash node), so bake the resolved lenses dir in —
-            // captured in registerTools, which runs before this — so both sides
-            // read one path (see the rooms collector).
-            bash: `bun ${shQuote(LENSES_COLLECTOR)} ${shQuote(lensesDir())}`,
+            // Out-of-process (a bash node), so bake the resolved data home in —
+            // captured in registerTools, which runs before this. The collector reads
+            // both the lenses and the minds (to tone each lens's dot by its
+            // maintaining Mind's identity), so it bakes the home, not a single store dir.
+            bash: `bun ${shQuote(LENSES_COLLECTOR)} ${shQuote(chamberDataHome())}`,
             output_schema: { type: "object", required: ["view", "sections"] },
           },
         ],
@@ -2220,27 +2228,34 @@ async function draftSetAction(action: RibAction): Promise<RibActionResult> {
   }
 }
 
-// Convene a room from the current draft: resolve participants as all current Minds
-// minus the draft's excluded set, then reuse the room start path (startRoom →
-// validateStart → driver), so the <2-participant / unknown-strategy / seam-absent
-// guards aren't duplicated here. On success clear the draft (back to all-selected)
-// and refresh the roster so the chips reset. The default empty draft yields every
-// Mind, preserving the historical all-Minds Start.
+// Convene a room from the current draft and the chosen shape: participants are all
+// current Minds minus the draft's excluded set; the room shape (a `strategy` in the
+// action payload) and its per-shape fields (topic, project, moderator, manager, turns)
+// come from the shape action the operator clicked. Reuses the room start path
+// (startRoom → validateStart → driver), so the <2-participant / facilitator-rules /
+// cross-vendor / seam-absent guards aren't duplicated here — a shape the draft can't
+// satisfy (a Review that isn't a cross-vendor pair, a Debate whose moderator is also a
+// participant) surfaces validateStart's error. On success clear the draft (back to
+// all-selected) and refresh the roster so the chips reset. An empty draft with the
+// Discussion shape yields every Mind in a sequential room — the historical Start.
 async function conveneAction(action: RibAction): Promise<RibActionResult> {
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
+  let allMinds: Mind[];
   let participants: string[];
   let displayNames: string[];
   try {
     const excluded = await readDraftExclusion();
-    const minds = await readMinds(mindsDir());
-    const drafted = minds.filter((m) => !excluded.has(m.slug));
+    allMinds = await readMinds(mindsDir());
+    const drafted = allMinds.filter((m) => !excluded.has(m.slug));
     participants = drafted.map((m) => m.slug);
     displayNames = drafted.map((m) => m.name);
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
+  const strategy = asNonEmptyString(payload.strategy) || "sequential";
   const topic = asNonEmptyString(payload.topic) || undefined;
+
   const projectInput = asNonEmptyString(payload.project);
   const projectId = projectInput ? resolveProjectByNameOrId(projectInput)?.id : undefined;
   if (projectInput && !projectId) {
@@ -2249,13 +2264,38 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
       error: `unknown project "${projectInput}" — pick a project from the host's project list`,
     };
   }
+
+  // Moderator (Debate) and manager (Build) are Mind name-or-slug free text; resolve
+  // each to a slug so validateStart's facilitator rules apply. An unresolvable
+  // non-empty value is surfaced, not silently dropped.
+  const resolveFacilitator = (
+    input: string | undefined,
+    role: string,
+  ): { slug?: string } | { error: string } => {
+    if (!input) return {};
+    const slug = resolveMindByNameOrId(allMinds, input);
+    return slug ? { slug } : { error: `unknown ${role} "${input}" — name a Mind from the roster` };
+  };
+  const mod = resolveFacilitator(asNonEmptyString(payload.moderator), "moderator");
+  if ("error" in mod) return { ok: false, error: mod.error };
+  const mgr = resolveFacilitator(asNonEmptyString(payload.manager), "manager");
+  if ("error" in mgr) return { ok: false, error: mgr.error };
+
+  // Turns: free text -> a positive integer, else the default; validateStart caps it.
+  const turnsRaw = asNonEmptyString(payload.turns);
+  const parsedTurns = turnsRaw ? Number.parseInt(turnsRaw, 10) : Number.NaN;
+  const turnBudget =
+    Number.isInteger(parsedTurns) && parsedTurns > 0 ? parsedTurns : DEFAULT_ROOM_TURN_BUDGET;
+
   const res = await startRoom({
     name: deriveRoomName(topic, displayNames),
-    strategy: "sequential",
+    strategy,
     participants,
-    turnBudget: DEFAULT_ROOM_TURN_BUDGET,
+    turnBudget,
     topic,
     ...(projectId ? { projectId } : {}),
+    ...(mod.slug ? { moderator: mod.slug } : {}),
+    ...(mgr.slug ? { manager: mgr.slug } : {}),
   });
   if (res.ok) {
     await clearDraft().catch(() => {});
@@ -2846,12 +2886,15 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
           : [];
         const model = rawModel?.trim();
         const provider = rawProvider?.trim();
-        // A Mind takes the next identity slot after the current roster, in author
-        // order — so a hand-authored genesis doesn't stack every Mind on slot 0
-        // (mirrors squad's member cast).
-        const existingCount = (await resolveMinds()).length;
+        const slug = slugify(name);
+        // A Mind takes the lowest identity slot not already worn (keelson#390),
+        // preferring its starter's own hue when that slug matches a starter and the
+        // hue is free — so the cold-start card previews what actually gets seated,
+        // and a churned roster never double-seats a hue (next-free, not count-based).
+        const preferred = GENESIS_STARTERS.find((s) => s.slug === slug)?.seat;
+        const slot = nextFreeSlot(await resolveMinds(), preferred);
         const record: MindRecord = {
-          slug: slugify(name),
+          slug,
           name,
           role,
           voice,
@@ -2859,7 +2902,9 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
           // authored tagline trimmed, not hard-cut.
           persona: tagline.trim(),
           createdAt: new Date().toISOString(),
-          identitySlot: identitySlotForIndex(existingCount),
+          // Omit the slot past the ramp (a sixth Mind) so identityToneForSlot folds
+          // it to neutral rather than persisting an out-of-range index.
+          ...(slot < IDENTITY_SLOT_COUNT ? { identitySlot: slot } : {}),
           ...(model ? { model } : {}),
           ...(model && provider ? { provider } : {}),
           ...(knownTools.length > 0 ? { tools: knownTools } : {}),

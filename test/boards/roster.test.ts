@@ -26,6 +26,13 @@ function cards(board: ReturnType<typeof buildRosterBoard>) {
   if (section?.kind !== "cards") throw new Error("no cards section");
   return section.items;
 }
+// The seated Minds only (open-seat ghosts share the cards section but title "Open seat").
+function mindCards(board: ReturnType<typeof buildRosterBoard>) {
+  return cards(board).filter((c) => c.title !== "Open seat");
+}
+function openSeats(board: ReturnType<typeof buildRosterBoard>) {
+  return cards(board).filter((c) => c.title === "Open seat");
+}
 
 describe("buildRosterBoard cold start", () => {
   test("is a valid board with the roster header at 0 minds", () => {
@@ -53,7 +60,23 @@ describe("buildRosterBoard cold start", () => {
     }
   });
 
-  test("exactly three author-archetype actions in order with verbatim labels", () => {
+  test("the authoring section is titled 'Genesis — author a Mind'", () => {
+    const board = buildRosterBoard([]);
+    expect(actionsSection(board, "Genesis — author a Mind")?.kind).toBe("actions");
+  });
+
+  test("the freeform-brief hero leads the authoring section (brand, before the starters)", () => {
+    const items = actionsSection(buildRosterBoard([]), "Genesis — author a Mind");
+    if (items?.kind !== "actions") throw new Error("no authoring section");
+    const first = items.items[0];
+    expect(first?.type).toBe("describe-own");
+    expect(first?.tone).toBe("brand");
+    // The describe-own hero precedes every starter action.
+    const firstStarter = items.items.findIndex((i) => i.type === "author-archetype");
+    expect(items.items.findIndex((i) => i.type === "describe-own")).toBeLessThan(firstStarter);
+  });
+
+  test("exactly three author-archetype actions in order, each toned by its seat", () => {
     const board = buildRosterBoard([]);
     const authors = actionItems(board).filter((i) => i.type === "author-archetype");
     expect(authors).toHaveLength(3);
@@ -61,47 +84,53 @@ describe("buildRosterBoard cold start", () => {
     expect(authors.map((a) => a.label)).toEqual(
       GENESIS_STARTERS.map((s) => `${s.name} — ${s.tagline}`),
     );
-    expect(authors.map((a) => (a.payload as { slug: string }).slug)).toEqual([
-      "moneypenny",
-      "mycroft",
-      "jarvis",
-    ]);
-    for (const a of authors) expect(a.type).toBe("author-archetype");
+    // Seats 0/1/2 preview blue/amber/teal — the hue each starter will wear when
+    // authored from an empty roster.
+    expect(authors.map((a) => a.tone)).toEqual(["id-blue", "id-amber", "id-teal"]);
   });
 
   test("a describe-own action carries the verbatim brief field", () => {
     const board = buildRosterBoard([]);
     const own = actionItems(board).find((i) => i.type === "describe-own");
-    expect(own?.label).toBe("Describe & author");
+    expect(own?.label).toBe("Describe & author your own…");
+    expect(own?.glyph).toBe("✦");
     expect(own?.fields).toEqual([
       {
         name: "brief",
-        label: "Or describe your own",
-        placeholder:
-          'Who should this feel like? e.g. "Athena — a skeptical staff engineer who guards the architecture"',
+        label: "Who should this Mind feel like?",
+        placeholder: 'e.g. "Athena — a skeptical staff engineer who guards the architecture"',
         multiline: true,
       },
     ]);
   });
 
-  test("the trailing rows item carries the verbatim next-step text + trailing", () => {
+  test("a bridge caption teaches the /genesis equivalence", () => {
     const board = buildRosterBoard([]);
-    const rows = board.sections.filter((s) => s.kind === "rows");
-    const last = rows[rows.length - 1];
-    if (last?.kind !== "rows") throw new Error("no trailing rows section");
-    expect(last.items[0]?.text).toBe(
-      "Next: with two Minds you can convene a Room; any Mind can keep a Lens. Each appears as its own panel here once it exists.",
+    const bridge = board.sections
+      .flatMap((s) => (s.kind === "rows" ? s.items : []))
+      .find((i) => i.trailing === "genesis");
+    expect(bridge?.text).toBe(
+      "Authoring runs the genesis rite — /genesis in chat, chamber-genesis in workflows.",
     );
-    expect(last.items[0]?.trailing).toBe("what's next");
   });
 
-  test("no Enter/Retire actions section, no cards, only the three documented sections", () => {
+  test("a three-step journey strip replaces the prose next-step row", () => {
+    const board = buildRosterBoard([]);
+    const journey = board.sections
+      .filter((s) => s.kind === "rows")
+      .find((s) => s.kind === "rows" && s.items.some((i) => i.icon === "1"));
+    if (journey?.kind !== "rows") throw new Error("no journey rows section");
+    expect(journey.items.map((i) => i.icon)).toEqual(["1", "2", "3"]);
+    expect(journey.items[0]?.text).toMatch(/^Author —/);
+    expect(journey.items[2]?.text).toMatch(/^Convene —/);
+  });
+
+  test("no cards, no Enter/Retire section; section kinds are rows/actions/rows/rows", () => {
     const board = buildRosterBoard([]);
     expect(actionsSection(board, "Enter")).toBeUndefined();
     expect(actionsSection(board, "Retire")).toBeUndefined();
     expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
-    expect(board.sections).toHaveLength(3);
-    expect(board.sections.map((s) => s.kind)).toEqual(["rows", "actions", "rows"]);
+    expect(board.sections.map((s) => s.kind)).toEqual(["rows", "actions", "rows", "rows"]);
   });
 });
 
@@ -113,41 +142,41 @@ describe("buildRosterBoard populated", () => {
     expect(two.header?.status?.label).toBe("2 minds");
   });
 
-  test("each card dot is the Mind's persisted identity-slot tone (keelson#390), never a hash", () => {
+  test("each seated card dot is the Mind's persisted identity-slot tone (keelson#390)", () => {
     const board = buildRosterBoard([
       mind({ slug: "a", identitySlot: 0 }),
       mind({ slug: "b", name: "Bo", identitySlot: 1 }),
     ]);
-    const [a, b] = cards(board);
+    const [a, b] = mindCards(board);
     expect(a?.dot).toBe("id-blue");
     expect(b?.dot).toBe("id-amber");
   });
 
-  test("a slot past the ramp (or absent) folds to neutral, not an invented hue", () => {
+  test("a seated slot past the ramp (or absent) folds to neutral, not an invented hue", () => {
     const board = buildRosterBoard([
       mind({ slug: "a", identitySlot: 99 }),
       mind({ slug: "b", name: "Bo" }),
     ]);
-    for (const card of cards(board)) expect(card.dot).toBe("neutral");
+    for (const card of mindCards(board)) expect(card.dot).toBe("neutral");
   });
 
   test("exactly one pill per card carrying the role, never the slug", () => {
     const board = buildRosterBoard([mind({ slug: "ada", role: "Chief of Staff" })]);
-    const card = cards(board)[0];
+    const card = mindCards(board)[0];
     expect(card?.pill).toEqual({ label: "Chief of Staff" });
   });
 
   test("an empty role falls back to a 'Mind' pill", () => {
-    expect(cards(buildRosterBoard([mind({ role: "" })]))[0]?.pill?.label).toBe("Mind");
+    expect(mindCards(buildRosterBoard([mind({ role: "" })]))[0]?.pill?.label).toBe("Mind");
   });
 
   test("fields: a truncated persona ((no persona) fallback) and model only when set", () => {
-    const withModel = cards(buildRosterBoard([mind({ model: "claude-x" })]))[0];
+    const withModel = mindCards(buildRosterBoard([mind({ model: "claude-x" })]))[0];
     expect(withModel?.fields?.find((f) => f.label === "persona")?.value).toBe("You are Ada.");
     expect(withModel?.fields?.find((f) => f.label === "model")?.value).toBe("claude-x");
-    const noModel = cards(buildRosterBoard([mind({ model: undefined })]))[0];
+    const noModel = mindCards(buildRosterBoard([mind({ model: undefined })]))[0];
     expect(noModel?.fields?.some((f) => f.label === "model")).toBe(false);
-    const noPersona = cards(buildRosterBoard([mind({ persona: "   " })]))[0];
+    const noPersona = mindCards(buildRosterBoard([mind({ persona: "   " })]))[0];
     expect(noPersona?.fields?.find((f) => f.label === "persona")?.value).toBe("(no persona)");
   });
 
@@ -155,9 +184,9 @@ describe("buildRosterBoard populated", () => {
     expect(JSON.stringify(buildRosterBoard([mind({ slug: "ada" })]))).toContain("ada");
   });
 
-  test("each card.actions has a destructive Retire with a simple confirm", () => {
+  test("each seated card.actions has a destructive Retire with a simple confirm", () => {
     const board = buildRosterBoard([mind({ slug: "ada", name: "Ada" })]);
-    const retire = cards(board)[0]?.actions?.find((a) => a.type === "retire");
+    const retire = mindCards(board)[0]?.actions?.find((a) => a.type === "retire");
     expect(retire).toMatchObject({
       type: "retire",
       label: "Retire Mind…",
@@ -171,9 +200,9 @@ describe("buildRosterBoard populated", () => {
     expect(retire?.confirm?.confirmLabel).toBe("Retire");
   });
 
-  test("each card.actions leads with a non-destructive Enter carrying the slug", () => {
+  test("each seated card.actions leads with a non-destructive Enter carrying the slug", () => {
     const board = buildRosterBoard([mind({ slug: "ada", name: "Ada" })]);
-    const actions = cards(board)[0]?.actions ?? [];
+    const actions = mindCards(board)[0]?.actions ?? [];
     const enter = actions.find((a) => a.type === "enter-mind");
     expect(enter).toMatchObject({
       type: "enter-mind",
@@ -181,22 +210,19 @@ describe("buildRosterBoard populated", () => {
       glyph: "→",
       payload: { slug: "ada" },
     });
-    // Non-destructive (so the host renders it inline, not in the overflow) and
-    // un-gated — no confirm.
     expect(enter?.destructive ?? false).toBe(false);
     expect(enter?.confirm).toBeUndefined();
-    // Enter is the primary verb: it precedes the destructive Retire on the card.
     expect(actions[0]?.type).toBe("enter-mind");
     expect(actions.findIndex((a) => a.type === "enter-mind")).toBeLessThan(
       actions.findIndex((a) => a.type === "retire"),
     );
   });
 
-  test("each card carries a set-model action with model/provider fields", () => {
+  test("each seated card carries a set-model action with model/provider fields", () => {
     const board = buildRosterBoard([
       mind({ slug: "ada", name: "Ada", model: "claude-opus-4.8", provider: "anthropic" }),
     ]);
-    const actions = cards(board)[0]?.actions ?? [];
+    const actions = mindCards(board)[0]?.actions ?? [];
     const setModel = actions.find((a) => a.type === "set-model");
     expect(setModel).toMatchObject({
       type: "set-model",
@@ -212,88 +238,186 @@ describe("buildRosterBoard populated", () => {
     expect(actions.findIndex((a) => a.type === "retire")).toBe(actions.length - 1);
   });
 
-  test("no standalone actions section titled Enter; Enter lives on each card", () => {
+  test("Enter lives on each Mind card; no standalone Enter/retire action item", () => {
     const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
-    // Enter moved onto the card (host renders non-destructive card actions inline),
-    // so there is no separate button-list section for it.
     expect(actionsSection(board, "Enter")).toBeUndefined();
-    expect(actionItems(board).some((i) => i.type === "enter-mind")).toBe(false);
-    // One enter-mind card action per Mind, each carrying its own slug.
-    const enters = cards(board).map((c) => c.actions?.find((a) => a.type === "enter-mind"));
+    // enter-mind and retire ride the Mind cards, never a separate button list.
+    for (const item of actionItems(board)) {
+      expect(item.type).not.toBe("enter-mind");
+      expect(item.type).not.toBe("retire");
+    }
+    const enters = mindCards(board).map((c) => c.actions?.find((a) => a.type === "enter-mind"));
     expect(enters.map((e) => e?.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
-    for (const e of enters) expect(e?.glyph).toBe("→");
+  });
+});
+
+describe("buildRosterBoard open seats (persistent authoring)", () => {
+  test("a dashed open seat renders per free identity slot, in ramp order", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "a", identitySlot: 0 }),
+      mind({ slug: "b", name: "Bo", identitySlot: 1 }),
+    ]);
+    // Two seated (blue, amber) → three open seats in teal, rose, olive.
+    const seats = openSeats(board);
+    expect(seats.map((s) => s.dot)).toEqual(["id-teal", "id-rose", "id-olive"]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
-  test("no standalone actions-section item of type retire", () => {
-    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
-    expect(actionItems(board).some((i) => i.type === "retire")).toBe(false);
+  test("open seats honor slot gaps left by a churned roster", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "a", identitySlot: 0 }),
+      mind({ slug: "c", name: "Cy", identitySlot: 2 }),
+    ]);
+    // Slots 0 and 2 taken → the free seats are 1, 3, 4 (amber, rose, olive).
+    expect(openSeats(board).map((s) => s.dot)).toEqual(["id-amber", "id-rose", "id-olive"]);
   });
 
-  test("the Convene-a-room composer appears only at >= 2 minds", () => {
-    expect(actionsSection(buildRosterBoard([mind()]), "Convene a room")).toBeUndefined();
-    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
-    expect(actionsSection(board, "Convene a room")?.kind).toBe("actions");
+  test("every open seat carries the freeform Author verb; the first also offers free starters", () => {
+    const board = buildRosterBoard([mind({ slug: "a", identitySlot: 0 })]);
+    const seats = openSeats(board);
+    for (const seat of seats) {
+      expect(seat.actions?.some((x) => x.type === "describe-own")).toBe(true);
+    }
+    const firstStarters = seats[0]?.actions?.filter((x) => x.type === "author-archetype") ?? [];
+    expect(firstStarters).toHaveLength(GENESIS_STARTERS.length);
+    // Subsequent seats don't repeat the starter buttons.
+    expect(seats[1]?.actions?.some((x) => x.type === "author-archetype")).toBe(false);
+  });
+
+  test("an already-seated starter is not offered again in the open seat", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "moneypenny", name: "Moneypenny", identitySlot: 0 }),
+    ]);
+    const firstSeat = openSeats(board)[0];
+    const offered = (firstSeat?.actions ?? [])
+      .filter((x) => x.type === "author-archetype")
+      .map((x) => (x.payload as { slug: string }).slug);
+    expect(offered).not.toContain("moneypenny");
+    expect(offered).toContain("mycroft");
+  });
+
+  test("one Mind seated points forward with a 'seat a second' nudge (the composer needs two)", () => {
+    const board = buildRosterBoard([mind({ slug: "a", identitySlot: 0 })]);
+    const nudge = board.sections
+      .flatMap((s) => (s.kind === "rows" ? s.items : []))
+      .find((i) => i.trailing === "next");
+    expect(nudge?.text).toBe("Seat a second Mind to convene a Room.");
+    // No convene composer yet at one Mind.
+    expect(actionsSection(board, "Convene a room — who's in")).toBeUndefined();
+    // The nudge is gone once a second Mind is seated (the composer takes over).
+    const two = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
+    expect(
+      two.sections
+        .flatMap((s) => (s.kind === "rows" ? s.items : []))
+        .some((i) => i.trailing === "next"),
+    ).toBe(false);
+  });
+
+  test("a starter whose preferred seat is taken is offered untoned (no false hue promise)", () => {
+    // "ada" claims slot 0 — Moneypenny's seat. The offered Moneypenny starter must not
+    // promise blue (she would land elsewhere); Mycroft (seat 1, free) keeps its amber.
+    const board = buildRosterBoard([mind({ slug: "ada", name: "Ada", identitySlot: 0 })]);
+    const starters =
+      openSeats(board)[0]?.actions?.filter((x) => x.type === "author-archetype") ?? [];
+    const bySlug = new Map(starters.map((s) => [(s.payload as { slug: string }).slug, s]));
+    expect(bySlug.get("moneypenny")?.tone).toBeUndefined();
+    expect(bySlug.get("mycroft")?.tone).toBe("id-amber");
+  });
+
+  test("a full ramp (5 seated) has no open seats but keeps a quiet Author action", () => {
+    const five = [0, 1, 2, 3, 4].map((slot) =>
+      mind({ slug: `m${slot}`, name: `M${slot}`, identitySlot: slot }),
+    );
+    const board = buildRosterBoard(five);
+    expect(openSeats(board)).toHaveLength(0);
+    const author = actionsSection(board, "Author a Mind");
+    if (author?.kind !== "actions") throw new Error("no quiet Author action");
+    expect(author.items.map((i) => i.type)).toEqual(["describe-own"]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 });
 
 describe("buildRosterBoard convene composer", () => {
-  const two = [mind({ slug: "a", name: "Ada" }), mind({ slug: "b", name: "Bo" })];
+  const two = [
+    mind({ slug: "a", name: "Ada", identitySlot: 0 }),
+    mind({ slug: "b", name: "Bo", identitySlot: 1 }),
+  ];
 
-  function convene(board: ReturnType<typeof buildRosterBoard>) {
-    const section = actionsSection(board, "Convene a room");
-    if (section?.kind !== "actions") throw new Error("no Convene section");
+  function whoChips(board: ReturnType<typeof buildRosterBoard>) {
+    const section = actionsSection(board, "Convene a room — who's in");
+    if (section?.kind !== "actions") throw new Error("no who's-in section");
     return section.items;
   }
-  const chips = (board: ReturnType<typeof buildRosterBoard>) =>
-    convene(board).filter((i) => i.type === "draft-set");
-  const conveneAction = (board: ReturnType<typeof buildRosterBoard>) =>
-    convene(board).find((i) => i.type === "convene");
+  function shapes(board: ReturnType<typeof buildRosterBoard>) {
+    const section = actionsSection(board, "…and how");
+    return section?.kind === "actions" ? section.items : [];
+  }
 
-  test("default (empty exclusion) renders one selected chip per Mind", () => {
+  test("who's-in chips are identity-toned draft-set toggles, one per Mind", () => {
     const board = buildRosterBoard(two);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const items = chips(board);
-    expect(items).toHaveLength(2);
-    // ✓ glyph = selected; each chip is a draft-set action carrying only its slug.
-    for (const chip of items) expect(chip.glyph).toBe("✓");
-    expect(items.map((c) => c.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
-    expect(items.map((c) => c.label)).toEqual(["Ada", "Bo"]);
+    const chips = whoChips(board);
+    expect(chips.map((c) => c.type)).toEqual(["draft-set", "draft-set"]);
+    for (const chip of chips) expect(chip.glyph).toBe("✓");
+    expect(chips.map((c) => c.tone)).toEqual(["id-blue", "id-amber"]);
+    expect(chips.map((c) => c.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
+    expect(chips.map((c) => c.label)).toEqual(["Ada", "Bo"]);
   });
 
   test("an excluded slug renders unselected (+ glyph); others stay selected (✓)", () => {
     const board = buildRosterBoard(two, new Set(["a"]));
     const bySlug = new Map(
-      chips(board).map((c) => [(c.payload as { slug: string }).slug, c.glyph]),
+      whoChips(board).map((c) => [(c.payload as { slug: string }).slug, c.glyph]),
     );
     expect(bySlug.get("a")).toBe("+");
     expect(bySlug.get("b")).toBe("✓");
   });
 
-  test("Convene is present at >= 2 selected and carries NO participants in its payload", () => {
-    const action = conveneAction(buildRosterBoard(two));
-    expect(action).toBeDefined();
-    expect(action?.glyph).toBe("▸");
-    // The server reads the draft — the action must not bake participants.
-    expect(action?.payload ?? {}).not.toHaveProperty("participants");
-    // It carries the optional topic capture field, plus a free-text project field
-    // conveneAction resolves by id/name against the host's project list.
-    expect(action?.fields?.map((f) => f.name)).toEqual(["topic", "project"]);
+  test("the five room shapes appear at >= 2 selected, each dispatching convene with its strategy", () => {
+    const items = shapes(buildRosterBoard(two));
+    expect(items.map((i) => i.type)).toEqual([
+      "convene",
+      "convene",
+      "convene",
+      "convene",
+      "convene",
+    ]);
+    expect(items.map((i) => (i.payload as { strategy: string }).strategy)).toEqual([
+      "sequential",
+      "group-chat",
+      "open-floor",
+      "review",
+      "magentic",
+    ]);
+    // The server reads the draft — no shape bakes participants into its payload.
+    for (const i of items) expect(i.payload ?? {}).not.toHaveProperty("participants");
   });
 
-  test("Convene is absent below 2 selected (one excluded of two)", () => {
+  test("the Debate shape collects a moderator; Build collects a manager + project", () => {
+    const items = shapes(buildRosterBoard(two));
+    const byStrategy = new Map(items.map((i) => [(i.payload as { strategy: string }).strategy, i]));
+    expect(byStrategy.get("group-chat")?.fields?.map((f) => f.name)).toEqual([
+      "topic",
+      "moderator",
+      "turns",
+    ]);
+    expect(byStrategy.get("magentic")?.fields?.map((f) => f.name)).toEqual([
+      "topic",
+      "manager",
+      "project",
+      "turns",
+    ]);
+    expect(byStrategy.get("sequential")?.fields?.map((f) => f.name)).toEqual(["topic", "project"]);
+  });
+
+  test("shapes are absent below 2 selected, but the chips stay (so the operator can re-select)", () => {
     const board = buildRosterBoard(two, new Set(["a"]));
-    // Chips still render (so the operator can re-select), but Convene is omitted —
-    // validateStart needs >= 2 distinct participants.
-    expect(chips(board)).toHaveLength(2);
-    expect(conveneAction(board)).toBeUndefined();
+    expect(whoChips(board)).toHaveLength(2);
+    expect(shapes(board)).toHaveLength(0);
   });
 
-  test("Convene is absent when all are excluded", () => {
-    expect(conveneAction(buildRosterBoard(two, new Set(["a", "b"])))).toBeUndefined();
-  });
-
-  test("the board stays valid with an excluded slug and no Convene", () => {
-    expect(canvasViewSchema.safeParse(buildRosterBoard(two, new Set(["a"]))).success).toBe(true);
+  test("shapes are absent when all are excluded", () => {
+    expect(shapes(buildRosterBoard(two, new Set(["a", "b"])))).toHaveLength(0);
   });
 
   test("no room-start action remains anywhere on the board", () => {
@@ -301,7 +425,7 @@ describe("buildRosterBoard convene composer", () => {
   });
 });
 
-describe("buildRosterBoard pulse (stats atop the roster)", () => {
+describe("buildRosterBoard pulse (leads the board)", () => {
   const two = [mind({ slug: "a", name: "Ada" }), mind({ slug: "b", name: "Bo" })];
 
   test("omitting pulse, or forYou:false, renders no pulse section at all", () => {
@@ -313,7 +437,7 @@ describe("buildRosterBoard pulse (stats atop the roster)", () => {
     expect(quiet.sections).toEqual(omitted.sections);
   });
 
-  test("forYou:true leads the board with one quiet rows line, not a stats grid", () => {
+  test("forYou:true leads the board with one quiet rows line", () => {
     const board = buildRosterBoard(two, new Set(), { forYou: true });
     const first = board.sections[0];
     expect(first?.kind).toBe("rows");

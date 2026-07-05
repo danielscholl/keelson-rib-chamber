@@ -49,7 +49,9 @@ describe("buildRoomsIndexBoard empty", () => {
     expect(board.header?.status?.label).toBe("1 session");
     const items = cards(board);
     expect(items).toHaveLength(1);
-    expect(items[0]?.pill).toEqual({ label: "active · 2/6", tone: "info" });
+    // The pill carries STATE (the status word); the bar carries MAGNITUDE (progress).
+    expect(items[0]?.pill).toEqual({ label: "active", tone: "info" });
+    expect(items[0]?.bar).toEqual({ value: 2, total: 6 });
     expect(items[0]?.dot).toBe("info");
     // An active room is status-only — already live in its inline panel — so its card
     // carries no actions (no frozen-snapshot Open, no orphaning Delete).
@@ -108,15 +110,43 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(cards(board)[1]?.dot).toBe("warn");
   });
 
-  test("status pill = `<status> · <turnIndex>/<turnBudget>` with a status tone", () => {
+  test("pill = the status word (one job), bar = turn progress, turns field in ink", () => {
     const done = cards(
       buildRoomsIndexBoard([room({ status: "done", turnIndex: 6, turnBudget: 6 })]),
     );
-    expect(done[0]?.pill).toEqual({ label: "done · 6/6", tone: "ok" });
+    expect(done[0]?.pill).toEqual({ label: "done", tone: "ok" });
+    expect(done[0]?.bar).toEqual({ value: 6, total: 6 });
+    expect(done[0]?.fields?.find((f) => f.label === "turns")?.value).toBe("6/6");
     const stopped = cards(
       buildRoomsIndexBoard([room({ status: "stopped", turnIndex: 3, turnBudget: 8 })]),
     );
-    expect(stopped[0]?.pill).toEqual({ label: "stopped · 3/8", tone: "warn" });
+    expect(stopped[0]?.pill).toEqual({ label: "stopped", tone: "warn" });
+    expect(stopped[0]?.bar).toEqual({ value: 3, total: 8 });
+    expect(stopped[0]?.fields?.find((f) => f.label === "turns")?.value).toBe("3/8");
+  });
+
+  test("the shape field names the strategy and its facilitator", () => {
+    const seq = cards(buildRoomsIndexBoard([room({ strategy: "sequential" })]));
+    expect(seq[0]?.fields?.find((f) => f.label === "shape")?.value).toBe("discussion");
+    const debate = cards(
+      buildRoomsIndexBoard([room({ strategy: "group-chat", config: { moderator: "moneypenny" } })]),
+    );
+    expect(debate[0]?.fields?.find((f) => f.label === "shape")?.value).toBe(
+      "debate · moneypenny moderates",
+    );
+    const build = cards(
+      buildRoomsIndexBoard([room({ strategy: "magentic", config: { manager: "mycroft" } })]),
+    );
+    expect(build[0]?.fields?.find((f) => f.label === "shape")?.value).toBe(
+      "build · mycroft manages",
+    );
+  });
+
+  test("the round cursor is a field only once it has advanced (0 for a plain sequential room)", () => {
+    const seq = cards(buildRoomsIndexBoard([room({ round: 0 })]))[0];
+    expect(seq?.fields?.some((f) => f.label === "round")).toBe(false);
+    const rounds = cards(buildRoomsIndexBoard([room({ strategy: "group-chat", round: 3 })]))[0];
+    expect(rounds?.fields?.find((f) => f.label === "round")?.value).toBe("3");
   });
 
   test("fields carry the participants joined by ' · ' and a started-relative time", () => {
