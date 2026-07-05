@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type CanvasTone, canvasViewSchema } from "@keelson/shared";
+import { canvasViewSchema } from "@keelson/shared";
 import { buildRosterBoard } from "../../src/boards/roster.ts";
 import { GENESIS_STARTERS } from "../../src/starters.ts";
 import type { Mind } from "../../src/types.ts";
@@ -11,17 +11,6 @@ const mind = (over: Partial<Mind> = {}): Mind => ({
   persona: "You are Ada.",
   ...over,
 });
-
-const TONES: readonly CanvasTone[] = [
-  "ok",
-  "warn",
-  "error",
-  "neutral",
-  "info",
-  "caution",
-  "brand",
-  "accent",
-];
 
 const ANCHOR =
   "A Chamber is a team of persistent Minds you author — they chat with you, meet each other in Rooms, and keep Lenses for ongoing work. Author your first Mind to start the Chamber.";
@@ -124,22 +113,22 @@ describe("buildRosterBoard populated", () => {
     expect(two.header?.status?.label).toBe("2 minds");
   });
 
-  test("each card dot is a canvas tone; dotFor is deterministic and can differ", () => {
-    const board = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "moneypenny", name: "M" })]);
-    for (const card of cards(board)) {
-      expect(card.dot).toBeDefined();
-      expect(TONES).toContain(card.dot as CanvasTone);
-    }
-    // Determinism: the same slug hashes to the same dot across two builds.
-    const again = buildRosterBoard([mind({ slug: "a" })]);
-    expect(cards(again)[0]?.dot).toBe(cards(board)[0]?.dot);
-    // Distinct slugs don't all collapse to one tone. Order-independent: a
-    // DOT_TONES reorder permutes the tone labels but not how many distinct tones
-    // a fixed slug set lands on.
-    const spread = buildRosterBoard(
-      ["a", "b", "c", "d", "e", "f", "g", "h"].map((slug) => mind({ slug })),
-    );
-    expect(new Set(cards(spread).map((c) => c.dot)).size).toBeGreaterThan(1);
+  test("each card dot is the Mind's persisted identity-slot tone (keelson#390), never a hash", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "a", identitySlot: 0 }),
+      mind({ slug: "b", name: "Bo", identitySlot: 1 }),
+    ]);
+    const [a, b] = cards(board);
+    expect(a?.dot).toBe("id-blue");
+    expect(b?.dot).toBe("id-amber");
+  });
+
+  test("a slot past the ramp (or absent) folds to neutral, not an invented hue", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "a", identitySlot: 99 }),
+      mind({ slug: "b", name: "Bo" }),
+    ]);
+    for (const card of cards(board)) expect(card.dot).toBe("neutral");
   });
 
   test("exactly one pill per card carrying the role, never the slug", () => {
@@ -286,8 +275,9 @@ describe("buildRosterBoard convene composer", () => {
     expect(action?.glyph).toBe("▸");
     // The server reads the draft — the action must not bake participants.
     expect(action?.payload ?? {}).not.toHaveProperty("participants");
-    // It does carry the optional topic capture field.
-    expect(action?.fields?.[0]?.name).toBe("topic");
+    // It carries the optional topic capture field, plus a free-text project field
+    // conveneAction resolves by id/name against the host's project list.
+    expect(action?.fields?.map((f) => f.name)).toEqual(["topic", "project"]);
   });
 
   test("Convene is absent below 2 selected (one excluded of two)", () => {
@@ -313,63 +303,30 @@ describe("buildRosterBoard convene composer", () => {
 
 describe("buildRosterBoard pulse (stats atop the roster)", () => {
   const two = [mind({ slug: "a", name: "Ada" }), mind({ slug: "b", name: "Bo" })];
-  const pulse = (over: Partial<Parameters<typeof buildRosterBoard>[2] & object> = {}) => ({
-    forYou: false,
-    activeRooms: 0,
-    liveLenses: 0,
-    minds: 2,
-    ...over,
+
+  test("omitting pulse, or forYou:false, renders no pulse section at all", () => {
+    const omitted = buildRosterBoard(two);
+    expect(
+      omitted.sections.some((s) => s.kind === "rows" && s.items[0]?.trailing === "Briefing"),
+    ).toBe(false);
+    const quiet = buildRosterBoard(two, new Set(), { forYou: false });
+    expect(quiet.sections).toEqual(omitted.sections);
   });
 
-  function statsItems(board: ReturnType<typeof buildRosterBoard>) {
+  test("forYou:true leads the board with one quiet rows line, not a stats grid", () => {
+    const board = buildRosterBoard(two, new Set(), { forYou: true });
     const first = board.sections[0];
-    if (first?.kind !== "stats") throw new Error("sections[0] is not a stats section");
-    return first.items;
-  }
-
-  test("omitting pulse keeps the historical no-stats shape", () => {
-    const board = buildRosterBoard(two);
-    expect(board.sections[0]?.kind).not.toBe("stats");
-    expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
-  });
-
-  test("with pulse, sections[0] is a stats section carrying the four labels", () => {
-    const board = buildRosterBoard(two, new Set(), pulse({ activeRooms: 1, liveLenses: 3 }));
-    expect(board.sections[0]?.kind).toBe("stats");
-    expect(statsItems(board).map((i) => i.label)).toEqual([
-      "For you",
-      "Active work",
-      "Live views",
-      "Team",
+    expect(first?.kind).toBe("rows");
+    if (first?.kind !== "rows") throw new Error("expected a rows section");
+    expect(first.items).toEqual([
+      { glyph: "brand", text: "A briefing is waiting for you.", trailing: "Briefing" },
     ]);
-    const byLabel = new Map(statsItems(board).map((i) => [i.label, i.value]));
-    expect(byLabel.get("Active work")).toBe(1);
-    expect(byLabel.get("Live views")).toBe(3);
-    expect(byLabel.get("Team")).toBe(2);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
-  test("forYou toggles the 'For you' value + tone (quiet when nothing waits)", () => {
-    const waiting = statsItems(buildRosterBoard(two, new Set(), pulse({ forYou: true })));
-    const forYouWaiting = waiting.find((i) => i.label === "For you");
-    expect(forYouWaiting?.value).toBe("1 waiting");
-    expect(forYouWaiting?.tone).toBe("brand");
-
-    const quiet = statsItems(buildRosterBoard(two, new Set(), pulse({ forYou: false })));
-    const forYouQuiet = quiet.find((i) => i.label === "For you");
-    expect(forYouQuiet?.value).toBe("—");
-    expect(forYouQuiet?.tone).toBe("neutral");
-  });
-
-  test("a zero count tones neutral so an idle Chamber stays calm", () => {
-    const items = statsItems(buildRosterBoard(two, new Set(), pulse()));
-    expect(items.find((i) => i.label === "Active work")?.tone).toBe("neutral");
-    expect(items.find((i) => i.label === "Live views")?.tone).toBe("neutral");
-  });
-
   test("the pulse leads even the cold-start board and stays valid", () => {
-    const board = buildRosterBoard([], new Set(), pulse({ minds: 0 }));
-    expect(board.sections[0]?.kind).toBe("stats");
+    const board = buildRosterBoard([], new Set(), { forYou: true });
+    expect(board.sections[0]?.kind).toBe("rows");
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 });

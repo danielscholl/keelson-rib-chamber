@@ -1,3 +1,4 @@
+import type { TokenUsage } from "@keelson/shared";
 import { stripControlJson } from "./routing.ts";
 import type { MindSlug, TaskLedger, TurnEntry } from "./types.ts";
 
@@ -252,6 +253,7 @@ export interface BuildTurnEntryInput {
   at: string;
   aborted?: boolean;
   round?: number;
+  usage?: TokenUsage;
 }
 
 // Build a transcript entry from driver-stamped fields. Centralised so the driver
@@ -268,5 +270,6 @@ export function buildTurnEntry(input: BuildTurnEntryInput): TurnEntry {
     parts: [{ text: input.text }],
     ...(input.aborted ? { aborted: true } : {}),
     at: input.at,
+    ...(input.usage ? { usage: input.usage } : {}),
   };
 }

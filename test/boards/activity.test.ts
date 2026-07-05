@@ -38,20 +38,14 @@ const lens = (over: Partial<LensRecord> = {}): LensRecord => ({
 
 type Board = ReturnType<typeof buildActivityBoard>;
 
-function statsItems(board: Board) {
-  const s = board.sections.find((x) => x.kind === "stats");
-  if (s?.kind !== "stats") throw new Error("no stats section");
-  return s.items;
-}
 function feedItems(board: Board) {
   const s = board.sections.find((x) => x.kind === "rows");
   if (s?.kind !== "rows") throw new Error("no rows section");
   return s.items;
 }
-const byLabel = (board: Board) => new Map(statsItems(board).map((i) => [i.label, i] as const));
 
 describe("buildActivityBoard cold start", () => {
-  test("valid board, Quiet header, zeroed neutral pulse, empty-feed hint", () => {
+  test("valid board, Quiet header, no stats section, empty-feed hint", () => {
     const board = buildActivityBoard([], [], [], NOW);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.view).toBe("board");
@@ -59,39 +53,14 @@ describe("buildActivityBoard cold start", () => {
     expect(board.header?.chip).toBe("activity");
     expect(board.header?.status?.label).toBe("Quiet");
     expect(board.header?.status?.tone).toBe("neutral");
-    const stats = byLabel(board);
-    expect([...stats.keys()]).toEqual(["Minds", "Rooms", "Lenses", "Turns"]);
-    for (const item of stats.values()) {
-      expect(item.value).toBe(0);
-      expect(item.tone).toBe("neutral");
-    }
+    // The prior cumulative-pulse stats section (Minds/Rooms/Lenses/Turns) is gone —
+    // each count already reads once elsewhere (roster header, Rooms/Lenses region
+    // headers); the feed is the panel's whole job now.
+    expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
+    expect(board.sections).toHaveLength(1);
     const feed = feedItems(board);
     expect(feed).toHaveLength(1);
     expect(feed[0]?.text).toContain("No activity yet");
-  });
-});
-
-describe("buildActivityBoard pulse", () => {
-  test("counts each store and sums turnIndex into Turns", () => {
-    const board = buildActivityBoard(
-      [mind(), mind({ name: "Bo" })],
-      [room({ slug: "r1", turnIndex: 4 }), room({ slug: "r2", turnIndex: 6, status: "active" })],
-      [lens()],
-      NOW,
-    );
-    const stats = byLabel(board);
-    expect(stats.get("Minds")?.value).toBe(2);
-    expect(stats.get("Rooms")?.value).toBe(2);
-    expect(stats.get("Lenses")?.value).toBe(1);
-    expect(stats.get("Turns")?.value).toBe(10);
-    expect(canvasViewSchema.safeParse(board).success).toBe(true);
-  });
-
-  test("a non-zero count tones bright; a zero stays neutral (calm idle Chamber)", () => {
-    const stats = byLabel(buildActivityBoard([mind()], [], [], NOW));
-    expect(stats.get("Minds")?.tone).toBe("brand");
-    expect(stats.get("Rooms")?.tone).toBe("neutral");
-    expect(stats.get("Turns")?.tone).toBe("neutral");
   });
 });
 
@@ -135,14 +104,13 @@ describe("buildActivityBoard feed", () => {
     expect(feedItems(board)[0]?.text).toBe('Lens "Release Risks" · timeline');
   });
 
-  test("an unparseable timestamp is counted in the pulse but dropped from the feed", () => {
+  test("an entry with an unparseable timestamp is dropped from the feed", () => {
     const board = buildActivityBoard(
       [mind({ name: "Ghost", createdAt: "" })],
       [],
       [lens({ updatedAt: at(MIN) })],
       NOW,
     );
-    expect(byLabel(board).get("Minds")?.value).toBe(1);
     const feed = feedItems(board);
     expect(feed).toHaveLength(1);
     expect(feed.every((i) => !i.text.includes("Ghost"))).toBe(true);

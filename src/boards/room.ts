@@ -1,34 +1,113 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
+import {
+  clockTime,
+  type DecisionMarker,
+  flattenMarkdown,
+  formatDuration,
+  formatTokenCount,
+  type OutcomeSplit,
+  outcomeReceipt,
+  parseDecisionMarkers,
+  parseOutcomeQuestions,
+  splitOutcome,
+  sumTurnUsage,
+  topicContractTail,
+  topicGist,
+} from "../room-text.ts";
 import { speakerCounts, stripControlJson } from "../routing.ts";
-import type { LedgerTask, MindSlug, Room, TaskLedger, TurnEntry } from "../types.ts";
+import {
+  identityToneForSlot,
+  type LedgerTask,
+  type Mind,
+  type MindSlug,
+  type Room,
+  type TaskLedger,
+  type TurnEntry,
+} from "../types.ts";
+
+// A `rows` section — the shape the Voices/Decisions rail and the debate column
+// share, and the return type a `columns` slot's leaf sections need (not the
+// full board-section union, which also includes `columns` itself).
+type RowsSection = Extract<CanvasBoardView["sections"][number], { kind: "rows" }>;
+
+// One rows item — the debate feed, the Voices/Decisions rail, and the Topic row
+// all share this shape.
+type FeedItem = RowsSection["items"][number];
+
+// A decision marker resolved to where it was authored — the round it landed in,
+// the Mind who pinned it, and its position in the transcript (so a turn row can
+// look up "did THIS turn decide anything" precisely).
+interface RailEntry extends DecisionMarker {
+  round?: number;
+  authorSlug: MindSlug;
+  turnIndex: number;
+}
 
 // Pure: a room + its transcript (+ a magentic task ledger, when one applies) -> a
-// canvas `board` (a `rows` feed, one row per turn, plus a participant `segments`
-// header). Validated against canvasViewSchema in tests.
+// canvas `board`. `minds`, when supplied, resolves each speaker to its persisted
+// display name and host identity-tone slot (keelson#390); omitted (the default)
+// degrades every speaker to its slug and the pre-identity-tones role fallback, so
+// older callers and a minimal test setup still render a valid board. `projectLabel`
+// is the room's optional scope, already resolved to a display string by the
+// caller — the board never resolves a project id itself, staying pure.
+// Validated against canvasViewSchema in tests.
 export function buildRoomBoard(
   room: Room,
   transcript: readonly TurnEntry[],
   ledger?: TaskLedger,
+  minds: readonly Mind[] = [],
+  projectLabel?: string,
 ): CanvasBoardView {
-  // Same fold the routing engine uses, so the board's per-speaker counts can never
-  // drift from the anti-monopoly cap / close gate.
+  const mindBySlug = new Map(minds.map((m) => [m.slug, m]));
   const counts = speakerCounts(transcript);
-  const segments = room.participants.map((slug) => ({ label: slug, n: counts.get(slug) ?? 0 }));
 
-  const items = buildFeed(room, transcript);
+  // The room's own convention for closing a debate: the LAST agent turn may carry
+  // a synthesized outcome document, split at its own `---`/`##` boundary (see
+  // room-text.ts). `textFor` is the one place that split is applied, so every
+  // other reader (the debate feed, the decision scan) sees the same effective
+  // text for that turn — its pre-boundary debate content, never the document.
+  const lastAgentIndex = findLastAgentIndex(transcript);
+  const lastRaw = lastAgentIndex >= 0 ? effectiveRawText(transcript[lastAgentIndex]!) : "";
+  const { debate: lastDebateText, outcome } = splitOutcome(lastRaw);
+  const textFor = (entry: TurnEntry, index: number): string =>
+    index === lastAgentIndex && outcome ? lastDebateText : effectiveRawText(entry);
 
-  // Surface the room's framing topic above the feed so an operator watching the
-  // board sees what the discussion is about — it otherwise lives only in the
-  // (system-side) turn prompt.
-  const topic = room.topic?.trim();
-  const topicSection: CanvasBoardView["sections"] = topic
-    ? [{ kind: "rows", title: "Topic", items: [{ glyph: "brand", text: topic }] }]
-    : [];
+  const decisions = collectDecisions(transcript, textFor);
+  const roundDecisions = groupByRound(decisions);
 
-  // The magentic plan, when this is a magentic room — between the topic and the feed
-  // so an operator reads the goal, then the plan, then the discussion.
+  const topicSection = buildTopicSection(room.topic, decisions.length);
+  const vitalsSection = buildVitalsSection(transcript, projectLabel);
   const planSection = buildPlanSection(ledger);
+
+  const debateColumn = {
+    kind: "rows" as const,
+    title: debateColumnTitle(transcript),
+    items: buildDebateItems(room, transcript, textFor, mindBySlug, roundDecisions, decisions),
+  };
+  const voicesSection = buildVoicesSection(room, mindBySlug, counts);
+  const decisionsSection = buildDecisionsSection(decisions, mindBySlug, outcome);
+
+  const columnsSection: CanvasBoardView["sections"][number] = {
+    kind: "columns",
+    columns: [
+      { weight: 1.9, sections: [debateColumn] },
+      { weight: 1, sections: [voicesSection, ...(decisionsSection ? [decisionsSection] : [])] },
+    ],
+  };
+
+  const outcomeSection: CanvasBoardView["sections"] =
+    outcome && lastAgentIndex >= 0
+      ? [
+          buildOutcomeSection(
+            room,
+            outcome,
+            transcript[lastAgentIndex]!.from,
+            transcript[lastAgentIndex]!.at,
+            mindBySlug,
+          ),
+        ]
+      : [];
 
   return {
     view: "board",
@@ -36,15 +115,98 @@ export function buildRoomBoard(
     header: {
       status: { label: room.status, tone: statusTone(room.status) },
       chip: `${room.turnIndex}/${room.turnBudget}`,
-      ...(segments.length > 0 ? { segments } : {}),
     },
-    // The topic banner, the plan (magentic only), the transcript feed, then
-    // board-baked controls. Each action carries the room slug as payload (a static
-    // actions[] button can't), so onAction routes to the right room. Payload-required
-    // controls have to live here, not in the rib's static actions list — those
-    // dispatch type-only.
-    sections: [...topicSection, ...planSection, { kind: "rows", items }, roomControls(room)],
+    // Vitals, then the topic brief, the magentic plan (when applicable), the
+    // debate+rail columns, the outcome document (when the room produced one),
+    // then board-baked controls. Each control carries the room slug as payload
+    // (a static actions[] button can't), so onAction routes to the right room.
+    sections: [
+      ...vitalsSection,
+      ...topicSection,
+      ...planSection,
+      columnsSection,
+      ...outcomeSection,
+      roomControls(room),
+    ],
   };
+}
+
+function effectiveRawText(entry: TurnEntry): string {
+  return stripControlJson(entry.parts.map((p) => p.text).join("\n"));
+}
+
+function findLastAgentIndex(transcript: readonly TurnEntry[]): number {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    if (transcript[i]?.role === "agent") return i;
+  }
+  return -1;
+}
+
+// The room's vitals as ONE compact line — a `stats` section renders as a row of
+// hero tiles (the right weight for a handful of headline KPIs, the wrong one
+// here: these are secondary facts riding beside the debate, not the point of
+// the screen). A single `rows` item reads at the same quiet register as the
+// round dividers below it: duration + its clock-time span, then token usage,
+// with the scope (when set) as a small leading chip.
+function buildVitalsSection(
+  transcript: readonly TurnEntry[],
+  projectLabel: string | undefined,
+): CanvasBoardView["sections"] {
+  const first = transcript[0];
+  const last = transcript[transcript.length - 1];
+  const parts: string[] = [];
+  if (first && last) {
+    const duration = formatDuration(first.at, last.at);
+    if (duration) parts.push(`${duration} · ${clockTime(first.at)} → ${clockTime(last.at)}`);
+  }
+  const usage = sumTurnUsage(transcript);
+  if (usage) {
+    parts.push(
+      `↑ ${formatTokenCount(usage.inputTokens)} in · ↓ ${formatTokenCount(usage.outputTokens)} out`,
+    );
+  }
+  if (parts.length === 0 && !projectLabel) return [];
+  return [
+    {
+      kind: "rows",
+      items: [
+        {
+          glyph: "neutral" as CanvasTone,
+          ...(projectLabel
+            ? { chip: { label: `⌂ ${projectLabel}`, tone: "neutral" as CanvasTone } }
+            : {}),
+          text: parts.length > 0 ? parts.join(" · ") : "No turns yet",
+        },
+      ],
+    },
+  ];
+}
+
+// The topic as a brief: the gist collapsed with its contract tail (what the room
+// owes, read off decisions actually found plus the topic's own vocabulary — see
+// topicContractTail), the full text behind `detail`. Omitted when the room has no
+// topic.
+function buildTopicSection(
+  topic: string | undefined,
+  decisionCount: number,
+): CanvasBoardView["sections"] {
+  const trimmed = topic?.trim();
+  if (!trimmed) return [];
+  const tail = topicContractTail(trimmed, decisionCount);
+  return [
+    {
+      kind: "rows",
+      title: "Topic",
+      items: [
+        {
+          glyph: "brand",
+          text: topicGist(trimmed),
+          ...(tail ? { trailing: tail } : {}),
+          detail: flattenMarkdown(trimmed),
+        },
+      ],
+    },
+  ];
 }
 
 // The magentic task ledger as a board section: one row per task — the status as a
@@ -223,86 +385,268 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
   };
 }
 
-// One rows item — the feed mixes turn rows with thin round/termination markers.
-type FeedItem = Extract<CanvasBoardView["sections"][number], { kind: "rows" }>["items"][number];
+// Every decision marker in the transcript, resolved to where it landed — the
+// round, the author, and its transcript position (so a turn row can look up
+// exactly what IT decided, and a round divider can list what ITS round decided).
+function collectDecisions(
+  transcript: readonly TurnEntry[],
+  textFor: (entry: TurnEntry, index: number) => string,
+): RailEntry[] {
+  const out: RailEntry[] = [];
+  transcript.forEach((entry, index) => {
+    if (entry.role !== "agent") return;
+    for (const marker of parseDecisionMarkers(textFor(entry, index))) {
+      out.push({ ...marker, round: entry.round, authorSlug: entry.from, turnIndex: index });
+    }
+  });
+  return out;
+}
 
-// The transcript feed: a row per turn, with a thin "Round N" divider wherever the
-// round cursor advances and a single termination marker once the room closes.
-// Facilitator turns (the moderator's routing, the synthesizer's closing summary)
-// read distinctly from participant chatter — both are non-participant Minds, so an
-// identity check on `from` is exact (start validation keeps them out of the roster).
-function buildFeed(room: Room, transcript: readonly TurnEntry[]): FeedItem[] {
+function groupByRound(decisions: readonly RailEntry[]): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  for (const d of decisions) {
+    if (d.round === undefined) continue;
+    const existing = map.get(d.round);
+    if (existing) existing.push(d.question);
+    else map.set(d.round, [d.question]);
+  }
+  return map;
+}
+
+function debateColumnTitle(transcript: readonly TurnEntry[]): string {
+  const rounds = transcript.map((e) => e.round).filter((r): r is number => r !== undefined);
+  if (rounds.length === 0) return "Debate";
+  const roundCount = Math.max(...rounds) + 1;
+  return roundCount > 1 ? `Debate · ${roundCount} rounds` : "Debate";
+}
+
+// The debate feed: a row per turn, with a round-head divider wherever the round
+// cursor changes (including the very first) and a single termination marker once
+// the room closes. A round head names the questions decided within it, computed
+// (never authored) from the transcript's own decision markers.
+function buildDebateItems(
+  room: Room,
+  transcript: readonly TurnEntry[],
+  textFor: (entry: TurnEntry, index: number) => string,
+  mindBySlug: Map<string, Mind>,
+  roundDecisions: Map<number, number[]>,
+  decisions: readonly RailEntry[],
+): FeedItem[] {
   const moderator = room.config?.moderator;
   const synthesizer = room.config?.synthesizer;
   const manager = room.config?.manager;
   const items: FeedItem[] = [];
-  let prevRound: number | undefined;
-  for (const entry of transcript) {
-    if (entry.round !== undefined) {
-      if (prevRound !== undefined && entry.round > prevRound) {
-        items.push({ icon: "—", glyph: "neutral", text: `Round ${entry.round + 1}` });
-      }
-      prevRound = entry.round;
+  let lastRound: number | undefined;
+  transcript.forEach((entry, index) => {
+    if (entry.round !== undefined && entry.round !== lastRound) {
+      items.push(roundDivider(entry.round, roundDecisions.get(entry.round)));
+      lastRound = entry.round;
     }
-    items.push(turnRow(entry, moderator, synthesizer, manager));
-  }
+    items.push(
+      turnRow(entry, index, textFor, moderator, synthesizer, manager, mindBySlug, decisions),
+    );
+  });
   const end = terminationMarker(room);
   if (end) items.push(end);
   return items;
 }
 
+function roundDivider(round: number, questions: number[] | undefined): FeedItem {
+  const label = `Round ${round + 1}`;
+  if (!questions || questions.length === 0) return { icon: "—", glyph: "neutral", text: label };
+  return {
+    icon: "—",
+    glyph: "neutral",
+    text: `${label} — decides ${questions.map((q) => `Q${q}`).join(" · ")}`,
+  };
+}
+
+// Facilitator turns (the moderator's routing, the synthesizer's closing summary,
+// a magentic manager's plan) read distinctly from participant chatter — all three
+// wear the host's brand tone (matching squad's coordinator convention), never a
+// participant's identity hue. A participant wears its persisted identity-tone
+// slot (keelson#390) when resolvable, else the pre-identity-tones role fallback.
 function turnRow(
   entry: TurnEntry,
+  index: number,
+  textFor: (entry: TurnEntry, index: number) => string,
   moderator: MindSlug | undefined,
   synthesizer: MindSlug | undefined,
   manager: MindSlug | undefined,
+  mindBySlug: Map<string, Mind>,
+  decisions: readonly RailEntry[],
 ): FeedItem {
-  const text = turnText(entry);
-  const trailing = entry.aborted ? `${entry.at} · aborted` : entry.at;
-  // An aborted turn reads as an error dot whoever authored it.
+  const label = mindBySlug.get(entry.from)?.name ?? entry.from;
+  const time = clockTime(entry.at);
+
   if (entry.aborted) {
     return {
       glyph: "error",
-      chip: { label: entry.from, tone: roleTone(entry.role) },
-      text,
-      trailing,
+      chip: { label, tone: roleTone(entry.role) },
+      text: "(aborted)",
+      trailing: `${time} · aborted`,
     };
   }
-  if (entry.from === synthesizer) {
+
+  const flattened = flattenMarkdown(textFor(entry, index));
+  const summary = summaryLine(flattened);
+  const text = summary || "(no text)";
+  const detail =
+    flattened.trim().length > 0 && flattened.trim() !== summary ? flattened : undefined;
+  const decidedHere = decisions.filter((d) => d.turnIndex === index);
+  const decidedSuffix = decidedHere.length
+    ? ` · ${decidedHere.map((d) => `Q${d.question} decided`).join(", ")}`
+    : "";
+  const trailing = `${time}${decidedSuffix}`;
+
+  if (entry.from === synthesizer || entry.from === manager || entry.from === moderator) {
+    const icon = entry.from === synthesizer ? "◆" : entry.from === manager ? "❖" : "◇";
     return {
       glyph: "brand",
-      chip: { label: entry.from, tone: "brand" },
-      icon: "◆",
+      icon,
+      chip: { label, tone: "brand" },
       text,
       trailing,
+      ...(detail ? { detail } : {}),
     };
   }
-  // The magentic manager — a non-participant facilitator, like the moderator — reads
-  // distinctly from worker chatter (a room is magentic OR moderated, never both, so
-  // the two checks never collide).
-  if (entry.from === manager) {
-    return {
-      glyph: "accent",
-      chip: { label: entry.from, tone: "accent" },
-      icon: "❖",
-      text,
-      trailing,
-    };
+
+  const mind = entry.role === "agent" ? mindBySlug.get(entry.from) : undefined;
+  const tone = mind ? identityToneForSlot(mind.identitySlot) : roleTone(entry.role);
+  return { glyph: tone, chip: { label, tone }, text, trailing, ...(detail ? { detail } : {}) };
+}
+
+function summaryLine(flatText: string, max = 140): string {
+  const oneline = flatText.replace(/\s+/g, " ").trim();
+  return oneline.length > max ? `${oneline.slice(0, max - 1).trim()}…` : oneline;
+}
+
+// The Voices panel: the room's facilitator(s) (moderator/synthesizer/manager —
+// brand-toned, matching squad's coordinator), then its participants in seat
+// order, each with its role, its host identity tone, and its spelled-out turn
+// count ("6 turns", not a ×N code).
+function buildVoicesSection(
+  room: Room,
+  mindBySlug: Map<string, Mind>,
+  counts: Map<string, number>,
+): RowsSection {
+  const seen = new Set<string>();
+  const rows: FeedItem[] = [];
+  for (const [slug, role] of facilitatorRoles(room)) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    rows.push(voiceRow(slug, mindBySlug, "brand", role, counts.get(slug) ?? 0));
   }
-  if (entry.from === moderator) {
-    return {
-      glyph: "accent",
-      chip: { label: entry.from, tone: "accent" },
-      icon: "◇",
-      text,
-      trailing,
-    };
+  for (const slug of room.participants) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    const mind = mindBySlug.get(slug);
+    const tone = mind ? identityToneForSlot(mind.identitySlot) : "info";
+    rows.push(voiceRow(slug, mindBySlug, tone, mind?.role, counts.get(slug) ?? 0));
   }
+  return { kind: "rows", title: "Voices", items: rows };
+}
+
+function facilitatorRoles(room: Room): [MindSlug, string][] {
+  const out: [MindSlug, string][] = [];
+  if (room.config?.moderator) out.push([room.config.moderator, "moderator"]);
+  if (room.config?.synthesizer) out.push([room.config.synthesizer, "synthesizer"]);
+  if (room.config?.manager) out.push([room.config.manager, "manager"]);
+  return out;
+}
+
+function voiceRow(
+  slug: MindSlug,
+  mindBySlug: Map<string, Mind>,
+  tone: CanvasTone,
+  role: string | undefined,
+  turns: number,
+): FeedItem {
   return {
-    glyph: roleTone(entry.role),
-    chip: { label: entry.from, tone: roleTone(entry.role) },
-    text,
-    trailing,
+    glyph: tone,
+    chip: { label: mindBySlug.get(slug)?.name ?? slug, tone },
+    text: role?.trim() || "Mind",
+    trailing: `${turns} turn${turns === 1 ? "" : "s"}`,
+  };
+}
+
+// The Decisions rail: one row per pinned question, in debate order — the tone
+// and name of who decided it, which round, and its gist. The title folds in the
+// scoreboard metric: "N of M decided" once the room's outcome document restates
+// the full set, else a plain running "N decided" while the room is still live.
+function buildDecisionsSection(
+  decisions: readonly RailEntry[],
+  mindBySlug: Map<string, Mind>,
+  outcome: OutcomeSplit | undefined,
+): RowsSection | undefined {
+  if (decisions.length === 0) return undefined;
+  const decidedCount = new Set(decisions.map((d) => d.question)).size;
+  const totalCount = outcome ? parseOutcomeQuestions(outcome.body).length : 0;
+  const metric =
+    totalCount > 0 ? `${decidedCount} of ${totalCount} decided` : `${decidedCount} decided`;
+  const items: FeedItem[] = decisions.map((d) => {
+    const mind = mindBySlug.get(d.authorSlug);
+    const tone = mind ? identityToneForSlot(mind.identitySlot) : "info";
+    return {
+      glyph: tone,
+      chip: { label: `Q${d.question}`, tone },
+      text: d.gist ? `${d.title} — ${d.gist}` : d.title,
+      trailing: `${mind?.name ?? d.authorSlug}${d.round !== undefined ? ` · round ${d.round + 1}` : ""}`,
+    };
+  });
+  return { kind: "rows", title: `Decisions · ${metric}`, items };
+}
+
+// The Outcome card: the document's authored title, a receipt (who synthesized
+// it, when, and a mechanical contract check against its own section headings —
+// never an authored claim), a short preview, and the two concrete verbs: Copy
+// (the field's copyAction seam fetches the full markdown on click and writes it
+// to the clipboard — see index.ts's outcomeCopyAction) and Explore in chat (the
+// surface→chat handoff every ✦ verb uses — see outcomeExploreAction).
+function buildOutcomeSection(
+  room: Room,
+  outcome: OutcomeSplit,
+  authorSlug: MindSlug,
+  at: string,
+  mindBySlug: Map<string, Mind>,
+): CanvasBoardView["sections"][number] {
+  const receipt = outcomeReceipt(outcome.body);
+  const authorName = mindBySlug.get(authorSlug)?.name ?? authorSlug;
+  const parts = [`${receipt.decisions} decision${receipt.decisions === 1 ? "" : "s"}`];
+  if (receipt.criteria !== undefined) parts.push(`${receipt.criteria} criteria`);
+  if (receipt.hasTestPlan) parts.push("test plan");
+  if (receipt.hasOutOfScope) parts.push("out-of-scope");
+  const flattenedBody = flattenMarkdown(outcome.body);
+  const preview =
+    flattenedBody.length > 220 ? `${flattenedBody.slice(0, 219).trim()}…` : flattenedBody;
+  return {
+    kind: "cards",
+    title: "Outcome",
+    items: [
+      {
+        title: outcome.title,
+        dot: "ok" as CanvasTone,
+        reason: {
+          text: `synthesized by ${authorName} · ${clockTime(at)} — ✓ delivers ${parts.join(" · ")}`,
+        },
+        footnote: `${preview}\n\nFull document via Copy markdown or ✦ Explore in chat.`,
+        fields: [
+          {
+            label: "Copy",
+            value: "Outcome as markdown",
+            copyAction: { type: "outcome-copy", payload: { slug: room.slug } },
+          },
+        ],
+        actions: [
+          {
+            type: "outcome-explore",
+            label: "✦ Explore in chat",
+            glyph: "✦",
+            payload: { slug: room.slug },
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -315,14 +659,6 @@ function terminationMarker(room: Room): FeedItem | undefined {
   if (room.status === "active") return undefined;
   if (room.status === "stopped") return { icon: "—", glyph: "warn", text: "Stopped" };
   return { icon: "—", glyph: "neutral", text: "Closed" };
-}
-
-function turnText(entry: TurnEntry): string {
-  // Strip the trailing control directive (a moderator's routing JSON, an
-  // open-floor speaker's nomination tail) the same way the prompt context does
-  // (transcript.ts), so the machine-routing JSON never leaks into the rendered turn.
-  const text = stripControlJson(entry.parts.map((p) => p.text).join("\n")).trim();
-  return text.length > 0 ? text : "(no text)";
 }
 
 function roleTone(role: TurnEntry["role"]): CanvasTone {

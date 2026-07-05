@@ -51,11 +51,11 @@ describe("collect-roster", () => {
     }
   });
 
-  test("emits the pulse stats section, with for-you reflecting the watermark", async () => {
+  test("a promoted watermark leads the board with the waiting-briefing line", async () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-collect-"));
     try {
       await seedMind(home);
-      // A promoted watermark → the pulse's "For you" reads as a waiting briefing.
+      // A promoted watermark → the pulse reads as a waiting briefing.
       await writeWatermark(
         {
           ackedEndedRooms: [],
@@ -68,14 +68,29 @@ describe("collect-roster", () => {
       const { code, out } = await runCollector(home);
       expect(code).toBe(0);
       const board = JSON.parse(out) as {
-        sections: { kind: string; items?: { label: string; value: string | number }[] }[];
+        sections: { kind: string; items?: { text?: string }[] }[];
       };
-      // The pulse leads the board.
-      const stats = board.sections[0];
-      expect(stats?.kind).toBe("stats");
-      const byLabel = new Map((stats?.items ?? []).map((i) => [i.label, i.value]));
-      expect(byLabel.get("For you")).toBe("1 waiting");
-      expect(byLabel.get("Team")).toBe(1);
+      const first = board.sections[0];
+      expect(first?.kind).toBe("rows");
+      expect(first?.items?.[0]?.text).toBe("A briefing is waiting for you.");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a quiet watermark renders no pulse section", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-"));
+    try {
+      await seedMind(home);
+      const { code, out } = await runCollector(home);
+      expect(code).toBe(0);
+      const board = JSON.parse(out) as { sections: { kind: string }[] };
+      expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
+      expect(
+        board.sections.some(
+          (s) => (s as { items?: { trailing?: string }[] }).items?.[0]?.trailing === "Briefing",
+        ),
+      ).toBe(false);
     } finally {
       await rm(home, { recursive: true, force: true });
     }

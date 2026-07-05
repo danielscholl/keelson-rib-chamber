@@ -28,52 +28,28 @@ const FEED_LIMIT = 10;
 // cools to neutral — a glance signal independent of the feed's relative spans.
 const FRESH_WINDOW_MS = 60 * 60_000;
 
-// Pure: the three Chamber stores -> a standing ACTIVITY board. Leads with a
-// cumulative pulse (counts + total turns transacted, the one metric the roster
-// pulse doesn't carry), then a unified reverse-chron feed of recent genesis / room
-// / lens events. `now` is injected so the relative spans + ordering test
-// deterministically. Validated against canvasViewSchema in tests; the producer
-// never parses (validation lives at the binding edge).
+// Pure: the three Chamber stores -> a standing ACTIVITY board — a plain feed of
+// recent genesis / room / lens events, reverse-chron. A prior version led with a
+// cumulative-pulse stats section (Minds/Rooms/Lenses/Turns counts); those first
+// three each already read once elsewhere (the roster header chip, the Rooms and
+// Lenses region headers), so repeating them here was the "4 minds in six places"
+// finding — the feed plus the header's freshness read carries this panel's whole
+// job. `now` is injected so the relative spans + ordering test deterministically.
+// Validated against canvasViewSchema in tests; the producer never parses
+// (validation lives at the binding edge).
 export function buildActivityBoard(
   minds: readonly MindActivity[],
   rooms: readonly Room[],
   lenses: readonly LensRecord[],
   now: number = Date.now(),
 ): CanvasBoardView {
-  const totalTurns = rooms.reduce((sum, r) => sum + Math.max(0, r.turnIndex), 0);
   const events = collectEvents(minds, rooms, lenses);
-
-  const sections: CanvasBoardView["sections"] = [
-    pulseSection(minds.length, rooms.length, lenses.length, totalTurns),
-    events.length === 0 ? emptyFeed() : feedSection(events, now),
-  ];
 
   return {
     view: "board",
     title: "Activity",
     header: { status: freshnessStatus(events, now), chip: "activity" },
-    sections,
-  };
-}
-
-// The cumulative pulse: counts plus the total turns transacted across the retained
-// rooms. Distinct from the roster pulse (for-you + current counts) by the turn
-// total — a sense of accrued work. A zero tones neutral so an idle Chamber is calm.
-function pulseSection(
-  minds: number,
-  rooms: number,
-  lenses: number,
-  turns: number,
-): CanvasBoardView["sections"][number] {
-  const toned = (n: number, tone: CanvasTone): CanvasTone => (n > 0 ? tone : "neutral");
-  return {
-    kind: "stats",
-    items: [
-      { label: "Minds", value: minds, tone: toned(minds, "brand") },
-      { label: "Rooms", value: rooms, tone: toned(rooms, "ok") },
-      { label: "Lenses", value: lenses, tone: toned(lenses, "accent") },
-      { label: "Turns", value: turns, sub: "across rooms", tone: toned(turns, "info") },
-    ],
+    sections: [events.length === 0 ? emptyFeed() : feedSection(events, now)],
   };
 }
 
