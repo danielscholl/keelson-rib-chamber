@@ -20,19 +20,41 @@ export const IDENTITY_SLOT_TONES: readonly CanvasTone[] = [
   "id-olive",
 ];
 
-export function identityToneForSlot(slot: number | undefined): CanvasTone {
-  return typeof slot === "number" &&
-    Number.isInteger(slot) &&
-    slot >= 0 &&
-    slot < IDENTITY_SLOT_COUNT
-    ? IDENTITY_SLOT_TONES[slot]!
-    : "neutral";
+// The single slot-validity predicate — an in-range integer index into the ramp.
+// Allocation (nextFreeSlot), tone rendering (identityToneForSlot), and the roster's
+// open-seat scan all read it, so a Mind's seated hue and its seat's availability can
+// never disagree on what counts as a valid slot.
+export function isValidSlot(slot: number | undefined): slot is number {
+  return (
+    typeof slot === "number" && Number.isInteger(slot) && slot >= 0 && slot < IDENTITY_SLOT_COUNT
+  );
 }
 
-export function identitySlotForIndex(index: number): number {
-  const slot = Math.trunc(index);
-  if (!Number.isFinite(slot)) return 0;
-  return Math.min(Math.max(0, slot), IDENTITY_SLOT_COUNT - 1);
+export function identityToneForSlot(slot: number | undefined): CanvasTone {
+  return isValidSlot(slot) ? IDENTITY_SLOT_TONES[slot]! : "neutral";
+}
+
+// The lowest identity slot not already worn by a seated Mind, honoring `preferred`
+// (a starter's own hue) when it is free. Allocation is next-FREE, never count-based:
+// a count would double-seat a hue the moment the roster churns (retire a mid-roster
+// Mind, author a new one, and the dropped count re-picks an occupied slot — the
+// "fixed order, never cycled" break). A Mind with no valid slot (authored before the
+// field, or the neutral overflow) occupies nothing, so it never blocks a hue. When
+// all five are taken the result is IDENTITY_SLOT_COUNT, which identityToneForSlot
+// folds to neutral — the sixth Mind wears its name, not an invented hue.
+export function nextFreeSlot(
+  minds: readonly { identitySlot?: number }[],
+  preferred?: number,
+): number {
+  const taken = new Set<number>();
+  for (const m of minds) {
+    if (isValidSlot(m.identitySlot)) taken.add(m.identitySlot);
+  }
+  if (isValidSlot(preferred) && !taken.has(preferred)) return preferred;
+  for (let slot = 0; slot < IDENTITY_SLOT_COUNT; slot++) {
+    if (!taken.has(slot)) return slot;
+  }
+  return IDENTITY_SLOT_COUNT;
 }
 
 // The two non-Mind authorities that may author a transcript entry. The driver is

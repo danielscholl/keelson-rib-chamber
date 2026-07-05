@@ -32,22 +32,28 @@ export function buildRoomsIndexBoard(rooms: readonly Room[]): CanvasBoardView {
   };
 }
 
-// One room -> one card: an identity dot toned by status, the
-// `<status> · <turnIndex>/<turnBudget>` progress in a status-toned pill, and
-// participants + the started-relative time as fields. A CLOSED room adds an Open
-// (focuses its transcript in the canvas drawer) and a destructive Delete (overflow,
-// a confirm dialog). An ACTIVE room is status-only: it is already live in
-// its inline panel, so a frozen drawer snapshot would just go stale beside it (and
-// the delete handler refuses a live room anyway).
+// One room -> one card: an identity dot toned by status, one job per encoding — the
+// pill carries STATE (the status word) and the bar carries MAGNITUDE (turn progress),
+// where the prior version packed both into a `done · 12/12` pill string. The numbers
+// stay as a field in ink, alongside the room shape (strategy + facilitator), the
+// participants, and the started-relative time. A CLOSED room adds an Open (focuses its
+// transcript in the canvas drawer) and a destructive Delete (overflow, a confirm
+// dialog). An ACTIVE room is status-only: it is already live in its inline panel, so a
+// frozen drawer snapshot would just go stale beside it (and the delete handler refuses
+// a live room anyway).
 function cardFor(room: Room) {
+  const tone = statusTone(room.status);
   const card = {
     title: room.name,
-    dot: statusTone(room.status),
-    pill: {
-      label: `${room.status} · ${room.turnIndex}/${room.turnBudget}`,
-      tone: statusTone(room.status),
-    },
+    dot: tone,
+    pill: { label: room.status, tone },
+    bar: { value: room.turnIndex, total: room.turnBudget },
     fields: [
+      { label: "turns", value: `${room.turnIndex}/${room.turnBudget}` },
+      // The round cursor is meaningful only for round-based strategies (it stays 0
+      // for a plain sequential room), so surface it only once it has advanced.
+      ...(room.round > 0 ? [{ label: "round", value: String(room.round) }] : []),
+      { label: "shape", value: shapeLabel(room) },
       { label: "with", value: room.participants.join(" · ") },
       // The Room model carries only createdAt — no end/close time — so this is an
       // honest "started <relative> ago", not an invented "ended" timestamp.
@@ -57,6 +63,28 @@ function cardFor(room: Room) {
   return room.status === "active"
     ? card
     : { ...card, actions: [openAction(room), deleteAction(room)] };
+}
+
+// The room's shape named for the meta line: the strategy in plain words, plus the
+// facilitator a moderated/managed room routes through — so the index reads how a room
+// runs, not just that it exists.
+function shapeLabel(room: Room): string {
+  const mod = room.config?.moderator;
+  const mgr = room.config?.manager;
+  switch (room.strategy) {
+    case "group-chat":
+      return mod ? `debate · ${mod} moderates` : "debate";
+    case "magentic":
+      return mgr ? `build · ${mgr} manages` : "build";
+    case "open-floor":
+      return "open floor";
+    case "review":
+      return "review";
+    case "concurrent":
+      return "concurrent";
+    default:
+      return "discussion";
+  }
 }
 
 function openAction(room: Room) {

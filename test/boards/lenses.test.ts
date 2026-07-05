@@ -2,6 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { type CanvasTone, canvasViewSchema } from "@keelson/shared";
 import { buildLensesIndexBoard } from "../../src/boards/lenses.ts";
 import type { LensRecord } from "../../src/lens-store.ts";
+import type { Mind } from "../../src/types.ts";
+
+const mind = (over: Partial<Mind> = {}): Mind => ({
+  slug: "ada",
+  name: "Ada",
+  role: "Chief of Staff",
+  persona: "You are Ada.",
+  ...over,
+});
 
 const lens = (over: Partial<LensRecord> = {}): LensRecord => ({
   id: "release-risks",
@@ -74,13 +83,31 @@ describe("buildLensesIndexBoard cards", () => {
     expect(untitled?.title).toBe("bare");
   });
 
-  test("each card dot is a valid tone, deterministic from the id (distinct ids → may differ)", () => {
-    const board = buildLensesIndexBoard([lens({ id: "alpha" }), lens({ id: "beta" })]);
-    for (const c of cards(board)) expect(TONES).toContain(c.dot as CanvasTone);
-    // Deterministic: the same id always hashes to the same tone.
-    const a1 = cards(buildLensesIndexBoard([lens({ id: "alpha" })]))[0]?.dot;
-    const a2 = cards(buildLensesIndexBoard([lens({ id: "alpha" })]))[0]?.dot;
-    expect(a1).toBe(a2 as CanvasTone);
+  test("the dot is the maintaining Mind's identity tone — never a hash across status tones", () => {
+    const roster = [mind({ slug: "ada", name: "Ada", identitySlot: 0 })];
+    // Resolves by slug OR name (case-insensitive), to the Mind's seat hue.
+    const bySlug = cards(buildLensesIndexBoard([lens({ maintainingMind: "ada" })], roster))[0];
+    expect(bySlug?.dot).toBe("id-blue");
+    const byName = cards(buildLensesIndexBoard([lens({ maintainingMind: "Ada" })], roster))[0];
+    expect(byName?.dot).toBe("id-blue");
+    // Every dot the builder emits is a valid tone.
+    for (const c of cards(buildLensesIndexBoard([lens()], roster))) {
+      expect(TONES).toContain(c.dot as CanvasTone);
+    }
+  });
+
+  test("an unknown maintainer, or no roster, folds the dot to neutral (not error-red by hash)", () => {
+    // No roster passed at all.
+    expect(cards(buildLensesIndexBoard([lens({ maintainingMind: "ada" })]))[0]?.dot).toBe(
+      "neutral",
+    );
+    // A maintainer not on the roster.
+    const roster = [mind({ slug: "bo", name: "Bo", identitySlot: 1 })];
+    expect(cards(buildLensesIndexBoard([lens({ maintainingMind: "ghost" })], roster))[0]?.dot).toBe(
+      "neutral",
+    );
+    // No maintainer at all.
+    expect(cards(buildLensesIndexBoard([lens()], roster))[0]?.dot).toBe("neutral");
   });
 
   test("with no provenance, the only field is an `updated … ago` freshness — no pill/by/reason", () => {
