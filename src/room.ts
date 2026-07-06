@@ -512,9 +512,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         );
         return active ? "advanced" : "ended";
       }
-      // synthesize is reached inline from a moderate close (runCloseSynthesis),
-      // never as a strategy-returned step, so it never reaches step().
-      throw new Error(`step kind "${decision.kind}" is not supported yet`);
+      if (decision.kind === "synthesize") {
+        const active = await runCloseSynthesis(room, controller, gen, decision.mind);
+        return active ? "advanced" : "ended";
+      }
+      throw new Error("step kind is not supported yet");
     } finally {
       controllers.delete(slug);
       inFlight.delete(slug);
@@ -688,7 +690,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   }
 
   // Append a finished agent turn and advance the room under the write lock: an
-  // aborted turn -> stopped, the budget reached -> done, else still active.
+  // aborted turn -> stopped; a budget hit stays active just long enough for the
+  // strategy's closing synthesis decision.
   // Returns whether the room remains active (false when superseded/closed). The
   // entry is stamped with `room.turnIndex` (the snapshot handed in) while the room
   // advances from the re-loaded current, so a director inject racing the commit is
@@ -715,9 +718,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       };
       if (aborted) {
         return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
-      }
-      if (advanced.turnIndex >= advanced.turnBudget) {
-        return await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
       }
       return await commitActive(room.slug, gen, advanced);
     });
@@ -783,7 +783,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     );
     const turn = await runOneTurn(room, mind, prompt, controller);
     if (turn === "disposed") return false;
-    return await commitTurn(room, mind, turn.text, turn.aborted, gen, turn.usage);
+    const active = await commitTurn(room, mind, turn.text, turn.aborted, gen, turn.usage);
+    if (!active) return false;
+    return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
   }
 
   // A concurrent round: run the round's speakers at once — each prompted from the
@@ -851,8 +853,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // same running index, so the entry count and the advance share one source (no
     // separate +N that could drift from what was actually appended). Commit once.
     // An aborted reply (a stop landed mid-round) stops the room; reaching the budget
-    // closes it done.
-    return await withLock(room.slug, async () => {
+    // hands off to one closing synthesis turn.
+    const active = await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
       let nextIdx = current.turnIndex;
       let anyAborted = false;
@@ -877,19 +879,17 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       if (anyAborted) {
         return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
       }
-      if (advanced.turnIndex >= advanced.turnBudget) {
-        return await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
-      }
       return await commitActive(room.slug, gen, advanced);
     });
+    if (!active) return false;
+    return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
   }
 
   // A group-chat moderate step: run the moderator, then route on its reply. Up to
   // two turns under one step() (the serial gate + the shared controller/gen cover
   // both). The moderator commits first (so the speaker is prompted from a
-  // transcript that already holds its direction); the budget gate is the commit's
-  // own terminal check — if the moderator's tick reaches turnBudget the commit
-  // returns inactive and no speaker/synthesis runs.
+  // transcript that already holds its direction); if the moderator's tick reaches
+  // turnBudget, routing stops and the fallback synthesis closes the room.
   async function runModerateTurn(
     room: Room,
     moderatorSlug: MindSlug,
@@ -917,12 +917,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       gen,
       modTurn.usage,
     );
-    if (!modActive) return false; // aborted/stopped, budget -> done, or superseded
+    if (!modActive) return false; // aborted/stopped or superseded
 
     // Re-load so the speaker/synthesis turn advances from the moderator's commit,
     // not the pre-moderator snapshot — its entry index must follow the moderator's.
     const afterMod = await deps.store.loadRoom(room.slug);
     if (afterMod?.status !== "active" || generationOf(room.slug) !== gen) return false;
+    if (afterMod.turnIndex >= afterMod.turnBudget) {
+      return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
+    }
 
     const decision = parseModeratorDecision(modTurn.text);
     const postMod = await loadCachedTranscript(room.slug);
@@ -960,7 +963,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
     const spkTurn = await runOneTurn(room, speakerMind, spkPrompt, controller);
     if (spkTurn === "disposed") return false;
-    return await commitTurn(
+    const active = await commitTurn(
       afterMod,
       speakerMind,
       spkTurn.text,
@@ -968,6 +971,8 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       gen,
       spkTurn.usage,
     );
+    if (!active) return false;
+    return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
   }
 
   // The driver's speaker pick for a moderate step: the moderator's validated
@@ -1033,19 +1038,37 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return openFloor({ room, transcript });
   }
 
-  // The closing act of a group-chat: an optional synthesizer authors one summary
-  // turn, then the room ends (done). Synthesis always closes — even an errored
-  // turn — and a disposed turn drops cleanly. Only reached when the moderator's
-  // commit left budget, so the synthesis turn always fits.
+  async function runBudgetSynthesisIfExhausted(
+    slug: MindSlug,
+    controller: AbortController,
+    gen: number,
+  ): Promise<boolean | undefined> {
+    const room = await deps.store.loadRoom(slug);
+    if (room?.status !== "active" || generationOf(slug) !== gen) return false;
+    if (room.turnIndex < room.turnBudget) return undefined;
+    const transcript = await loadCachedTranscript(slug);
+    const decision =
+      room.strategy === "magentic"
+        ? magentic({ room, transcript, ledger: await deps.store.loadLedger(slug) })
+        : getStrategy(room.strategy)({ room, transcript });
+    if (decision.kind === "synthesize") {
+      return await runCloseSynthesis(room, controller, gen, decision.mind);
+    }
+    return await withLock(slug, () => commitTerminal(slug, gen, { ...room, status: "done" }));
+  }
+
+  // The closing act: a configured synthesizer, or a strategy-chosen fallback,
+  // authors one summary turn, then the room ends (done). Synthesis always closes —
+  // even an errored turn — and a disposed turn drops cleanly.
   async function runCloseSynthesis(
     room: Room,
     controller: AbortController,
     gen: number,
+    fallbackSynthSlug?: MindSlug,
   ): Promise<boolean> {
-    const synthSlug = room.config?.synthesizer;
+    const synthSlug = room.config?.synthesizer ?? fallbackSynthSlug;
     if (synthSlug) {
-      const minds = await fetchMinds();
-      const synth = minds.find((m) => m.slug === synthSlug);
+      const synth = await resolveMindOrFailClosed(room, synthSlug, gen);
       if (synth) {
         // Skip only if a stop superseded before synthesis starts (no phantom entry
         // for a turn that never ran); a stop during it is recorded, as on the
@@ -1121,7 +1144,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const nextLedger = turn.errored
       ? ledger
       : applyManagerPlan(ledger, parseMagenticPlan(turn.text), room.participants, { now, newId });
-    return await commitLedgerTurn(room, manager, turn, nextLedger, gen);
+    const active = await commitLedgerTurn(room, manager, turn, nextLedger, gen);
+    if (!active) return false;
+    return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
   }
 
   // A magentic assign step: one worker executes one task. Marks the task in-progress
@@ -1176,14 +1201,17 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       { now },
       summarizeOutcome(turn.text),
     );
-    return await commitLedgerTurn(room, worker, turn, nextLedger, gen);
+    const active = await commitLedgerTurn(room, worker, turn, nextLedger, gen);
+    if (!active) return false;
+    return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
   }
 
   // Append a manager/worker turn, persist the ledger it produced, and advance the room
   // under the write lock — the magentic counterpart to commitTurn (which has no ledger
   // to persist). The ledger save is generation-gated exactly like the room write, so a
-  // stop/restart racing the commit drops both. An aborted turn -> stopped, the budget
-  // reached -> done, else still active. Returns whether the room remains active.
+  // stop/restart racing the commit drops both. An aborted turn -> stopped; a budget
+  // hit stays active just long enough for the closing synthesis. Returns whether the
+  // room remains active.
   async function commitLedgerTurn(
     room: Room,
     mind: Mind,
@@ -1206,9 +1234,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       };
       if (turn.aborted) {
         return await commitTerminal(room.slug, gen, { ...advanced, status: "stopped" });
-      }
-      if (advanced.turnIndex >= advanced.turnBudget) {
-        return await commitTerminal(room.slug, gen, { ...advanced, status: "done" });
       }
       return await commitActive(room.slug, gen, advanced);
     });

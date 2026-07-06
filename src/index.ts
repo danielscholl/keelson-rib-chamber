@@ -1564,7 +1564,12 @@ const rib: Rib = {
     const digestTool = makeDigestTool();
     // Like genesis and digest, the list and cleanup tools need only the disk paths
     // captured above, so they are always available — independent of the snapshot/turn seams.
-    const readTools = [makeListMindsTool(), makeListRoomsTool(), makeListLensesTool()];
+    const readTools = [
+      makeListMindsTool(),
+      makeListRoomsTool(),
+      makeListLensesTool(),
+      makeRoomTranscriptTool(),
+    ];
     const cleanupTools = [makeRetireMindTool(), makeRoomDeleteTool()];
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
@@ -1932,22 +1937,26 @@ type StartConfigInput = RoomConfigInput;
 // The positive-integer floor for the routing knobs both group-chat and open-floor
 // accept. Floored at the shared boundary so every entry point (chat tool, board
 // action, a direct API payload) is protected — a 0 minRounds would open the close
-// gate immediately, a 0 maxSpeakerRepeats would redirect every pick. Returns an
-// error message, or null when the knobs are valid/absent.
-function routingKnobError(config: StartConfigInput): string | null {
+// gate immediately, a 0 maxSpeakerRepeats would redirect every pick.
+function validationFailure(errors: string[]): { ok: false; error: string } {
+  return { ok: false, error: errors.join("\n") };
+}
+
+function routingKnobErrors(config: StartConfigInput): string[] {
+  const errors: string[] = [];
   if (
     config.minRounds !== undefined &&
     (!Number.isInteger(config.minRounds) || config.minRounds < 1)
   ) {
-    return "minRounds must be a positive integer";
+    errors.push("minRounds must be a positive integer");
   }
   if (
     config.maxSpeakerRepeats !== undefined &&
     (!Number.isInteger(config.maxSpeakerRepeats) || config.maxSpeakerRepeats < 1)
   ) {
-    return "maxSpeakerRepeats must be a positive integer";
+    errors.push("maxSpeakerRepeats must be a positive integer");
   }
-  return null;
+  return errors;
 }
 
 async function validateStart(
@@ -2007,62 +2016,49 @@ async function validateStart(
       error: `unknown Mind(s): ${missing.join(", ")} — genesis them first or check the roster`,
     };
   }
-  // `manager` is a magentic-only role; reject it for any other strategy rather than
-  // silently dropping a dead field (the same guard moderator/synthesizer get).
-  if (strategy !== "magentic" && config.manager) {
-    return {
-      ok: false,
-      error: `${strategy} has no manager — \`manager\` is only for the magentic strategy`,
-    };
-  }
+  const managerConfigErrors =
+    strategy !== "magentic" && config.manager
+      ? [`${strategy} has no manager — \`manager\` is only for the magentic strategy`]
+      : [];
   // group-chat needs a moderator Mind that routes but never speaks: it must be a
   // real Mind and NOT in the speaker pool (so isValidNominee rejects nominating it
   // and the board never counts it as a speaker — see docs/design/phase3-rooms.md §1).
   if (strategy === "group-chat") {
+    const errors: string[] = [...managerConfigErrors];
     const moderator = config.moderator;
     if (!moderator) {
-      return { ok: false, error: "group-chat needs a moderator Mind — set `moderator`" };
-    }
-    if (!isValidParticipant(moderator)) {
-      return { ok: false, error: "moderator must be a safe Mind slug (not director/system)" };
-    }
-    if (!known.has(moderator)) {
-      return {
-        ok: false,
-        error: `unknown moderator Mind: ${moderator} — genesis it first or check the roster`,
-      };
-    }
-    if (deduped.includes(moderator)) {
-      return {
-        ok: false,
-        error: "the moderator must not also be a participant — it routes, it does not speak",
-      };
+      errors.push("group-chat needs a moderator Mind — set `moderator`");
+    } else {
+      if (!isValidParticipant(moderator)) {
+        errors.push("moderator must be a safe Mind slug (not director/system)");
+      }
+      if (!known.has(moderator)) {
+        errors.push(`unknown moderator Mind: ${moderator} — genesis it first or check the roster`);
+      }
+      if (deduped.includes(moderator)) {
+        errors.push("the moderator must not also be a participant — it routes, it does not speak");
+      }
     }
     if (config.synthesizer) {
       // Same safe/reserved-slug guard as the moderator: a synthesizer authors a
       // role:"agent" turn, so it must never be a reserved authority (director/system).
       if (!isValidParticipant(config.synthesizer)) {
-        return { ok: false, error: "synthesizer must be a safe Mind slug (not director/system)" };
+        errors.push("synthesizer must be a safe Mind slug (not director/system)");
       }
       if (!known.has(config.synthesizer)) {
-        return { ok: false, error: `unknown synthesizer Mind: ${config.synthesizer}` };
+        errors.push(`unknown synthesizer Mind: ${config.synthesizer}`);
       }
       if (deduped.includes(config.synthesizer)) {
-        return {
-          ok: false,
-          error:
-            "the synthesizer must not also be a participant — it writes the closing summary, it does not debate",
-        };
+        errors.push(
+          "the synthesizer must not also be a participant — it writes the closing summary, it does not debate",
+        );
       }
       if (config.synthesizer === moderator) {
-        return {
-          ok: false,
-          error: "the synthesizer must not also be the moderator — they are distinct roles",
-        };
+        errors.push("the synthesizer must not also be the moderator — they are distinct roles");
       }
     }
-    const knobError = routingKnobError(config);
-    if (knobError) return { ok: false, error: knobError };
+    errors.push(...routingKnobErrors(config));
+    if (errors.length > 0) return validationFailure(errors);
     const roomConfig: RoomConfig = {
       moderator,
       ...(config.synthesizer ? { synthesizer: config.synthesizer } : {}),
@@ -2077,28 +2073,26 @@ async function validateStart(
   // by an end-vote. Same routing-knob floors as group-chat, plus the end-vote
   // threshold (a (0,1) fraction; the close gate is a strict `>` against it).
   if (strategy === "open-floor") {
+    const errors: string[] = [...managerConfigErrors];
     // open-floor has no routing Mind: speakers nominate each other and vote to
     // close. Reject a moderator/synthesizer rather than silently dropping it, so an
     // operator who reused a group-chat payload sees why the field had no effect.
     if (config.moderator) {
-      return {
-        ok: false,
-        error: "open-floor has no moderator — every speaker nominates the next",
-      };
+      errors.push("open-floor has no moderator — every speaker nominates the next");
     }
     if (config.synthesizer) {
-      return { ok: false, error: "open-floor has no closing synthesizer — drop `synthesizer`" };
+      errors.push("open-floor has no closing synthesizer — drop `synthesizer`");
     }
-    const knobError = routingKnobError(config);
-    if (knobError) return { ok: false, error: knobError };
+    errors.push(...routingKnobErrors(config));
     if (
       config.endVoteThreshold !== undefined &&
       (!Number.isFinite(config.endVoteThreshold) ||
         config.endVoteThreshold <= 0 ||
         config.endVoteThreshold >= 1)
     ) {
-      return { ok: false, error: "endVoteThreshold must be a number in (0,1)" };
+      errors.push("endVoteThreshold must be a number in (0,1)");
     }
+    if (errors.length > 0) return validationFailure(errors);
     const roomConfig: RoomConfig = {
       ...(typeof config.minRounds === "number" ? { minRounds: config.minRounds } : {}),
       ...(typeof config.maxSpeakerRepeats === "number"
@@ -2114,27 +2108,22 @@ async function validateStart(
   // on different providers (the whole point), so a same-vendor or unpinned pair is
   // rejected here rather than running a pointless same-model review.
   if (strategy === "review") {
+    const errors: string[] = [...managerConfigErrors];
     if (deduped.length !== 2) {
-      return {
-        ok: false,
-        error: "review needs exactly 2 participants: the author, then the reviewer",
-      };
+      errors.push("review needs exactly 2 participants: the author, then the reviewer");
     }
     if (turnBudget < 2) {
-      return {
-        ok: false,
-        error: "review needs a turnBudget of at least 2 (one author turn, one review turn)",
-      };
+      errors.push("review needs a turnBudget of at least 2 (one author turn, one review turn)");
     }
     if (config.moderator) {
-      return {
-        ok: false,
-        error: "review has no moderator — the reviewer critiques the author's artifact directly",
-      };
+      errors.push(
+        "review has no moderator — the reviewer critiques the author's artifact directly",
+      );
     }
     if (config.synthesizer) {
-      return { ok: false, error: "review has no synthesizer — the reviewer's turn is the close" };
+      errors.push("review has no synthesizer — the reviewer's turn is the close");
     }
+    if (errors.length > 0) return validationFailure(errors);
     const authorSlug = deduped[0];
     const reviewerSlug = deduped[1];
     if (authorSlug === undefined || reviewerSlug === undefined) {
@@ -2177,34 +2166,33 @@ async function validateStart(
   // other facilitated modes — rejects a stray moderator/synthesizer rather than
   // silently dropping it, so a reused payload's dead field is explained.
   if (strategy === "magentic") {
+    const errors: string[] = [];
     const manager = config.manager;
     if (!manager) {
-      return { ok: false, error: "magentic needs a manager Mind — set `manager`" };
-    }
-    if (!isValidParticipant(manager)) {
-      return { ok: false, error: "manager must be a safe Mind slug (not director/system)" };
-    }
-    if (!known.has(manager)) {
-      return {
-        ok: false,
-        error: `unknown manager Mind: ${manager} — genesis it first or check the roster`,
-      };
-    }
-    if (deduped.includes(manager)) {
-      return {
-        ok: false,
-        error:
+      errors.push("magentic needs a manager Mind — set `manager`");
+    } else {
+      if (!isValidParticipant(manager)) {
+        errors.push("manager must be a safe Mind slug (not director/system)");
+      }
+      if (!known.has(manager)) {
+        errors.push(`unknown manager Mind: ${manager} — genesis it first or check the roster`);
+      }
+      if (deduped.includes(manager)) {
+        errors.push(
           "the manager must not also be a worker — it plans and delegates, it does not execute tasks",
-      };
+        );
+      }
     }
     if (config.moderator) {
-      return { ok: false, error: "magentic has no moderator — the manager routes the work" };
+      errors.push("magentic has no moderator — the manager routes the work");
     }
     if (config.synthesizer) {
-      return { ok: false, error: "magentic has no synthesizer — the manager closes the plan" };
+      errors.push("magentic has no synthesizer — the manager closes the plan");
     }
+    if (errors.length > 0) return validationFailure(errors);
     return { ok: true, participants: deduped, config: { manager } };
   }
+  if (managerConfigErrors.length > 0) return validationFailure(managerConfigErrors);
   return { ok: true, participants: deduped };
 }
 
@@ -3434,6 +3422,58 @@ function makeRetireMindTool(): ToolDefinition {
 }
 
 const roomDeleteSchema = z.object({ room: z.string().min(1) });
+const ROOM_TRANSCRIPT_DEFAULT_LIMIT = 50;
+const ROOM_TRANSCRIPT_MAX_LIMIT = 500;
+const roomTranscriptSchema = z.object({
+  room: z.string().min(1),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(ROOM_TRANSCRIPT_MAX_LIMIT).optional(),
+});
+
+function makeRoomTranscriptTool(): ToolDefinition {
+  return {
+    name: "chamber_room_transcript",
+    description:
+      "Read a Chamber room's full persisted transcript in pages: returns exact transcript entries from rooms/<slug>/transcript.jsonl plus offset, limit, total, and nextCursor. Read-only. Use it to page through a long room transcript without chamber_room_status truncation. NOT for starting, steering, stopping, or deleting a room.",
+    inputSchema: roomTranscriptSchema,
+    state_changing: false,
+    async execute(input, ctx) {
+      const parsed = roomTranscriptSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_room_transcript: ${parsed.error.message}`, true);
+        return;
+      }
+      const slug = parsed.data.room.trim();
+      if (!slug) {
+        emitResult(ctx, "chamber_room_transcript: room is required", true);
+        return;
+      }
+      const offset = parsed.data.offset ?? 0;
+      const limit = parsed.data.limit ?? ROOM_TRANSCRIPT_DEFAULT_LIMIT;
+      try {
+        const store = createFileRoomStore(roomsDir());
+        const room = await store.loadRoom(slug);
+        if (!room) throw new Error(`room '${slug}' not found`);
+        const transcript = await store.loadTranscript(slug);
+        const end = Math.min(offset + limit, transcript.length);
+        emitResult(
+          ctx,
+          JSON.stringify({
+            ok: true,
+            room: slug,
+            offset,
+            limit,
+            total: transcript.length,
+            nextCursor: end < transcript.length ? end : null,
+            entries: transcript.slice(offset, end),
+          }),
+        );
+      } catch (e) {
+        emitResult(ctx, `chamber_room_transcript failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
 
 // Room delete seam: remove an ended room's directory (room.json + transcript +
 // ledger), drop its panel, and refresh the sessions index — the same path the
@@ -3505,7 +3545,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        'Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns total, default 8). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. For a moderated discussion set strategy:"group-chat" and a `moderator` Mind slug (a Mind NOT among participants — it routes who speaks and decides when to close); optional `synthesizer` authors a closing summary. For a cross-vendor review set strategy:"review" with exactly two participants pinned to different providers — the first authors an artifact, the second (a different vendor) reviews it. For a manager-led project set strategy:"magentic" and a `manager` Mind slug (a Mind NOT among participants — it plans a task ledger, delegates each task to a worker, and replans until the goal is met); the participants are the workers (at least two). State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster); needs at least two. Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).',
+        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns, default 8; at budget exhaustion every strategy except review appends one extra paid closing-synthesis turn, so a completed room bills up to turnBudget + 1). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. Strategy role rules: sequential/concurrent need only at least two participant Mind slugs and no manager; group-chat requires a `moderator` Mind slug that is real, safe, and NOT among participants, with optional `synthesizer` that is also real/safe and neither a participant nor the moderator; open-floor has no moderator or synthesizer; review requires exactly two participants pinned to different providers — first author, second reviewer — with no moderator or synthesizer and turnBudget at least 2; magentic requires a real/safe `manager` Mind slug NOT among participants, no moderator or synthesizer, and at least two worker participants. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster). Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).",
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,

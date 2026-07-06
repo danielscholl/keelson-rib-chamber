@@ -42,7 +42,7 @@ describe("review strategy (pure rhythm)", () => {
     expect(review(input({ participants: ["author"] }))).toEqual({ kind: "end" });
   });
 
-  test("ends at the turn budget", () => {
+  test("ends at the turn budget — exempt from exhaustion synthesis, the critique is the close", () => {
     expect(review(input({ turnIndex: 2, turnBudget: 2 }))).toEqual({ kind: "end" });
   });
 

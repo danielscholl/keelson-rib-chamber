@@ -17,6 +17,7 @@ import { listLenses } from "../src/lens-store.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
 import { lensesDir, mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
+import type { Room, TurnEntry } from "../src/types.ts";
 import { abortableRunAgentTurn } from "./helpers/fakes.ts";
 
 const registerTools = rib.registerTools;
@@ -74,6 +75,7 @@ function makeToolCtx() {
     ctx,
     out: () => chunks.map((c) => (c as { content?: string }).content ?? "").join(""),
     errored: () => chunks.some((c) => (c as { isError?: boolean }).isError === true),
+    chunkCount: () => chunks.length,
   };
 }
 
@@ -202,6 +204,7 @@ describe("chamber room-control chat tools", () => {
       "chamber_room_start",
       "chamber_room_status",
       "chamber_room_stop",
+      "chamber_room_transcript",
     ]);
     // No runAgentTurn -> no driver -> no room-control tools, but the always-on seams
     // (genesis + digest writes, the read-only list tools, and the retire-mind /
@@ -223,6 +226,7 @@ describe("chamber room-control chat tools", () => {
         "chamber_retire_lens",
         "chamber_retire_mind",
         "chamber_room_delete",
+        "chamber_room_transcript",
       ].sort(),
     );
     // Without the snapshot/registerRegion seams the lens tools are withheld fail-closed,
@@ -240,6 +244,7 @@ describe("chamber room-control chat tools", () => {
       "chamber_list_rooms",
       "chamber_retire_mind",
       "chamber_room_delete",
+      "chamber_room_transcript",
     ]);
   });
 
@@ -442,6 +447,7 @@ describe("chamber room-control chat tools", () => {
 
   it("advertises start/say/stop as state-changing and start as requiring confirmation", () => {
     expect(tool("chamber_room_status").state_changing ?? false).toBe(false);
+    expect(tool("chamber_room_transcript").state_changing ?? false).toBe(false);
     expect(tool("chamber_room_start").state_changing).toBe(true);
     expect(tool("chamber_room_start").requires_confirmation).toBe(true);
     expect(tool("chamber_room_say").state_changing).toBe(true);
@@ -452,6 +458,74 @@ describe("chamber room-control chat tools", () => {
     const t = makeToolCtx();
     await tool("chamber_room_status").execute({}, t.ctx);
     expect(t.out()).toContain("No Chamber room yet");
+  });
+
+  it("chamber_room_transcript pages the full persisted transcript exactly", async () => {
+    const store = createFileRoomStore(roomsDir());
+    const room: Room = {
+      slug: "room-transcript-long",
+      name: "Long transcript",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: "done",
+      turnBudget: 64,
+      turnIndex: 37,
+      round: 18,
+      topic: "Long-form transcript pagination",
+      createdAt: "2026-01-02T00:00:00.000Z",
+    };
+    await store.saveRoom(room);
+    const transcript: TurnEntry[] = Array.from({ length: 37 }, (_, i) => ({
+      messageId: `msg-${String(i).padStart(2, "0")}`,
+      roomSlug: room.slug,
+      turnIndex: i,
+      round: Math.floor(i / 2),
+      from: i % 2 === 0 ? "alice" : "bob",
+      role: "agent",
+      parts: [
+        {
+          text: `entry ${i}\n${"x".repeat(700)}\nkeeps exact text ${i}`,
+        },
+      ],
+      at: `2026-01-02T00:${String(i).padStart(2, "0")}:00.000Z`,
+      ...(i === 9 ? { usage: { inputTokens: 10, outputTokens: 20 } } : {}),
+    }));
+    for (const entry of transcript) await store.appendTranscript(room.slug, entry);
+
+    const pages: TurnEntry[][] = [];
+    let cursor: number | null = 0;
+    while (cursor !== null) {
+      const t = makeToolCtx();
+      await tool("chamber_room_transcript").execute(
+        { room: room.slug, offset: cursor, limit: 13 },
+        t.ctx,
+      );
+      expect(t.errored()).toBe(false);
+      const out = JSON.parse(t.out()) as {
+        ok: true;
+        room: string;
+        offset: number;
+        limit: number;
+        total: number;
+        nextCursor: number | null;
+        entries: TurnEntry[];
+      };
+      expect(out.ok).toBe(true);
+      expect(out.room).toBe(room.slug);
+      expect(out.offset).toBe(cursor);
+      expect(out.limit).toBe(13);
+      expect(out.total).toBe(transcript.length);
+      pages.push(out.entries);
+      cursor = out.nextCursor;
+    }
+
+    expect(pages.map((p) => p.length)).toEqual([13, 13, 11]);
+    expect(pages.flat()).toEqual(transcript);
+
+    const unknown = makeToolCtx();
+    await tool("chamber_room_transcript").execute({ room: "room-transcript-ghost" }, unknown.ctx);
+    expect(unknown.errored()).toBe(true);
+    expect(unknown.out()).toContain("room 'room-transcript-ghost' not found");
   });
 
   it("chamber_room_start dry-runs without confirm and opens nothing", async () => {
@@ -563,6 +637,35 @@ describe("chamber room-control chat tools", () => {
     );
     expect(withSynth.errored()).toBe(true);
     expect(withSynth.out()).toContain("synthesizer");
+  });
+
+  it("reports every unmet role/config rule for a room start in one error", async () => {
+    const expected = [
+      "open-floor has no manager — `manager` is only for the magentic strategy",
+      "open-floor has no moderator — every speaker nominates the next",
+      "open-floor has no closing synthesizer — drop `synthesizer`",
+      "endVoteThreshold must be a number in (0,1)",
+    ];
+    for (const confirm of [false, true]) {
+      const t = makeToolCtx();
+      await tool("chamber_room_start").execute(
+        {
+          participants: ["alice", "bob"],
+          strategy: "open-floor",
+          manager: "mod",
+          moderator: "mod",
+          synthesizer: "mod",
+          endVoteThreshold: 1.5,
+          confirm,
+        },
+        t.ctx,
+      );
+      expect(t.errored()).toBe(true);
+      expect(t.chunkCount()).toBe(1);
+      for (const message of expected) {
+        expect(t.out()).toContain(message);
+      }
+    }
   });
 
   it("review dry-runs a cross-vendor pair and labels the author/reviewer roles", async () => {

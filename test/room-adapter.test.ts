@@ -166,6 +166,7 @@ describe("room adapter — fails closed without the seams", () => {
     ).toEqual(
       [
         "chamber_room_delete",
+        "chamber_room_transcript",
         "chamber_emit_digest",
         "chamber_emit_genesis",
         "chamber_emit_lens",
@@ -527,8 +528,8 @@ describe("room adapter — live room", () => {
     await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
 
     const transcript = await store.loadTranscript(slug);
-    expect(transcript).toHaveLength(2);
-    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob"]);
+    expect(transcript).toHaveLength(3);
+    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob", "bob"]);
     // The room registered its per-slug key and published a valid board on start +
     // each turn (live WS push).
     const key = `rib:chamber:room:${slug}`;
@@ -544,8 +545,8 @@ describe("room adapter — live room", () => {
     const second = slugOf(await onAction(startPayload(), makeCtx({ sm: snap.sm })));
     expect(second).not.toBe(first); // never reuses the slug
     await waitFor(async () => (await store.loadRoom(second))?.status === "done");
-    // Each run is its own fresh 2-turn room — the new one isn't contaminated.
-    expect(await store.loadTranscript(second)).toHaveLength(2);
+    // Each run is its own fresh room — the new one isn't contaminated.
+    expect(await store.loadTranscript(second)).toHaveLength(3);
   });
 
   it("room-stop halts an active room", async () => {
@@ -640,9 +641,10 @@ describe("room adapter — live room", () => {
     expect(slug).toMatch(/^room-/);
     await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
     const transcript = await store.loadTranscript(slug);
-    expect(transcript).toHaveLength(2);
+    expect(transcript).toHaveLength(3);
     expect(transcript[0]?.from).toBe("mod"); // the moderator turn ran first
     expect(["alice", "bob"]).toContain(transcript[1]?.from ?? ""); // routed to a participant
+    expect(transcript[2]?.from).toBe("mod"); // moderator writes the closing synthesis
   });
 
   it("rejects a group-chat start without a moderator", async () => {
@@ -682,7 +684,7 @@ describe("room adapter — live room", () => {
     expect(slug).toMatch(/^room-/);
     await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
     const transcript = await store.loadTranscript(slug);
-    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob"]);
+    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob", "bob"]);
   });
 
   it("rejects an open-floor start with a moderator", async () => {
@@ -706,8 +708,8 @@ describe("room adapter — live room", () => {
     expect(slug).toMatch(/^room-/);
     await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
     const transcript = await store.loadTranscript(slug);
-    expect(transcript).toHaveLength(2);
-    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob"]); // participant order
+    expect(transcript).toHaveLength(3);
+    expect(transcript.map((e) => e.from)).toEqual(["alice", "bob", "bob"]); // participant order, then synthesis
   });
 
   it("prunes old closed room dirs after a fresh room loop completes", async () => {
@@ -739,7 +741,7 @@ describe("room adapter — live room", () => {
 
     expect(await store.loadRoom(oldest)).toBeUndefined();
     expect((await store.loadRoom(slug))?.status).toBe("done");
-    expect(await store.loadTranscript(slug)).toHaveLength(1);
+    expect(await store.loadTranscript(slug)).toHaveLength(2);
   });
 
   // Must run last: dispose() flips module-global state so the loop stops driving.

@@ -101,8 +101,14 @@ describe("magentic strategy", () => {
   test("ends on the structural cases", () => {
     expect(magentic(input({ room: { status: "stopped" } }))).toEqual({ kind: "end" });
     expect(magentic(input({ room: { participants: [] } }))).toEqual({ kind: "end" });
-    expect(magentic(input({ room: { turnIndex: 8, turnBudget: 8 } }))).toEqual({ kind: "end" });
     expect(magentic(input({ room: { config: {} } }))).toEqual({ kind: "end" }); // no manager
+  });
+
+  test("synthesizes with the manager at the turn budget", () => {
+    expect(magentic(input({ room: { turnIndex: 8, turnBudget: 8 } }))).toEqual({
+      kind: "synthesize",
+      mind: "mgr",
+    });
   });
 
   test("is pure (same input, same output, no mutation)", () => {
