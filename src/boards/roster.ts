@@ -114,9 +114,17 @@ export function buildRosterBoard(
         payload: { slug: mind.slug },
       };
     });
-    sections.push({ kind: "actions", title: "Convene a room — who's in", items: chips });
+    // Both rows wrap: the cast and the shape are two quick picks, so they read as
+    // compact chip rows rather than a stacked column spending the surface's width
+    // (keelson#413). The selected shape's form still breaks to its own full line.
+    sections.push({
+      kind: "actions",
+      title: "Convene a room — who's in",
+      wrap: true,
+      items: chips,
+    });
     if (selectedCount >= 2) {
-      sections.push({ kind: "actions", title: "…and how", items: shapeActions() });
+      sections.push({ kind: "actions", title: "…and how", wrap: true, items: shapeActions() });
     }
   }
 
@@ -371,9 +379,12 @@ function shapeActions(): CanvasActionItem[] {
       payload: { strategy: "sequential" },
       fields: [topicField, projectField],
     },
+    // Short chip labels now the shapes wrap as a compact row; each shape's own
+    // mechanism (a moderator, a cross-vendor pair, a manager) is taught by its form
+    // and enforced server-side, so the qualifier need not ride the chip.
     {
       type: "convene",
-      label: "Debate — moderated",
+      label: "Debate",
       glyph: "◆",
       payload: { strategy: "group-chat" },
       fields: [topicField, moderatorField, turnsField],
@@ -387,14 +398,14 @@ function shapeActions(): CanvasActionItem[] {
     },
     {
       type: "convene",
-      label: "Review — cross-vendor",
+      label: "Review",
       glyph: "✓",
       payload: { strategy: "review" },
       fields: [topicField],
     },
     {
       type: "convene",
-      label: "Build — magentic",
+      label: "Build",
       glyph: "⚑",
       payload: { strategy: "magentic" },
       fields: [topicField, managerField, projectField, turnsField],
