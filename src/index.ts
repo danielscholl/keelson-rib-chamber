@@ -320,6 +320,16 @@ let briefAbort = new AbortController();
 // the paid turn; `promotedCount` is the "N new" the header shows.
 let promotedDelta: CanvasBoardView["sections"] | undefined;
 let promotedCount = 0;
+// The structured origins of the promoted delta, resolved at promote time from the
+// gate's own slugs/ids (never parsed from the agent-authored prose) and rendered as
+// "Open what changed" jump chips beneath the delta register. Lives and lapses with
+// promotedDelta.
+interface PromotedSource {
+  kind: "room" | "lens";
+  label: string;
+  ref: string;
+}
+let promotedSources: readonly PromotedSource[] = [];
 // Serializes footer re-publishes so a mutation-driven refresh and a gate promote can't
 // interleave two composes onto one publish; reset on dispose.
 let briefingPublishInFlight: Promise<void> = Promise.resolve();
@@ -495,6 +505,7 @@ async function runBriefGate(): Promise<void> {
       try {
         promotedDelta = undefined;
         promotedCount = 0;
+        promotedSources = [];
         await writeWatermark({
           ...watermark,
           briefPromoted: false,
@@ -516,8 +527,9 @@ async function runBriefGate(): Promise<void> {
   // ONE agent turn. On a clean board reply, publish it and advance the watermark to
   // the state we just read; on any failure keep the prior board and do not advance.
   let prompt: string;
+  let sources: PromotedSource[];
   try {
-    prompt = await composeBriefPrompt(delta);
+    ({ prompt, sources } = await composeBriefPrompt(delta));
   } catch (e) {
     console.error(`[rib-chamber] brief prompt compose failed: ${errText(e)}`);
     return;
@@ -555,9 +567,11 @@ async function runBriefGate(): Promise<void> {
   try {
     // The turn authored a board; its sections become the delta register, labelled and
     // wrapped with the digest + record by composeBriefingBoard. Store the count so the
-    // header reads "N new".
+    // header reads "N new", and the resolved sources so the register carries its
+    // deterministic jump chips.
     promotedDelta = board.sections;
     promotedCount = delta.newlyEndedRooms.length + delta.changedOrNewLenses.length;
+    promotedSources = sources;
     await writeWatermark({
       ackedEndedRooms: state.endedRoomSlugs,
       lensFingerprints: state.lensFingerprints,
@@ -631,9 +645,14 @@ function firstJsonObject(text: string): string | null {
 // since the last briefing — ended rooms by name/status/turns and changed/new lenses
 // by id + scope/reason. METADATA ONLY (no transcript text) so a briefing never reads
 // a room's content. Reads the rooms/lenses once on the promote path (rare, and a paid
-// turn is about to run anyway) to resolve the slugs/ids the delta carries to metadata.
-async function composeBriefPrompt(delta: ChamberDelta): Promise<string> {
+// turn is about to run anyway) to resolve the slugs/ids the delta carries to metadata
+// — the same read also yields the structured `sources` the footer renders as jump
+// chips, so the chips can never name anything the prompt didn't.
+async function composeBriefPrompt(
+  delta: ChamberDelta,
+): Promise<{ prompt: string; sources: PromotedSource[] }> {
   const lines: string[] = [];
+  const sources: PromotedSource[] = [];
   if (delta.newlyEndedRooms.length > 0) {
     const rooms = await listRooms(roomsDir());
     const bySlug = new Map(rooms.map((r) => [r.slug, r]));
@@ -642,6 +661,7 @@ async function composeBriefPrompt(delta: ChamberDelta): Promise<string> {
       const room = bySlug.get(slug);
       if (!room) continue;
       lines.push(`  - ${room.name} (${room.status}, ${room.turnIndex} turns)`);
+      sources.push({ kind: "room", label: room.name || room.slug, ref: slug });
     }
   }
   if (delta.changedOrNewLenses.length > 0) {
@@ -654,13 +674,18 @@ async function composeBriefPrompt(delta: ChamberDelta): Promise<string> {
         ? [lens.scope, lens.reason].filter((s): s is string => Boolean(s)).join(" — ")
         : "";
       lines.push(`  - ${id}${detail ? ` (${detail})` : ""}`);
+      // A lens retired between the diff and this read has no live key left to open.
+      if (lens) sources.push({ kind: "lens", label: lens.board.title || id, ref: id });
     }
   }
-  if (lines.length === 0) return BRIEF_PROMPT;
-  return `${BRIEF_PROMPT}
+  if (lines.length === 0) return { prompt: BRIEF_PROMPT, sources };
+  return {
+    prompt: `${BRIEF_PROMPT}
 
 What's new since the last briefing — lead the briefing with these, honestly (do NOT invent detail beyond what is listed):
-${lines.join("\n")}`;
+${lines.join("\n")}`,
+    sources,
+  };
 }
 
 // Boot reconciliation: the footer is re-seeded with the quiet board on every
@@ -978,10 +1003,25 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
   ]);
   const sections: CanvasBoardView["sections"] = [];
 
-  // 1. Delta — the promoted brief turn's content, labelled on its first section.
+  // 1. Delta — the promoted brief turn's content, labelled on its first section,
+  //    followed by its deterministic jump chips (from the gate's structured delta,
+  //    reusing the index cards' own open verbs — the prose stays the narrative,
+  //    the chips are only the way there).
   if (promotedDelta && promotedDelta.length > 0) {
     const [first, ...rest] = promotedDelta;
     if (first) sections.push({ ...first, title: "Since you last looked" }, ...rest);
+    if (promotedSources.length > 0) {
+      sections.push({
+        kind: "actions",
+        title: "Open what changed",
+        wrap: true,
+        items: promotedSources.map((s) =>
+          s.kind === "room"
+            ? { type: "room-open", label: `${s.label} ↗`, glyph: "▦", payload: { slug: s.ref } }
+            : { type: "lens-open", label: `${s.label} ↗`, glyph: "❖", payload: { id: s.ref } },
+        ),
+      });
+    }
   }
 
   // 2. Digest — the standing synthesis, only once the chamber has content. Drop any
@@ -1378,10 +1418,12 @@ const rib: Rib = {
         nodes: [
           {
             id: "collect",
-            // Out-of-process (a bash node), so bake the resolved rooms dir in —
-            // captured in registerTools, which runs before this — so both sides
-            // read one path (see the roster collector).
-            bash: `bun ${shQuote(ROOMS_COLLECTOR)} ${shQuote(roomsDir())}`,
+            // Out-of-process (a bash node), so bake the resolved data home in —
+            // captured in registerTools, which runs before this. The collector reads
+            // both the rooms and the minds (to tone each cast name by its Mind's
+            // identity), so it bakes the home, not a single store dir (see the
+            // lenses collector).
+            bash: `bun ${shQuote(ROOMS_COLLECTOR)} ${shQuote(chamberDataHome())}`,
             output_schema: { type: "object", required: ["view", "sections"] },
           },
         ],
@@ -1596,6 +1638,7 @@ const rib: Rib = {
       // digest + record are read fresh by the first compose.
       promotedDelta = undefined;
       promotedCount = 0;
+      promotedSources = [];
       // Prime BRIEF_KEY so a client subscribing the instant the footer appears reads the
       // seed, then compose the real three-register footer (record + any standing digest)
       // in the background so it doesn't wait on the next mutation.
@@ -1840,6 +1883,7 @@ const rib: Rib = {
     // and a fresh publish chain.
     promotedDelta = undefined;
     promotedCount = 0;
+    promotedSources = [];
     briefingPublishInFlight = Promise.resolve();
     // Abort in-flight reflection and drain its writes so a late memory write can't
     // land after teardown; reset the per-Mind write chains for the next boot.

@@ -263,6 +263,16 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const delta = footer?.sections.find((s) => s.title === "Since you last looked");
     expect(delta?.kind).toBe("rows");
     expect(JSON.stringify(delta)).toContain("A room just ended.");
+    // The delta register carries its deterministic jump chips — built from the
+    // gate's structured slugs (never parsed from the turn's prose), reusing the
+    // rooms index's own open verb.
+    const chips = footer?.sections.find((s) => s.title === "Open what changed");
+    expect(chips?.kind).toBe("actions");
+    if (chips?.kind !== "actions") throw new Error("no jump-chip section");
+    expect(chips.wrap).toBe(true);
+    expect(chips.items).toEqual([
+      { type: "room-open", label: "Design Review ↗", glyph: "▦", payload: { slug: "r-done" } },
+    ]);
     // The watermark advanced: the ended room is acked and the brief is promoted.
     const wm = await readWatermark(home);
     expect(wm.ackedEndedRooms).toEqual(["r-done"]);
@@ -297,6 +307,23 @@ describe("brief gate (cost-safety + delta promotion)", () => {
         (b as CanvasBoardView).sections?.some((s) => s.title === "Since you last looked"),
       ),
     ).toBe(true);
+    // Its jump chip opens the changed lens by the id the gate diffed — labelled by
+    // the lens board's own title, via the lenses index's open verb.
+    const chipSections = published.flatMap(
+      (b) => (b as CanvasBoardView).sections?.filter((s) => s.title === "Open what changed") ?? [],
+    );
+    expect(
+      chipSections.some(
+        (s) =>
+          s.kind === "actions" &&
+          s.items.some(
+            (i) =>
+              i.type === "lens-open" &&
+              i.label === "Chamber Briefing ↗" &&
+              JSON.stringify(i.payload) === JSON.stringify({ id: "findings" }),
+          ),
+      ),
+    ).toBe(true);
     // The promote advanced the watermark to ack the lens fingerprint.
     const wm = await readWatermark(home);
     expect(Object.keys(wm.lensFingerprints)).toContain("findings");
@@ -317,9 +344,11 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await evaluateBriefGate(); // nothing new since
     // No second paid turn.
     expect(requests).toHaveLength(1);
-    // The delta register lapses (the digest + record remain); the header is calm again.
+    // The delta register lapses (the digest + record remain); the header is calm again
+    // and the jump chips lapse with their register.
     expect(lastBoard()?.header?.status?.label).toBe("Up to date");
     expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
+    expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
     expect((await readWatermark(home)).briefPromoted).toBe(false);
   });
 

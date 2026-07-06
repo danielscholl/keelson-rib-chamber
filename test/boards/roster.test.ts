@@ -172,6 +172,13 @@ describe("buildRosterBoard genesis boot card", () => {
     expect(values.some((v) => v.includes("identity: Mycroft"))).toBe(true);
     expect(values.some((v) => v.includes("purpose: Research Partner"))).toBe(true);
     expect(values.some((v) => v.includes("38s"))).toBe(true);
+    // The liturgy renders as stacked terminal lines: the card stacks its fields,
+    // each a dim `>` prompt label with the readout on the green ok tone.
+    expect(boot?.stacked).toBe(true);
+    for (const f of boot?.fields ?? []) {
+      expect(f.label).toBe(">");
+      expect(f.tone).toBe("ok");
+    }
   });
 
   test("a freeform brief (no name/role) holds 'calibrating…' and titles the seat Genesis", () => {
