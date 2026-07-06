@@ -17,3 +17,10 @@ export function relativeAgo(iso: string, now: number = Date.now()): string {
   }
   return "just now";
 }
+
+// The span with " ago" appended only when it isn't "just now" — a fresh record
+// reads "just now", never "just now ago".
+export function agoLabel(iso: string, now: number = Date.now()): string {
+  const span = relativeAgo(iso, now);
+  return span === "just now" ? span : `${span} ago`;
+}

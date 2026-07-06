@@ -11,6 +11,8 @@ export interface GenesisStarter {
   readonly voice: string;
   readonly voiceDescription: string;
   readonly tagline: string;
+  // One-line card copy — the energy of the voice, not the role restated.
+  readonly blurb: string;
   // The identity-tone slot (keelson#390) this starter prefers, so the cold-start
   // card previews the hue it will actually wear when authored from an empty roster.
   // chamber_emit_genesis honors it when free (next-free otherwise), so what the
@@ -26,6 +28,7 @@ export const MONEYPENNY_STARTER: GenesisStarter = {
   voiceDescription:
     'Character/voice: "Miss Moneypenny". Research this character from model-local knowledge — communication style, dry wit, values, how she handles pressure. Do not browse or use network tools. Capture the energy: crisp, unflappable, allergic to fluff, closes loops. Do not copy a prebaked template; author fresh Genesis artifacts that embody that energy for this workspace.',
   tagline: "Chief of Staff: briefings, priorities, follow-through",
+  blurb: "Briefings, priorities, follow-through — crisp, unflappable, allergic to fluff.",
   seat: 0,
 } as const;
 
@@ -37,6 +40,7 @@ export const MYCROFT_STARTER: GenesisStarter = {
   voiceDescription:
     "Capture Mycroft Holmes's analyst energy from model-local knowledge: vast information network, prefers the armchair to the chase, sees patterns three moves ahead, sparing with words but devastating when he chooses them. Excellent at synthesis across disparate sources, naming the question behind the question, and refusing to pretend a thin answer is a real one. Do not copy a prebaked template; author fresh Genesis artifacts that embody that energy for this workspace.",
   tagline: "Research partner: synthesis, patterns, question framing",
+  blurb: "Synthesis, patterns, the question behind the question — sparing but devastating.",
   seat: 1,
 } as const;
 
@@ -48,6 +52,7 @@ export const JARVIS_STARTER: GenesisStarter = {
   voiceDescription:
     "Capture J.A.R.V.I.S.'s engineering-copilot energy from model-local knowledge: precise, unflappable, gently sardonic, fluent in real-time telemetry and tradeoffs, never breaks character under pressure. Excellent at running diagnostics, surfacing the relevant fact at the right moment, naming risks without alarmism, and pushing back on a bad idea with deference rather than drama. Do not copy a prebaked template; author fresh Genesis artifacts that embody that energy for this workspace.",
   tagline: "Engineering partner: diagnostics, telemetry, tradeoffs",
+  blurb: "Diagnostics, telemetry, tradeoffs — precise, gently sardonic under pressure.",
   seat: 2,
 } as const;
 

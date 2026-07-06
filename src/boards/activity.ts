@@ -1,6 +1,6 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
-import { relativeAgo } from "../relative-time.ts";
+import { agoLabel } from "../relative-time.ts";
 import type { Room } from "../types.ts";
 
 // The minimal Mind shape the feed reads: listMindRecords supplies it (the
@@ -53,14 +53,11 @@ export function recordSection(
   }
   const shown = events.slice(0, FEED_LIMIT);
   const items: RowsSection["items"] = shown.map((e) => {
-    // relativeAgo returns a bare span ("5 minutes") or "just now"; append " ago" only to
-    // the former, so a fresh event reads "just now", not "just now ago".
-    const span = relativeAgo(e.at, now);
     return {
       icon: e.icon,
       glyph: e.glyph,
       text: e.text,
-      trailing: span === "just now" ? span : `${span} ago`,
+      trailing: agoLabel(e.at, now),
     };
   });
   const overflow = events.length - shown.length;
