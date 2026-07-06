@@ -114,9 +114,10 @@ export function buildRosterBoard(
         payload: { slug: mind.slug },
       };
     });
-    // Both rows wrap: the cast and the shape are two quick picks, so they read as
-    // compact chip rows rather than a stacked column spending the surface's width
-    // (keelson#413). The selected shape's form still breaks to its own full line.
+    // The cast wraps as toggle chips (many can be in); the shapes are a tabs strip
+    // (exactly one mechanism, keelson#417): picking a shape closes any sibling form
+    // and opens its own as a stable full-width panel below the strip, so switching
+    // shapes never reflows the row the way per-chip mid-row breaking did.
     sections.push({
       kind: "actions",
       title: "Convene a room — who's in",
@@ -124,7 +125,7 @@ export function buildRosterBoard(
       items: chips,
     });
     if (selectedCount >= 2) {
-      sections.push({ kind: "actions", title: "…and how", wrap: true, items: shapeActions() });
+      sections.push({ kind: "actions", title: "…and how", tabs: true, items: shapeActions() });
     }
   }
 
