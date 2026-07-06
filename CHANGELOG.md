@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.11.0...v0.12.0) (2026-07-06)
+
+
+### Added
+
+* fold the standing panels into one Briefing and add a genesis boot card ([#155](https://github.com/danielscholl/keelson-rib-chamber/issues/155)) ([fc9f644](https://github.com/danielscholl/keelson-rib-chamber/commit/fc9f64461f8abe74b0015a41a75e53e0df50fe7b))
+* seat authoring, identity tones, and room shapes on the home surface ([#153](https://github.com/danielscholl/keelson-rib-chamber/issues/153)) ([c4c165a](https://github.com/danielscholl/keelson-rib-chamber/commit/c4c165aaedfb6e0328e8981a2f2f5ba5a58d9880))
+
 ## [0.11.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.10.3...v0.11.0) (2026-07-05)
 
 
