@@ -31,6 +31,10 @@ export function lensesDir(): string {
   return join(chamberDataHome(), "lenses");
 }
 
+export function htmlLensesDir(): string {
+  return join(chamberDataHome(), "lenses-html");
+}
+
 // Recursive mkdir doubles as a writability probe — idempotent if the dir exists
 // (genesis creates it anyway), and fails only when the path isn't writable.
 export async function isChamberDataHomeWritable(): Promise<boolean> {
