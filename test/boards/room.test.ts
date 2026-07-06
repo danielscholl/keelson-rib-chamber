@@ -281,7 +281,7 @@ describe("buildRoomBoard", () => {
     expect(actionsSection(board).items[0]?.payload).toMatchObject({ topic: "Q3 roadmap" });
   });
 
-  test("the synthesizer's closing summary reads as a distinct brand chip + icon", () => {
+  test("the synthesizer's closing summary reads as a distinct brand chip, no leading icon", () => {
     const board = buildRoomBoard(
       room({
         status: "done",
@@ -294,22 +294,27 @@ describe("buildRoomBoard", () => {
     const items = debateItems(board);
     const summary = items.find((i) => i.text === "in summary");
     expect(summary?.chip).toEqual({ label: "s", tone: "brand" });
-    expect(summary?.icon).toBe("◆");
-    // a participant turn keeps the plain info tone (no minds[] supplied — the
-    // pre-identity-tones fallback) and no leading icon
+    // The brand tone is the sole facilitator marker — every speaker row leads with
+    // one toned bullet + chip and no icon, so the feed aligns on a single left edge.
+    expect(summary?.icon).toBeUndefined();
     const aTurn = items.find((i) => i.chip?.label === "a");
     expect(aTurn?.chip?.tone).toBe("info");
     expect(aTurn?.icon).toBeUndefined();
   });
 
-  test("a moderator's routing turn reads as a distinct brand chip + icon", () => {
+  test("a moderator's routing turn reads as a distinct brand chip, aligned with participants", () => {
     const board = buildRoomBoard(room({ strategy: "group-chat", config: { moderator: "mod" } }), [
       entry({ from: "mod", parts: [{ text: "Bob, your take?" }] }),
       entry({ from: "b" }),
     ]);
-    const modTurn = debateItems(board).find((i) => i.chip?.label === "mod");
+    const items = debateItems(board);
+    const modTurn = items.find((i) => i.chip?.label === "mod");
     expect(modTurn?.chip).toEqual({ label: "mod", tone: "brand" });
-    expect(modTurn?.icon).toBe("◇");
+    expect(modTurn?.glyph).toBe("brand");
+    // No leading icon — the moderator's chip sits at the same left edge as a
+    // participant's, distinguished only by its brand tone.
+    expect(modTurn?.icon).toBeUndefined();
+    expect(items.find((i) => i.chip?.label === "b")?.icon).toBeUndefined();
   });
 
   test("a participant wears its persisted identity-tone slot when minds[] resolves it", () => {
@@ -323,7 +328,7 @@ describe("buildRoomBoard", () => {
     const aTurn = items.find((i) => i.chip?.label === "Ada"); // the Mind's NAME, not slug
     expect(aTurn?.chip?.tone).toBe("id-teal");
     // the moderator keeps brand regardless of any identitySlot
-    expect(items.find((i) => i.icon === "◇")?.chip?.tone).toBe("brand");
+    expect(items.find((i) => i.chip?.label === "mod")?.chip?.tone).toBe("brand");
   });
 
   test("a round boundary inserts a 'Round N' divider, INCLUDING the first round", () => {
@@ -688,7 +693,7 @@ describe("buildRoomBoard — magentic plan + manager", () => {
     expect(plan.items).toEqual([{ glyph: "neutral", text: "No tasks yet" }]);
   });
 
-  test("a manager turn reads as a distinct brand chip + icon", () => {
+  test("a manager turn reads as a distinct brand chip, no leading icon", () => {
     const board = buildRoomBoard(
       room({ strategy: "magentic", config: { manager: "mgr" } }),
       [
@@ -699,10 +704,10 @@ describe("buildRoomBoard — magentic plan + manager", () => {
     );
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const items = debateItems(board);
-    expect(items.find((i) => i.chip?.label === "mgr")).toMatchObject({
-      glyph: "brand",
-      icon: "❖",
-    });
+    const mgrTurn = items.find((i) => i.chip?.label === "mgr");
+    expect(mgrTurn?.glyph).toBe("brand");
+    expect(mgrTurn?.chip?.tone).toBe("brand");
+    expect(mgrTurn?.icon).toBeUndefined();
   });
 
   test("an active magentic room offers Stop but no per-worker Call-on", () => {

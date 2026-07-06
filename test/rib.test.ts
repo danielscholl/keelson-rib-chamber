@@ -51,6 +51,8 @@ describe("rib-chamber", () => {
     const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns);
     expect(cols.find((c) => c.key === "rib:chamber:rooms")?.collapsible).toBe(true);
     expect(cols.find((c) => c.key === "rib:chamber:lenses")?.collapsible).toBe(true);
+    // The roster header collapses too, so a seated bench can fold to its head strip.
+    expect(surface?.layout.header?.collapsible).toBe(true);
   });
 
   it("the Briefing footer is rib-driven — keyed but with no workflow binding", () => {
