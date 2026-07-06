@@ -444,12 +444,13 @@ describe("buildRosterBoard convene composer", () => {
     return section?.kind === "actions" ? section.items : [];
   }
 
-  test("both composer rows wrap — compact chip rows, not a stacked column", () => {
+  test("the cast wraps as toggle chips; the shapes are a single-select tabs strip", () => {
     const board = buildRosterBoard(two);
     const who = actionsSection(board, "Convene a room — who's in");
     const how = actionsSection(board, "…and how");
     expect(who?.kind === "actions" && who.wrap).toBe(true);
-    expect(how?.kind === "actions" && how.wrap).toBe(true);
+    expect(how?.kind === "actions" && how.tabs).toBe(true);
+    expect(how?.kind === "actions" && how.wrap).toBeFalsy();
   });
 
   test("shape chips carry short labels; the mechanism is taught by each form", () => {
