@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.12.0...v0.13.0) (2026-07-06)
+
+
+### Added
+
+* collapsible roster, aligned transcript speakers, live rooms-index bar ([#159](https://github.com/danielscholl/keelson-rib-chamber/issues/159)) ([620082e](https://github.com/danielscholl/keelson-rib-chamber/commit/620082eb496721ff0af89177ac1d901465a6f44a))
+* convene composer as compact wrapping chip rows ([#160](https://github.com/danielscholl/keelson-rib-chamber/issues/160)) ([450b3b2](https://github.com/danielscholl/keelson-rib-chamber/commit/450b3b2afa2c9504c9dea3eb0fdd33c0b760846e))
+* recompose the cold start to the design's hero hierarchy ([#156](https://github.com/danielscholl/keelson-rib-chamber/issues/156)) ([9a5816a](https://github.com/danielscholl/keelson-rib-chamber/commit/9a5816acbb86b740b3cfd0763fc580da77fea29f))
+
+
+### Fixed
+
+* drop the cold start's journey strip — the anchor and nudges carry it ([#158](https://github.com/danielscholl/keelson-rib-chamber/issues/158)) ([c2fd09a](https://github.com/danielscholl/keelson-rib-chamber/commit/c2fd09a47ce84114e3e50b0bbe527a0f9a592d8b))
+
 ## [0.12.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.11.0...v0.12.0) (2026-07-06)
 
 
