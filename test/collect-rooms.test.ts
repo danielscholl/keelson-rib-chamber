@@ -3,12 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { scaffoldMind } from "../src/minds-store.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 
 // The out-of-process rooms-index collector the chamber-rooms workflow runs. It
-// reads the rooms dir baked into its argv (the keelson-home-rooted path the rib
-// captured in-process), so the two processes agree without a shared env var.
+// reads the data home baked into its argv (the keelson-home-rooted path the rib
+// captured in-process) and derives the rooms + minds dirs from it, so the two
+// processes agree without a shared env var.
 const COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.meta.url));
 
 const room = (over: Partial<Room> = {}): Room => ({
@@ -24,21 +26,21 @@ const room = (over: Partial<Room> = {}): Room => ({
   ...over,
 });
 
-async function runCollector(roomsRoot: string): Promise<{ out: string; code: number }> {
-  const proc = Bun.spawn(["bun", COLLECTOR, roomsRoot], { stdout: "pipe", stderr: "ignore" });
+async function runCollector(home: string): Promise<{ out: string; code: number }> {
+  const proc = Bun.spawn(["bun", COLLECTOR, home], { stdout: "pipe", stderr: "ignore" });
   const out = await new Response(proc.stdout).text();
   const code = await proc.exited;
   return { out, code };
 }
 
 describe("collect-rooms", () => {
-  test("reads the rooms dir from argv[2] and emits a sessions index with active + closed rooms", async () => {
-    const root = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+  test("reads the data home from argv[2] and emits a sessions index with active + closed rooms", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
     try {
-      const store = createFileRoomStore(root);
+      const store = createFileRoomStore(join(home, "rooms"));
       await store.saveRoom(room({ slug: "room-ended", name: "Ended room", status: "done" }));
       await store.saveRoom(room({ slug: "room-live", name: "Live room", status: "active" }));
-      const { out, code } = await runCollector(root);
+      const { out, code } = await runCollector(home);
       expect(code).toBe(0);
       const board = JSON.parse(out) as {
         view: string;
@@ -52,19 +54,54 @@ describe("collect-rooms", () => {
       // The ended room is actionable, so its slug rides its Open/Delete payloads.
       expect(out).toContain("room-ended");
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true });
     }
   });
 
-  test("an empty / missing rooms dir → a valid empty-state board (no throw)", async () => {
-    const root = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+  test("seated Minds tone the cast: a participant renders as a people entry in its seat hue", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
     try {
-      const { out, code } = await runCollector(join(root, "missing"));
+      await scaffoldMind(
+        join(home, "minds"),
+        {
+          slug: "ada",
+          name: "Ada",
+          role: "Chief of Staff",
+          voice: "calm",
+          persona: "You are Ada.",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          identitySlot: 0,
+        },
+        "soul ada",
+      );
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(room({ participants: ["ada", "ghost"] }));
+      const { out, code } = await runCollector(home);
+      expect(code).toBe(0);
+      const board = JSON.parse(out) as {
+        sections: {
+          kind: string;
+          items: { fields?: { label?: string; people?: { name: string; tone?: string }[] }[] }[];
+        }[];
+      };
+      const withField = board.sections
+        .find((s) => s.kind === "cards")
+        ?.items[0]?.fields?.find((f) => f.label === "with");
+      expect(withField?.people).toEqual([{ name: "Ada", tone: "id-blue" }, { name: "ghost" }]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("an empty / missing data home → a valid empty-state board (no throw)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const { out, code } = await runCollector(join(home, "missing"));
       expect(code).toBe(0);
       const board = JSON.parse(out) as { view: string };
       expect(board.view).toBe("board");
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true });
     }
   });
 });

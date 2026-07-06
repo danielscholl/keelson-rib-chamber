@@ -250,10 +250,12 @@ function openSeatCard(slot: number, extraStarters: CanvasActionItem[]) {
 const GENESIS_STALL_S = 180;
 
 // The seat being taken while a genesis runs — the original Chamber's boot screen quoted
-// in keelson's own ink. The liturgy lines are honest: identity/purpose are known at
-// action time for a starter (else "calibrating…"), and "voice: calibrating…" holds with
-// a real elapsed count that each roster re-publish advances. Past the stall window it
-// flips to a warn card with a Dismiss.
+// in keelson's own ink: stacked mono lines (the card's `stacked` presentation), each a
+// dim `>` prompt label with the readout riding the green `ok` field tone. The liturgy
+// lines are honest: identity/purpose are known at action time for a starter (else
+// "calibrating…"), and "voice: calibrating…" holds with a real elapsed count that each
+// roster re-publish advances. Past the stall window it flips to a warn card with a
+// Dismiss.
 function bootCard(pending: PendingGenesis, slot: number, now: number) {
   const started = Date.parse(pending.startedAt);
   // An unparseable startedAt (a hand-edited marker) has no honest elapsed — present it
@@ -276,15 +278,17 @@ function bootCard(pending: PendingGenesis, slot: number, now: number) {
       ],
     };
   }
+  const line = (text: string) => ({ label: ">", value: text, tone: "ok" as CanvasTone });
   return {
     title: pending.name ?? "Genesis",
     dot: identityToneForSlot(slot),
     pill: { label: "authoring", tone: "brand" as CanvasTone },
+    stacked: true,
     fields: [
-      { value: "> writing SOUL.md…" },
-      { value: `> identity: ${pending.name ?? "calibrating…"}` },
-      { value: `> purpose: ${pending.role ?? "calibrating…"}` },
-      { value: `> voice: calibrating… · ${elapsedS}s` },
+      line("writing SOUL.md…"),
+      line(`identity: ${pending.name ?? "calibrating…"}`),
+      line(`purpose: ${pending.role ?? "calibrating…"}`),
+      line(`voice: calibrating… · ${elapsedS}s`),
     ],
   };
 }

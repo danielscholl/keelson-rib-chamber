@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type CanvasTone, canvasViewSchema } from "@keelson/shared";
 import { buildRoomsIndexBoard } from "../../src/boards/rooms.ts";
-import type { Room } from "../../src/types.ts";
+import type { Mind, Room } from "../../src/types.ts";
 
 const room = (over: Partial<Room> = {}): Room => ({
   slug: "room-1",
@@ -13,6 +13,14 @@ const room = (over: Partial<Room> = {}): Room => ({
   turnIndex: 6,
   round: 0,
   createdAt: "2026-01-01T00:00:00.000Z",
+  ...over,
+});
+
+const mind = (over: Partial<Mind> = {}): Mind => ({
+  slug: "ada",
+  name: "Ada",
+  role: "Chief of Staff",
+  persona: "You are Ada.",
   ...over,
 });
 
@@ -149,13 +157,41 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(rounds?.fields?.find((f) => f.label === "round")?.value).toBe("3");
   });
 
-  test("fields carry the participants joined by ' · ' and a started-relative time", () => {
+  test("the with field is a people list; names resolve to Minds' identity tones", () => {
+    const minds = [
+      mind({ slug: "ada", name: "Ada", identitySlot: 0 }),
+      mind({ slug: "bo", name: "Bo", identitySlot: 2 }),
+    ];
+    const board = buildRoomsIndexBoard([room({ participants: ["ada", "bo", "cy"] })], minds);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const withField = cards(board)[0]?.fields?.find((f) => f.label === "with");
+    // A seated slug wears its Mind's display name + seat hue; a retired/unknown
+    // slug stays the bare slug with no tone (the muted dot).
+    expect(withField?.people).toEqual([
+      { name: "Ada", tone: "id-blue" },
+      { name: "Bo", tone: "id-teal" },
+      { name: "cy" },
+    ]);
+    expect(withField?.value).toBeUndefined();
+  });
+
+  test("without minds the cast folds to bare slugs; a started-relative time renders", () => {
     const card = cards(buildRoomsIndexBoard([room({ participants: ["ada", "bo", "cy"] })]))[0];
-    expect(card?.fields?.find((f) => f.label === "with")?.value).toBe("ada · bo · cy");
+    expect(card?.fields?.find((f) => f.label === "with")?.people).toEqual([
+      { name: "ada" },
+      { name: "bo" },
+      { name: "cy" },
+    ]);
     const started = card?.fields?.find((f) => f.label === "started")?.value;
     // Rendered from createdAt — an "… ago" span, never an invented "ended" time.
     expect(String(started)).toMatch(/ ago$/);
     expect(card?.fields?.some((f) => f.label === "ended")).toBe(false);
+  });
+
+  test("a drifted no-participant room omits the with field (an empty people list is invalid)", () => {
+    const board = buildRoomsIndexBoard([room({ participants: [] })]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(cards(board)[0]?.fields?.some((f) => f.label === "with")).toBe(false);
   });
 
   test("each card has an inline Open then a destructive Delete with a simple confirm", () => {
