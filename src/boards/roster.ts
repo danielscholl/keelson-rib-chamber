@@ -425,8 +425,10 @@ function starterCard(starter: GenesisStarter) {
 // The cold-start launchpad, mirroring the design review's hero hierarchy: the anchor
 // sentence, the freeform brief open inline under "Genesis — author a Mind" (the one
 // filled button on the board), the /genesis bridge caption, the starter voices as
-// seated-alternative cards below an "or" divider, a three-step journey strip, and the
-// void screen's line at rest. No locked Rooms/Lenses panels; no "convene <slug>".
+// seated-alternative cards below an "or" divider, and the void screen's line at rest.
+// No what's-next strip: the anchor names the journey and the seated roster's own
+// nudges teach Meet/Convene when they become actionable. No locked Rooms/Lenses
+// panels; no "convene <slug>".
 function coldStartSections(): CanvasBoardView["sections"] {
   return [
     { kind: "rows", items: [{ glyph: "brand", text: ANCHOR }] },
@@ -441,18 +443,6 @@ function coldStartSections(): CanvasBoardView["sections"] {
       title: "Or seat a starter voice",
       boxed: true,
       items: GENESIS_STARTERS.map(starterCard),
-    },
-    {
-      kind: "cards",
-      boxed: true,
-      items: [
-        {
-          title: "1 · Author",
-          footnote: "The genesis rite seats a Mind with a soul that persists.",
-        },
-        { title: "2 · Meet", footnote: "Enter it for a 1:1 chat. What it learns, it keeps." },
-        { title: "3 · Convene", footnote: "With two Minds seated, open a Room on a topic." },
-      ],
     },
     // The original Chamber's void screen, quoted at rest — while a genesis runs, the
     // boot card in the seat replaces this stillness with a live count.
