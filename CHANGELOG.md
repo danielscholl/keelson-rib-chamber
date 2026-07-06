@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.15.0...v0.16.0) (2026-07-06)
+
+
+### Added
+
+* briefing jump chips, identity-toned cast, stacked boot liturgy ([#167](https://github.com/danielscholl/keelson-rib-chamber/issues/167)) ([e5b9e02](https://github.com/danielscholl/keelson-rib-chamber/commit/e5b9e0256017f7d081c0fc429a408cd48c7e8c7e))
+
 ## [0.15.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.14.0...v0.15.0) (2026-07-06)
 
 
