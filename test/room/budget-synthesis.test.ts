@@ -72,14 +72,6 @@ describe("room driver — budget exhaustion synthesis", () => {
       expectedFrom: ["a", "a"],
     },
     {
-      name: "review",
-      strategy: "review" as RoomStrategyName,
-      participants: ["author", "reviewer"],
-      turnBudget: 2,
-      scripts: [{ text: "artifact" }, { text: "review" }, { text: "summary" }],
-      expectedFrom: ["author", "reviewer", "reviewer"],
-    },
-    {
       name: "group-chat",
       strategy: "group-chat" as RoomStrategyName,
       participants: ["a", "b"],
@@ -98,6 +90,26 @@ describe("room driver — budget exhaustion synthesis", () => {
       expectedFrom: ["mgr", "a", "mgr"],
     },
   ];
+
+  test("review is exempt — the reviewer's critique closes the room with no synthesis turn", async () => {
+    const h = harness([{ text: "artifact" }, { text: "review" }]);
+    await h.driver.start({
+      slug: "review",
+      name: "review",
+      strategy: "review" as RoomStrategyName,
+      participants: ["author", "reviewer"],
+      turnBudget: 2,
+      topic: "Decide the thing",
+    });
+
+    await drain(h.driver, "review");
+
+    const transcript = await h.store.loadTranscript("review");
+    expect(transcript.map((e) => e.from)).toEqual(["author", "reviewer"]);
+    expect(transcript).toHaveLength(2);
+    expect(h.turns.requests.at(-1)?.prompt).not.toContain("Synthesize the discussion");
+    expect((await h.store.loadRoom("review"))?.status).toBe("done");
+  });
 
   for (const c of cases) {
     test(`${c.name} appends exactly one fallback synthesis turn after budget exhaustion`, async () => {

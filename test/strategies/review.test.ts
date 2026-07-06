@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { review } from "../../src/strategies/review.ts";
-import type { Room, StrategyInput, TurnEntry } from "../../src/types.ts";
+import type { Room, StrategyInput } from "../../src/types.ts";
 
 function room(overrides: Partial<Room> = {}): Room {
   return {
@@ -17,18 +17,8 @@ function room(overrides: Partial<Room> = {}): Room {
   };
 }
 
-const agentEntry = (from: string): TurnEntry => ({
-  messageId: "m",
-  roomSlug: "r",
-  turnIndex: 0,
-  from,
-  role: "agent",
-  parts: [{ text: "hi" }],
-  at: "2026-01-01T00:00:00.000Z",
-});
-
-function input(overrides: Partial<Room> = {}, transcript: TurnEntry[] = []): StrategyInput {
-  return { room: room(overrides), transcript };
+function input(overrides: Partial<Room> = {}): StrategyInput {
+  return { room: room(overrides), transcript: [] };
 }
 
 describe("review strategy (pure rhythm)", () => {
@@ -52,11 +42,8 @@ describe("review strategy (pure rhythm)", () => {
     expect(review(input({ participants: ["author"] }))).toEqual({ kind: "end" });
   });
 
-  test("synthesizes with the reviewer at the turn budget", () => {
-    expect(review(input({ turnIndex: 2, turnBudget: 2 }, [agentEntry("reviewer")]))).toEqual({
-      kind: "synthesize",
-      mind: "reviewer",
-    });
+  test("ends at the turn budget — exempt from exhaustion synthesis, the critique is the close", () => {
+    expect(review(input({ turnIndex: 2, turnBudget: 2 }))).toEqual({ kind: "end" });
   });
 
   test("is pure (same input, same output, no mutation)", () => {
