@@ -11,6 +11,7 @@ import type {
 } from "@keelson/shared";
 import { canvasViewSchema, expectView } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
+import { writeDigest } from "../src/digest-store.ts";
 import rib, { evaluateBriefGate } from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
@@ -168,6 +169,59 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(wm.lensFingerprints).toEqual({ keep: "t1" });
   });
 
+  test("the Digest register embeds digest.json's sections with any stats dropped, labelled 'Digest'", async () => {
+    await seedMinds(); // the chamber has content, so the digest register may render
+    await writeDigest(
+      {
+        board: {
+          view: "board",
+          title: "Digest",
+          sections: [
+            // A stats section a turn might author despite the prompt — it must be dropped
+            // so an index count can't creep into the one narrator.
+            { kind: "stats", items: [{ label: "Minds", value: 2 }] },
+            { kind: "rows", items: [{ text: "The bench is naming a new rib." }] },
+          ],
+        },
+        fingerprint: "fp",
+      },
+      home,
+    );
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    rib.registerTools?.(makeCtx(run, sm));
+    // Boot composes the footer in-process; wait for the Digest register to appear.
+    await waitFor(() => (lastBoard()?.sections ?? []).some((s) => s.title === "Digest"));
+    const footer = lastBoard();
+    const digest = footer?.sections.find((s) => s.title === "Digest");
+    expect(digest?.kind).toBe("rows"); // the stats section was dropped; the rows section leads
+    expect(JSON.stringify(digest)).toContain("The bench is naming a new rib.");
+    // No stats section reached the footer from the digest.
+    expect(footer?.sections.some((s) => s.kind === "stats")).toBe(false);
+  });
+
+  test("the Digest register is absent on a chamber with no content (sparse = absent, not narrated)", async () => {
+    // A stored digest exists, but nothing is seated — hasContent is false, so the digest
+    // register is withheld rather than naming gone entities.
+    await writeDigest(
+      {
+        board: {
+          view: "board",
+          sections: [{ kind: "rows", items: [{ text: "a stale synthesis" }] }],
+        },
+        fingerprint: "fp",
+      },
+      home,
+    );
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    rib.registerTools?.(makeCtx(run, sm));
+    // Wait for the composed footer (its record register shows the empty-chamber hint).
+    await waitFor(() => JSON.stringify(lastBoard() ?? {}).includes("No activity yet"));
+    expect(lastBoard()?.sections.some((s) => s.title === "Digest")).toBe(false);
+    expect(JSON.stringify(lastBoard())).not.toContain("a stale synthesis");
+  });
+
   test("quiet (nothing new) runs ZERO agent turns and leaves the watermark unchanged", async () => {
     await seedMinds(); // minds alone are NOT substance
     const { sm } = fakeSnapshotManager();
@@ -202,8 +256,13 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(prompt).toContain("done");
     // Tools are withheld for the compose turn (cost + no side effects).
     expect(requests[0]?.allowedTools).toEqual([]);
-    // The authored board reached the footer.
-    expect(lastBoard()?.title).toBe("Chamber Briefing");
+    // The turn's content became the footer's delta register, labelled and counted.
+    const footer = lastBoard();
+    expect(footer?.title).toBe("Briefing");
+    expect(footer?.header?.status?.label).toBe("1 new");
+    const delta = footer?.sections.find((s) => s.title === "Since you last looked");
+    expect(delta?.kind).toBe("rows");
+    expect(JSON.stringify(delta)).toContain("A room just ended.");
     // The watermark advanced: the ended room is acked and the brief is promoted.
     const wm = await readWatermark(home);
     expect(wm.ackedEndedRooms).toEqual(["r-done"]);
@@ -231,9 +290,13 @@ describe("brief gate (cost-safety + delta promotion)", () => {
 
     // The lens publish itself runs no turn; the gate runs exactly one brief turn.
     expect(requests).toHaveLength(1);
-    // The promote published the authored briefing board (the trailing chained re-eval
-    // then lapses to quiet — the promote itself is what we assert here).
-    expect(published.some((b) => (b as CanvasBoardView).title === "Chamber Briefing")).toBe(true);
+    // The promote published the delta register into the footer (the trailing chained
+    // re-eval then lapses it — the promote itself is what we assert here).
+    expect(
+      published.some((b) =>
+        (b as CanvasBoardView).sections?.some((s) => s.title === "Since you last looked"),
+      ),
+    ).toBe(true);
     // The promote advanced the watermark to ack the lens fingerprint.
     const wm = await readWatermark(home);
     expect(Object.keys(wm.lensFingerprints)).toContain("findings");
@@ -254,8 +317,9 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await evaluateBriefGate(); // nothing new since
     // No second paid turn.
     expect(requests).toHaveLength(1);
-    // The promoted brief lapses back to quiet (republished, flag cleared).
-    expect(lastBoard()?.header?.status?.label).toBe("Quiet");
+    // The delta register lapses (the digest + record remain); the header is calm again.
+    expect(lastBoard()?.header?.status?.label).toBe("Up to date");
+    expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
     expect((await readWatermark(home)).briefPromoted).toBe(false);
   });
 
@@ -285,15 +349,14 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     ]);
     rib.registerTools?.(makeCtx(run, sm));
     await waitFor(() => lastBoard() !== undefined);
-    const seeded = lastBoard(); // the quiet seed
-    expect(seeded?.header?.status?.label).toBe("Quiet");
 
     await expect(evaluateBriefGate()).resolves.toBeUndefined(); // never throws
 
     expect(requests).toHaveLength(1); // the turn ran
-    // …but its bad output was dropped: the footer still shows the seeded quiet board.
-    expect(lastBoard()).toEqual(seeded);
-    // And the watermark did NOT advance, so a later valid turn can still promote.
+    // …but its bad output was dropped: no delta register reached the footer, the header
+    // stays calm, and the watermark did NOT advance (a later valid turn can promote).
+    expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
+    expect(lastBoard()?.header?.status?.label).toBe("Up to date");
     const wm = await readWatermark(home);
     expect(wm.briefPromoted).toBe(false);
     expect(wm.ackedEndedRooms).toEqual([]);
@@ -312,7 +375,8 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await evaluateBriefGate();
 
     expect(requests).toHaveLength(1);
-    expect(lastBoard()?.title).toBe("Chamber Briefing");
+    expect(lastBoard()?.header?.status?.label).toBe("1 new");
+    expect(JSON.stringify(lastBoard())).toContain("A room just ended.");
     const wm = await readWatermark(home);
     expect(wm.ackedEndedRooms).toEqual(["r-done"]);
     expect(wm.briefPromoted).toBe(true);
@@ -331,7 +395,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await evaluateBriefGate();
 
     expect(requests).toHaveLength(1);
-    expect(lastBoard()?.title).toBe("Chamber Briefing");
+    expect(JSON.stringify(lastBoard())).toContain("A room just ended.");
     expect((await readWatermark(home)).briefPromoted).toBe(true);
   });
 
@@ -344,13 +408,12 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const { run, requests } = scriptedRunAgentTurn([{ text: "Bob replies." }]);
     rib.registerTools?.(makeCtx(run, sm));
     await waitFor(() => lastBoard() !== undefined);
-    const seeded = lastBoard();
-    expect(seeded?.header?.status?.label).toBe("Quiet");
 
     await expect(evaluateBriefGate()).resolves.toBeUndefined();
 
     expect(requests).toHaveLength(1);
-    expect(lastBoard()).toEqual(seeded);
+    // No delta register reached the footer; the watermark stayed cold.
+    expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
     const wm = await readWatermark(home);
     expect(wm.briefPromoted).toBe(false);
     expect(wm.ackedEndedRooms).toEqual([]);
@@ -413,8 +476,12 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     release();
     await gate;
 
-    // The only published board is the boot quiet seed — the post-dispose result was dropped.
-    expect(published.some((b) => (b as CanvasBoardView).title === "Chamber Briefing")).toBe(false);
+    // No delta register was ever published — the post-dispose turn result was dropped.
+    expect(
+      published.some((b) =>
+        (b as CanvasBoardView).sections?.some((s) => s.title === "Since you last looked"),
+      ),
+    ).toBe(false);
     const wm = await readWatermark(home);
     expect(wm.briefPromoted).toBe(false);
     expect(wm.ackedEndedRooms).toEqual([]);

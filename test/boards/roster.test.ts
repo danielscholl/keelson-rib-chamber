@@ -125,12 +125,95 @@ describe("buildRosterBoard cold start", () => {
     expect(journey.items[2]?.text).toMatch(/^Convene —/);
   });
 
-  test("no cards, no Enter/Retire section; section kinds are rows/actions/rows/rows", () => {
+  test("no cards, no Enter/Retire section; the void screen's line closes it", () => {
     const board = buildRosterBoard([]);
     expect(actionsSection(board, "Enter")).toBeUndefined();
     expect(actionsSection(board, "Retire")).toBeUndefined();
     expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
-    expect(board.sections.map((s) => s.kind)).toEqual(["rows", "actions", "rows", "rows"]);
+    expect(board.sections.map((s) => s.kind)).toEqual(["rows", "actions", "rows", "rows", "rows"]);
+    // The original Chamber's void-screen line, quoted at rest.
+    const last = board.sections.at(-1);
+    if (last?.kind !== "rows") throw new Error("no closing rows section");
+    expect(last.items[0]?.text).toBe("awaiting genesis.");
+  });
+});
+
+describe("buildRosterBoard genesis boot card", () => {
+  const START = Date.parse("2026-07-05T18:00:00.000Z");
+  const pending = (over: Partial<import("../../src/pending-genesis.ts").PendingGenesis> = {}) => ({
+    startedAt: new Date(START).toISOString(),
+    ...over,
+  });
+  function bootCard(board: ReturnType<typeof buildRosterBoard>) {
+    return cards(board).find((c) => c.title !== "Open seat" && "pill" in c && c.pill?.label);
+  }
+
+  test("a pending genesis renders a boot card in the next free seat, with a live elapsed count", () => {
+    const board = buildRosterBoard(
+      [mind({ slug: "a", identitySlot: 0 })],
+      new Set(),
+      undefined,
+      pending({ name: "Mycroft", role: "Research Partner" }),
+      START + 38_000,
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const boot = cards(board).find((c) => c.title === "Mycroft");
+    expect(boot?.dot).toBe("id-amber"); // slot 1 — the next free seat after slot 0
+    expect(boot?.pill).toEqual({ label: "authoring", tone: "brand" });
+    const values = boot?.fields?.map((f) => String(f.value)) ?? [];
+    expect(values.some((v) => v.includes("identity: Mycroft"))).toBe(true);
+    expect(values.some((v) => v.includes("purpose: Research Partner"))).toBe(true);
+    expect(values.some((v) => v.includes("38s"))).toBe(true);
+  });
+
+  test("a freeform brief (no name/role) holds 'calibrating…' and titles the seat Genesis", () => {
+    const board = buildRosterBoard([], new Set(), undefined, pending(), START + 4_000);
+    const boot = cards(board).find((c) => c.title === "Genesis");
+    expect(boot).toBeDefined();
+    const values = boot?.fields?.map((f) => String(f.value)) ?? [];
+    expect(values.some((v) => v.includes("identity: calibrating…"))).toBe(true);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("past the stall window the boot card flips to a warn card with a Dismiss action", () => {
+    const board = buildRosterBoard(
+      [],
+      new Set(),
+      undefined,
+      pending({ name: "Mycroft" }),
+      START + 200_000, // > 180s stall window
+    );
+    const boot = cards(board).find((c) => c.title === "Mycroft");
+    expect(boot?.pill).toEqual({ label: "stalled", tone: "warn" });
+    expect(boot?.actions?.some((a) => a.type === "dismiss-genesis")).toBe(true);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("an unparseable startedAt (a hand-edited marker) renders the dismissable stalled card", () => {
+    const board = buildRosterBoard(
+      [],
+      new Set(),
+      undefined,
+      { startedAt: "not-a-date", name: "Mycroft" },
+      START,
+    );
+    const boot = cards(board).find((c) => c.title === "Mycroft");
+    expect(boot?.pill).toEqual({ label: "stalled", tone: "warn" });
+    expect(boot?.actions?.some((a) => a.type === "dismiss-genesis")).toBe(true);
+    // No "NaNs" leaks into the rendered card.
+    expect(JSON.stringify(boot)).not.toContain("NaN");
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("the quiet Author action and lone-Mind nudge are withheld while a genesis is pending", () => {
+    const one = buildRosterBoard([mind({ slug: "a" })], new Set(), undefined, pending(), START);
+    expect(
+      one.sections
+        .flatMap((s) => (s.kind === "rows" ? s.items : []))
+        .some((i) => i.trailing === "next"),
+    ).toBe(false);
+    // The boot card consumed a seat; the remaining free slots are still open seats.
+    expect(bootCard(one)).toBeDefined();
   });
 });
 

@@ -428,15 +428,10 @@ describe("chamber room-control chat tools", () => {
     );
     refreshed.length = 0;
     // A successful retire refreshes the index AND the roster (its "Live views" count
-    // drops with the lens), plus the standing panels — Activity always, and the Digest
-    // because a removal would otherwise leave it naming a gone lens.
+    // drops with the lens), plus the one narrator: refreshStandingPanels nudges the
+    // digest gate (which re-composes now the lens is gone) and re-publishes the footer.
     await retire.execute({ id: "refresh-lens" }, makeToolCtx().ctx);
-    expect(refreshed).toEqual([
-      "chamber-lenses",
-      "chamber-roster",
-      "chamber-activity",
-      "chamber-digest",
-    ]);
+    expect(refreshed).toEqual(["chamber-lenses", "chamber-roster", "chamber-digest"]);
     // ...a failed one (unknown id) does not.
     refreshed.length = 0;
     const failed = makeToolCtx();
@@ -894,10 +889,11 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     expect((await readMinds(mindsDir())).some((m) => m.slug === "ghost")).toBe(false);
   });
 
-  it("refreshes the chamber-roster and chamber-activity workflows after a successful scaffold", async () => {
+  it("refreshes the chamber-roster and nudges the chamber-digest gate after a successful scaffold", async () => {
     // Wire a recording refreshWorkflow through registerTools, then drive the genesis
-    // tool it returns: a successful write must re-run the bound roster AND activity
-    // collectors so a new Mind appears promptly, not only on the 120s cadence.
+    // tool it returns: a successful write must re-run the bound roster collector and
+    // nudge the digest gate (refreshStandingPanels) so the surface reflects the new
+    // Mind promptly, not only on the 120s cadence.
     const refreshed: string[] = [];
     const refreshTools = registerTools(
       makeCtx(undefined, sm, async (name) => {
@@ -918,7 +914,7 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
       t.ctx,
     );
     expect(t.errored()).toBe(false);
-    expect(refreshed).toEqual(["chamber-roster", "chamber-activity"]);
+    expect(refreshed).toEqual(["chamber-roster", "chamber-digest"]);
   });
 
   it("does not refresh when the scaffold fails (slug collision)", async () => {

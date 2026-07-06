@@ -24,6 +24,7 @@ import {
   z,
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
+import { recordSection } from "./boards/activity.ts";
 import { buildRoomBoard } from "./boards/room.ts";
 import {
   capabilityVocabulary,
@@ -39,7 +40,7 @@ import {
   readChamberRecords,
 } from "./chamber-state.ts";
 import { buildSeedFor, composeRoomSystemPrompt } from "./compose.ts";
-import { writeDigest } from "./digest-store.ts";
+import { readDigest, writeDigest } from "./digest-store.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
 import {
   CHAMBER_SURFACE_ID,
@@ -58,6 +59,7 @@ import {
 import { createFileLensStore, type LensStore, listLenses } from "./lens-store.ts";
 import {
   appendLog,
+  listMindRecords,
   MEMORY_DOC_CAP,
   type MindRecord,
   readMindDoc,
@@ -76,6 +78,11 @@ import {
   roomsDir,
   setChamberDataHome,
 } from "./paths.ts";
+import {
+  clearPendingGenesis,
+  type PendingGenesis,
+  writePendingGenesis,
+} from "./pending-genesis.ts";
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
@@ -97,7 +104,6 @@ const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
-const ACTIVITY_KEY = "rib:chamber:activity";
 const DIGEST_KEY = "rib:chamber:digest";
 // The standing-digest write seam, referenced by both the tool registration and the
 // chamber-digest workflow's author node (allowed_tools) — one source of truth.
@@ -156,14 +162,74 @@ const roomViewEntries = new Map<
 // fail-soft: undefined on an older harness, where the index falls back to cadence.
 let refreshWorkflow: RibContext["refreshWorkflow"];
 
-// Fan a Chamber mutation out to the derived STANDING panels, which were otherwise
-// cadence-only. Activity is deterministic + free, so every mutation refreshes it; a
-// removal also re-runs the gated Digest so its board can't keep naming a gone entity
-// (the gate no-ops when the fingerprint is unchanged). The Briefing delta is left to
-// its own attention gate.
-async function refreshStandingPanels(opts: { removed?: boolean } = {}): Promise<void> {
-  await refreshWorkflow?.("chamber-activity")?.catch(() => {});
-  if (opts.removed) await refreshWorkflow?.("chamber-digest")?.catch(() => {});
+// Fan a Chamber mutation out to the one narrator (the Briefing footer). Nudge the
+// standing-digest gate — mutation-driven now, not a 120s poll, since every Chamber
+// mutation flows through the rib, so the gate re-evaluates exactly when the fingerprint
+// can have changed (and still spends a paid turn ONLY when it actually did) — then
+// re-publish the footer so its record + digest registers reflect the change. The delta
+// register rides its own attention gate (evaluateBriefGate).
+async function refreshStandingPanels(): Promise<void> {
+  await refreshWorkflow?.("chamber-digest")?.catch(() => {});
+  await publishBriefing();
+}
+
+// The genesis boot-card ticker. While a genesis runs (a pending-genesis marker on disk),
+// the rib re-publishes the roster every GENESIS_TICK_MS so the boot card's elapsed count
+// advances and the live-region head dot pulses (keelson#353 — streaming is derived from
+// frame cadence). Ticking is bounded to the stall window: a wedged genesis stops ticking
+// and the collector shows the stalled card + Dismiss. All timers unref so they never hold
+// the process open, and stopGenesisTick clears them on emit / dismiss / dispose.
+const GENESIS_TICK_MS = 2_500;
+const GENESIS_STALL_MS = 180_000;
+let genesisTicker: ReturnType<typeof setInterval> | undefined;
+let genesisTickerDeadline: ReturnType<typeof setTimeout> | undefined;
+
+function tickRoster(): void {
+  void refreshWorkflow?.("chamber-roster")?.catch(() => {});
+}
+
+function startGenesisTick(): void {
+  stopGenesisTick();
+  tickRoster(); // show the boot card at once
+  genesisTicker = setInterval(tickRoster, GENESIS_TICK_MS);
+  genesisTicker.unref?.();
+  genesisTickerDeadline = setTimeout(() => {
+    tickRoster(); // one last frame flips the card to its stalled state
+    if (genesisTicker) clearInterval(genesisTicker);
+    genesisTicker = undefined;
+  }, GENESIS_STALL_MS);
+  genesisTickerDeadline.unref?.();
+}
+
+function stopGenesisTick(): void {
+  if (genesisTicker) clearInterval(genesisTicker);
+  if (genesisTickerDeadline) clearTimeout(genesisTickerDeadline);
+  genesisTicker = undefined;
+  genesisTickerDeadline = undefined;
+}
+
+// Begin a genesis: persist the pending marker (name/role known for a starter, absent for
+// a freeform brief) and start the boot-card tick. Fail-soft — a marker write failure just
+// skips the boot card, never blocks the genesis workflow the caller is about to launch.
+async function beginGenesis(info: { name?: string; role?: string }): Promise<void> {
+  try {
+    const marker: PendingGenesis = {
+      startedAt: new Date().toISOString(),
+      ...(info.name ? { name: info.name } : {}),
+      ...(info.role ? { role: info.role } : {}),
+    };
+    await writePendingGenesis(marker);
+    startGenesisTick();
+  } catch (e) {
+    console.error(`[rib-chamber] pending-genesis write failed: ${errText(e)}`);
+  }
+}
+
+// End the boot card: stop the tick and clear the marker so the next roster frame shows
+// the real seat (a completed genesis) or drops the card (a dismissed one). Fail-soft.
+async function endGenesis(): Promise<void> {
+  stopGenesisTick();
+  await clearPendingGenesis().catch(() => {});
 }
 // The host projects lookup, captured in registerTools and cleared in dispose (like
 // refreshWorkflow). Undefined on a harness that predates RibContext.getProjects,
@@ -223,6 +289,17 @@ let briefInFlight: Promise<void> = Promise.resolve();
 // instead of writing post-teardown. registerTools installs a fresh controller each
 // boot, so an orphaned pre-dispose turn stays aborted (gated out) even after re-boot.
 let briefAbort = new AbortController();
+// The Briefing footer is the surface's one narrator: three registers composed
+// in-process (the footer is rib-driven, not a collector) — the promoted delta (from
+// the last paid brief turn, held here), the standing digest (read from digest.json),
+// and the always-on record (the activity feed tail). `promotedDelta` holds the delta
+// turn's sections so a record/digest refresh re-assembles the footer without re-running
+// the paid turn; `promotedCount` is the "N new" the header shows.
+let promotedDelta: CanvasBoardView["sections"] | undefined;
+let promotedCount = 0;
+// Serializes footer re-publishes so a mutation-driven refresh and a gate promote can't
+// interleave two composes onto one publish; reset on dispose.
+let briefingPublishInFlight: Promise<void> = Promise.resolve();
 
 // The reflection gate's seams + state, captured in registerTools alongside the brief
 // gate's. reflectRunAgentTurn is the (paid) turn each participating Mind runs at a
@@ -292,7 +369,7 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
     // showing instead of lingering until the 120s cadence.
     if (removed.length > 0) {
       await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
-      await refreshStandingPanels({ removed: true });
+      await refreshStandingPanels();
     }
   } catch (e) {
     console.error(`[rib-chamber] room retention sweep failed: ${errText(e)}`);
@@ -366,7 +443,6 @@ async function runBriefGate(): Promise<void> {
   // Seam absent (older harness, or a ctx without the snapshot/turn seams): the footer
   // keeps whatever board it has (the boot-seeded quiet one) and no turn ever runs.
   if (!briefPublisher || !briefRunAgentTurn) return;
-  const publisher = briefPublisher;
   const runTurn = briefRunAgentTurn;
   // Capture this boot's abort signal up front: a dispose during the turn aborts it,
   // and re-checking it (not the live briefAbort) before publish/write gates out a
@@ -384,18 +460,20 @@ async function runBriefGate(): Promise<void> {
   }
   const delta = diffAgainstWatermark(state, watermark);
 
-  // Quiet: nothing new since the watermark. If the footer was showing a promoted
-  // brief, lapse it back to the calm board and clear the flag; otherwise this is an
-  // idempotent no-op — no publish, no write, and (the headline invariant) NO turn.
+  // Quiet: nothing new since the watermark. If the delta register was promoted, lapse
+  // it (the digest + record stay) and clear the flag; otherwise this is an idempotent
+  // no-op — no write, and (the headline invariant) NO turn.
   if (!delta.hasSubstance) {
     if (watermark.briefPromoted) {
       try {
-        await publisher.publish(quietBriefBoard());
+        promotedDelta = undefined;
+        promotedCount = 0;
         await writeWatermark({
           ...watermark,
           briefPromoted: false,
           updatedAt: new Date().toISOString(),
         });
+        await publishBriefing();
         // The just-cleared briefPromoted flips the roster pulse's "For you" back to
         // calm — refresh it so the footer and pulse agree without the 120s cadence.
         void refreshWorkflow?.("chamber-roster")?.catch(() => {});
@@ -448,19 +526,24 @@ async function runBriefGate(): Promise<void> {
   // published or written after the rib is disposed (mirrors room.ts runOneTurn).
   if (signal.aborted) return;
   try {
-    await publisher.publish(board);
+    // The turn authored a board; its sections become the delta register, labelled and
+    // wrapped with the digest + record by composeBriefingBoard. Store the count so the
+    // header reads "N new".
+    promotedDelta = board.sections;
+    promotedCount = delta.newlyEndedRooms.length + delta.changedOrNewLenses.length;
     await writeWatermark({
       ackedEndedRooms: state.endedRoomSlugs,
       lensFingerprints: state.lensFingerprints,
       briefPromoted: true,
       updatedAt: new Date().toISOString(),
     });
+    await publishBriefing();
     // The just-set briefPromoted flips the roster pulse's "For you" to the waiting
     // briefing — refresh it so the footer and pulse agree without the 120s cadence.
     void refreshWorkflow?.("chamber-roster")?.catch(() => {});
   } catch (e) {
-    // Published the board but the watermark write failed: the board is live, but a
-    // later trigger may re-promote. Logged; never thrown into a fire-and-forget hook.
+    // Stored the delta but the watermark write failed: the footer is live, but a later
+    // trigger may re-promote. Logged; never thrown into a fire-and-forget hook.
     console.error(`[rib-chamber] brief watermark advance failed: ${errText(e)}`);
   }
 }
@@ -822,9 +905,6 @@ const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", impor
 const ROOMS_COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.meta.url));
 // The lenses-index collector, resolved the same way (see ROSTER_COLLECTOR).
 const LENSES_COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", import.meta.url));
-// The activity collector, resolved the same way (see ROSTER_COLLECTOR). It reads
-// all three stores, so the bash node bakes in the data home (not a single store dir).
-const ACTIVITY_COLLECTOR = fileURLToPath(new URL("../bin/collect-activity.ts", import.meta.url));
 // The standing-digest collectors, resolved the same way (see ROSTER_COLLECTOR). The
 // gate reads all three stores + the digest, so it bakes in the data home (not a single
 // store dir); the publish collector reads the digest store from the same home.
@@ -842,27 +922,85 @@ function shQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-// The quiet board the footer holds whenever nothing new has happened since the last
-// briefing — seeded at boot (so the footer never shows the idle "Load" state) and
-// republished when a promoted brief lapses back to quiet. A valid, calm board, not a
-// paid turn: the cost-safety invariant is that the quiet path authors nothing.
-function quietBriefBoard(): CanvasBoardView {
+// The synchronous seed the footer holds for the instant between registration and the
+// first async compose (createCoalescingPublisher needs a sync default). A valid, calm
+// board; publishBriefing() replaces it with the composed three-register footer.
+function seedBriefingBoard(): CanvasBoardView {
   return {
     view: "board",
     title: "Briefing",
-    header: { status: { label: "Quiet", tone: "neutral" } },
-    sections: [
-      {
-        kind: "rows",
-        items: [
-          {
-            text: "Nothing to brief yet — the briefing fills in when a room ends or a lens changes.",
-            glyph: "neutral",
-          },
-        ],
-      },
-    ],
+    header: { status: { label: "Up to date", tone: "neutral" } },
+    sections: [{ kind: "rows", title: "The record", items: [{ glyph: "neutral", text: "…" }] }],
   };
+}
+
+// The one narrator, composed in-process from three producers and published to
+// BRIEF_KEY. Attention-ordered top to bottom: the delta leads (what's new since you
+// last looked), the digest interprets (the standing synthesis), the record grounds
+// (recent events). Quiet is STRUCTURAL — a register renders only when it has something
+// to say: the delta only when promoted, the digest only once the chamber has content
+// (sparse = absent, never narrated), the record always (a single hint line on a fresh
+// chamber). No paid turn runs here — the delta and digest are read from where their
+// (separately gated) turns already wrote.
+async function composeBriefingBoard(): Promise<CanvasBoardView> {
+  const [mindRecords, rooms, lenses, digest] = await Promise.all([
+    listMindRecords(mindsDir()).catch(() => []),
+    listRooms(roomsDir()).catch(() => []),
+    listLenses(lensesDir()).catch(() => []),
+    readDigest().catch(() => null),
+  ]);
+  const sections: CanvasBoardView["sections"] = [];
+
+  // 1. Delta — the promoted brief turn's content, labelled on its first section.
+  if (promotedDelta && promotedDelta.length > 0) {
+    const [first, ...rest] = promotedDelta;
+    if (first) sections.push({ ...first, title: "Since you last looked" }, ...rest);
+  }
+
+  // 2. Digest — the standing synthesis, only once the chamber has content. Drop any
+  //    stats section the turn may have authored so an index count can't creep back
+  //    into the one narrator; label the register on its first surviving section.
+  const hasContent = mindRecords.length > 0 || rooms.length > 0 || lenses.length > 0;
+  if (hasContent && digest?.board) {
+    // readDigest only checks `board` is an object; guard `sections` so a torn digest.json
+    // can't throw here and drop the WHOLE footer publish (delta + record too).
+    const digestSections = Array.isArray(digest.board.sections) ? digest.board.sections : [];
+    const kept = digestSections.filter((s) => s.kind !== "stats");
+    const [first, ...rest] = kept;
+    if (first) sections.push({ ...first, title: "Digest" }, ...rest);
+  }
+
+  // 3. Record — always present.
+  sections.push(recordSection(mindRecords, rooms, lenses));
+
+  return {
+    view: "board",
+    title: "Briefing",
+    header: {
+      status:
+        promotedCount > 0
+          ? { label: `${promotedCount} new`, tone: "brand" }
+          : { label: "Up to date", tone: "neutral" },
+    },
+    sections,
+  };
+}
+
+// Re-compose and publish the footer. Serialized so a mutation-driven refresh and a gate
+// promote can't race two composes onto one publish; never throws into a fire-and-forget
+// caller. A no-op when the publisher seam is absent (older harness).
+function publishBriefing(): Promise<void> {
+  const run = async (): Promise<void> => {
+    if (!briefPublisher) return;
+    try {
+      await briefPublisher.publish(await composeBriefingBoard());
+    } catch (e) {
+      console.error(`[rib-chamber] briefing publish failed: ${errText(e)}`);
+    }
+  };
+  const next = briefingPublishInFlight.then(run, run);
+  briefingPublishInFlight = next.catch(() => {});
+  return next;
 }
 
 // The brief turn's budget. A briefing is a single composing turn (no tools), so a
@@ -1076,7 +1214,9 @@ const rib: Rib = {
     { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
     { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
     { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
-    { key: ACTIVITY_KEY, canvasKind: "view", title: "Activity" },
+    // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
+    // into the Briefing footer's Digest register — but the chamber-digest workflow
+    // still binds it (its store is what the footer reads), so the view stays declared.
     { key: DIGEST_KEY, canvasKind: "view", title: "Digest" },
     { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
     { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
@@ -1089,7 +1229,9 @@ const rib: Rib = {
 
   // The Chamber nav tab. The roster sits in the header (the Minds you genesis), the
   // standing row pairs the sessions index (ended rooms) with the lenses index (the
-  // living views), and the brief settles into the footer. The live room panels and
+  // living views) at half width each, and the one narrator — the Briefing footer, which
+  // folds what were three what's-happening panels (delta / digest / record) into one —
+  // settles into the footer. The live room panels and
   // lens panels are push-fed dynamic regions a producer registers at runtime — each
   // ACTIVE room registers its own per-slug region (group "rooms") on start via
   // room-region-registry, and a Mind authors lenses (chamber_emit_lens, group "lens"),
@@ -1111,6 +1253,9 @@ const rib: Rib = {
           // fresh after a new Mind without hammering. The Briefing footer is left
           // cadence-free on purpose — it is a paid agent turn, refreshed on demand.
           cadenceMs: 120_000,
+          // While a genesis runs the rib pushes roster frames every ~2.5s (the boot
+          // card's tick); `live` pulses the head dot as those frames arrive (keelson#353).
+          live: true,
           glyph: { char: "◇", tone: "brand" },
         },
         rows: [
@@ -1140,38 +1285,16 @@ const rib: Rib = {
                 collapsible: true,
                 glyph: { char: "✦", tone: "accent" },
               },
-              {
-                key: ACTIVITY_KEY,
-                workflow: "chamber-activity",
-                title: "Activity",
-                // The DETERMINISTIC arm of the standing-lens cost guard: a cheap
-                // collector that recomputes the pulse + recent-events feed from disk, so
-                // the host scheduler refreshes it on cadence with NO tab open — a disk
-                // read, never a paid turn. Its agent-turn counterpart is Digest below.
-                cadenceMs: 120_000,
-                collapsible: true,
-                glyph: { char: "↻", tone: "info" },
-              },
-              {
-                key: DIGEST_KEY,
-                workflow: "chamber-digest",
-                title: "Digest",
-                // The AGENT-TURN arm of the standing-lens cost guard: an agent
-                // re-authors this standing board, but only when the Chamber's structural
-                // fingerprint advances. The scheduler refreshes it on cadence (a cheap
-                // gate + re-publish disk read), yet it spends a turn ONLY on a real
-                // change — the Briefing's watermark gate, generalized onto the scheduler.
-                cadenceMs: 120_000,
-                collapsible: true,
-                glyph: { char: "✶", tone: "brand" },
-              },
             ],
           },
         ],
         // The Briefing footer has NO `workflow` binding: it is rib-driven, not a
-        // cadence/refresh-fed collector. The rib seeds a quiet board at boot and the
-        // attention gate (evaluateBriefGate) republishes it — promoting to a paid
-        // agent turn only when a room ended or a lens changed since the watermark.
+        // cadence/refresh-fed collector. The rib composes it in-process from three
+        // registers — the promoted delta (its own attention gate, evaluateBriefGate),
+        // the standing digest (read from digest.json), and the always-on record (the
+        // activity feed tail) — re-publishing on every mutation (refreshStandingPanels)
+        // and on a promote/lapse. The former standalone Activity + Digest panels are
+        // gone; their producers survive as this footer's registers.
         footer: {
           key: BRIEF_KEY,
           title: "Briefing",
@@ -1261,44 +1384,24 @@ const rib: Rib = {
       validate: expectView(LENSES_KEY, "board"),
     },
     {
-      // The activity producer (the chamber-lenses sibling): a deterministic collector
-      // that reads ALL THREE Chamber stores from the data home and emits the standing
-      // activity board — a cumulative pulse plus a reverse-chron feed of recent
-      // genesis / room / lens events. The host scheduler refreshes it on cadence with
-      // no tab open (the standing lens); because it is a cheap disk read — never an
-      // agent turn — every tick is cost-safe.
-      definition: {
-        name: "chamber-activity",
-        description:
-          'Use when: you want a single standing panel of what is happening across the Chamber. Triggers: "show activity", "what is happening", "recent events". Does: reads the Minds, rooms, and lenses from the Chamber data home and publishes a standing activity board (cumulative pulse stats + a recent-events feed) to the Chamber Activity canvas, auto-refreshed on cadence. NOT for: authoring a Mind/room/lens, or the editorial Briefing (the rib-driven footer).',
-        nodes: [
-          {
-            id: "collect",
-            // Out-of-process (a bash node), so bake the resolved data home in —
-            // captured in registerTools, which runs before this — so both sides read
-            // one path (see the roster collector, which also reads all three stores).
-            bash: `bun ${shQuote(ACTIVITY_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-            output_schema: { type: "object", required: ["view", "sections"] },
-          },
-        ],
-      },
-      bindSnapshotKey: ACTIVITY_KEY,
-      validate: expectView(ACTIVITY_KEY, "board"),
-    },
-    {
-      // The digest producer (the chamber-activity sibling, agent-turn arm): a
+      // The digest producer (agent-turn arm of the standing-lens cost guard): a
       // SELF-GATING bound workflow that re-authors a standing digest board with an
       // agent turn, but spends that turn only when the Chamber changed. `gate` (a cheap
       // bash read) emits { dirty, summary }; `author` runs ONLY when dirty (its `when:`),
       // composing the board from the gate's summary and persisting it via
       // chamber_emit_digest (which advances the fingerprint); `publish` always runs
-      // (trigger_rule all_done) and re-reads the store to drive the key — so the key
-      // refreshes every tick (composedAt stays live) while a paid turn fires only on a
-      // real change. The host scheduler runs the whole workflow on cadence, no tab open.
+      // (trigger_rule all_done) and re-reads the store to drive the key. The store it
+      // writes (digest.json) is what the Briefing footer's Digest register reads — the
+      // digest no longer has a standing surface region of its own. It is MUTATION-DRIVEN,
+      // not polled: refreshStandingPanels nudges it on every Chamber mutation (exactly
+      // when the fingerprint can have changed), and the fingerprint gate keeps a no-op
+      // nudge free. Trade-off vs the old 120s poll: a failed authoring self-heals on the
+      // NEXT mutation rather than the next tick (a standing synthesis, so a brief
+      // staleness after a rare failed turn is acceptable).
       definition: {
         name: "chamber-digest",
         description:
-          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it; the panel re-publishes from disk each tick. Auto-refreshed on cadence, but spends a turn only when the Chamber changed. NOT for: the deterministic Activity feed, the delta Briefing footer, or authoring a Mind/room/lens.',
+          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it to the store the Briefing footer\'s Digest register reads. Nudged by the rib on each Chamber mutation, but spends a turn only when the Chamber changed. NOT for: the deterministic record feed, the delta Briefing, or authoring a Mind/room/lens.',
         nodes: [
           {
             id: "gate",
@@ -1321,8 +1424,8 @@ const rib: Rib = {
             // surfaces a bad authoring as a FAILED author node (visible in the run's
             // node rows) rather than a SUCCEEDED turn that wrote nothing. The run itself
             // is not failed — the always-on publish below rescues it (trigger_rule
-            // all_done), so a transient bad turn never errors the scheduled run, and the
-            // un-advanced fingerprint drives a re-author on the next tick.
+            // all_done), so a transient bad turn never errors the nudged run, and the
+            // un-advanced fingerprint drives a re-author on the next mutation-nudge.
             fail_on_tool_error: true,
             // Rib tools are default-off in workflow prompt nodes; opt in to the single
             // write seam by name (and nothing else).
@@ -1333,8 +1436,8 @@ const rib: Rib = {
             depends_on: ["author"],
             // all_done, not the default all_success: publish must run whether author ran
             // (dirty), was skipped (quiet), or failed — so the key re-publishes the
-            // cached board every tick and self-heals a failed authoring (the fingerprint
-            // stays un-advanced, so the next tick re-authors).
+            // cached board and a failed authoring self-heals (the fingerprint stays
+            // un-advanced, so the next mutation-nudge re-authors).
             trigger_rule: "all_done",
             bash: `bun ${shQuote(DIGEST_PUBLISH_COLLECTOR)} ${shQuote(chamberDataHome())}`,
             output_schema: { type: "object", required: ["view", "sections"] },
@@ -1445,7 +1548,7 @@ const rib: Rib = {
       briefUnregister?.();
       const { publisher, latest } = createCoalescingPublisher(
         () => sm.recompose(BRIEF_KEY),
-        quietBriefBoard(),
+        seedBriefingBoard(),
       );
       briefUnregister = sm.register(BRIEF_KEY, latest, {
         validate: expectView(BRIEF_KEY, "board"),
@@ -1453,14 +1556,20 @@ const rib: Rib = {
       briefPublisher = publisher;
       briefSm = sm;
       briefRunAgentTurn = run;
-      // Prime BRIEF_KEY so a client subscribing the instant the footer appears reads
-      // the seeded quiet board, not a 204 (the GET path doesn't lazy-compose).
+      // A re-boot starts the delta register empty (briefPromoted is cleared below); the
+      // digest + record are read fresh by the first compose.
+      promotedDelta = undefined;
+      promotedCount = 0;
+      // Prime BRIEF_KEY so a client subscribing the instant the footer appears reads the
+      // seed, then compose the real three-register footer (record + any standing digest)
+      // in the background so it doesn't wait on the next mutation.
       void sm.recompose(BRIEF_KEY);
-      // The footer was just re-seeded quiet, but a persisted briefPromoted:true would
-      // make the pulse ("For you") read "1 waiting" against this quiet footer until the
-      // next event. Clear the flag (preserving the acks) so the two agree from boot.
-      // Serialized through briefInFlight so it can't lose-update a concurrent gate
-      // promotion's watermark write — both are read-modify-writes of the same file.
+      void publishBriefing();
+      // The footer's delta register is empty, but a persisted briefPromoted:true would
+      // make the pulse ("For you") read "1 waiting" against it until the next event.
+      // Clear the flag (preserving the acks) so the two agree from boot. Serialized
+      // through briefInFlight so it can't lose-update a concurrent gate promotion's
+      // watermark write — both are read-modify-writes of the same file.
       briefInFlight = briefInFlight.then(clearPersistedBriefPromoted, clearPersistedBriefPromoted);
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
@@ -1581,6 +1690,8 @@ const rib: Rib = {
         return authorArchetypeAction(action);
       case "describe-own":
         return describeOwnAction(action);
+      case "dismiss-genesis":
+        return dismissGenesisAction();
       case "retire":
         return retireAction(action);
       case "set-model":
@@ -1671,6 +1782,10 @@ const rib: Rib = {
     loops.clear();
     activeRooms.clear();
     lastSlug = undefined;
+    // A genesis can't survive the process — stop its tick and clear the marker so a
+    // re-boot doesn't render a boot card for a workflow that died with the old process.
+    stopGenesisTick();
+    await clearPendingGenesis().catch(() => {});
     refreshWorkflow = undefined;
     getProjects = undefined;
     briefUnregister?.();
@@ -1684,6 +1799,11 @@ const rib: Rib = {
     // briefInFlight parked on a never-settling promise (that would wedge a later boot).
     briefAbort.abort();
     briefInFlight = Promise.resolve();
+    // Reset the footer's in-memory registers so a re-boot starts with an empty delta
+    // and a fresh publish chain.
+    promotedDelta = undefined;
+    promotedCount = 0;
+    briefingPublishInFlight = Promise.resolve();
     // Abort in-flight reflection and drain its writes so a late memory write can't
     // land after teardown; reset the per-Mind write chains for the next boot.
     reflectRunAgentTurn = undefined;
@@ -2345,7 +2465,7 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
     if (lastSlug === slug) lastSlug = undefined;
     reconcileRoomPanels();
     await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
-    await refreshStandingPanels({ removed: true });
+    await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2503,7 +2623,7 @@ async function retireLensAction(action: RibAction): Promise<RibActionResult> {
     // The retired lens drops from the roster pulse's "Live views" count too — refresh
     // it so the count matches the just-updated index (mirrors the emit path).
     await refreshWorkflow?.("chamber-roster")?.catch(() => {});
-    await refreshStandingPanels({ removed: true });
+    await refreshStandingPanels();
     return { ok: true, data: { id, key: lensKey(id) } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2684,11 +2804,15 @@ async function authorArchetypeAction(action: RibAction): Promise<RibActionResult
   const slug = asNonEmptyString(payload.slug);
   const starter = GENESIS_STARTERS.find((s) => s.slug === slug);
   if (!starter) return { ok: false, error: `unknown archetype: ${slug || "(none)"}` };
+  // A starter's name/role are known now (pinned as inputs), so the boot card can show
+  // them; stay on the surface (stay: true) so the operator watches the seat fill.
+  await beginGenesis({ name: starter.name, role: starter.role });
   return {
     ok: true,
     data: {
       effect: "run-workflow",
       workflow: "chamber-genesis",
+      stay: true,
       args: {
         ARGUMENTS: starter.voiceDescription,
         name: starter.name,
@@ -2710,14 +2834,27 @@ async function describeOwnAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const brief = asNonEmptyString(payload.brief);
   if (!brief) return { ok: false, error: "Describe the Mind first — who should it feel like?" };
+  // A freeform brief has no name/role yet (the workflow authors them), so the boot card
+  // holds "calibrating…"; stay on the surface so the operator watches the seat fill.
+  await beginGenesis({});
   return {
     ok: true,
     data: {
       effect: "run-workflow",
       workflow: "chamber-genesis",
+      stay: true,
       args: { ARGUMENTS: brief.slice(0, MAX_BRIEF_CHARS) },
     },
   };
+}
+
+// Dismiss a stalled (or unwanted) genesis boot card: stop the tick, clear the marker,
+// and refresh the roster so the seat returns to an open seat. A deterministic, free
+// state clear — not paid, not a workflow.
+async function dismissGenesisAction(): Promise<RibActionResult> {
+  await endGenesis();
+  await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+  return { ok: true };
 }
 
 async function retireAction(action: RibAction): Promise<RibActionResult> {
@@ -2728,7 +2865,7 @@ async function retireAction(action: RibAction): Promise<RibActionResult> {
     await retireMind(mindsDir(), slug);
     invalidateRoster(); // a Mind is gone — drop it from the cached roster
     await refreshWorkflow?.("chamber-roster")?.catch(() => {});
-    await refreshStandingPanels({ removed: true });
+    await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2911,6 +3048,9 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         };
         await scaffoldMind(mindsDir(), record, soul);
         invalidateRoster();
+        // The genesis landed — clear the boot-card marker and stop its tick so the next
+        // roster frame shows the real seat instead of the boot card.
+        await endGenesis();
         // Re-run the bound chamber-roster collector so the new Mind appears
         // promptly instead of waiting on the 120s cadence. Fail-soft (the seam
         // resolves on error and is absent on an older harness) — never throw.
@@ -3001,7 +3141,7 @@ function makeDigestTool(): ToolDefinition {
   return {
     name: DIGEST_TOOL_NAME,
     description:
-      "Internal write-seam for the chamber-digest workflow: persist the standing digest board the author turn composed. The workflow's gate-conditioned author node calls this once with { board } when the Chamber changed; this tool validates the board fail-closed, stamps it with the current chamber fingerprint, and writes it so the digest panel refreshes. The chamber-digest workflow (run on cadence by the host scheduler) is the entry point — don't call this directly.",
+      "Internal write-seam for the chamber-digest workflow: persist the standing digest board the author turn composed. The workflow's gate-conditioned author node calls this once with { board } when the Chamber changed; this tool validates the board fail-closed, stamps it with the current chamber fingerprint, and writes it so the Briefing footer's Digest register refreshes. The chamber-digest workflow (nudged by the rib on each Chamber mutation) is the entry point — don't call this directly.",
     inputSchema: digestEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -3024,6 +3164,9 @@ function makeDigestTool(): ToolDefinition {
           board: parsed.data.board,
           fingerprint: chamberFingerprint(minds, rooms, lenses),
         });
+        // The digest register reads digest.json — re-publish the footer so the new
+        // synthesis lands without waiting on the next mutation.
+        await publishBriefing();
         emitResult(ctx, JSON.stringify({ ok: true }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_digest failed: ${errText(e)}`, true);
@@ -3098,7 +3241,7 @@ function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefin
         // The retired lens drops from the roster pulse's "Live views" count too —
         // refresh it so the count matches the just-updated index (mirrors emit).
         await refreshWorkflow?.("chamber-roster")?.catch(() => {});
-        await refreshStandingPanels({ removed: true });
+        await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, key: lensKey(id) }));
       } catch (e) {
         emitResult(ctx, `chamber_retire_lens failed: ${errText(e)}`, true);
@@ -3249,7 +3392,7 @@ function makeRetireMindTool(): ToolDefinition {
         await retireMind(mindsDir(), slug);
         invalidateRoster();
         await refreshWorkflow?.("chamber-roster")?.catch(() => {});
-        await refreshStandingPanels({ removed: true });
+        await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug }));
       } catch (e) {
         emitResult(ctx, `chamber_retire_mind failed: ${errText(e)}`, true);
@@ -3294,7 +3437,7 @@ function makeRoomDeleteTool(): ToolDefinition {
         if (lastSlug === slug) lastSlug = undefined;
         reconcileRoomPanels();
         await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
-        await refreshStandingPanels({ removed: true });
+        await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug }));
       } catch (e) {
         emitResult(ctx, `chamber_room_delete failed: ${errText(e)}`, true);

@@ -176,47 +176,31 @@ describe("rib-chamber", () => {
     expect(names).not.toContain("chamber_room_start");
   });
 
-  it("declares the Activity standing-lens view", () => {
-    const keys = (rib.views ?? []).map((v) => v.key);
-    expect(keys).toContain("rib:chamber:activity");
-  });
-
-  it("ships the Activity standing column — workflow-bound and cadence-refreshed", () => {
-    const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) => r.columns);
-    const activity = cols.find((c) => c.key === "rib:chamber:activity");
-    expect(activity?.workflow).toBe("chamber-activity");
-    // The host scheduler reads cadenceMs off a STATIC region to refresh it tab-closed;
-    // a fixed-key bound producer is the only standing-lens form the scheduler sees.
-    expect(activity?.cadenceMs).toBeGreaterThanOrEqual(30_000);
-    expect(activity?.collapsible).toBe(true);
-  });
-
-  it("declares the Digest standing-lens view", () => {
+  it("declares the Digest standing-lens view (its store feeds the Briefing's Digest register)", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
     expect(keys).toContain("rib:chamber:digest");
+    // The Activity view retired with its region — the record folds into the footer.
+    expect(keys).not.toContain("rib:chamber:activity");
   });
 
-  it("ships the Digest standing column — workflow-bound and cadence-refreshed (agent-turn arm)", () => {
+  it("the standing row is Rooms + Lenses only — the Activity + Digest panels folded into the Briefing", () => {
     const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) => r.columns);
-    const digest = cols.find((c) => c.key === "rib:chamber:digest");
-    expect(digest?.workflow).toBe("chamber-digest");
-    // Same static-region cadence contract as Activity — the scheduler refreshes the
-    // fixed-key bound producer tab-closed; the gate keeps a quiet tick cheap.
-    expect(digest?.cadenceMs).toBeGreaterThanOrEqual(30_000);
-    expect(digest?.collapsible).toBe(true);
+    expect(cols.map((c) => c.key)).toEqual(["rib:chamber:rooms", "rib:chamber:lenses"]);
+    // Neither what's-happening narrator has a standing column anymore.
+    expect(cols.some((c) => c.key === "rib:chamber:activity")).toBe(false);
+    expect(cols.some((c) => c.key === "rib:chamber:digest")).toBe(false);
+    // The Briefing is the one narrator, in the footer.
+    expect(rib.surfaces?.[0]?.layout.footer?.key).toBe("rib:chamber:brief");
   });
 
-  it("contributes the chamber-activity collector workflow bound to the activity key", () => {
+  it("no longer contributes a chamber-activity workflow (the record is composed in-process)", () => {
     const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
-    const activity = wfs.find(
-      (w) => (w.definition as { name?: string }).name === "chamber-activity",
+    expect(wfs.some((w) => (w.definition as { name?: string }).name === "chamber-activity")).toBe(
+      false,
     );
-    expect(activity?.bindSnapshotKey).toBe("rib:chamber:activity");
-    // A deterministic bash collector (not an agent turn) — the cost-safe arm of the
-    // standing-lens cost guard — guarded by an output_schema requiring view + sections.
-    const node = (activity?.definition as { nodes?: { bash?: string; output_schema?: unknown }[] })
-      .nodes?.[0];
-    expect(node?.bash).toContain("collect-activity.ts");
-    expect(node?.output_schema).toBeDefined();
+    // The chamber-digest workflow survives — its paid synthesis still feeds the footer.
+    expect(wfs.some((w) => (w.definition as { name?: string }).name === "chamber-digest")).toBe(
+      true,
+    );
   });
 });

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { buildRosterBoard } from "../src/boards/roster.ts";
 import { readMinds } from "../src/minds-store.ts";
 import { chamberDataHome } from "../src/paths.ts";
+import { readPendingGenesis } from "../src/pending-genesis.ts";
 import { readDraftExclusion } from "../src/room-draft.ts";
 import { readWatermark } from "../src/watermark-store.ts";
 
@@ -38,7 +39,10 @@ async function main() {
   } catch {
     pulse = undefined;
   }
-  process.stdout.write(JSON.stringify(buildRosterBoard(mindsList, excluded, pulse)));
+  // A genesis in flight renders a boot card in the seat being taken; a missing/corrupt
+  // marker (the common case) is null — no boot card.
+  const pending = await readPendingGenesis(home).catch(() => null);
+  process.stdout.write(JSON.stringify(buildRosterBoard(mindsList, excluded, pulse, pending)));
 }
 
 await main();

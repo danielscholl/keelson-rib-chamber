@@ -227,7 +227,7 @@ describe("chamber cleanup tools (drive cleanup over MCP)", () => {
     expect(t.errored()).toBe(false);
     expect(JSON.parse(t.out())).toMatchObject({ ok: true, slug: "doomed" });
     expect((await readMinds(mindsDir())).some((m) => m.slug === "doomed")).toBe(false);
-    expect(refreshed).toEqual(["chamber-roster", "chamber-activity", "chamber-digest"]);
+    expect(refreshed).toEqual(["chamber-roster", "chamber-digest"]);
   });
 
   it("chamber_retire_mind fails closed on an unknown slug, refreshing nothing", async () => {
