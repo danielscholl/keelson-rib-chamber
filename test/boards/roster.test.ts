@@ -444,6 +444,25 @@ describe("buildRosterBoard convene composer", () => {
     return section?.kind === "actions" ? section.items : [];
   }
 
+  test("both composer rows wrap — compact chip rows, not a stacked column", () => {
+    const board = buildRosterBoard(two);
+    const who = actionsSection(board, "Convene a room — who's in");
+    const how = actionsSection(board, "…and how");
+    expect(who?.kind === "actions" && who.wrap).toBe(true);
+    expect(how?.kind === "actions" && how.wrap).toBe(true);
+  });
+
+  test("shape chips carry short labels; the mechanism is taught by each form", () => {
+    const items = shapes(buildRosterBoard(two));
+    expect(items.map((i) => i.label)).toEqual([
+      "Discussion",
+      "Debate",
+      "Open floor",
+      "Review",
+      "Build",
+    ]);
+  });
+
   test("who's-in chips are identity-toned draft-set toggles, one per Mind", () => {
     const board = buildRosterBoard(two);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
