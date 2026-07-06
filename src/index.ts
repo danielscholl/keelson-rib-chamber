@@ -11,6 +11,7 @@ import type {
   RibAuthStatus,
   RibCommandDescriptor,
   RibContext,
+  RibViewDescriptor,
   SnapshotManager,
   ToolContext,
   ToolDefinition,
@@ -18,9 +19,13 @@ import type {
 import {
   asNonEmptyString,
   asStringArray,
+  buildCanvasArtifactGuidance,
+  CANVAS_PUBLISH_CONTRACT,
   canvasBoardViewSchema,
   errText,
   expectView,
+  formatPaletteReport,
+  validateCategoricalPalette,
   z,
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
@@ -52,10 +57,14 @@ import {
 } from "./lens.ts";
 import {
   createHtmlLensRegistry,
+  declaredHtmlPalettes,
   HTML_LENS_KEY,
   HTML_LENS_TOOL_NAME,
   type HtmlLensRegistry,
+  htmlLensKey,
+  htmlLensStructuralError,
 } from "./lens-html.ts";
+import { createFileHtmlLensStore, listHtmlLenses } from "./lens-html-store.ts";
 import { createFileLensStore, type LensStore, listLenses } from "./lens-store.ts";
 import {
   appendLog,
@@ -72,6 +81,7 @@ import {
 } from "./minds-store.ts";
 import {
   chamberDataHome,
+  htmlLensesDir,
   isChamberDataHomeWritable,
   lensesDir,
   mindsDir,
@@ -444,6 +454,28 @@ function reconcileLensPanels(registry: LensRegistry): void {
     }
   })();
   void lensReconcileInFlight;
+}
+
+// The HTML twin of reconcileLensPanels: re-publish every persisted HTML lens on
+// boot so its key, region, and views entry come back after a restart, via
+// reregister (no re-save, authored updatedAt preserved), fail-soft per entry.
+function reconcileHtmlLensPanels(registry: HtmlLensRegistry): void {
+  void (async () => {
+    let records: Awaited<ReturnType<typeof listHtmlLenses>>;
+    try {
+      records = await listHtmlLenses(htmlLensesDir());
+    } catch (e) {
+      console.error(`[rib-chamber] html lens re-registration failed: ${errText(e)}`);
+      return;
+    }
+    for (const rec of records) {
+      try {
+        await registry.reregister(rec.id, rec.html, rec.title);
+      } catch (e) {
+        console.error(`[rib-chamber] html lens '${rec.id}' re-registration failed: ${errText(e)}`);
+      }
+    }
+  })();
 }
 
 // The room surface shows a panel for every active room plus the most-recent room's,
@@ -1141,6 +1173,26 @@ Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, reas
   - reason (optional): a short note on what this authoring changed (e.g. "added two new risks") — omit it on a first author.
 Supply scope/reason only when you can name them truthfully; never invent provenance. Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
 
+// The HTML lens authoring prompt: one agent turn composes a designed,
+// self-contained HTML page on a subject and emits it via chamber_emit_lens_html.
+// The design contract is the shared canvas guidance (tokens, frame rules, chart
+// rules) rather than chamber-local prose, so the page reads as part of keelson.
+const HTML_LENS_WF_PROMPT = `You are authoring an HTML LENS for Keelson's Chamber — ONE designed, self-contained HTML page on a subject, rendered live in a sandboxed iframe on the Chamber surface with no hand-coded UI.
+
+Subject: $ARGUMENTS
+
+${buildCanvasArtifactGuidance()}
+
+(In this run canvas_publish and canvas_design_guide are NOT available — the guidance above is the full contract; publish with the chamber_emit_lens_html tool instead.)
+
+Compose ONE page about the subject. Be honest — do NOT invent data you cannot see; if the subject is abstract, lay out its structure, parts, or status rather than fabricating metrics.
+
+Then call the chamber_emit_lens_html tool with { html, id, title? }:
+  - html: the complete self-contained page markup (inline all CSS/JS; theme through the token block above; the host supplies the document shell).
+  - id: a short, stable, kebab-case identifier for this subject (e.g. "release-risks") — re-emitting the same id updates the same panel.
+  - title (optional): a short human title for the panel head.
+If the tool rejects the emit (a failing palette report or a blocked external script/stylesheet), fix the markup or colors it names and call the tool again — do not drop the palette declaration to dodge the check. Do NOT print the HTML as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
+
 // The standing-digest authoring prompt: one agent turn synthesizes the Chamber's
 // current shape into a canvas board and calls chamber_emit_digest to persist it. No
 // $ARGUMENTS — the digest is scheduler-driven, so the gate hands it the live state via
@@ -1271,23 +1323,43 @@ async function invokeChamberCommand(name: string, arg: string): Promise<CommandI
 // prompt-injected lens can't drive retire / room-* / set-model / convene. See #124.
 const FRAME_SAFE_ACTIONS: ReadonlySet<string> = new Set(["lens-html", "lens-open"]);
 
+// The rib's view declarations, mutable at runtime: the host resolves a snapshot
+// key's canvas kind by EXACT match against this list (per GET /api/ribs request),
+// so each per-subject HTML lens must add its own `canvasKind: "html"` entry here
+// or the drawer would render its string frame through the board pipeline. The
+// registry's declareView seam pushes/removes entries; the statics stay fixed.
+const RIB_VIEWS: RibViewDescriptor[] = [
+  { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
+  { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
+  { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
+  // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
+  // into the Briefing footer's Digest register — but the chamber-digest workflow
+  // still binds it (its store is what the footer reads), so the view stays declared.
+  { key: DIGEST_KEY, canvasKind: "view", title: "Digest" },
+  { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
+  { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
+];
+
+function declareHtmlLensView(id: string, title?: string): () => void {
+  const view: RibViewDescriptor = {
+    key: htmlLensKey(id),
+    canvasKind: "html",
+    title: title ?? id,
+  };
+  RIB_VIEWS.push(view);
+  return () => {
+    const at = RIB_VIEWS.indexOf(view);
+    if (at >= 0) RIB_VIEWS.splice(at, 1);
+  };
+}
+
 const rib: Rib = {
   id: "chamber",
   displayName: "Chamber",
 
   // Binds the agent-authored keys to the canvas renderer; data arrives when the
   // producers (the roster collector, the brief turn, the room driver) run.
-  views: [
-    { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
-    { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
-    { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
-    // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
-    // into the Briefing footer's Digest register — but the chamber-digest workflow
-    // still binds it (its store is what the footer reads), so the view stays declared.
-    { key: DIGEST_KEY, canvasKind: "view", title: "Digest" },
-    { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
-    { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
-  ],
+  views: RIB_VIEWS,
 
   // No static actions[]: a payload-less button can't carry input, so every Chamber
   // control lives where its context is. Genesis is the chamber-genesis workflow (it
@@ -1564,6 +1636,27 @@ const rib: Rib = {
         ],
       },
     },
+    {
+      // The HTML lens producer (the chamber-lens sibling): one agent turn composes
+      // a designed, self-contained HTML page for the subject and emits it via
+      // chamber_emit_lens_html. No bindSnapshotKey — the per-subject key is chosen
+      // at run time by the tool.
+      definition: {
+        name: "chamber-lens-html",
+        description:
+          'Use when: have an agent author a designed HTML LENS — a self-contained, token-themed page on a subject — rendered in a sandboxed iframe on the Chamber surface. Triggers: "author an html lens", "design a page on X", "/workflow run chamber-lens-html <subject>". Does: one agent turn composes a self-contained HTML page for the subject (keelson design tokens, validated palette) and publishes it as its own Chamber lens panel via chamber_emit_lens_html. NOT for: structured canvas boards (the chamber-lens workflow), the standing Chamber Briefing, genesis-ing agents, or running a room.',
+        nodes: [
+          {
+            id: "compose",
+            prompt: HTML_LENS_WF_PROMPT,
+            // Deliberately NO fail_on_tool_error: a rejected palette or blocked
+            // external resource is the retry signal — the turn reads the isError
+            // report, fixes the markup, and emits again within the same node.
+            allowed_tools: [HTML_LENS_TOOL_NAME],
+          },
+        ],
+      },
+    },
   ],
 
   // Boot-time wiring of the room loop. Builds the driver against the real seams:
@@ -1672,11 +1765,19 @@ const rib: Rib = {
       sm !== htmlLensSm ||
       registerRegion !== htmlLensRegisterRegion
     ) {
-      const next = createHtmlLensRegistry(sm, registerRegion);
+      const next = createHtmlLensRegistry(
+        sm,
+        registerRegion,
+        createFileHtmlLensStore(htmlLensesDir()),
+        declareHtmlLensView,
+      );
       htmlLensRegistry?.dispose();
       htmlLensRegistry = next;
       htmlLensSm = sm;
       htmlLensRegisterRegion = registerRegion;
+      // Re-register every persisted HTML lens so it survives a restart (key +
+      // region + views entry back live). Fail-soft per entry, like board lenses.
+      reconcileHtmlLensPanels(next);
     }
     if (sm && registerRegion && sm !== lensSm) {
       const next = createLensRegistry(sm, registerRegion, lensStore);
@@ -3241,13 +3342,22 @@ function makeDigestTool(): ToolDefinition {
 
 const lensHtmlEmitSchema = z.object({
   html: z.string().min(1).max(262144),
+  id: z.string().min(1).max(64).optional(),
+  title: z.string().min(1).max(80).optional(),
 });
 
 function makeEmitLensHtmlTool(registry: HtmlLensRegistry): ToolDefinition {
   return {
     name: HTML_LENS_TOOL_NAME,
-    description:
-      "Author an HTML lens: publish a literal HTML string to the Chamber HTML canvas, rendered in the host's sandboxed iframe. `html` is the exact markup to render; non-string or oversized payloads fail closed.",
+    // The shared canvas contract IS the description (one source of truth with the
+    // host's canvas_publish); the chamber-specific routing rides ahead of it.
+    description: [
+      "Author an HTML lens: publish a designed, self-contained HTML page as its own live panel on the Chamber surface.",
+      "`id` is a short, stable kebab-case identifier for the subject (re-emitting the same id updates the same panel, and the lens persists across restarts);",
+      "omit it to target the single shared legacy canvas instead. `title` (optional) names the panel head.",
+      "`id` plays the role the contract below calls `name`.",
+      CANVAS_PUBLISH_CONTRACT,
+    ].join(" "),
     inputSchema: lensHtmlEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -3256,11 +3366,51 @@ function makeEmitLensHtmlTool(registry: HtmlLensRegistry): ToolDefinition {
         emitResult(ctx, `chamber_emit_lens_html: ${parsed.error.message}`, true);
         return;
       }
+      const { html, title } = parsed.data;
+      const structural = htmlLensStructuralError(html);
+      if (structural !== undefined) {
+        emitResult(ctx, `chamber_emit_lens_html: ${structural}`, true);
+        return;
+      }
+      // Fail-closed palette gate (the canvas_publish contract): a declared
+      // categorical palette that hard-fails CVD/contrast rejects the emit with the
+      // per-check report so the turn fixes the colors and retries.
+      const palettes = declaredHtmlPalettes(html);
+      for (const mode of ["dark", "light"] as const) {
+        const palette = palettes[mode];
+        if (!palette) continue;
+        let report: ReturnType<typeof validateCategoricalPalette>;
+        try {
+          report = validateCategoricalPalette(palette, { mode });
+        } catch (e) {
+          emitResult(ctx, `chamber_emit_lens_html: data-palette-${mode}: ${errText(e)}`, true);
+          return;
+        }
+        if (!report.ok) {
+          emitResult(
+            ctx,
+            `chamber_emit_lens_html: the declared ${mode} palette fails validation — fix the colors (prefer the keelson series slots) and emit again:\n${formatPaletteReport(report)}`,
+            true,
+          );
+          return;
+        }
+      }
+      let id: string | undefined;
+      if (parsed.data.id !== undefined) {
+        id = canonicalLensId(parsed.data.id);
+        if (!id) {
+          emitResult(ctx, "chamber_emit_lens_html: id has no usable characters", true);
+          return;
+        }
+      }
       try {
-        const { key } = await registry.publish(parsed.data.html);
-        // No chamber-lenses/roster/brief refresh here (unlike chamber_emit_lens): the
-        // HTML lens is published in-memory only and isn't part of the persisted lens
-        // store those collectors read, so refreshing them would be inert.
+        const { key } = await registry.publish(html, {
+          ...(id !== undefined ? { id } : {}),
+          ...(title !== undefined ? { title } : {}),
+        });
+        // No chamber-lenses/roster/brief refresh here (unlike chamber_emit_lens):
+        // HTML lenses persist in their own store, which those collectors don't
+        // read, so refreshing them would be inert.
         emitResult(ctx, JSON.stringify({ ok: true, key }));
       } catch (e) {
         emitResult(ctx, `chamber_emit_lens_html failed: ${errText(e)}`, true);
