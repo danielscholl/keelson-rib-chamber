@@ -35,8 +35,11 @@ describe("group-chat strategy (pure rhythm)", () => {
     expect(groupChat(input({ participants: [] }))).toEqual({ kind: "end" });
   });
 
-  test("ends at the turn budget", () => {
-    expect(groupChat(input({ turnIndex: 10, turnBudget: 10 }))).toEqual({ kind: "end" });
+  test("synthesizes with the moderator at the turn budget", () => {
+    expect(groupChat(input({ turnIndex: 10, turnBudget: 10 }))).toEqual({
+      kind: "synthesize",
+      mind: "mod",
+    });
   });
 
   test("ends when no moderator is configured", () => {

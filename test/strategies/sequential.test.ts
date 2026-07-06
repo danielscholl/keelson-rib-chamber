@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { sequential } from "../../src/strategies/sequential.ts";
-import type { Room, StrategyInput } from "../../src/types.ts";
+import type { Room, StrategyInput, TurnEntry } from "../../src/types.ts";
 
 function room(overrides: Partial<Room> = {}): Room {
   return {
@@ -17,8 +17,18 @@ function room(overrides: Partial<Room> = {}): Room {
   };
 }
 
-function input(overrides: Partial<Room> = {}): StrategyInput {
-  return { room: room(overrides), transcript: [] };
+const agentEntry = (from: string): TurnEntry => ({
+  messageId: "m",
+  roomSlug: "r",
+  turnIndex: 0,
+  from,
+  role: "agent",
+  parts: [{ text: "hi" }],
+  at: "2026-01-01T00:00:00.000Z",
+});
+
+function input(overrides: Partial<Room> = {}, transcript: TurnEntry[] = []): StrategyInput {
+  return { room: room(overrides), transcript };
 }
 
 describe("sequential strategy", () => {
@@ -28,8 +38,11 @@ describe("sequential strategy", () => {
     expect(sequential(input({ turnIndex: 2 }))).toEqual({ kind: "speak", mind: "a" });
   });
 
-  test("ends at the turn budget", () => {
-    expect(sequential(input({ turnIndex: 10, turnBudget: 10 }))).toEqual({ kind: "end" });
+  test("synthesizes with the last speaker at the turn budget", () => {
+    expect(sequential(input({ turnIndex: 10, turnBudget: 10 }, [agentEntry("b")]))).toEqual({
+      kind: "synthesize",
+      mind: "b",
+    });
   });
 
   test("ends when not active", () => {

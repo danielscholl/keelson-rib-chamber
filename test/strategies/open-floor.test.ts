@@ -50,8 +50,11 @@ describe("open-floor strategy (pure tier-3 seed/fallback)", () => {
     expect(openFloor(input([], { participants: [] }))).toEqual({ kind: "end" });
   });
 
-  test("ends at the turn budget", () => {
-    expect(openFloor(input([], { turnIndex: 10, turnBudget: 10 }))).toEqual({ kind: "end" });
+  test("synthesizes with the last speaker at the turn budget", () => {
+    expect(openFloor(input([agentEntry("b")], { turnIndex: 10, turnBudget: 10 }))).toEqual({
+      kind: "synthesize",
+      mind: "b",
+    });
   });
 
   test("is pure (same input, same output, no mutation)", () => {

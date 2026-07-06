@@ -248,7 +248,7 @@ describe("magentic driver", () => {
     expect(await h.driver.step("demo")).toBe("advanced"); // manage (turnIndex 1)
     expect(await h.driver.step("demo")).toBe("ended"); // one work turn hits the budget
     expect((await h.store.loadRoom("demo"))?.status).toBe("done");
-    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(2);
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(3);
   });
 
   test("stopping during a worker turn stops the room", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { concurrent } from "../../src/strategies/concurrent.ts";
-import type { Room, StrategyInput } from "../../src/types.ts";
+import type { Room, StrategyInput, TurnEntry } from "../../src/types.ts";
 
 function room(overrides: Partial<Room> = {}): Room {
   return {
@@ -17,8 +17,18 @@ function room(overrides: Partial<Room> = {}): Room {
   };
 }
 
-function input(overrides: Partial<Room> = {}): StrategyInput {
-  return { room: room(overrides), transcript: [] };
+const agentEntry = (from: string): TurnEntry => ({
+  messageId: "m",
+  roomSlug: "r",
+  turnIndex: 0,
+  from,
+  role: "agent",
+  parts: [{ text: "hi" }],
+  at: "2026-01-01T00:00:00.000Z",
+});
+
+function input(overrides: Partial<Room> = {}, transcript: TurnEntry[] = []): StrategyInput {
+  return { room: room(overrides), transcript };
 }
 
 describe("concurrent strategy", () => {
@@ -34,8 +44,11 @@ describe("concurrent strategy", () => {
     });
   });
 
-  test("ends at the turn budget", () => {
-    expect(concurrent(input({ turnIndex: 10, turnBudget: 10 }))).toEqual({ kind: "end" });
+  test("synthesizes with the last speaker at the turn budget", () => {
+    expect(concurrent(input({ turnIndex: 10, turnBudget: 10 }, [agentEntry("c")]))).toEqual({
+      kind: "synthesize",
+      mind: "c",
+    });
   });
 
   test("ends when not active", () => {

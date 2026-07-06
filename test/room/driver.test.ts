@@ -128,7 +128,7 @@ describe("room driver — lifecycle", () => {
     await h.driver.start({ ...START, turnBudget: 1 });
     expect(await h.driver.step("demo")).toBe("ended");
     expect((await h.store.loadRoom("demo"))?.status).toBe("done");
-    expect(await h.store.loadTranscript("demo")).toHaveLength(1);
+    expect(await h.store.loadTranscript("demo")).toHaveLength(2);
 
     await h.driver.start(START);
     expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(0);
@@ -137,7 +137,7 @@ describe("room driver — lifecycle", () => {
     expect(debateRows(reopened)).toHaveLength(0);
 
     await h.driver.step("demo");
-    expect(h.turns.requests[1]?.prompt ?? "").not.toContain("old done reply");
+    expect(h.turns.requests[2]?.prompt ?? "").not.toContain("old done reply");
   });
 
   test("restarting a stopped same-slug room starts with a clean transcript cache", async () => {
@@ -190,7 +190,7 @@ describe("room driver — step", () => {
     expect(t[0]?.from).toBe("a");
   });
 
-  test("budget: reaching turnBudget marks done; further steps are no-ops", async () => {
+  test("budget: reaching turnBudget appends synthesis, marks done, and further steps are no-ops", async () => {
     const h = harness();
     await h.driver.start({ ...START, turnBudget: 2 });
     await h.driver.step("demo");
@@ -223,7 +223,7 @@ describe("room driver — round cursor", () => {
     await h.driver.step("demo"); // b again — second cycle complete (room then done)
     expect((await h.store.loadRoom("demo"))?.round).toBe(2);
     // each entry carries the round it was authored in
-    expect((await h.store.loadTranscript("demo")).map((e) => e.round)).toEqual([0, 0, 1, 1]);
+    expect((await h.store.loadTranscript("demo")).map((e) => e.round)).toEqual([0, 0, 1, 1, 2]);
   });
 
   test("concurrent: one parallel batch is a full round, sharing one stamp", async () => {
@@ -599,7 +599,7 @@ describe("room driver — lifecycle edge cases", () => {
   test("an inject racing room closure does not reactivate the room", async () => {
     const { store } = makeFakeStore();
     const pub = makeFakePublisher();
-    const turns = gatedRunAgentTurn();
+    const turns = gatedRunAgentTurnPool();
     const driver = createRoomDriver({
       store,
       publisher: pub.publisher,
@@ -610,9 +610,11 @@ describe("room driver — lifecycle edge cases", () => {
     });
     await driver.start({ ...START, turnBudget: 1 }); // the one turn completes -> done
     const stepP = driver.step("demo");
-    await turns.started;
+    await turns.started(1);
     const injectP = driver.inject("demo", { nextSpeaker: "b" }); // loads the still-active room
-    turns.release(); // step completes -> done (closes the generation)
+    turns.release(0); // debate turn reaches the budget, then the synthesis turn starts
+    await turns.started(2);
+    turns.release(1);
     await Promise.all([stepP, injectP]);
     expect((await store.loadRoom("demo"))?.status).toBe("done"); // not reactivated
   });
@@ -940,11 +942,11 @@ describe("room driver — turn request (CR-1 topic / CR-2 soul / CR-3 cwd)", () 
     });
     await h.driver.start({ ...START2, turnBudget: 2 });
     await h.driver.step("demo");
-    await h.driver.step("demo"); // budget reached -> done
+    await h.driver.step("demo"); // budget reached -> synthesis -> done
     await waitForLen(closed, 1);
     await h.driver.step("demo"); // a redundant step on a closed room must not re-signal
     expect(closed).toHaveLength(1);
-    expect(closed[0]).toEqual({ status: "done", turns: 2 });
+    expect(closed[0]).toEqual({ status: "done", turns: 3 });
   });
 
   test("CR-4: signals onRoomClosed when an operator stops the room", async () => {
@@ -1161,13 +1163,13 @@ describe("room driver — group-chat moderate", () => {
     expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m", "a"]);
   });
 
-  test("a moderator tick that reaches turnBudget runs no speaker (room done)", async () => {
+  test("a moderator tick that reaches turnBudget runs synthesis, not a speaker", async () => {
     const h = gcHarness([{ text: direct("a") }, { text: "should-not-run" }]);
     await startGc(h.driver, { moderator: "m" }, 1); // budget 1 -> the moderator tick hits it
     expect(await h.driver.step("gc")).toBe("ended");
     expect((await h.store.loadRoom("gc"))?.status).toBe("done");
-    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m"]);
-    expect(h.turns.requests).toHaveLength(1); // no speaker turn was invoked
+    expect((await h.store.loadTranscript("gc")).map((e) => e.from)).toEqual(["m", "m"]);
+    expect(h.turns.requests).toHaveLength(2); // no speaker turn was invoked, only synthesis
   });
 
   test("an unknown moderator fails the room closed", async () => {
@@ -1550,8 +1552,8 @@ describe("room driver — concurrent (speak-parallel)", () => {
     await h.driver.start({ ...START_CONC, turnBudget: 2 });
     const before = h.pub.all().length; // start published the seed frame
     await h.driver.step("demo"); // one parallel round of two -> done
-    expect(h.pub.all().length).toBe(before + 1); // exactly one more frame for the whole batch
-    expect(await h.store.loadTranscript("demo")).toHaveLength(2);
+    expect(h.pub.all().length).toBe(before + 2); // the batch publish, then the synthesis close
+    expect(await h.store.loadTranscript("demo")).toHaveLength(3);
     expect((await h.store.loadRoom("demo"))?.status).toBe("done");
   });
 
@@ -1564,9 +1566,9 @@ describe("room driver — concurrent (speak-parallel)", () => {
     expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(2);
     expect(await h.driver.step("demo")).toBe("ended"); // round 2: trimmed, hits budget
     const t = await h.store.loadTranscript("demo");
-    expect(t.map((e) => e.from)).toEqual(["a", "b", "a"]); // exactly turnBudget turns
+    expect(t.map((e) => e.from)).toEqual(["a", "b", "a", "a"]);
     const room = await h.store.loadRoom("demo");
-    expect(room?.turnIndex).toBe(3); // never exceeds turnBudget
+    expect(room?.turnIndex).toBe(4);
     expect(room?.status).toBe("done");
   });
 

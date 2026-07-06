@@ -100,6 +100,7 @@ describe("rib-chamber", () => {
       "chamber_list_rooms",
       "chamber_retire_mind",
       "chamber_room_delete",
+      "chamber_room_transcript",
     ]);
   });
 

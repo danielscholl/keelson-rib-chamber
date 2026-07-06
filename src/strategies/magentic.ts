@@ -1,5 +1,6 @@
 import { leastSpoken, speakerCounts } from "../routing.ts";
 import type { LedgerTask, MindSlug, Strategy, TurnEntry } from "../types.ts";
+import { exhaustedSynthesis } from "./synthesis.ts";
 
 // Resolve which worker executes a task: the manager's assignment if it still names a
 // current participant (validated at plan time, re-checked here so a roster change
@@ -27,8 +28,8 @@ export function resolveAssignee(
 export const magentic: Strategy = ({ room, transcript, ledger }) => {
   if (room.status !== "active") return { kind: "end" };
   if (room.participants.length === 0) return { kind: "end" };
-  if (room.turnIndex >= room.turnBudget) return { kind: "end" };
   const manager = room.config?.manager;
+  if (room.turnIndex >= room.turnBudget) return exhaustedSynthesis(room, transcript, manager);
   if (!manager) return { kind: "end" }; // validateStart guarantees one — defensive
   // A closed plan ends — checked BEFORE the empty-ledger guard, because a manager that
   // declared done (or planned nothing) on its first turn settles to status "done" with
