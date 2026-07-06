@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.14.0...v0.15.0) (2026-07-06)
+
+
+### Added
+
+* room DX — batched start validation, synthesis at budget exhaustion, transcript accessor ([#165](https://github.com/danielscholl/keelson-rib-chamber/issues/165)) ([615ee26](https://github.com/danielscholl/keelson-rib-chamber/commit/615ee26832f4687b920c93faf4d999fcd42bf494))
+
 ## [0.14.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.13.0...v0.14.0) (2026-07-06)
 
 
