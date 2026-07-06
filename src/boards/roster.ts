@@ -4,6 +4,7 @@ import type {
   CanvasBoardView,
   CanvasTone,
 } from "@keelson/shared";
+import type { PendingGenesis } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from "../types.ts";
 
@@ -80,9 +81,15 @@ export function buildRosterBoard(
   minds: readonly Mind[],
   draftExcluded: ReadonlySet<string> = new Set(),
   pulse?: RosterPulse,
+  pending?: PendingGenesis | null,
+  now: number = Date.now(),
 ): CanvasBoardView {
+  // A genesis in flight takes the next free seat as a boot card (a nod to the original
+  // Chamber's genesis screen); the seated + open seats compose around it. Only the cold
+  // start with no pending genesis shows the launchpad — once authoring is underway, the
+  // boot card carries the moment.
   const sections: CanvasBoardView["sections"] =
-    minds.length === 0 ? coldStartSections() : seatedSections(minds);
+    minds.length === 0 && !pending ? coldStartSections() : seatedSections(minds, pending, now);
 
   // A room needs at least two Minds to be a conversation. The composer splits into
   // "who's in" (identity-toned toggle chips against the server-side draft) and
@@ -227,22 +234,78 @@ function openSeatCard(slot: number, extraStarters: CanvasActionItem[]) {
   };
 }
 
-// >=1 Mind: the seated cards, then a dashed open-seat card per free identity slot.
+// The genesis stall window (seconds): past it, a pending genesis is presumed wedged
+// (the workflow failed without clearing the marker), so the boot card offers a Dismiss.
+const GENESIS_STALL_S = 180;
+
+// The seat being taken while a genesis runs — the original Chamber's boot screen quoted
+// in keelson's own ink. The liturgy lines are honest: identity/purpose are known at
+// action time for a starter (else "calibrating…"), and "voice: calibrating…" holds with
+// a real elapsed count that each roster re-publish advances. Past the stall window it
+// flips to a warn card with a Dismiss.
+function bootCard(pending: PendingGenesis, slot: number, now: number) {
+  const started = Date.parse(pending.startedAt);
+  // An unparseable startedAt (a hand-edited marker) has no honest elapsed — present it
+  // as stalled so it always carries a Dismiss, never a stuck "NaNs" card.
+  const elapsedS = Number.isFinite(started)
+    ? Math.max(0, Math.floor((now - started) / 1000))
+    : GENESIS_STALL_S;
+  if (elapsedS >= GENESIS_STALL_S) {
+    return {
+      title: pending.name ?? "Genesis",
+      dot: "warn" as CanvasTone,
+      pill: { label: "stalled", tone: "warn" as CanvasTone },
+      fields: [
+        {
+          value: `genesis has not landed in ${Math.floor(elapsedS / 60)}m — the workflow may have failed.`,
+        },
+      ],
+      actions: [
+        { type: "dismiss-genesis", label: "Dismiss", glyph: "✕", tone: "warn" as CanvasTone },
+      ],
+    };
+  }
+  return {
+    title: pending.name ?? "Genesis",
+    dot: identityToneForSlot(slot),
+    pill: { label: "authoring", tone: "brand" as CanvasTone },
+    fields: [
+      { value: "> writing SOUL.md…" },
+      { value: `> identity: ${pending.name ?? "calibrating…"}` },
+      { value: `> purpose: ${pending.role ?? "calibrating…"}` },
+      { value: `> voice: calibrating… · ${elapsedS}s` },
+    ],
+  };
+}
+
+// >=1 Mind (or a genesis in flight): the seated cards, a boot card in the seat being
+// taken when a genesis is pending, then a dashed open-seat card per remaining free slot.
 // Past five Minds (or a fully-seated ramp) no seat remains, so a quiet Author action
-// keeps authoring reachable — a sixth Mind folds to neutral + name (the host rule).
-function seatedSections(minds: readonly Mind[]): CanvasBoardView["sections"] {
+// keeps authoring reachable — a sixth Mind folds to neutral + name (the host rule). The
+// quiet Author action and the lone-Mind nudge are withheld while a genesis is pending
+// (authoring is already underway).
+function seatedSections(
+  minds: readonly Mind[],
+  pending: PendingGenesis | null | undefined,
+  now: number,
+): CanvasBoardView["sections"] {
   const open = freeSlots(minds);
   const openSet = new Set(open);
   const seatedSlugs = new Set(minds.map((m) => m.slug));
   const freeStarters = GENESIS_STARTERS.filter((s) => !seatedSlugs.has(s.slug)).map((s) =>
     starterAction(s, openSet),
   );
-  const openSeats = open.map((slot, i) => openSeatCard(slot, i === 0 ? freeStarters : []));
+
+  // The boot card takes the first free slot (or folds to neutral past the ramp); the
+  // remaining free slots become open seats.
+  const bootItems = pending ? [bootCard(pending, open[0] ?? IDENTITY_SLOT_COUNT, now)] : [];
+  const openSlots = pending ? open.slice(1) : open;
+  const openSeats = openSlots.map((slot, i) => openSeatCard(slot, i === 0 ? freeStarters : []));
 
   const sections: CanvasBoardView["sections"] = [
-    { kind: "cards", items: [...minds.map(cardFor), ...openSeats] },
+    { kind: "cards", items: [...minds.map(cardFor), ...bootItems, ...openSeats] },
   ];
-  if (openSeats.length === 0) {
+  if (openSeats.length === 0 && !pending) {
     sections.push({
       kind: "actions",
       title: "Author a Mind",
@@ -251,7 +314,7 @@ function seatedSections(minds: readonly Mind[]): CanvasBoardView["sections"] {
   }
   // With one Mind seated the composer hasn't appeared yet (it needs two). Name the
   // one act that unlocks it, so the lone-Mind roster still points forward.
-  if (minds.length === 1) {
+  if (minds.length === 1 && !pending) {
     sections.push({
       kind: "rows",
       items: [
@@ -339,8 +402,8 @@ function shapeActions(): CanvasActionItem[] {
 
 // The cold-start launchpad: the anchor sentence, a "Genesis — author a Mind" section
 // (the freeform-brief hero first, then the starter archetypes each in its seat hue),
-// the /genesis bridge caption, and a three-step journey. No locked Rooms/Lenses
-// panels; no "convene <slug>".
+// the /genesis bridge caption, a three-step journey, and the void screen's line at
+// rest. No locked Rooms/Lenses panels; no "convene <slug>".
 function coldStartSections(): CanvasBoardView["sections"] {
   return [
     { kind: "rows", items: [{ glyph: "brand", text: ANCHOR }] },
@@ -370,6 +433,9 @@ function coldStartSections(): CanvasBoardView["sections"] {
         },
       ],
     },
+    // The original Chamber's void screen, quoted at rest — while a genesis runs, the
+    // boot card in the seat replaces this stillness with a live count.
+    { kind: "rows", items: [{ glyph: "neutral", text: "awaiting genesis." }] },
   ];
 }
 

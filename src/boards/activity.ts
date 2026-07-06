@@ -20,92 +20,57 @@ interface ActivityEvent {
   text: string;
 }
 
-// A standing panel is a glance, not a log: cap the feed and name the remainder in an
-// overflow row. The Rooms and Lenses indexes hold the full history.
-const FEED_LIMIT = 10;
+// The Briefing's always-on RECORD register is a glance, not a log: cap the feed and
+// name the remainder in an overflow row. The Rooms and Lenses indexes hold the full
+// history.
+const FEED_LIMIT = 8;
 
-// The header pill tones brand while the freshest event is newer than this, then
-// cools to neutral — a glance signal independent of the feed's relative spans.
-const FRESH_WINDOW_MS = 60 * 60_000;
+type RowsSection = Extract<CanvasBoardView["sections"][number], { kind: "rows" }>;
 
-// Pure: the three Chamber stores -> a standing ACTIVITY board — a plain feed of
-// recent genesis / room / lens events, reverse-chron. A prior version led with a
-// cumulative-pulse stats section (Minds/Rooms/Lenses/Turns counts); those first
-// three each already read once elsewhere (the roster header chip, the Rooms and
-// Lenses region headers), so repeating them here was the "4 minds in six places"
-// finding — the feed plus the header's freshness read carries this panel's whole
-// job. `now` is injected so the relative spans + ordering test deterministically.
-// Validated against canvasViewSchema in tests; the producer never parses
-// (validation lives at the binding edge).
-export function buildActivityBoard(
+// Pure: the three Chamber stores -> the Briefing's RECORD section — a reverse-chron
+// rows feed of recent genesis / room / lens events (what used to be the standalone
+// Activity panel, now a register of the one narrator). An empty chamber yields a
+// single hint line so the footer stays a valid board with nothing else to say. `now`
+// is injected so the relative spans + ordering test deterministically.
+export function recordSection(
   minds: readonly MindActivity[],
   rooms: readonly Room[],
   lenses: readonly LensRecord[],
   now: number = Date.now(),
-): CanvasBoardView {
+): RowsSection {
   const events = collectEvents(minds, rooms, lenses);
-
-  return {
-    view: "board",
-    title: "Activity",
-    header: { status: freshnessStatus(events, now), chip: "activity" },
-    sections: [events.length === 0 ? emptyFeed() : feedSection(events, now)],
-  };
-}
-
-// The header pill reads the freshest event's recency, so a glance answers "is
-// anything happening?": brand while fresh (< an hour), neutral as it cools, a calm
-// "Quiet" with no events at all.
-function freshnessStatus(
-  events: readonly ActivityEvent[],
-  now: number,
-): { label: string; tone: CanvasTone } {
-  const newest = events[0];
-  if (!newest) return { label: "Quiet", tone: "neutral" };
-  const span = relativeAgo(newest.at, now);
-  const fresh = now - newest.atMs < FRESH_WINDOW_MS;
-  return {
-    label: span === "just now" ? "active now" : `active ${span} ago`,
-    tone: fresh ? "brand" : "neutral",
-  };
-}
-
-type FeedRow = { icon: string; glyph: CanvasTone; text: string; trailing?: string };
-
-function feedSection(
-  events: readonly ActivityEvent[],
-  now: number,
-): CanvasBoardView["sections"][number] {
+  if (events.length === 0) {
+    return {
+      kind: "rows",
+      title: "The record",
+      items: [
+        {
+          glyph: "neutral",
+          text: "No activity yet — author a Mind, convene a Room, or keep a Lens.",
+        },
+      ],
+    };
+  }
   const shown = events.slice(0, FEED_LIMIT);
-  const items: FeedRow[] = shown.map((e) => ({
-    icon: e.icon,
-    glyph: e.glyph,
-    text: e.text,
-    trailing: `${relativeAgo(e.at, now)} ago`,
-  }));
+  const items: RowsSection["items"] = shown.map((e) => {
+    // relativeAgo returns a bare span ("5 minutes") or "just now"; append " ago" only to
+    // the former, so a fresh event reads "just now", not "just now ago".
+    const span = relativeAgo(e.at, now);
+    return {
+      icon: e.icon,
+      glyph: e.glyph,
+      text: e.text,
+      trailing: span === "just now" ? span : `${span} ago`,
+    };
+  });
   const overflow = events.length - shown.length;
   if (overflow > 0) items.push({ icon: "…", glyph: "neutral", text: `…${overflow} earlier` });
-  return { kind: "rows", title: "Recent", items };
-}
-
-// The empty/cold state: a single rows hint, so the panel is a valid board even with
-// nothing authored yet (a fresh Chamber, or everything retired).
-function emptyFeed(): CanvasBoardView["sections"][number] {
-  return {
-    kind: "rows",
-    title: "Recent",
-    items: [
-      {
-        glyph: "neutral",
-        text: "No activity yet — author a Mind, convene a Room, or keep a Lens.",
-      },
-    ],
-  };
+  return { kind: "rows", title: "The record", items };
 }
 
 // Fold the three stores into one feed, newest first. An event with no parseable
-// timestamp (a drifted record) is counted in the pulse but dropped from the feed
-// rather than sorting as epoch-0 noise.
+// timestamp (a drifted record) is dropped from the feed rather than sorting as
+// epoch-0 noise.
 function collectEvents(
   minds: readonly MindActivity[],
   rooms: readonly Room[],
