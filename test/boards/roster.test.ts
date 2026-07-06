@@ -126,15 +126,9 @@ describe("buildRosterBoard cold start", () => {
     );
   });
 
-  test("a three-step journey strip renders as boxed step cards", () => {
+  test("no what's-next journey strip — the anchor and seated nudges carry orientation", () => {
     const board = buildRosterBoard([]);
-    const journey = board.sections.find(
-      (s) => s.kind === "cards" && s.items.some((c) => c.title === "1 · Author"),
-    );
-    if (journey?.kind !== "cards") throw new Error("no journey cards section");
-    expect(journey.boxed).toBe(true);
-    expect(journey.items.map((c) => c.title)).toEqual(["1 · Author", "2 · Meet", "3 · Convene"]);
-    expect(journey.items[0]?.footnote).toMatch(/genesis rite/);
+    expect(JSON.stringify(board)).not.toContain("1 · Author");
   });
 
   test("no mind cards, no Enter/Retire section; the void screen's line closes it", () => {
@@ -144,14 +138,7 @@ describe("buildRosterBoard cold start", () => {
     expect(actionItems(board).some((i) => i.type === "enter-mind" || i.type === "retire")).toBe(
       false,
     );
-    expect(board.sections.map((s) => s.kind)).toEqual([
-      "rows",
-      "actions",
-      "rows",
-      "cards",
-      "cards",
-      "rows",
-    ]);
+    expect(board.sections.map((s) => s.kind)).toEqual(["rows", "actions", "rows", "cards", "rows"]);
     // The original Chamber's void-screen line, quoted at rest.
     const last = board.sections.at(-1);
     if (last?.kind !== "rows") throw new Error("no closing rows section");
