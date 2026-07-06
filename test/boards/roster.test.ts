@@ -65,34 +65,46 @@ describe("buildRosterBoard cold start", () => {
     expect(actionsSection(board, "Genesis — author a Mind")?.kind).toBe("actions");
   });
 
-  test("the freeform-brief hero leads the authoring section (brand, before the starters)", () => {
+  test("the freeform-brief hero is the authoring section's one item — brand, expanded", () => {
     const items = actionsSection(buildRosterBoard([]), "Genesis — author a Mind");
     if (items?.kind !== "actions") throw new Error("no authoring section");
-    const first = items.items[0];
-    expect(first?.type).toBe("describe-own");
-    expect(first?.tone).toBe("brand");
-    // The describe-own hero precedes every starter action.
-    const firstStarter = items.items.findIndex((i) => i.type === "author-archetype");
-    expect(items.items.findIndex((i) => i.type === "describe-own")).toBeLessThan(firstStarter);
+    expect(items.items).toHaveLength(1);
+    const hero = items.items[0];
+    expect(hero?.type).toBe("describe-own");
+    expect(hero?.tone).toBe("brand");
+    // The brief field is open inline — no disclosure step on the authored path.
+    expect(hero?.expanded).toBe(true);
   });
 
-  test("exactly three author-archetype actions in order, each toned by its seat", () => {
+  test('the starters are seated-alternative cards under "Or seat a starter voice"', () => {
     const board = buildRosterBoard([]);
-    const authors = actionItems(board).filter((i) => i.type === "author-archetype");
-    expect(authors).toHaveLength(3);
-    expect(authors.map((a) => a.payload)).toEqual(GENESIS_STARTERS.map((s) => ({ slug: s.slug })));
-    expect(authors.map((a) => a.label)).toEqual(
-      GENESIS_STARTERS.map((s) => `${s.name} — ${s.tagline}`),
+    const section = board.sections.find(
+      (s) => s.kind === "cards" && s.title === "Or seat a starter voice",
     );
+    if (section?.kind !== "cards") throw new Error("no starter cards section");
+    expect(section.boxed).toBe(true);
+    expect(section.items.map((c) => c.title)).toEqual(GENESIS_STARTERS.map((s) => s.name));
     // Seats 0/1/2 preview blue/amber/teal — the hue each starter will wear when
-    // authored from an empty roster.
-    expect(authors.map((a) => a.tone)).toEqual(["id-blue", "id-amber", "id-teal"]);
+    // authored from an empty roster — with the role as the pill and blurb as copy.
+    expect(section.items.map((c) => c.dot)).toEqual(["id-blue", "id-amber", "id-teal"]);
+    expect(section.items.map((c) => c.pill?.label)).toEqual(GENESIS_STARTERS.map((s) => s.role));
+    expect(section.items.map((c) => c.footnote)).toEqual(GENESIS_STARTERS.map((s) => s.blurb));
+    for (const [i, card] of section.items.entries()) {
+      expect(card.actions).toEqual([
+        {
+          type: "author-archetype",
+          label: `Author ${GENESIS_STARTERS[i]?.name}`,
+          glyph: "✦",
+          payload: { slug: GENESIS_STARTERS[i]?.slug },
+        },
+      ]);
+    }
   });
 
   test("a describe-own action carries the verbatim brief field", () => {
     const board = buildRosterBoard([]);
     const own = actionItems(board).find((i) => i.type === "describe-own");
-    expect(own?.label).toBe("Describe & author your own…");
+    expect(own?.label).toBe("Author");
     expect(own?.glyph).toBe("✦");
     expect(own?.fields).toEqual([
       {
@@ -114,23 +126,32 @@ describe("buildRosterBoard cold start", () => {
     );
   });
 
-  test("a three-step journey strip replaces the prose next-step row", () => {
+  test("a three-step journey strip renders as boxed step cards", () => {
     const board = buildRosterBoard([]);
-    const journey = board.sections
-      .filter((s) => s.kind === "rows")
-      .find((s) => s.kind === "rows" && s.items.some((i) => i.icon === "1"));
-    if (journey?.kind !== "rows") throw new Error("no journey rows section");
-    expect(journey.items.map((i) => i.icon)).toEqual(["1", "2", "3"]);
-    expect(journey.items[0]?.text).toMatch(/^Author —/);
-    expect(journey.items[2]?.text).toMatch(/^Convene —/);
+    const journey = board.sections.find(
+      (s) => s.kind === "cards" && s.items.some((c) => c.title === "1 · Author"),
+    );
+    if (journey?.kind !== "cards") throw new Error("no journey cards section");
+    expect(journey.boxed).toBe(true);
+    expect(journey.items.map((c) => c.title)).toEqual(["1 · Author", "2 · Meet", "3 · Convene"]);
+    expect(journey.items[0]?.footnote).toMatch(/genesis rite/);
   });
 
-  test("no cards, no Enter/Retire section; the void screen's line closes it", () => {
+  test("no mind cards, no Enter/Retire section; the void screen's line closes it", () => {
     const board = buildRosterBoard([]);
     expect(actionsSection(board, "Enter")).toBeUndefined();
     expect(actionsSection(board, "Retire")).toBeUndefined();
-    expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
-    expect(board.sections.map((s) => s.kind)).toEqual(["rows", "actions", "rows", "rows", "rows"]);
+    expect(actionItems(board).some((i) => i.type === "enter-mind" || i.type === "retire")).toBe(
+      false,
+    );
+    expect(board.sections.map((s) => s.kind)).toEqual([
+      "rows",
+      "actions",
+      "rows",
+      "cards",
+      "cards",
+      "rows",
+    ]);
     // The original Chamber's void-screen line, quoted at rest.
     const last = board.sections.at(-1);
     if (last?.kind !== "rows") throw new Error("no closing rows section");

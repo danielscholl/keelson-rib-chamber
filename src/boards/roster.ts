@@ -5,7 +5,7 @@ import type {
   CanvasTone,
 } from "@keelson/shared";
 import type { PendingGenesis } from "../pending-genesis.ts";
-import { GENESIS_STARTERS } from "../starters.ts";
+import { GENESIS_STARTERS, type GenesisStarter } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from "../types.ts";
 
 // The Chamber pulse: the one "for you" signal (a waiting briefing) the roster
@@ -35,9 +35,11 @@ const GENESIS_BRIDGE =
 function describeOwnAction(variant: "hero" | "seat"): CanvasActionItem {
   return {
     type: "describe-own",
-    label: variant === "hero" ? "Describe & author your own…" : "Author…",
+    label: variant === "hero" ? "Author" : "Author…",
     glyph: variant === "hero" ? "✦" : "✎",
-    ...(variant === "hero" ? { tone: "brand" as CanvasTone } : {}),
+    // The hero is the board's one filled primary, its brief field open inline —
+    // no disclosure step between the operator and the authored path.
+    ...(variant === "hero" ? { tone: "brand" as CanvasTone, expanded: true } : {}),
     fields: [
       {
         name: "brief",
@@ -400,37 +402,56 @@ function shapeActions(): CanvasActionItem[] {
   ];
 }
 
-// The cold-start launchpad: the anchor sentence, a "Genesis — author a Mind" section
-// (the freeform-brief hero first, then the starter archetypes each in its seat hue),
-// the /genesis bridge caption, a three-step journey, and the void screen's line at
-// rest. No locked Rooms/Lenses panels; no "convene <slug>".
+// A starter archetype as a seated-alternative card: the seat hue it will wear, the
+// role as its pill, the voice's energy as the footnote, one Author action. The cold
+// start is the only caller — every seat is free there, so the hue preview is truthful.
+function starterCard(starter: GenesisStarter) {
+  return {
+    title: starter.name,
+    dot: identityToneForSlot(starter.seat),
+    pill: { label: starter.role },
+    footnote: starter.blurb,
+    actions: [
+      {
+        type: "author-archetype",
+        label: `Author ${starter.name}`,
+        glyph: "✦",
+        payload: { slug: starter.slug },
+      },
+    ],
+  };
+}
+
+// The cold-start launchpad, mirroring the design review's hero hierarchy: the anchor
+// sentence, the freeform brief open inline under "Genesis — author a Mind" (the one
+// filled button on the board), the /genesis bridge caption, the starter voices as
+// seated-alternative cards below an "or" divider, a three-step journey strip, and the
+// void screen's line at rest. No locked Rooms/Lenses panels; no "convene <slug>".
 function coldStartSections(): CanvasBoardView["sections"] {
   return [
     { kind: "rows", items: [{ glyph: "brand", text: ANCHOR }] },
     {
       kind: "actions",
       title: "Genesis — author a Mind",
-      items: [describeOwnAction("hero"), ...GENESIS_STARTERS.map((s) => starterAction(s))],
+      items: [describeOwnAction("hero")],
     },
     { kind: "rows", items: [{ glyph: "neutral", text: GENESIS_BRIDGE, trailing: "genesis" }] },
     {
-      kind: "rows",
+      kind: "cards",
+      title: "Or seat a starter voice",
+      boxed: true,
+      items: GENESIS_STARTERS.map(starterCard),
+    },
+    {
+      kind: "cards",
+      boxed: true,
       items: [
         {
-          icon: "1",
-          glyph: "brand",
-          text: "Author — the genesis rite seats a Mind with a soul that persists.",
+          title: "1 · Author",
+          footnote: "The genesis rite seats a Mind with a soul that persists.",
         },
-        {
-          icon: "2",
-          glyph: "neutral",
-          text: "Meet — enter it for a 1:1 chat. What it learns, it keeps.",
-        },
-        {
-          icon: "3",
-          glyph: "neutral",
-          text: "Convene — with two Minds seated, open a Room on a topic.",
-        },
+        { title: "2 · Meet", footnote: "Enter it for a 1:1 chat. What it learns, it keeps." },
+        { title: "3 · Convene", footnote: "With two Minds seated, open a Room on a topic." },
       ],
     },
     // The original Chamber's void screen, quoted at rest — while a genesis runs, the

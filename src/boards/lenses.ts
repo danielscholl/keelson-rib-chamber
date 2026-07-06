@@ -1,6 +1,6 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
-import { relativeAgo } from "../relative-time.ts";
+import { agoLabel } from "../relative-time.ts";
 import { identityToneForSlot, type Mind } from "../types.ts";
 
 // A lens's dot carries the identity of the Mind that MAINTAINS it (keelson#390),
@@ -71,7 +71,7 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
   // by-Mind first, then freshness — the maintainer reads ahead of "how stale".
   const fields = [
     ...(lens.maintainingMind ? [{ label: "by", value: lens.maintainingMind }] : []),
-    { label: "updated", value: `${relativeAgo(lens.updatedAt)} ago` },
+    { label: "updated", value: agoLabel(lens.updatedAt) },
   ];
   return {
     title,

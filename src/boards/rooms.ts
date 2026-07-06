@@ -1,5 +1,5 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
-import { relativeAgo } from "../relative-time.ts";
+import { agoLabel } from "../relative-time.ts";
 import type { Room } from "../types.ts";
 
 // Pure: the persisted rooms -> a canvas `board`. Active rooms come first (most
@@ -57,7 +57,7 @@ function cardFor(room: Room) {
       { label: "with", value: room.participants.join(" · ") },
       // The Room model carries only createdAt — no end/close time — so this is an
       // honest "started <relative> ago", not an invented "ended" timestamp.
-      { label: "started", value: `${relativeAgo(room.createdAt)} ago` },
+      { label: "started", value: agoLabel(room.createdAt) },
     ],
   };
   return room.status === "active"
