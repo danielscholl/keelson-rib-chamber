@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.13.0...v0.14.0) (2026-07-06)
+
+
+### Added
+
+* shape picker as a single-select tabs strip ([#161](https://github.com/danielscholl/keelson-rib-chamber/issues/161)) ([0afc278](https://github.com/danielscholl/keelson-rib-chamber/commit/0afc278f9a45f148de5f9751d6e4921808cedaad))
+
 ## [0.13.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.12.0...v0.13.0) (2026-07-06)
 
 
