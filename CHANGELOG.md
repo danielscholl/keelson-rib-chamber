@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.16.0...v0.17.0) (2026-07-06)
+
+
+### Added
+
+* **lens-html:** introduce first-class per-subject HTML lenses ([#169](https://github.com/danielscholl/keelson-rib-chamber/issues/169)) ([f663f29](https://github.com/danielscholl/keelson-rib-chamber/commit/f663f29fec7e6e189d4dd04ee89d1cce45ac4176))
+
 ## [0.16.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.15.0...v0.16.0) (2026-07-06)
 
 
