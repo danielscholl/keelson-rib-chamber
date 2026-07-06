@@ -188,6 +188,29 @@ function tickRoster(): void {
   void refreshWorkflow?.("chamber-roster")?.catch(() => {});
 }
 
+// The rooms-index ticker. The index card's bar reads room.turnIndex/turnBudget,
+// which commitActive persists every turn — but the index is a bound collector that
+// only recomposes on a room lifecycle change (start/end/delete), so a live room's
+// bar sat frozen at its start value mid-run. While ANY room is active, re-read the
+// index on a modest cadence so the bar advances as turns land (a cheap deterministic
+// disk read, like the roster tick); stop once no room is active. Unref'd so it never
+// holds the process open; cleared on dispose.
+const ROOMS_TICK_MS = 2_500;
+let roomsTicker: ReturnType<typeof setInterval> | undefined;
+
+function startRoomsTick(): void {
+  if (roomsTicker) return;
+  roomsTicker = setInterval(() => {
+    void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+  }, ROOMS_TICK_MS);
+  roomsTicker.unref?.();
+}
+
+function stopRoomsTick(): void {
+  if (roomsTicker) clearInterval(roomsTicker);
+  roomsTicker = undefined;
+}
+
 function startGenesisTick(): void {
   stopGenesisTick();
   tickRoster(); // show the boot card at once
@@ -421,6 +444,10 @@ function reconcileRoomPanels(): void {
   const keep = new Set(activeRooms);
   if (lastSlug) keep.add(lastSlug);
   roomRegistry?.retainOnly(keep);
+  // Drive the rooms-index bar off the same lifecycle signal: tick while a room is
+  // live so its bar advances, quiet once the bench is idle.
+  if (activeRooms.size > 0) startRoomsTick();
+  else stopRoomsTick();
 }
 
 // The attention gate. A room ending or a lens changing fires this; it is the SOLE
@@ -1253,6 +1280,10 @@ const rib: Rib = {
           // fresh after a new Mind without hammering. The Briefing footer is left
           // cadence-free on purpose — it is a paid agent turn, refreshed on demand.
           cadenceMs: 120_000,
+          // Collapsible like the other regions: once the bench is seated an operator
+          // can fold the roster to its head strip and watch Rooms/Briefing, reopening
+          // it to author or convene. Default expanded — the cold start needs it open.
+          collapsible: true,
           // While a genesis runs the rib pushes roster frames every ~2.5s (the boot
           // card's tick); `live` pulses the head dot as those frames arrive (keelson#353).
           live: true,
@@ -1782,6 +1813,7 @@ const rib: Rib = {
     loops.clear();
     activeRooms.clear();
     lastSlug = undefined;
+    stopRoomsTick();
     // A genesis can't survive the process — stop its tick and clear the marker so a
     // re-boot doesn't render a boot card for a workflow that died with the old process.
     stopGenesisTick();

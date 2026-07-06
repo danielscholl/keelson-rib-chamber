@@ -482,8 +482,12 @@ function roundDivider(round: number, questions: number[] | undefined): FeedItem 
 // Facilitator turns (the moderator's routing, the synthesizer's closing summary,
 // a magentic manager's plan) read distinctly from participant chatter — all three
 // wear the host's brand tone (matching squad's coordinator convention), never a
-// participant's identity hue. A participant wears its persisted identity-tone
-// slot (keelson#390) when resolvable, else the pre-identity-tones role fallback.
+// participant's identity hue. The brand tone is the sole facilitator marker: every
+// speaker row leads with one toned bullet + its name chip so the feed aligns on a
+// single left edge (a facilitator row carried an extra leading icon before, which
+// pushed its chip right and read as an unintended indent beside flush participants).
+// A participant wears its persisted identity-tone slot (keelson#390) when
+// resolvable, else the pre-identity-tones role fallback.
 function turnRow(
   entry: TurnEntry,
   index: number,
@@ -518,10 +522,8 @@ function turnRow(
   const trailing = `${time}${decidedSuffix}`;
 
   if (entry.from === synthesizer || entry.from === manager || entry.from === moderator) {
-    const icon = entry.from === synthesizer ? "◆" : entry.from === manager ? "❖" : "◇";
     return {
       glyph: "brand",
-      icon,
       chip: { label, tone: "brand" },
       text,
       trailing,
