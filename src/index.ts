@@ -35,6 +35,7 @@ import {
   capabilityVocabulary,
   codingReviewCapabilityError,
   codingToolPool,
+  externalToolPool,
   KNOWN_CAPABILITY_SLUGS,
 } from "./capabilities.ts";
 import {
@@ -1824,10 +1825,9 @@ const rib: Rib = {
         turnCwd: chamberDataHome(),
         resolveProjectRoot,
         resolveProjectName,
-        // When the lens seam is wired, let a Mind author a lens mid-room: the C1
-        // turn seam resolves this name to the rib's registered chamber_emit_lens
-        // def and projects it to the provider. Without it, room turns stay text-only.
-        ...(lensRegistry ? { turnTools: [{ name: LENS_TOOL_NAME }] } : {}),
+        // Base room tools are still a ceiling: lens only when its seam is wired,
+        // plus external read-only names that resolve only for declaring Minds.
+        turnTools: [...(lensRegistry ? [{ name: LENS_TOOL_NAME }] : []), ...externalToolPool()],
         // The coding pool (host built-ins), always handed over but inert until a
         // room opts in (room.coding) and is confined — the tier is gated per-room.
         codingTools: codingToolPool(),
