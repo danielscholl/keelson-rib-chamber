@@ -137,11 +137,14 @@ describe("external capability tier", () => {
   });
 
   test("CAPABILITIES.osdu is pinned to the read-only osdu tool names", () => {
-    expect(CAPABILITIES.osdu.tools).toEqual(OSDU_TOOL_NAMES);
+    const osdu = CAPABILITIES.osdu;
+    expect(osdu).toBeDefined();
+    if (!osdu) throw new Error("CAPABILITIES.osdu must exist");
+    expect(osdu.tools).toEqual(OSDU_TOOL_NAMES);
     for (const name of OSDU_WRITE_TOOL_NAMES) {
-      expect(CAPABILITIES.osdu.tools).not.toContain(name);
+      expect(osdu.tools).not.toContain(name);
     }
-    for (const name of CAPABILITIES.osdu.tools) expect(name.startsWith("osdu_")).toBe(true);
+    for (const name of osdu.tools) expect(name.startsWith("osdu_")).toBe(true);
   });
 
   test("EXTERNAL_CAPABILITY_SLUGS drives externalToolPool from CAPABILITIES", () => {
