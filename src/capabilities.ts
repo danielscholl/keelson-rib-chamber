@@ -55,6 +55,18 @@ export function codingToolPool(): { name: string }[] {
   return [...names].map((name) => ({ name }));
 }
 
+export const EXTERNAL_CAPABILITY_SLUGS: ReadonlySet<string> = new Set(["osdu"]);
+
+// Other ribs register these names; co-install the owning rib or the turn seam
+// rejects them, and do not treat them as host-confined coding built-ins.
+export function externalToolPool(): { name: string }[] {
+  const names = new Set<string>();
+  for (const slug of EXTERNAL_CAPABILITY_SLUGS) {
+    for (const name of CAPABILITIES[slug]?.tools ?? []) names.add(name);
+  }
+  return [...names].map((name) => ({ name }));
+}
+
 // "slug (what it does)" list for the genesis prompt, derived from CAPABILITIES
 // so the advertised vocabulary can't drift from what actually resolves.
 export function capabilityVocabulary(): string {
