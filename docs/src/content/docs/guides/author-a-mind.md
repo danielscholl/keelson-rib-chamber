@@ -113,6 +113,11 @@ and a `projectId`): `read` lets a Mind read files in the room's project; `code` 
 it run Bash, Edit, and Write. A coding review room requires the author Mind to declare
 `code` and the reviewer Mind to declare at least `read`.
 
+A fourth capability, `osdu`, lets a Mind consult read-only OSDU platform status
+during a room turn. Use it only when the osdu rib is co-installed, because those
+tool names are registered by that rib. Without that rib, an osdu-declaring room
+turn fails at the tool seam instead of silently falling back.
+
 The vocabulary is curated, so declaring anything unknown is dropped. Declaring
 nothing keeps the Mind conversation-only. A capability scopes what a Mind may do
 inside a room turn; it never makes the Mind reach a tool the room does not already
