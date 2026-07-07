@@ -20,6 +20,19 @@ export const CAPABILITIES: Readonly<
     tools: ["Bash", "Edit", "Write"],
     summary: "edit files and run commands in the room's project (coding rooms only)",
   },
+  osdu: {
+    tools: [
+      "osdu_quality",
+      "osdu_security",
+      "osdu_features",
+      "osdu_release",
+      "osdu_events",
+      "osdu_waiting",
+      "osdu_cluster",
+      "osdu_topology",
+    ],
+    summary: "consult read-only OSDU platform status — requires the osdu rib co-installed",
+  },
 };
 
 export const KNOWN_CAPABILITY_SLUGS: ReadonlySet<string> = new Set(Object.keys(CAPABILITIES));
