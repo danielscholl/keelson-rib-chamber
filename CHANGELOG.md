@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.17.0...v0.18.0) (2026-07-07)
+
+
+### Added
+
+* **capabilities:** add osdu capability slug and external tool pool ([#171](https://github.com/danielscholl/keelson-rib-chamber/issues/171)) ([58cef32](https://github.com/danielscholl/keelson-rib-chamber/commit/58cef32829bc202776f43d441b25e1f6cbd6d12b))
+
 ## [0.17.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.16.0...v0.17.0) (2026-07-06)
 
 
