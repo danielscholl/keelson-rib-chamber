@@ -10,11 +10,11 @@
 A speaker reaches **only** the tools its Mind declares, intersected with what the
 room permits. `Mind.tools` is a list of **capability slugs** (a curated, friendly
 vocabulary — *not* raw tool names); `RoomDriverDeps.turnTools` is the **room-safe
-pool**, the ceiling of what any room turn may invoke (the lens write seam by
-default; a coding room widens it — see [The coding tier](#the-coding-tier-opt-in)).
-At each per-speaker turn the driver resolves the Mind's slugs to tool names and
-intersects them with the pool. A Mind that declares nothing runs **text-only** —
-the room default — never "all tools."
+pool**, the ceiling of what any room turn may invoke (the lens write seam when
+wired, plus external read-only tools such as `osdu`; a coding room widens it — see
+[The coding tier](#the-coding-tier-opt-in)). At each per-speaker turn the driver
+resolves the Mind's slugs to tool names and intersects them with the pool. A Mind
+that declares nothing runs **text-only** — the room default — never "all tools."
 
 ## Resolution
 
@@ -36,20 +36,30 @@ turn's requested names against the **shared** registry and applies the denylist
 floor — it does **not** scope a turn to its own rib (the `ribId` is threaded but
 unused). The room-pool intersection is therefore chamber's own allowlist ceiling:
 a Mind can never reach a room-control tool (`chamber_room_*`), the genesis write
-seam, or another rib's tools — even via a hand-edited `mind.json` — because those
-names are not in the pool. The curated `CAPABILITIES` map only ever names
-room-safe tools, so the two layers are belt-and-suspenders.
+seam, or an unpooled tool from this rib or another rib — even via a hand-edited
+`mind.json` — because those names are not in the pool. The curated `CAPABILITIES`
+map only ever names room-safe tools, so the two layers are belt-and-suspenders.
+
+## External read-only slugs
+
+The base room-safe pool also includes `externalToolPool()`: curated tool names
+registered by another rib. Today that is `osdu → osdu_quality/osdu_security/
+osdu_features/osdu_release/osdu_events/osdu_waiting/osdu_cluster/osdu_topology`,
+the read-only OSDU platform status tools. They are projected by name through C1
+and require the osdu rib to be co-installed; without it, an osdu-declaring turn
+fails at the turn seam. Because they still pass through `resolveMindTools`, a
+Mind reaches them only when it declares `osdu`.
 
 ## The coding tier (opt-in)
 
-When the lens seam is wired, the default room-safe pool is the lens write seam
-alone, so a room turn is text-or-lens — it never touches the filesystem; without
-that seam, room turns are text-only. A room started with `coding: true`
-(which **requires** a target `projectId`) layers the **coding pool** on top: the
-host built-ins a coding slug authorizes — `code → Bash/Edit/Write`, `read → Read`
-(`CODING_CAPABILITY_SLUGS` / `codingToolPool()`, `src/capabilities.ts`). The
-intersection is unchanged, so a Mind still reaches only what it declares against
-the now-wider pool — a text-only Mind in a coding room stays text-only.
+When the lens seam is wired, the base room-safe pool includes the lens write seam,
+so a room turn can be text, lens, or a declared external read. It never touches the
+filesystem. A room started with `coding: true` (which **requires** a target
+`projectId`) layers the **coding pool** on top: the host built-ins a coding slug
+authorizes — `code → Bash/Edit/Write`, `read → Read` (`CODING_CAPABILITY_SLUGS` /
+`codingToolPool()`, `src/capabilities.ts`). The intersection is unchanged, so a
+Mind still reaches only what it declares against the now-wider pool — a text-only
+Mind in a coding room stays text-only.
 
 **Granting and confining are one decision.** A turn is offered the coding tools
 *only when there is a root to confine it to*: the driver sets the turn's
@@ -79,7 +89,9 @@ The `chamber-genesis` workflow lets the authored soul declare capability slugs;
 than failing the run. `Mind.tools` round-trips through `mind.json`
 (`src/minds-store.ts`). The coding slugs (`code`/`read`) are part of the vocabulary
 and so a Mind may declare them, but they resolve to nothing outside a coding room —
-declaring `code` is harmless until the room opts into the tier.
+declaring `code` is harmless until the room opts into the tier. The external slug
+(`osdu`) is part of the vocabulary too; it resolves only against the external pool
+and requires the osdu rib to be co-installed.
 
 ## Not in scope
 

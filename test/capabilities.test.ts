@@ -5,14 +5,32 @@ import {
   capabilityVocabulary,
   codingReviewCapabilityError,
   codingToolPool,
+  EXTERNAL_CAPABILITY_SLUGS,
+  externalToolPool,
   KNOWN_CAPABILITY_SLUGS,
   resolveMindTools,
 } from "../src/capabilities.ts";
 import { LENS_TOOL_NAME } from "../src/lens.ts";
 
+const OSDU_TOOL_NAMES = [
+  "osdu_quality",
+  "osdu_security",
+  "osdu_features",
+  "osdu_release",
+  "osdu_events",
+  "osdu_waiting",
+  "osdu_cluster",
+  "osdu_topology",
+];
+const OSDU_WRITE_TOOL_NAMES = [
+  "osdu_cluster_reconcile",
+  "osdu_cluster_suspend",
+  "osdu_cluster_resume",
+];
 const POOL = [{ name: LENS_TOOL_NAME }];
 // The ceiling a coding room layers on: base (lens) + the coding built-ins.
 const CODING_POOL = [{ name: LENS_TOOL_NAME }, ...codingToolPool()];
+const OSDU_POOL = [{ name: LENS_TOOL_NAME }, ...externalToolPool()];
 
 describe("resolveMindTools", () => {
   test("maps a declared slug to its tool name when the pool permits it", () => {
@@ -44,12 +62,14 @@ describe("resolveMindTools", () => {
   test("KNOWN_CAPABILITY_SLUGS mirrors the map keys", () => {
     expect([...KNOWN_CAPABILITY_SLUGS].sort()).toEqual(Object.keys(CAPABILITIES).sort());
     expect(KNOWN_CAPABILITY_SLUGS.has("lens")).toBe(true);
+    expect(KNOWN_CAPABILITY_SLUGS.has("osdu")).toBe(true);
   });
 
   test("capabilityVocabulary lists every known slug with its gloss", () => {
     const doc = capabilityVocabulary();
     for (const slug of KNOWN_CAPABILITY_SLUGS) expect(doc).toContain(slug);
     expect(doc).toContain("lens (");
+    expect(doc).toContain("osdu (");
   });
 });
 
@@ -98,6 +118,44 @@ describe("coding capability tier", () => {
       [...CODING_CAPABILITY_SLUGS].flatMap((s) => [...(CAPABILITIES[s]?.tools ?? [])]),
     );
     expect(new Set(codingToolPool().map((t) => t.name))).toEqual(fromMap);
+  });
+});
+
+describe("external capability tier", () => {
+  test("the `osdu` slug maps to the read-only osdu tools when the pool permits", () => {
+    expect(resolveMindTools({ tools: ["osdu"] }, OSDU_POOL)).toEqual(
+      OSDU_TOOL_NAMES.map((name) => ({ name })),
+    );
+  });
+
+  test("the `osdu` slug is dropped when the pool omits osdu tools", () => {
+    expect(resolveMindTools({ tools: ["osdu"] }, POOL)).toEqual([]);
+  });
+
+  test("a non-osdu Mind cannot reach osdu tools from the external pool", () => {
+    expect(resolveMindTools({ tools: ["lens"] }, OSDU_POOL)).toEqual([{ name: LENS_TOOL_NAME }]);
+  });
+
+  test("CAPABILITIES.osdu is pinned to the read-only osdu tool names", () => {
+    const osdu = CAPABILITIES.osdu;
+    expect(osdu).toBeDefined();
+    if (!osdu) throw new Error("CAPABILITIES.osdu must exist");
+    expect(osdu.tools).toEqual(OSDU_TOOL_NAMES);
+    for (const name of OSDU_WRITE_TOOL_NAMES) {
+      expect(osdu.tools).not.toContain(name);
+    }
+    for (const name of osdu.tools) expect(name.startsWith("osdu_")).toBe(true);
+  });
+
+  test("EXTERNAL_CAPABILITY_SLUGS drives externalToolPool from CAPABILITIES", () => {
+    expect([...EXTERNAL_CAPABILITY_SLUGS].sort()).toEqual(["osdu"]);
+    for (const slug of EXTERNAL_CAPABILITY_SLUGS) {
+      expect(KNOWN_CAPABILITY_SLUGS.has(slug)).toBe(true);
+    }
+    const fromMap = new Set(
+      [...EXTERNAL_CAPABILITY_SLUGS].flatMap((s) => [...(CAPABILITIES[s]?.tools ?? [])]),
+    );
+    expect(new Set(externalToolPool().map((t) => t.name))).toEqual(fromMap);
   });
 });
 
