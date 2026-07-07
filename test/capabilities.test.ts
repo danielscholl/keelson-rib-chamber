@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   CAPABILITIES,
   CODING_CAPABILITY_SLUGS,
-  EXTERNAL_CAPABILITY_SLUGS,
   capabilityVocabulary,
   codingReviewCapabilityError,
   codingToolPool,
+  EXTERNAL_CAPABILITY_SLUGS,
   externalToolPool,
   KNOWN_CAPABILITY_SLUGS,
   resolveMindTools,
