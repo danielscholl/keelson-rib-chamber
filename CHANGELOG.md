@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.19.0...v0.20.0) (2026-07-08)
+
+
+### Added
+
+* **roster:** emit the header roster peek + collapse hint ([#178](https://github.com/danielscholl/keelson-rib-chamber/issues/178)) ([3c6b79f](https://github.com/danielscholl/keelson-rib-chamber/commit/3c6b79faac42609347e4b5c00b35a843c5f67cea))
+* **roster:** replace open-seat grid with launchpad sections ([#176](https://github.com/danielscholl/keelson-rib-chamber/issues/176)) ([485fcba](https://github.com/danielscholl/keelson-rib-chamber/commit/485fcbac1e87b3ffc48c7bd460bd228d92ff05b8))
+
 ## [0.19.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.18.0...v0.19.0) (2026-07-08)
 
 
