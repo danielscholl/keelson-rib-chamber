@@ -12,9 +12,6 @@ const mind = (over: Partial<Mind> = {}): Mind => ({
   ...over,
 });
 
-const ANCHOR =
-  "A Chamber is a team of persistent Minds you author — they chat with you, meet each other in Rooms, and keep Lenses for ongoing work. Author your first Mind to start the Chamber.";
-
 function actionItems(board: ReturnType<typeof buildRosterBoard>) {
   return board.sections.flatMap((s) => (s.kind === "actions" ? s.items : []));
 }
@@ -35,19 +32,21 @@ function openSeats(board: ReturnType<typeof buildRosterBoard>) {
 }
 
 describe("buildRosterBoard cold start", () => {
-  test("is a valid board with the roster header at 0 minds", () => {
+  test("is a valid board with no roster slug chip at 0 minds", () => {
     const board = buildRosterBoard([]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.view).toBe("board");
-    expect(board.header?.chip).toBe("roster");
+    // The redundant "roster" slug is gone; the count status stays.
+    expect(board.header?.chip).toBeUndefined();
     expect(board.header?.status?.label).toBe("0 minds");
   });
 
-  test("the leading rows item is the verbatim anchor sentence", () => {
+  test("the cold start leads with the Genesis authoring section — no anchor preamble", () => {
     const board = buildRosterBoard([]);
     const first = board.sections[0];
-    expect(first?.kind).toBe("rows");
-    if (first?.kind === "rows") expect(first.items[0]?.text).toBe(ANCHOR);
+    expect(first?.kind).toBe("actions");
+    if (first?.kind === "actions") expect(first.title).toBe("Genesis — author a Mind");
+    expect(JSON.stringify(board)).not.toContain("A Chamber is a team of persistent Minds");
   });
 
   test('no "convene <slug>" string anywhere; no row trailing starts with "convene "', () => {
@@ -76,29 +75,25 @@ describe("buildRosterBoard cold start", () => {
     expect(hero?.expanded).toBe(true);
   });
 
-  test('the starters are seated-alternative cards under "Or seat a starter voice"', () => {
+  test('the starters are a compact "Or seat a starter voice" actions chip row', () => {
     const board = buildRosterBoard([]);
-    const section = board.sections.find(
-      (s) => s.kind === "cards" && s.title === "Or seat a starter voice",
+    const section = actionsSection(board, "Or seat a starter voice");
+    if (section?.kind !== "actions") throw new Error("no starter actions section");
+    // A wrapping chip row, not the old boxed cards.
+    expect(section.wrap).toBe(true);
+    expect(section.items.map((i) => i.type)).toEqual(
+      GENESIS_STARTERS.map(() => "author-archetype"),
     );
-    if (section?.kind !== "cards") throw new Error("no starter cards section");
-    expect(section.boxed).toBe(true);
-    expect(section.items.map((c) => c.title)).toEqual(GENESIS_STARTERS.map((s) => s.name));
-    // Seats 0/1/2 preview blue/amber/teal — the hue each starter will wear when
-    // authored from an empty roster — with the role as the pill and blurb as copy.
-    expect(section.items.map((c) => c.dot)).toEqual(["id-blue", "id-amber", "id-teal"]);
-    expect(section.items.map((c) => c.pill?.label)).toEqual(GENESIS_STARTERS.map((s) => s.role));
-    expect(section.items.map((c) => c.footnote)).toEqual(GENESIS_STARTERS.map((s) => s.blurb));
-    for (const [i, card] of section.items.entries()) {
-      expect(card.actions).toEqual([
-        {
-          type: "author-archetype",
-          label: `Author ${GENESIS_STARTERS[i]?.name}`,
-          glyph: "✦",
-          payload: { slug: GENESIS_STARTERS[i]?.slug },
-        },
-      ]);
-    }
+    // Compact label: name + role (not the fuller tagline an open-seat action carries).
+    expect(section.items.map((i) => i.label)).toEqual(
+      GENESIS_STARTERS.map((s) => `${s.name} — ${s.role}`),
+    );
+    // Seats 0/1/2 preview blue/amber/teal — every seat is free at cold start.
+    expect(section.items.map((i) => i.tone)).toEqual(["id-blue", "id-amber", "id-teal"]);
+    expect(section.items.map((i) => (i.payload as { slug: string }).slug)).toEqual(
+      GENESIS_STARTERS.map((s) => s.slug),
+    );
+    for (const item of section.items) expect(item.glyph).toBe("✦");
   });
 
   test("a describe-own action carries the verbatim brief field", () => {
@@ -116,14 +111,13 @@ describe("buildRosterBoard cold start", () => {
     ]);
   });
 
-  test("a bridge caption teaches the /genesis equivalence", () => {
+  test("no genesis-rite bridge caption rides the cold start", () => {
     const board = buildRosterBoard([]);
     const bridge = board.sections
       .flatMap((s) => (s.kind === "rows" ? s.items : []))
       .find((i) => i.trailing === "genesis");
-    expect(bridge?.text).toBe(
-      "Authoring runs the genesis rite — /genesis in chat, chamber-genesis in workflows.",
-    );
+    expect(bridge).toBeUndefined();
+    expect(JSON.stringify(board)).not.toContain("genesis rite");
   });
 
   test("no what's-next journey strip — the anchor and seated nudges carry orientation", () => {
@@ -138,7 +132,7 @@ describe("buildRosterBoard cold start", () => {
     expect(actionItems(board).some((i) => i.type === "enter-mind" || i.type === "retire")).toBe(
       false,
     );
-    expect(board.sections.map((s) => s.kind)).toEqual(["rows", "actions", "rows", "cards", "rows"]);
+    expect(board.sections.map((s) => s.kind)).toEqual(["actions", "actions", "rows"]);
     // The original Chamber's void-screen line, quoted at rest.
     const last = board.sections.at(-1);
     if (last?.kind !== "rows") throw new Error("no closing rows section");
