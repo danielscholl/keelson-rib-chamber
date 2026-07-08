@@ -469,6 +469,33 @@ describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => 
   });
 });
 
+describe("buildRosterBoard header peek (roster dots + collapse hint)", () => {
+  test("cold start emits no people and no collapse hint (the launchpad stays open)", () => {
+    const board = buildRosterBoard([]);
+    expect(board.header?.people).toBeUndefined();
+    expect(board.header?.defaultCollapsed).toBeUndefined();
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("a seated roster emits identity-toned people and the collapse hint", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "a", name: "Athena", identitySlot: 0 }),
+      mind({ slug: "b", name: "Bo", identitySlot: 1 }),
+    ]);
+    expect(board.header?.defaultCollapsed).toBe(true);
+    expect(board.header?.people).toEqual([
+      { name: "Athena", tone: "id-blue" },
+      { name: "Bo", tone: "id-amber" },
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("a slotless Mind folds to a neutral dot in the peek", () => {
+    const board = buildRosterBoard([mind({ slug: "a", name: "Ada" })]);
+    expect(board.header?.people).toEqual([{ name: "Ada", tone: "neutral" }]);
+  });
+});
+
 describe("buildRosterBoard convene composer", () => {
   const two = [
     mind({ slug: "a", name: "Ada", identitySlot: 0 }),
