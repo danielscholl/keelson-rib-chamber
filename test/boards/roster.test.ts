@@ -493,6 +493,7 @@ describe("buildRosterBoard header peek (roster dots + collapse hint)", () => {
   test("a slotless Mind folds to a neutral dot in the peek", () => {
     const board = buildRosterBoard([mind({ slug: "a", name: "Ada" })]);
     expect(board.header?.people).toEqual([{ name: "Ada", tone: "neutral" }]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 });
 
