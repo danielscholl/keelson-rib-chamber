@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.20.0...v0.21.0) (2026-07-08)
+
+
+### Added
+
+* **convene:** move convening into its own collapsible region ([#179](https://github.com/danielscholl/keelson-rib-chamber/issues/179)) ([acb6215](https://github.com/danielscholl/keelson-rib-chamber/commit/acb62153ec63c7ad3a8d39cf871f7f06982dab90))
+
 ## [0.20.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.19.0...v0.20.0) (2026-07-08)
 
 
