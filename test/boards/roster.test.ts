@@ -155,7 +155,6 @@ describe("buildRosterBoard genesis boot card", () => {
   test("a pending genesis renders a boot card in the next free seat, with a live elapsed count", () => {
     const board = buildRosterBoard(
       [mind({ slug: "a", identitySlot: 0 })],
-      new Set(),
       undefined,
       pending({ name: "Mycroft", role: "Research Partner" }),
       START + 38_000,
@@ -178,7 +177,7 @@ describe("buildRosterBoard genesis boot card", () => {
   });
 
   test("a freeform brief (no name/role) holds 'calibrating…' and titles the seat Genesis", () => {
-    const board = buildRosterBoard([], new Set(), undefined, pending(), START + 4_000);
+    const board = buildRosterBoard([], undefined, pending(), START + 4_000);
     const boot = cards(board).find((c) => c.title === "Genesis");
     expect(boot).toBeDefined();
     const values = boot?.fields?.map((f) => String(f.value)) ?? [];
@@ -189,7 +188,6 @@ describe("buildRosterBoard genesis boot card", () => {
   test("past the stall window the boot card flips to a warn card with a Dismiss action", () => {
     const board = buildRosterBoard(
       [],
-      new Set(),
       undefined,
       pending({ name: "Mycroft" }),
       START + 200_000, // > 180s stall window
@@ -203,7 +201,6 @@ describe("buildRosterBoard genesis boot card", () => {
   test("an unparseable startedAt (a hand-edited marker) renders the dismissable stalled card", () => {
     const board = buildRosterBoard(
       [],
-      new Set(),
       undefined,
       { startedAt: "not-a-date", name: "Mycroft" },
       START,
@@ -217,7 +214,7 @@ describe("buildRosterBoard genesis boot card", () => {
   });
 
   test("the quiet Author action and lone-Mind nudge are withheld while a genesis is pending", () => {
-    const one = buildRosterBoard([mind({ slug: "a" })], new Set(), undefined, pending(), START);
+    const one = buildRosterBoard([mind({ slug: "a" })], undefined, pending(), START);
     expect(
       one.sections
         .flatMap((s) => (s.kind === "rows" ? s.items : []))
@@ -425,16 +422,15 @@ describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => 
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
-  test("the launchpad sits below the convene composer at >= 2 minds", () => {
+  test("the launchpad is present at >= 2 minds; no convene composer rides the roster", () => {
     const board = buildRosterBoard([
       mind({ slug: "a", name: "Ada" }),
       mind({ slug: "b", name: "Bo" }),
     ]);
-    const titles = board.sections.map((s) => (s.kind === "actions" ? s.title : undefined));
-    const who = titles.indexOf("Convene a room — who's in");
-    const author = titles.indexOf("Author another Mind");
-    expect(who).toBeGreaterThanOrEqual(0);
-    expect(author).toBeGreaterThan(who);
+    expect(actionsSection(board, "Author another Mind")?.kind).toBe("actions");
+    // Convening moved to its own region — the roster is Minds-only now.
+    expect(actionsSection(board, "Convene a room — who's in")).toBeUndefined();
+    expect(actionsSection(board, "…and how")).toBeUndefined();
   });
 
   test("one Mind seated points forward with a 'seat a second' nudge above the launchpad", () => {
@@ -443,10 +439,10 @@ describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => 
       .flatMap((s) => (s.kind === "rows" ? s.items : []))
       .find((i) => i.trailing === "next");
     expect(nudge?.text).toBe("Seat a second Mind to convene a Room.");
-    // No convene composer yet at one Mind, but the launchpad is there to author #2.
+    // No convene composer rides the roster; the launchpad is there to author #2.
     expect(actionsSection(board, "Convene a room — who's in")).toBeUndefined();
     expect(launchpad(board)?.kind).toBe("actions");
-    // The nudge is gone once a second Mind is seated (the composer takes over).
+    // The lone-Mind nudge is gone once a second Mind is seated.
     const two = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
     expect(
       two.sections
@@ -459,7 +455,6 @@ describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => 
     const START = Date.parse("2026-07-05T18:00:00.000Z");
     const board = buildRosterBoard(
       [mind({ slug: "a", identitySlot: 0 })],
-      new Set(),
       undefined,
       { startedAt: new Date(START).toISOString() },
       START,
@@ -497,114 +492,6 @@ describe("buildRosterBoard header peek (roster dots + collapse hint)", () => {
   });
 });
 
-describe("buildRosterBoard convene composer", () => {
-  const two = [
-    mind({ slug: "a", name: "Ada", identitySlot: 0 }),
-    mind({ slug: "b", name: "Bo", identitySlot: 1 }),
-  ];
-
-  function whoChips(board: ReturnType<typeof buildRosterBoard>) {
-    const section = actionsSection(board, "Convene a room — who's in");
-    if (section?.kind !== "actions") throw new Error("no who's-in section");
-    return section.items;
-  }
-  function shapes(board: ReturnType<typeof buildRosterBoard>) {
-    const section = actionsSection(board, "…and how");
-    return section?.kind === "actions" ? section.items : [];
-  }
-
-  test("the cast wraps as toggle chips; the shapes are a single-select tabs strip", () => {
-    const board = buildRosterBoard(two);
-    const who = actionsSection(board, "Convene a room — who's in");
-    const how = actionsSection(board, "…and how");
-    expect(who?.kind === "actions" && who.wrap).toBe(true);
-    expect(how?.kind === "actions" && how.tabs).toBe(true);
-    expect(how?.kind === "actions" && how.wrap).toBeFalsy();
-  });
-
-  test("shape chips carry short labels; the mechanism is taught by each form", () => {
-    const items = shapes(buildRosterBoard(two));
-    expect(items.map((i) => i.label)).toEqual([
-      "Discussion",
-      "Debate",
-      "Open floor",
-      "Review",
-      "Build",
-    ]);
-  });
-
-  test("who's-in chips are identity-toned draft-set toggles, one per Mind", () => {
-    const board = buildRosterBoard(two);
-    expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const chips = whoChips(board);
-    expect(chips.map((c) => c.type)).toEqual(["draft-set", "draft-set"]);
-    for (const chip of chips) expect(chip.glyph).toBe("✓");
-    expect(chips.map((c) => c.tone)).toEqual(["id-blue", "id-amber"]);
-    expect(chips.map((c) => c.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
-    expect(chips.map((c) => c.label)).toEqual(["Ada", "Bo"]);
-  });
-
-  test("an excluded slug renders unselected (+ glyph); others stay selected (✓)", () => {
-    const board = buildRosterBoard(two, new Set(["a"]));
-    const bySlug = new Map(
-      whoChips(board).map((c) => [(c.payload as { slug: string }).slug, c.glyph]),
-    );
-    expect(bySlug.get("a")).toBe("+");
-    expect(bySlug.get("b")).toBe("✓");
-  });
-
-  test("the five room shapes appear at >= 2 selected, each dispatching convene with its strategy", () => {
-    const items = shapes(buildRosterBoard(two));
-    expect(items.map((i) => i.type)).toEqual([
-      "convene",
-      "convene",
-      "convene",
-      "convene",
-      "convene",
-    ]);
-    expect(items.map((i) => (i.payload as { strategy: string }).strategy)).toEqual([
-      "sequential",
-      "group-chat",
-      "open-floor",
-      "review",
-      "magentic",
-    ]);
-    // The server reads the draft — no shape bakes participants into its payload.
-    for (const i of items) expect(i.payload ?? {}).not.toHaveProperty("participants");
-  });
-
-  test("the Debate shape collects a moderator; Build collects a manager + project", () => {
-    const items = shapes(buildRosterBoard(two));
-    const byStrategy = new Map(items.map((i) => [(i.payload as { strategy: string }).strategy, i]));
-    expect(byStrategy.get("group-chat")?.fields?.map((f) => f.name)).toEqual([
-      "topic",
-      "moderator",
-      "turns",
-    ]);
-    expect(byStrategy.get("magentic")?.fields?.map((f) => f.name)).toEqual([
-      "topic",
-      "manager",
-      "project",
-      "turns",
-    ]);
-    expect(byStrategy.get("sequential")?.fields?.map((f) => f.name)).toEqual(["topic", "project"]);
-  });
-
-  test("shapes are absent below 2 selected, but the chips stay (so the operator can re-select)", () => {
-    const board = buildRosterBoard(two, new Set(["a"]));
-    expect(whoChips(board)).toHaveLength(2);
-    expect(shapes(board)).toHaveLength(0);
-  });
-
-  test("shapes are absent when all are excluded", () => {
-    expect(shapes(buildRosterBoard(two, new Set(["a", "b"])))).toHaveLength(0);
-  });
-
-  test("no room-start action remains anywhere on the board", () => {
-    expect(actionItems(buildRosterBoard(two)).some((i) => i.type === "room-start")).toBe(false);
-  });
-});
-
 describe("buildRosterBoard pulse (leads the board)", () => {
   const two = [mind({ slug: "a", name: "Ada" }), mind({ slug: "b", name: "Bo" })];
 
@@ -613,12 +500,12 @@ describe("buildRosterBoard pulse (leads the board)", () => {
     expect(
       omitted.sections.some((s) => s.kind === "rows" && s.items[0]?.trailing === "Briefing"),
     ).toBe(false);
-    const quiet = buildRosterBoard(two, new Set(), { forYou: false });
+    const quiet = buildRosterBoard(two, { forYou: false });
     expect(quiet.sections).toEqual(omitted.sections);
   });
 
   test("forYou:true leads the board with one quiet rows line", () => {
-    const board = buildRosterBoard(two, new Set(), { forYou: true });
+    const board = buildRosterBoard(two, { forYou: true });
     const first = board.sections[0];
     expect(first?.kind).toBe("rows");
     if (first?.kind !== "rows") throw new Error("expected a rows section");
@@ -629,7 +516,7 @@ describe("buildRosterBoard pulse (leads the board)", () => {
   });
 
   test("the pulse leads even the cold-start board and stays valid", () => {
-    const board = buildRosterBoard([], new Set(), { forYou: true });
+    const board = buildRosterBoard([], { forYou: true });
     expect(board.sections[0]?.kind).toBe("rows");
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });

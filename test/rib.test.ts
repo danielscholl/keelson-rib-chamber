@@ -186,9 +186,17 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:activity");
   });
 
-  it("the standing row is Rooms + Lenses only — the Activity + Digest panels folded into the Briefing", () => {
-    const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) => r.columns);
-    expect(cols.map((c) => c.key)).toEqual(["rib:chamber:rooms", "rib:chamber:lenses"]);
+  it("Convene leads in its own collapsible row above the Rooms + Lenses row", () => {
+    const rows = rib.surfaces?.[0]?.layout.rows ?? [];
+    expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
+      ["rib:chamber:convene"],
+      ["rib:chamber:rooms", "rib:chamber:lenses"],
+    ]);
+    // Convene is in-process (no workflow binding) and folds to its head bar.
+    const convene = rows[0]?.columns[0];
+    expect(convene?.workflow).toBeUndefined();
+    expect(convene?.collapsible).toBe(true);
+    const cols = rows.flatMap((r) => r.columns);
     // Neither what's-happening narrator has a standing column anymore.
     expect(cols.some((c) => c.key === "rib:chamber:activity")).toBe(false);
     expect(cols.some((c) => c.key === "rib:chamber:digest")).toBe(false);
