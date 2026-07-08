@@ -65,10 +65,9 @@ function facilitatorField(
   };
 }
 
-interface ShapeEval {
-  readonly ok: boolean;
-  readonly reason: string;
-}
+// A gated shape carries the reason it can't run; an enabled one carries none —
+// `reason` is the canvas contract's disabled-explanation (reason ⇒ disabled).
+type ShapeEval = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
 // Can this shape run against the current cast? Mirrors the structural slice of
 // validateStart (2+ speakers, a non-participant facilitator, a cross-vendor Review
@@ -79,17 +78,11 @@ function evalShape(strategy: string, cast: readonly Mind[], out: readonly Mind[]
   switch (strategy) {
     case "group-chat":
       return out.length > 0
-        ? {
-            ok: true,
-            reason: "A chair — a Mind who isn’t debating — keeps order and calls the close.",
-          }
+        ? { ok: true }
         : { ok: false, reason: "Every Mind is in — free one from the cast to chair." };
     case "magentic":
       return out.length > 0
-        ? {
-            ok: true,
-            reason: "A manager — a Mind who isn’t building — plans the work and assigns it.",
-          }
+        ? { ok: true }
         : { ok: false, reason: "Every Mind is in — free one from the cast to manage." };
     case "review": {
       if (cast.length !== 2) {
@@ -105,12 +98,10 @@ function evalShape(strategy: string, cast: readonly Mind[], out: readonly Mind[]
           reason: `${a.name} and ${b.name} both use “${a.provider}” — review needs two vendors.`,
         };
       }
-      return { ok: true, reason: "Two Minds of different vendors, for a second opinion." };
+      return { ok: true };
     }
-    case "open-floor":
-      return { ok: true, reason: "Minds speak up in any order until the turns run out." };
     default:
-      return { ok: true, reason: "Everyone in the cast speaks in turn." };
+      return { ok: true };
   }
 }
 
@@ -161,9 +152,8 @@ function shapeActions(
       label: s.label,
       glyph: s.glyph,
       payload: { strategy: s.strategy },
-      reason: gate.reason,
     };
-    if (!gate.ok) return { ...base, disabled: true };
+    if (!gate.ok) return { ...base, disabled: true, reason: gate.reason };
     return { ...base, fields: s.fields.filter((f): f is CanvasActionField => f !== null) };
   });
 }
