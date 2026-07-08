@@ -8,6 +8,7 @@ import {
   EXTERNAL_CAPABILITY_SLUGS,
   externalToolPool,
   KNOWN_CAPABILITY_SLUGS,
+  readToolPool,
   resolveMindTools,
 } from "../src/capabilities.ts";
 import { LENS_TOOL_NAME } from "../src/lens.ts";
@@ -118,6 +119,20 @@ describe("coding capability tier", () => {
       [...CODING_CAPABILITY_SLUGS].flatMap((s) => [...(CAPABILITIES[s]?.tools ?? [])]),
     );
     expect(new Set(codingToolPool().map((t) => t.name))).toEqual(fromMap);
+  });
+});
+
+describe("read tier pool", () => {
+  test("readToolPool is exactly the `read` slug's tools (Read), derived from CAPABILITIES", () => {
+    expect(readToolPool()).toEqual([{ name: "Read" }]);
+    expect(new Set(readToolPool().map((t) => t.name))).toEqual(
+      new Set(CAPABILITIES.read?.tools ?? []),
+    );
+  });
+
+  test("readToolPool is a subset of the coding pool — the coding tier already includes Read", () => {
+    const coding = new Set(codingToolPool().map((t) => t.name));
+    for (const t of readToolPool()) expect(coding.has(t.name)).toBe(true);
   });
 });
 

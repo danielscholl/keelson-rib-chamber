@@ -15,7 +15,10 @@ export const CAPABILITIES: Readonly<
   Record<string, { readonly tools: readonly string[]; readonly summary: string }>
 > = {
   lens: { tools: [LENS_TOOL_NAME], summary: "author a live canvas board mid-room" },
-  read: { tools: ["Read"], summary: "read files in the room's project (coding rooms only)" },
+  read: {
+    tools: ["Read"],
+    summary: "read files in the room's project (auto-granted in project rooms)",
+  },
   code: {
     tools: ["Bash", "Edit", "Write"],
     summary: "edit files and run commands in the room's project (coding rooms only)",
@@ -53,6 +56,16 @@ export function codingToolPool(): { name: string }[] {
     for (const name of CAPABILITIES[slug]?.tools ?? []) names.add(name);
   }
   return [...names].map((name) => ({ name }));
+}
+
+// The read-only pool the driver grants every speaker in a room that targets a
+// resolvable project, confined to the project root. Selecting a project is the grant
+// — no per-Mind `read` declaration and no coding tier needed — so a Discussion is
+// grounded in the actual repo. Read is safe enough to grant room-wide (it can't
+// mutate); write/exec stays the two-key coding tier. Derived from CAPABILITIES so it
+// can't drift from what the `read` slug resolves to.
+export function readToolPool(): { name: string }[] {
+  return [...(CAPABILITIES.read?.tools ?? [])].map((name) => ({ name }));
 }
 
 export const EXTERNAL_CAPABILITY_SLUGS: ReadonlySet<string> = new Set(["osdu"]);

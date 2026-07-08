@@ -117,6 +117,27 @@ describe("renderTranscript windowing", () => {
   });
 });
 
+describe("buildTurnPrompt project context", () => {
+  test("renders the project context between the topic and the conversation", () => {
+    const p = buildTurnPrompt({
+      topic: "How could this be better?",
+      projectContext: 'This room is about the project "keelson-sample" (/repo).',
+      transcript: [entry({ from: "amy", parts: [{ text: "opening" }] })],
+    });
+    const topicAt = p.indexOf("Room topic:");
+    const projAt = p.indexOf("This room is about the project");
+    const convoAt = p.indexOf("Conversation so far:");
+    expect(topicAt).toBeGreaterThanOrEqual(0);
+    expect(projAt).toBeGreaterThan(topicAt);
+    expect(convoAt).toBeGreaterThan(projAt);
+  });
+
+  test("omits the project context when not provided (a non-project room is unchanged)", () => {
+    const p = buildTurnPrompt({ topic: "T", transcript: [] });
+    expect(p).not.toContain("This room is about the project");
+  });
+});
+
 describe("buildModeratorPrompt", () => {
   test("non-empty with no topic/transcript; lists participants and the control vocabulary", () => {
     const p = buildModeratorPrompt({ transcript: [], participants: ["a", "b"] });
