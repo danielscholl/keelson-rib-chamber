@@ -31,12 +31,15 @@ export function renderTranscript(transcript: readonly TurnEntry[]): string {
 // is no history yet — omit `emptyContext` (synthesis) to push nothing. Pure.
 function promptPreamble(input: {
   topic?: string;
+  projectContext?: string;
   transcript: readonly TurnEntry[];
   emptyContext?: string;
 }): string[] {
   const parts: string[] = [];
   const topic = input.topic?.trim();
   if (topic) parts.push(`Room topic: ${topic}`);
+  const projectContext = input.projectContext?.trim();
+  if (projectContext) parts.push(projectContext);
   const context = renderTranscript(input.transcript);
   if (context.length > 0) parts.push(`Conversation so far:\n\n${context}`);
   else if (input.emptyContext) parts.push(input.emptyContext);
@@ -50,11 +53,13 @@ function promptPreamble(input: {
 // CLI errors on that). Pure.
 export function buildTurnPrompt(input: {
   topic?: string;
+  projectContext?: string;
   transcript: readonly TurnEntry[];
   directionInjection?: string;
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.projectContext ? { projectContext: input.projectContext } : {}),
     transcript: input.transcript,
     emptyContext: "You are the first to speak — open the discussion.",
   });

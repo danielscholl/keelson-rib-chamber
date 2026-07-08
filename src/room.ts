@@ -86,6 +86,13 @@ export interface RoomDriverDeps {
   // cwd via allowedDirectories — granting and confining are one decision. Omitted
   // keeps every room text-only/lens (the coding tier is unavailable).
   codingTools?: readonly { name: string }[];
+  // The read-only pool (host built-in: Read) granted to EVERY speaker in a room that
+  // targets a resolvable project, confined to the project root — independent of the
+  // coding tier and of any per-Mind `read` declaration. Selecting a project is the
+  // grant, so a Discussion is grounded in the actual repo rather than reasoning blind.
+  // Read can't mutate, so it's safe room-wide; write/exec stays the coding tier.
+  // Omitted keeps project rooms text-only (the read tier is unavailable).
+  readTools?: readonly { name: string }[];
   now?: () => Date;
   newId?: () => string;
 }
@@ -555,18 +562,35 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return undefined;
   }
 
+  // The room's targeted project root, or undefined when there is no target, the host
+  // no longer knows it (deleted mid-room), or its rootPath is empty/whitespace
+  // (rootPath is `z.string()`, no min length). Resolved per turn so the projects store
+  // stays the single source of truth. This IS the read grant + confinement boundary.
+  function roomProjectRoot(room: Room): string | undefined {
+    if (!room.projectId) return undefined;
+    return deps.resolveProjectRoot?.(room.projectId)?.trim() || undefined;
+  }
+
   // Resolve a turn's cwd. A project-targeted room runs at the project root
-  // (path-as-context, as chat/workflows do); otherwise — including a targeted
-  // project the host no longer knows (deleted mid-room) or one whose root is
-  // empty/whitespace (rootPath is `z.string()`, no min length) — it keeps the
-  // neutral turnCwd, so a turn never falls through to the seam's process-tmpdir
-  // default. Resolved per turn so the projects store stays the single source of truth.
+  // (path-as-context, as chat/workflows do); otherwise it keeps the neutral turnCwd,
+  // so a turn never falls through to the seam's process-tmpdir default.
   function turnCwdFor(room: Room): string | undefined {
-    if (room.projectId) {
-      const root = deps.resolveProjectRoot?.(room.projectId)?.trim();
-      return root || deps.turnCwd;
-    }
-    return deps.turnCwd;
+    return roomProjectRoot(room) ?? deps.turnCwd;
+  }
+
+  // Prompt context for a project-targeted room: names the project (and root) so the
+  // discussion is grounded in a real repo, and — when the read tier is available —
+  // tells speakers to read it rather than reason from assumptions. Undefined when no
+  // project resolves, so a non-project room's prompt is unchanged.
+  function projectContextFor(room: Room): string | undefined {
+    const root = roomProjectRoot(room);
+    if (!root) return undefined;
+    const name = room.projectId ? deps.resolveProjectName?.(room.projectId)?.trim() : undefined;
+    const label = name ? `"${name}" (${root})` : root;
+    const readLine = deps.readTools?.length
+      ? " Ground your points in that actual project — use the Read tool to inspect its files (README, source, config) rather than reasoning from assumptions."
+      : "";
+    return `This room is about the project ${label}.${readLine}`;
   }
 
   // Run one agent turn and return its reply text + aborted flag, or "disposed" if
@@ -605,13 +629,20 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       aborted = true;
     } else {
       const cwd = turnCwdFor(room);
+      const projectRoot = roomProjectRoot(room);
       // Granting coding tools and confining the turn are one decision: the coding
       // pool is offered only when there is a real cwd to bound it to (project root,
       // or the neutral home if the project vanished), so a coding turn never runs
       // unconfined. The host enforces the boundary off allowedDirectories. The cwd
       // truthiness check is load-bearing: an empty root would confine to nothing.
       const coding = Boolean(room.coding) && Boolean(cwd);
-      const confineRoot = coding ? cwd : undefined;
+      // The read tier: a room that targets a resolvable project grants Read to EVERY
+      // speaker, confined to the project root — no per-Mind `read` needed and no coding
+      // tier — so a Discussion can read the repo it's about. Distinct from coding: read
+      // is confined to the project root only (never the neutral-home fallback), since
+      // there's nothing safe to read outside the targeted project.
+      const readGrant = Boolean(projectRoot) && Boolean(deps.readTools?.length);
+      const confineRoot = coding ? cwd : readGrant ? projectRoot : undefined;
       const pool =
         coding && deps.codingTools?.length
           ? [...(deps.turnTools ?? []), ...deps.codingTools]
@@ -621,7 +652,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // text-only. The Mind's model/provider pin is honoured (provider alongside
       // model so a cross-provider pin resolves coherently here, the same as a
       // direct /mind chat — not just against the default provider).
-      const tools = resolveMindTools(mind, pool);
+      const declared = resolveMindTools(mind, pool);
+      // Layer the room-level read grant on top, deduped — a code-declaring Mind in a
+      // coding room already carries Read, so this only adds it for those that don't.
+      const tools = readGrant
+        ? [
+            ...declared,
+            ...(deps.readTools ?? []).filter((t) => !declared.some((d) => d.name === t.name)),
+          ]
+        : declared;
       const turn = deps.runAgentTurn({
         system,
         prompt,
@@ -759,8 +798,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         ...(room.coding ? { coding: true } : {}),
       });
     }
+    const projectContext = projectContextFor(room);
     return buildTurnPrompt({
       ...(room.topic ? { topic: room.topic } : {}),
+      ...(projectContext ? { projectContext } : {}),
       transcript,
       ...(directionInjection ? { directionInjection } : {}),
     });

@@ -38,6 +38,7 @@ import {
   codingToolPool,
   externalToolPool,
   KNOWN_CAPABILITY_SLUGS,
+  readToolPool,
 } from "./capabilities.ts";
 import {
   buildChamberState,
@@ -1899,6 +1900,10 @@ const rib: Rib = {
         // The coding pool (host built-ins), always handed over but inert until a
         // room opts in (room.coding) and is confined — the tier is gated per-room.
         codingTools: codingToolPool(),
+        // The read pool (host built-in: Read), granted to every speaker in a room that
+        // targets a project, confined to the project root — so a Discussion can read
+        // the repo it's about without the coding tier or a per-Mind `read` declaration.
+        readTools: readToolPool(),
       });
       queueRoomRetentionSweep();
       // Expose the room controls as chat tools (start / say / stop / status),
