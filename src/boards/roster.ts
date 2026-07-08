@@ -5,7 +5,7 @@ import type {
   CanvasTone,
 } from "@keelson/shared";
 import type { PendingGenesis } from "../pending-genesis.ts";
-import { GENESIS_STARTERS, type GenesisStarter } from "../starters.ts";
+import { GENESIS_STARTERS } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from "../types.ts";
 
 // The Chamber pulse: the one "for you" signal (a waiting briefing) the roster
@@ -17,17 +17,6 @@ import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from
 export interface RosterPulse {
   forYou: boolean;
 }
-
-// The cold-start orientation sentence — what a Chamber is, and the single next act.
-const ANCHOR =
-  "A Chamber is a team of persistent Minds you author — they chat with you, meet each other in Rooms, and keep Lenses for ongoing work. Author your first Mind to start the Chamber.";
-
-// The bridge caption under the authoring actions: "Author" is the verb on the
-// button, but genesis is the project's own word (the /genesis command, the
-// chamber-genesis workflow), so the surface teaches the equivalence at the moment
-// the operator performs it rather than hiding it.
-const GENESIS_BRIDGE =
-  "Authoring runs the genesis rite — /genesis in chat, chamber-genesis in workflows.";
 
 // The freeform-brief hero: the authored, personal path (describe a Mind in your own
 // words). `glyph`/`label`/`tone` vary by placement — the cold-start hero is the
@@ -59,11 +48,16 @@ function describeOwnAction(variant: "hero" | "seat"): CanvasActionItem {
 function starterAction(
   starter: (typeof GENESIS_STARTERS)[number],
   free?: ReadonlySet<number>,
+  opts?: { compact?: boolean },
 ): CanvasActionItem {
   const seatFree = !free || free.has(starter.seat);
   return {
     type: "author-archetype",
-    label: `${starter.name} — ${starter.tagline}`,
+    // The cold-start chip row wants the tight name + role; an open seat's action
+    // carries the fuller tagline (it has the card's room for it).
+    label: opts?.compact
+      ? `${starter.name} — ${starter.role}`
+      : `${starter.name} — ${starter.tagline}`,
     glyph: "✦",
     ...(seatFree ? { tone: identityToneForSlot(starter.seat) } : {}),
     payload: { slug: starter.slug },
@@ -141,7 +135,6 @@ export function buildRosterBoard(
         label: `${minds.length} ${minds.length === 1 ? "mind" : "minds"}`,
         tone: "brand" as CanvasTone,
       },
-      chip: "roster",
     },
     sections,
   };
@@ -418,50 +411,23 @@ function shapeActions(): CanvasActionItem[] {
   ];
 }
 
-// A starter archetype as a seated-alternative card: the seat hue it will wear, the
-// role as its pill, the voice's energy as the footnote, one Author action. The cold
-// start is the only caller — every seat is free there, so the hue preview is truthful.
-function starterCard(starter: GenesisStarter) {
-  return {
-    title: starter.name,
-    dot: identityToneForSlot(starter.seat),
-    pill: { label: starter.role },
-    footnote: starter.blurb,
-    actions: [
-      {
-        type: "author-archetype",
-        label: `Author ${starter.name}`,
-        glyph: "✦",
-        payload: { slug: starter.slug },
-      },
-    ],
-  };
-}
-
-// The cold-start launchpad, mirroring the design review's hero hierarchy: the anchor
-// sentence, the freeform brief open inline under "Genesis — author a Mind" (the one
-// filled button on the board), the /genesis bridge caption, the starter voices as
-// seated-alternative cards below an "or" divider, and the void screen's line at rest.
-// No what's-next strip: the anchor names the journey and the seated roster's own
-// nudges teach Meet/Convene when they become actionable. No locked Rooms/Lenses
-// panels; no "convene <slug>".
+// The cold-start launchpad: the freeform brief open inline under "Genesis — author a
+// Mind" (the board's one filled button), then the three starter voices as a compact
+// "or seat a starter" chip row beneath it, and the void screen's line at rest. While a
+// genesis runs the boot card in the seat replaces this stillness with a live count.
 function coldStartSections(): CanvasBoardView["sections"] {
   return [
-    { kind: "rows", items: [{ glyph: "brand", text: ANCHOR }] },
     {
       kind: "actions",
       title: "Genesis — author a Mind",
       items: [describeOwnAction("hero")],
     },
-    { kind: "rows", items: [{ glyph: "neutral", text: GENESIS_BRIDGE, trailing: "genesis" }] },
     {
-      kind: "cards",
+      kind: "actions",
       title: "Or seat a starter voice",
-      boxed: true,
-      items: GENESIS_STARTERS.map(starterCard),
+      wrap: true,
+      items: GENESIS_STARTERS.map((s) => starterAction(s, undefined, { compact: true })),
     },
-    // The original Chamber's void screen, quoted at rest — while a genesis runs, the
-    // boot card in the seat replaces this stillness with a live count.
     { kind: "rows", items: [{ glyph: "neutral", text: "awaiting genesis." }] },
   ];
 }

@@ -1383,6 +1383,10 @@ const rib: Rib = {
       id: CHAMBER_SURFACE_ID,
       title: "Chamber",
       subtitle: "Author Minds · convene Rooms · keep Lenses · read the Briefing",
+      // Chamber panels are an authoring console, not snapshot cards to lift into chat,
+      // so drop the host's per-region explore/select/expand chrome. Board actions
+      // (Enter a Mind, room controls) still flow — only the head-strip icons go.
+      hideRegionActions: true,
       layout: {
         header: {
           key: ROSTER_KEY,
