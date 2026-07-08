@@ -23,7 +23,9 @@ function cards(board: ReturnType<typeof buildRosterBoard>) {
   if (section?.kind !== "cards") throw new Error("no cards section");
   return section.items;
 }
-// The seated Minds only (open-seat ghosts share the cards section but title "Open seat").
+// The seated Mind cards only (a pending genesis's boot card also rides the cards
+// section, but carries a pill). openSeats survives to assert the old dashed grid is
+// gone — no card is titled "Open seat" anymore.
 function mindCards(board: ReturnType<typeof buildRosterBoard>) {
   return cards(board).filter((c) => c.title !== "Open seat");
 }
@@ -343,59 +345,107 @@ describe("buildRosterBoard populated", () => {
   });
 });
 
-describe("buildRosterBoard open seats (persistent authoring)", () => {
-  test("a dashed open seat renders per free identity slot, in ramp order", () => {
+describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => {
+  const launchpad = (board: ReturnType<typeof buildRosterBoard>) =>
+    actionsSection(board, "Author another Mind");
+  const launchpadStarters = (board: ReturnType<typeof buildRosterBoard>) => {
+    const section = actionsSection(board, "Or seat a starter voice");
+    return section?.kind === "actions"
+      ? section.items.filter((i) => i.type === "author-archetype")
+      : [];
+  };
+  const starterSlugs = (board: ReturnType<typeof buildRosterBoard>) =>
+    launchpadStarters(board).map((s) => (s.payload as { slug: string }).slug);
+
+  test("no open-seat cards render once a Mind is seated", () => {
     const board = buildRosterBoard([
       mind({ slug: "a", identitySlot: 0 }),
       mind({ slug: "b", name: "Bo", identitySlot: 1 }),
     ]);
-    // Two seated (blue, amber) → three open seats in teal, rose, olive.
-    const seats = openSeats(board);
-    expect(seats.map((s) => s.dot)).toEqual(["id-teal", "id-rose", "id-olive"]);
+    expect(openSeats(board)).toHaveLength(0);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
-  test("open seats honor slot gaps left by a churned roster", () => {
-    const board = buildRosterBoard([
-      mind({ slug: "a", identitySlot: 0 }),
-      mind({ slug: "c", name: "Cy", identitySlot: 2 }),
-    ]);
-    // Slots 0 and 2 taken → the free seats are 1, 3, 4 (amber, rose, olive).
-    expect(openSeats(board).map((s) => s.dot)).toEqual(["id-amber", "id-rose", "id-olive"]);
-  });
-
-  test("every open seat carries the freeform Author verb; the first also offers free starters", () => {
+  test("the launchpad offers the freeform Author brief — the shared filled hero", () => {
     const board = buildRosterBoard([mind({ slug: "a", identitySlot: 0 })]);
-    const seats = openSeats(board);
-    for (const seat of seats) {
-      expect(seat.actions?.some((x) => x.type === "describe-own")).toBe(true);
-    }
-    const firstStarters = seats[0]?.actions?.filter((x) => x.type === "author-archetype") ?? [];
-    expect(firstStarters).toHaveLength(GENESIS_STARTERS.length);
-    // Subsequent seats don't repeat the starter buttons.
-    expect(seats[1]?.actions?.some((x) => x.type === "author-archetype")).toBe(false);
+    const section = launchpad(board);
+    if (section?.kind !== "actions") throw new Error("no launchpad");
+    expect(section.items.map((i) => i.type)).toEqual(["describe-own"]);
+    const own = section.items[0];
+    // Same hero as cold start: filled brand, brief open inline.
+    expect(own?.glyph).toBe("✦");
+    expect(own?.tone).toBe("brand");
+    expect(own?.expanded).toBe(true);
   });
 
-  test("an already-seated starter is not offered again in the open seat", () => {
+  test("the launchpad's starters are a compact 'Or seat a starter voice' chip row", () => {
+    const board = buildRosterBoard([mind({ slug: "a", identitySlot: 0 })]);
+    const section = actionsSection(board, "Or seat a starter voice");
+    if (section?.kind !== "actions") throw new Error("no starter row");
+    expect(section.wrap).toBe(true);
+    // "a" is not a starter → all three starters offered, compact "name — role".
+    expect(section.items.map((i) => i.label)).toEqual(
+      GENESIS_STARTERS.map((s) => `${s.name} — ${s.role}`),
+    );
+    expect(starterSlugs(board)).toEqual(GENESIS_STARTERS.map((s) => s.slug));
+  });
+
+  test("rule 1 — an authored starter drops off the row (never offered to re-author)", () => {
     const board = buildRosterBoard([
       mind({ slug: "moneypenny", name: "Moneypenny", identitySlot: 0 }),
     ]);
-    const firstSeat = openSeats(board)[0];
-    const offered = (firstSeat?.actions ?? [])
-      .filter((x) => x.type === "author-archetype")
-      .map((x) => (x.payload as { slug: string }).slug);
+    const offered = starterSlugs(board);
     expect(offered).not.toContain("moneypenny");
     expect(offered).toContain("mycroft");
+    expect(offered).toContain("jarvis");
   });
 
-  test("one Mind seated points forward with a 'seat a second' nudge (the composer needs two)", () => {
+  test("rule 2 — a starter whose preferred hue is taken stays, but untoned", () => {
+    // "ada" claims slot 0 — Moneypenny's blue. Moneypenny is still offered (not authored)
+    // but must not promise blue (she'd land elsewhere); Mycroft (seat 1, free) keeps amber.
+    const board = buildRosterBoard([mind({ slug: "ada", name: "Ada", identitySlot: 0 })]);
+    const bySlug = new Map(
+      launchpadStarters(board).map((s) => [(s.payload as { slug: string }).slug, s]),
+    );
+    expect(bySlug.get("moneypenny")?.tone).toBeUndefined();
+    expect(bySlug.get("mycroft")?.tone).toBe("id-amber");
+  });
+
+  test("a full ramp (5 seated) still offers the freeform Author, but no starter chips", () => {
+    const five = [0, 1, 2, 3, 4].map((slot) =>
+      mind({ slug: `m${slot}`, name: `M${slot}`, identitySlot: slot }),
+    );
+    const board = buildRosterBoard(five);
+    expect(openSeats(board)).toHaveLength(0);
+    const section = launchpad(board);
+    if (section?.kind !== "actions") throw new Error("no launchpad");
+    expect(section.items.map((i) => i.type)).toEqual(["describe-own"]);
+    // Every hue is seated — no starter voices offered.
+    expect(actionsSection(board, "Or seat a starter voice")).toBeUndefined();
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("the launchpad sits below the convene composer at >= 2 minds", () => {
+    const board = buildRosterBoard([
+      mind({ slug: "a", name: "Ada" }),
+      mind({ slug: "b", name: "Bo" }),
+    ]);
+    const titles = board.sections.map((s) => (s.kind === "actions" ? s.title : undefined));
+    const who = titles.indexOf("Convene a room — who's in");
+    const author = titles.indexOf("Author another Mind");
+    expect(who).toBeGreaterThanOrEqual(0);
+    expect(author).toBeGreaterThan(who);
+  });
+
+  test("one Mind seated points forward with a 'seat a second' nudge above the launchpad", () => {
     const board = buildRosterBoard([mind({ slug: "a", identitySlot: 0 })]);
     const nudge = board.sections
       .flatMap((s) => (s.kind === "rows" ? s.items : []))
       .find((i) => i.trailing === "next");
     expect(nudge?.text).toBe("Seat a second Mind to convene a Room.");
-    // No convene composer yet at one Mind.
+    // No convene composer yet at one Mind, but the launchpad is there to author #2.
     expect(actionsSection(board, "Convene a room — who's in")).toBeUndefined();
+    expect(launchpad(board)?.kind).toBe("actions");
     // The nudge is gone once a second Mind is seated (the composer takes over).
     const two = buildRosterBoard([mind({ slug: "a" }), mind({ slug: "b", name: "Bo" })]);
     expect(
@@ -405,27 +455,17 @@ describe("buildRosterBoard open seats (persistent authoring)", () => {
     ).toBe(false);
   });
 
-  test("a starter whose preferred seat is taken is offered untoned (no false hue promise)", () => {
-    // "ada" claims slot 0 — Moneypenny's seat. The offered Moneypenny starter must not
-    // promise blue (she would land elsewhere); Mycroft (seat 1, free) keeps its amber.
-    const board = buildRosterBoard([mind({ slug: "ada", name: "Ada", identitySlot: 0 })]);
-    const starters =
-      openSeats(board)[0]?.actions?.filter((x) => x.type === "author-archetype") ?? [];
-    const bySlug = new Map(starters.map((s) => [(s.payload as { slug: string }).slug, s]));
-    expect(bySlug.get("moneypenny")?.tone).toBeUndefined();
-    expect(bySlug.get("mycroft")?.tone).toBe("id-amber");
-  });
-
-  test("a full ramp (5 seated) has no open seats but keeps a quiet Author action", () => {
-    const five = [0, 1, 2, 3, 4].map((slot) =>
-      mind({ slug: `m${slot}`, name: `M${slot}`, identitySlot: slot }),
+  test("the launchpad is withheld while a genesis is pending (the boot card owns it)", () => {
+    const START = Date.parse("2026-07-05T18:00:00.000Z");
+    const board = buildRosterBoard(
+      [mind({ slug: "a", identitySlot: 0 })],
+      new Set(),
+      undefined,
+      { startedAt: new Date(START).toISOString() },
+      START,
     );
-    const board = buildRosterBoard(five);
-    expect(openSeats(board)).toHaveLength(0);
-    const author = actionsSection(board, "Author a Mind");
-    if (author?.kind !== "actions") throw new Error("no quiet Author action");
-    expect(author.items.map((i) => i.type)).toEqual(["describe-own"]);
-    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(actionsSection(board, "Author another Mind")).toBeUndefined();
+    expect(actionsSection(board, "Or seat a starter voice")).toBeUndefined();
   });
 });
 

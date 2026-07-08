@@ -3018,7 +3018,7 @@ async function describeOwnAction(action: RibAction): Promise<RibActionResult> {
 }
 
 // Dismiss a stalled (or unwanted) genesis boot card: stop the tick, clear the marker,
-// and refresh the roster so the seat returns to an open seat. A deterministic, free
+// and refresh the roster so the seat frees back to the launchpad. A deterministic, free
 // state clear — not paid, not a workflow.
 async function dismissGenesisAction(): Promise<RibActionResult> {
   await endGenesis();
