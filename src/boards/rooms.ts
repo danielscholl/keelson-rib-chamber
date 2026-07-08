@@ -145,7 +145,7 @@ function emptySections(): CanvasBoardView["sections"] {
       items: [
         {
           glyph: "neutral",
-          text: "No sessions yet. Convene a Room from the Roster; it appears here while live, and stays as history once it ends.",
+          text: "No sessions yet. Convene a Room above; it appears here while live, and stays as history once it ends.",
         },
       ],
     },

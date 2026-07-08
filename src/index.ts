@@ -30,6 +30,7 @@ import {
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
 import { recordSection } from "./boards/activity.ts";
+import { buildConveneBoard, type ConveneProject } from "./boards/convene.ts";
 import { buildRoomBoard } from "./boards/room.ts";
 import {
   capabilityVocabulary,
@@ -113,6 +114,7 @@ import { readWatermark, writeWatermark } from "./watermark-store.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
+const CONVENE_KEY = "rib:chamber:convene";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
 const DIGEST_KEY = "rib:chamber:digest";
@@ -303,6 +305,33 @@ function resolveMindByNameOrId(minds: readonly Mind[], input: string): string | 
     minds.find((m) => m.slug === trimmed)?.slug ??
     minds.find((m) => m.name.toLowerCase() === trimmed.toLowerCase())?.slug
   );
+}
+
+// The Convene composer is an in-process snapshot (like the Briefing footer, not a
+// bound collector) because its shape gating and project picker need the host's live
+// project list — an out-of-process collector can't reach ctx.getProjects. Registered
+// in registerTools and recomposed whenever the Minds it draws chips + capability
+// gating from change (the refreshWorkflow wrapper below) or on a draft/convene mutation.
+let conveneSm: SnapshotManager | undefined;
+let conveneUnregister: (() => void) | undefined;
+
+async function composeConveneBoard(): Promise<CanvasView> {
+  const [minds, excluded, rooms] = await Promise.all([
+    readMinds(mindsDir()).catch(() => [] as Mind[]),
+    readDraftExclusion().catch(() => new Set<string>()),
+    listRooms(roomsDir()).catch(() => [] as Room[]),
+  ]);
+  const projects: ConveneProject[] = (getProjects?.() ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+  }));
+  return buildConveneBoard(minds, excluded, projects, rooms.length);
+}
+
+// Fire-and-forget recompose of the Convene board. No-op until registerTools has bound
+// it to a snapshot manager (fail closed on an older harness).
+function refreshConvene(): void {
+  void conveneSm?.recompose(CONVENE_KEY).catch(() => {});
 }
 // The briefing gate's seams + state, captured in registerTools (the only hook with
 // the full ctx). The publisher routes the brief board to BRIEF_KEY; briefRunAgentTurn
@@ -1331,6 +1360,7 @@ const FRAME_SAFE_ACTIONS: ReadonlySet<string> = new Set(["lens-html", "lens-open
 // registry's declareView seam pushes/removes entries; the statics stay fixed.
 const RIB_VIEWS: RibViewDescriptor[] = [
   { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
+  { key: CONVENE_KEY, canvasKind: "view", title: "Convene" },
   { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
   { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
   // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
@@ -1407,6 +1437,20 @@ const rib: Rib = {
           glyph: { char: "◇", tone: "brand" },
         },
         rows: [
+          {
+            columns: [
+              {
+                key: CONVENE_KEY,
+                title: "Convene",
+                // In-process board (no workflow binding): the rib recomposes it on a
+                // roster/draft/convene mutation, not on cadence. Collapsible so it folds
+                // to its head bar once rooms exist (the board's defaultCollapsed hint),
+                // a one-click open when you want it — the empty-state cold.
+                collapsible: true,
+                glyph: { char: "＋", tone: "brand" },
+              },
+            ],
+          },
           {
             columns: [
               {
@@ -1679,7 +1723,17 @@ const rib: Rib = {
     if (dataDir) setChamberDataHome(dataDir);
     // Capture the refresh seam for onAction handlers (room-delete refreshes the
     // sessions index). dispose() clears it so a re-boot recaptures the new ctx's.
-    refreshWorkflow = ctx.refreshWorkflow;
+    // Wrapped so any roster refresh (genesis, retire, set-model — a Mind or its
+    // provider changed) also recomposes the in-process Convene board, whose chips +
+    // capability gating draw from the same Minds; draft-set / convene call
+    // refreshConvene directly.
+    const rawRefresh = ctx.refreshWorkflow;
+    refreshWorkflow = rawRefresh
+      ? (name) => {
+          if (name === "chamber-roster") refreshConvene();
+          return rawRefresh(name);
+        }
+      : undefined;
     // Capture the host projects lookup so a room can be targeted at a project
     // (per-room turn cwd = project.rootPath). dispose() clears it like the above.
     getProjects = ctx.getProjects;
@@ -1697,7 +1751,7 @@ const rib: Rib = {
     // Pass the refresh seam so a genesis write re-runs the bound chamber-roster
     // collector (republishing the roster), not just the 120s cadence. Optional and
     // fail-soft: undefined on an older harness, where genesis falls back to cadence.
-    const genesisTool = makeGenesisTool(ctx.refreshWorkflow);
+    const genesisTool = makeGenesisTool(refreshWorkflow);
     // The digest write seam is always available, like genesis: it only writes the
     // digest store (no snapshot/turn seam needed), and the chamber-digest workflow's
     // author node opts in to it by name.
@@ -1748,6 +1802,16 @@ const rib: Rib = {
       // through briefInFlight so it can't lose-update a concurrent gate promotion's
       // watermark write — both are read-modify-writes of the same file.
       briefInFlight = briefInFlight.then(clearPersistedBriefPromoted, clearPersistedBriefPromoted);
+    }
+    // The Convene composer: an in-process board (needs getProjects) registered on the
+    // snapshot manager and primed once; rebound onto a new manager on a re-bootstrap.
+    if (sm && sm !== conveneSm) {
+      conveneUnregister?.();
+      conveneUnregister = sm.register(CONVENE_KEY, composeConveneBoard, {
+        validate: expectView(CONVENE_KEY, "board"),
+      });
+      conveneSm = sm;
+      void sm.recompose(CONVENE_KEY);
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —
@@ -1973,6 +2037,9 @@ const rib: Rib = {
     await clearPendingGenesis().catch(() => {});
     refreshWorkflow = undefined;
     getProjects = undefined;
+    conveneUnregister?.();
+    conveneUnregister = undefined;
+    conveneSm = undefined;
     briefUnregister?.();
     briefUnregister = undefined;
     briefPublisher = undefined;
@@ -2495,9 +2562,9 @@ function roomStartAction(action: RibAction): Promise<RibActionResult> {
 
 // Toggle one Mind's membership in the Convene draft (the deselected-slug set). The
 // slug must name a real, current Mind (validated against the live roster, not just
-// shape) so a stale/forged chip can't write an unknown slug into the draft. On
-// success refresh the roster so the chips re-render with the new glyph; the refresh
-// is fail-soft (cadence covers an older harness). Returns the new exclusion list.
+// shape) so a stale/forged chip can't write an unknown slug into the draft. On success
+// recompose the Convene board so the chips re-render with the new glyph and the shape
+// gating re-evaluates against the new cast. Returns the new exclusion list.
 async function draftSetAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const slug = asNonEmptyString(payload.slug);
@@ -2510,7 +2577,7 @@ async function draftSetAction(action: RibAction): Promise<RibActionResult> {
       return { ok: false, error: `unknown Mind: ${slug}` };
     }
     const excluded = await toggleDraftExclusion(slug);
-    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+    refreshConvene();
     return { ok: true, data: { excluded: [...excluded] } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2525,8 +2592,9 @@ async function draftSetAction(action: RibAction): Promise<RibActionResult> {
 // cross-vendor / seam-absent guards aren't duplicated here — a shape the draft can't
 // satisfy (a Review that isn't a cross-vendor pair, a Debate whose moderator is also a
 // participant) surfaces validateStart's error. On success clear the draft (back to
-// all-selected) and refresh the roster so the chips reset. An empty draft with the
-// Discussion shape yields every Mind in a sequential room — the historical Start.
+// all-selected) and recompose the Convene board so the chips reset and it folds to its
+// bar (a room now exists). An empty draft with the Discussion shape yields every Mind
+// in a sequential room — the historical Start.
 async function conveneAction(action: RibAction): Promise<RibActionResult> {
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
@@ -2588,7 +2656,7 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
   });
   if (res.ok) {
     await clearDraft().catch(() => {});
-    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+    refreshConvene();
   }
   return res;
 }

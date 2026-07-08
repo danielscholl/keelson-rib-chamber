@@ -11,7 +11,6 @@ import { buildRosterBoard } from "../src/boards/roster.ts";
 import { readMinds } from "../src/minds-store.ts";
 import { chamberDataHome } from "../src/paths.ts";
 import { readPendingGenesis } from "../src/pending-genesis.ts";
-import { readDraftExclusion } from "../src/room-draft.ts";
 import { readWatermark } from "../src/watermark-store.ts";
 
 async function main() {
@@ -27,12 +26,9 @@ async function main() {
   } catch {
     mindsList = [];
   }
-  // The Convene draft sits beside minds/ under the data home; tolerant read — a
-  // missing/corrupt draft yields an empty (all-selected) set.
-  const excluded = await readDraftExclusion(home);
   // The pulse is just the for-you signal — the watermark's briefPromoted flag.
   // Fail-soft — a watermark read error drops the pulse, never the roster board.
-  let pulse: Parameters<typeof buildRosterBoard>[2];
+  let pulse: Parameters<typeof buildRosterBoard>[1];
   try {
     const watermark = await readWatermark(home);
     pulse = { forYou: watermark.briefPromoted };
@@ -42,7 +38,7 @@ async function main() {
   // A genesis in flight renders a boot card in the seat being taken; a missing/corrupt
   // marker (the common case) is null — no boot card.
   const pending = await readPendingGenesis(home).catch(() => null);
-  process.stdout.write(JSON.stringify(buildRosterBoard(mindsList, excluded, pulse, pending)));
+  process.stdout.write(JSON.stringify(buildRosterBoard(mindsList, pulse, pending)));
 }
 
 await main();

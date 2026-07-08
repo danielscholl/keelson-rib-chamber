@@ -1,9 +1,4 @@
-import type {
-  CanvasActionField,
-  CanvasActionItem,
-  CanvasBoardView,
-  CanvasTone,
-} from "@keelson/shared";
+import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { PendingGenesis } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from "../types.ts";
@@ -61,17 +56,15 @@ function starterAction(
 
 // Pure: a roster of Minds -> a canvas `board`. Zero Minds renders the genesis
 // launchpad (the freeform-brief hero + the starter voices at rest); >=1 renders one
-// card per Mind, the Convene composer at >=2, and the same launchpad reused below as
-// the "author another Mind" path (authoring never leaves the surface — the old dashed
-// open-seat grid is gone; a sixth Mind past the five hues folds to neutral).
-// `draftExcluded` is the server-side draft (deselected slugs) the chips reflect —
-// absent/empty means all Minds selected. `pulse`, when present AND waiting, leads the
-// board with one quiet line; omitted or quiet renders no pulse section at all.
+// card per Mind, and the same launchpad reused below as the "author another Mind" path
+// (authoring never leaves the surface — the old dashed open-seat grid is gone; a sixth
+// Mind past the five hues folds to neutral). `pulse`, when present AND waiting, leads
+// the board with one quiet line; omitted or quiet renders no pulse section at all.
+// Convening moved to its own region (boards/convene.ts), so the roster is Minds-only.
 // Validated against canvasViewSchema in tests; the producer never parses (validation
 // lives at the binding edge).
 export function buildRosterBoard(
   minds: readonly Mind[],
-  draftExcluded: ReadonlySet<string> = new Set(),
   pulse?: RosterPulse,
   pending?: PendingGenesis | null,
   now: number = Date.now(),
@@ -83,42 +76,6 @@ export function buildRosterBoard(
   // card carries the moment.
   const sections: CanvasBoardView["sections"] =
     minds.length === 0 && !pending ? coldStartSections() : seatedSections(minds, pending, now);
-
-  // A room needs at least two Minds to be a conversation. The composer splits into
-  // "who's in" (identity-toned toggle chips against the server-side draft) and
-  // "…and how" (one action per room shape, each teaching its own fields). The shapes
-  // are gated on the 2-speaker floor (validateStart's minimum) so that floor can't be
-  // violated from here; a shape's own preconditions — a Debate/Build facilitator that
-  // is a non-participant Mind, a cross-vendor Review pair — are still enforced
-  // server-side, surfacing a clear error when the current draft can't satisfy them.
-  if (minds.length >= 2) {
-    const selectedCount = minds.filter((m) => !draftExcluded.has(m.slug)).length;
-    const chips: CanvasActionItem[] = minds.map((mind) => {
-      const selected = !draftExcluded.has(mind.slug);
-      return {
-        type: "draft-set",
-        label: mind.name,
-        glyph: selected ? "✓" : "+",
-        // The "who" of a room is picked here; wear each Mind's identity tone so the
-        // cast is chosen in colour, not from a monochrome name list.
-        tone: identityToneForSlot(mind.identitySlot),
-        payload: { slug: mind.slug },
-      };
-    });
-    // The cast wraps as toggle chips (many can be in); the shapes are a tabs strip
-    // (exactly one mechanism, keelson#417): picking a shape closes any sibling form
-    // and opens its own as a stable full-width panel below the strip, so switching
-    // shapes never reflows the row the way per-chip mid-row breaking did.
-    sections.push({
-      kind: "actions",
-      title: "Convene a room — who's in",
-      wrap: true,
-      items: chips,
-    });
-    if (selectedCount >= 2) {
-      sections.push({ kind: "actions", title: "…and how", tabs: true, items: shapeActions() });
-    }
-  }
 
   // Authoring stays reachable in the seated state via the reused genesis launchpad,
   // appended below the cards + composer and withheld while a genesis is already in
@@ -348,84 +305,6 @@ function seatedSections(
     });
   }
   return sections;
-}
-
-// The topic/project/moderator/manager/turns fields the shape actions collect. Kept in
-// one place so each shape draws only the fields its strategy uses.
-const topicField: CanvasActionField = {
-  name: "topic",
-  label: "Topic",
-  placeholder: "What should they discuss? (optional)",
-  multiline: true,
-};
-const projectField: CanvasActionField = {
-  name: "project",
-  label: "Project (optional)",
-  placeholder: "name or id — leave blank for none",
-};
-const turnsField: CanvasActionField = {
-  name: "turns",
-  label: "Turns (optional)",
-  placeholder: "default 8",
-};
-const moderatorField: CanvasActionField = {
-  name: "moderator",
-  label: "Moderator — a Mind not in the room",
-  placeholder: "name or slug — e.g. moneypenny",
-  required: true,
-};
-const managerField: CanvasActionField = {
-  name: "manager",
-  label: "Manager — a Mind not in the room",
-  placeholder: "name or slug — e.g. moneypenny",
-  required: true,
-};
-
-// One action per room shape the driver speaks — each dispatches `convene` with its
-// strategy and only the fields that strategy needs (conveneAction resolves the draft
-// for participants, and validateStart enforces each strategy's rules). The board's
-// former single hard-pinned "sequential" Convene became these five.
-function shapeActions(): CanvasActionItem[] {
-  return [
-    {
-      type: "convene",
-      label: "Discussion",
-      glyph: "▸",
-      payload: { strategy: "sequential" },
-      fields: [topicField, projectField],
-    },
-    // Short chip labels now the shapes wrap as a compact row; each shape's own
-    // mechanism (a moderator, a cross-vendor pair, a manager) is taught by its form
-    // and enforced server-side, so the qualifier need not ride the chip.
-    {
-      type: "convene",
-      label: "Debate",
-      glyph: "◆",
-      payload: { strategy: "group-chat" },
-      fields: [topicField, moderatorField, turnsField],
-    },
-    {
-      type: "convene",
-      label: "Open floor",
-      glyph: "⊙",
-      payload: { strategy: "open-floor" },
-      fields: [topicField, turnsField],
-    },
-    {
-      type: "convene",
-      label: "Review",
-      glyph: "✓",
-      payload: { strategy: "review" },
-      fields: [topicField],
-    },
-    {
-      type: "convene",
-      label: "Build",
-      glyph: "⚑",
-      payload: { strategy: "magentic" },
-      fields: [topicField, managerField, projectField, turnsField],
-    },
-  ];
 }
 
 // The cold-start launchpad: the freeform brief open inline under "Genesis — author a
