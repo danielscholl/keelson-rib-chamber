@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.21.0...v0.22.0) (2026-07-08)
+
+
+### Added
+
+* **read:** grant read tier to project-targeted rooms ([#181](https://github.com/danielscholl/keelson-rib-chamber/issues/181)) ([98d1be7](https://github.com/danielscholl/keelson-rib-chamber/commit/98d1be7e98193e3c89eafe90248e8cb9d5c658f4))
+
 ## [0.21.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.20.0...v0.21.0) (2026-07-08)
 
 
