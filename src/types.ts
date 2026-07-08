@@ -22,8 +22,8 @@ export const IDENTITY_SLOT_TONES: readonly CanvasTone[] = [
 
 // The single slot-validity predicate — an in-range integer index into the ramp.
 // Allocation (nextFreeSlot), tone rendering (identityToneForSlot), and the roster's
-// open-seat scan all read it, so a Mind's seated hue and its seat's availability can
-// never disagree on what counts as a valid slot.
+// free-slot scan (freeSlots, for launchpad starter toning) all read it, so a Mind's
+// seated hue and its seat's availability can never disagree on what counts as a valid slot.
 export function isValidSlot(slot: number | undefined): slot is number {
   return (
     typeof slot === "number" && Number.isInteger(slot) && slot >= 0 && slot < IDENTITY_SLOT_COUNT

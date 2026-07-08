@@ -19,16 +19,16 @@ export interface RosterPulse {
 }
 
 // The freeform-brief hero: the authored, personal path (describe a Mind in your own
-// words). `glyph`/`label`/`tone` vary by placement — the cold-start hero is the
-// filled brand primary; a populated open seat is a quieter ✎ prompt.
-function describeOwnAction(variant: "hero" | "seat"): CanvasActionItem {
+// words). The board's one filled brand primary, its brief field open inline — no
+// disclosure step between the operator and the authored path. Cold start and the
+// seated "author another Mind" launchpad share it.
+function describeOwnAction(): CanvasActionItem {
   return {
     type: "describe-own",
-    label: variant === "hero" ? "Author" : "Author…",
-    glyph: variant === "hero" ? "✦" : "✎",
-    // The hero is the board's one filled primary, its brief field open inline —
-    // no disclosure step between the operator and the authored path.
-    ...(variant === "hero" ? { tone: "brand" as CanvasTone, expanded: true } : {}),
+    label: "Author",
+    glyph: "✦",
+    tone: "brand" as CanvasTone,
+    expanded: true,
     fields: [
       {
         name: "brief",
@@ -42,22 +42,17 @@ function describeOwnAction(variant: "hero" | "seat"): CanvasActionItem {
 
 // A starter archetype as an author action, previewing the identity hue it will wear
 // when authored (keelson#390) — chamber_emit_genesis honors the starter's `seat` when
-// free. Only tone the preview when that seat is actually free (`free`, or the cold
-// start where every seat is): on a populated roster whose ramp already claimed the
-// starter's seat it would land elsewhere, so promising the hue would lie.
+// free. Only tone the preview when that seat is actually free (`free` unset, or the
+// seat is in it): on a populated roster whose ramp already claimed the starter's seat
+// the Mind would land elsewhere, so promising the hue would lie.
 function starterAction(
   starter: (typeof GENESIS_STARTERS)[number],
   free?: ReadonlySet<number>,
-  opts?: { compact?: boolean },
 ): CanvasActionItem {
   const seatFree = !free || free.has(starter.seat);
   return {
     type: "author-archetype",
-    // The cold-start chip row wants the tight name + role; an open seat's action
-    // carries the fuller tagline (it has the card's room for it).
-    label: opts?.compact
-      ? `${starter.name} — ${starter.role}`
-      : `${starter.name} — ${starter.tagline}`,
+    label: `${starter.name} — ${starter.role}`,
     glyph: "✦",
     ...(seatFree ? { tone: identityToneForSlot(starter.seat) } : {}),
     payload: { slug: starter.slug },
@@ -65,9 +60,10 @@ function starterAction(
 }
 
 // Pure: a roster of Minds -> a canvas `board`. Zero Minds renders the genesis
-// launchpad (the freeform-brief hero + the starter voices + a short journey);
-// >=1 renders one card per Mind plus a dashed OPEN-SEAT card for each identity slot
-// still free (authoring never leaves the surface), and the Convene composer at >=2.
+// launchpad (the freeform-brief hero + the starter voices at rest); >=1 renders one
+// card per Mind, the Convene composer at >=2, and the same launchpad reused below as
+// the "author another Mind" path (authoring never leaves the surface — the old dashed
+// open-seat grid is gone; a sixth Mind past the five hues folds to neutral).
 // `draftExcluded` is the server-side draft (deselected slugs) the chips reflect —
 // absent/empty means all Minds selected. `pulse`, when present AND waiting, leads the
 // board with one quiet line; omitted or quiet renders no pulse section at all.
@@ -81,9 +77,10 @@ export function buildRosterBoard(
   now: number = Date.now(),
 ): CanvasBoardView {
   // A genesis in flight takes the next free seat as a boot card (a nod to the original
-  // Chamber's genesis screen); the seated + open seats compose around it. Only the cold
-  // start with no pending genesis shows the launchpad — once authoring is underway, the
-  // boot card carries the moment.
+  // Chamber's genesis screen); the seated cards compose around it. Cold start (no Mind,
+  // no pending) leads with the launchpad; a seated roster gets it appended below (the
+  // minds.length >= 1 block). While a genesis is pending neither shows it — the boot
+  // card carries the moment.
   const sections: CanvasBoardView["sections"] =
     minds.length === 0 && !pending ? coldStartSections() : seatedSections(minds, pending, now);
 
@@ -121,6 +118,14 @@ export function buildRosterBoard(
     if (selectedCount >= 2) {
       sections.push({ kind: "actions", title: "…and how", tabs: true, items: shapeActions() });
     }
+  }
+
+  // Authoring stays reachable in the seated state via the reused genesis launchpad,
+  // appended below the cards + composer and withheld while a genesis is already in
+  // flight (the boot card carries that moment). Cold start has its own launchpad, so
+  // this only fires once >=1 Mind is seated.
+  if (minds.length >= 1 && !pending) {
+    sections.push(...launchpadSections(minds, { title: "Author another Mind" }));
   }
 
   // The one waiting-for-you signal, when true — a Mind's first read is "is
@@ -220,22 +225,38 @@ function freeSlots(minds: readonly Mind[]): number[] {
   return open;
 }
 
-// A dashed OPEN-SEAT card in the hue it would assign: authoring stays on the surface
-// at every roster size (the "vanishing authoring" finding). Each carries the freeform
-// Author verb; the first also offers the starter voices not yet seated, so seating a
-// starter stays reachable past the cold start without repeating the buttons on every
-// seat.
-function openSeatCard(slot: number, extraStarters: CanvasActionItem[]) {
-  const actions: CanvasActionItem[] = [describeOwnAction("seat"), ...extraStarters];
-  return {
-    title: "Open seat",
-    dot: identityToneForSlot(slot),
-    footnote:
-      extraStarters.length > 0
-        ? "Describe a Mind, or seat a starter voice."
-        : "Author a Mind into this seat.",
-    actions,
-  };
+// The genesis launchpad — the describe-own brief plus the starter voices not yet
+// seated. Cold start leads with it (the filled hero, every free hue previewed, the
+// void line at rest); a seated roster reuses it below the cards as the one "author
+// another Mind" path, replacing the old dashed open-seat grid. Starters are offered
+// only while a hue seat is free (a sixth Mind can still be authored freeform — it
+// folds to neutral); an already-seated starter drops off (filtered by slug), and a
+// starter whose preferred hue is taken stays but shows untoned.
+function launchpadSections(
+  minds: readonly Mind[],
+  opts: { title: string; rest?: string },
+): CanvasBoardView["sections"] {
+  const seated = new Set(minds.map((m) => m.slug));
+  const free = new Set(freeSlots(minds));
+  const starters =
+    free.size > 0
+      ? GENESIS_STARTERS.filter((s) => !seated.has(s.slug)).map((s) => starterAction(s, free))
+      : [];
+  const sections: CanvasBoardView["sections"] = [
+    { kind: "actions", title: opts.title, items: [describeOwnAction()] },
+  ];
+  if (starters.length > 0) {
+    sections.push({
+      kind: "actions",
+      title: "Or seat a starter voice",
+      wrap: true,
+      items: starters,
+    });
+  }
+  if (opts.rest) {
+    sections.push({ kind: "rows", items: [{ glyph: "neutral", text: opts.rest }] });
+  }
+  return sections;
 }
 
 // The genesis stall window (seconds): past it, a pending genesis is presumed wedged
@@ -286,40 +307,23 @@ function bootCard(pending: PendingGenesis, slot: number, now: number) {
   };
 }
 
-// >=1 Mind (or a genesis in flight): the seated cards, a boot card in the seat being
-// taken when a genesis is pending, then a dashed open-seat card per remaining free slot.
-// Past five Minds (or a fully-seated ramp) no seat remains, so a quiet Author action
-// keeps authoring reachable — a sixth Mind folds to neutral + name (the host rule). The
-// quiet Author action and the lone-Mind nudge are withheld while a genesis is pending
-// (authoring is already underway).
+// >=1 Mind (or a genesis in flight): the seated cards, plus a boot card in the seat
+// being taken when a genesis is pending. Authoring is no longer a dashed open-seat
+// grid — buildRosterBoard appends the reused launchpad below (withheld while a genesis
+// is pending, since the boot card carries that moment). The lone-Mind nudge names the
+// one act that unlocks the composer, and is likewise withheld while a genesis runs.
 function seatedSections(
   minds: readonly Mind[],
   pending: PendingGenesis | null | undefined,
   now: number,
 ): CanvasBoardView["sections"] {
   const open = freeSlots(minds);
-  const openSet = new Set(open);
-  const seatedSlugs = new Set(minds.map((m) => m.slug));
-  const freeStarters = GENESIS_STARTERS.filter((s) => !seatedSlugs.has(s.slug)).map((s) =>
-    starterAction(s, openSet),
-  );
-
-  // The boot card takes the first free slot (or folds to neutral past the ramp); the
-  // remaining free slots become open seats.
+  // The boot card takes the first free slot (or folds to neutral past the ramp).
   const bootItems = pending ? [bootCard(pending, open[0] ?? IDENTITY_SLOT_COUNT, now)] : [];
-  const openSlots = pending ? open.slice(1) : open;
-  const openSeats = openSlots.map((slot, i) => openSeatCard(slot, i === 0 ? freeStarters : []));
 
   const sections: CanvasBoardView["sections"] = [
-    { kind: "cards", items: [...minds.map(cardFor), ...bootItems, ...openSeats] },
+    { kind: "cards", items: [...minds.map(cardFor), ...bootItems] },
   ];
-  if (openSeats.length === 0 && !pending) {
-    sections.push({
-      kind: "actions",
-      title: "Author a Mind",
-      items: [describeOwnAction("seat")],
-    });
-  }
   // With one Mind seated the composer hasn't appeared yet (it needs two). Name the
   // one act that unlocks it, so the lone-Mind roster still points forward.
   if (minds.length === 1 && !pending) {
@@ -412,24 +416,12 @@ function shapeActions(): CanvasActionItem[] {
 }
 
 // The cold-start launchpad: the freeform brief open inline under "Genesis — author a
-// Mind" (the board's one filled button), then the three starter voices as a compact
-// "or seat a starter" chip row beneath it, and the void screen's line at rest. While a
-// genesis runs the boot card in the seat replaces this stillness with a live count.
+// Mind" (the board's one filled button), the three starter voices as a compact chip
+// row beneath it, and the void screen's line at rest. Shares launchpadSections with
+// the seated "author another Mind" path — every hue is free here, so all starters
+// preview their tone. While a genesis runs the boot card replaces this with a live count.
 function coldStartSections(): CanvasBoardView["sections"] {
-  return [
-    {
-      kind: "actions",
-      title: "Genesis — author a Mind",
-      items: [describeOwnAction("hero")],
-    },
-    {
-      kind: "actions",
-      title: "Or seat a starter voice",
-      wrap: true,
-      items: GENESIS_STARTERS.map((s) => starterAction(s, undefined, { compact: true })),
-    },
-    { kind: "rows", items: [{ glyph: "neutral", text: "awaiting genesis." }] },
-  ];
+  return launchpadSections([], { title: "Genesis — author a Mind", rest: "awaiting genesis." });
 }
 
 function truncate(text: string, max = 120): string {
