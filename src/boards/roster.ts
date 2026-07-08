@@ -140,6 +140,19 @@ export function buildRosterBoard(
         label: `${minds.length} ${minds.length === 1 ? "mind" : "minds"}`,
         tone: "brand" as CanvasTone,
       },
+      // Once a Mind is seated, feed the host head its roster peek (an identity dot per
+      // Mind, names on hover) and the collapse hint so the panel folds to its head strip
+      // — the host collapses once, a manual toggle wins after. Cold start emits neither,
+      // so the genesis launchpad stays open.
+      ...(minds.length > 0
+        ? {
+            people: minds.map((m) => ({
+              name: m.name,
+              tone: identityToneForSlot(m.identitySlot),
+            })),
+            defaultCollapsed: true,
+          }
+        : {}),
     },
     sections,
   };
