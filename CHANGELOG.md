@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.18.0...v0.19.0) (2026-07-08)
+
+
+### Added
+
+* **roster:** tighten the cold-start Chamber and hide panel chrome ([#174](https://github.com/danielscholl/keelson-rib-chamber/issues/174)) ([7ab2ebb](https://github.com/danielscholl/keelson-rib-chamber/commit/7ab2ebbd5bca3421e16e1ade3580f9c1628ca219))
+
 ## [0.18.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.17.0...v0.18.0) (2026-07-07)
 
 
