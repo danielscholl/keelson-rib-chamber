@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.23.0...v0.24.0) (2026-07-09)
+
+
+### Added
+
+* **roster:** introduce curated model picker via set-model action ([#187](https://github.com/danielscholl/keelson-rib-chamber/issues/187)) ([105134f](https://github.com/danielscholl/keelson-rib-chamber/commit/105134f94878e95d030111836afb794e1f47c8ab))
+
 ## [0.23.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.22.0...v0.23.0) (2026-07-09)
 
 
