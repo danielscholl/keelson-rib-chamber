@@ -178,8 +178,10 @@ like this (it lives under the room's directory, see
 }
 ```
 
-Two tasks, two owners, two states. The manager wrote it; a worker flips its own row
-to `completed` when its turn lands. `status: "executing"` means open tasks remain,
+Two tasks, two owners, two states. The manager wrote it; the driver settles a
+worker's row to `completed` when its turn lands cleanly (or `failed` if the turn
+aborts or errors), so the row reflects the turn's outcome, not a worker's
+self-report. `status: "executing"` means open tasks remain,
 and when the last one settles and the goal is covered the manager flips the ledger
 to `done` and the room ends. That row-by-row accounting is the difference between a
 plan and a conversation about a plan.

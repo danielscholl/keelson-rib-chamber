@@ -103,16 +103,26 @@ in conversation is a [room](../run-a-room/).
 
 ## Declare capabilities
 
-By default a Mind is text-only, which is the room default. To let a Mind author a
-[lens](../author-a-lens/) (a canvas board) during a room turn, declare the `lens`
-capability. The genesis turn asks for an optional list of capability slugs, so ask
-for the `lens` capability in your brief when you want a Mind that visualizes its
-work.
+By default a Mind is text-only, the room default. Reading a room's project is the
+one exception: a project-targeted room auto-grants read-only file access to every
+speaker, covered below. To let a Mind table an
+[exhibit](../../concepts/lenses/#exhibits--the-deliverable-sibling) (a canvas board)
+during a room turn, declare the `lens` capability. The slug keeps the name `lens`
+for backward compatibility, but it now authorizes `chamber_table_exhibit`, which
+tables an exhibit (a room's deliverable), not a standing lens. The genesis turn asks
+for an optional list of capability slugs, so ask for the `lens` capability in your
+brief when you want a Mind that publishes its work to the canvas.
 
-Two additional capabilities apply to coding rooms (rooms started with `coding: true`
-and a `projectId`): `read` lets a Mind read files in the room's project; `code` lets
-it run Bash, Edit, and Write. A coding review room requires the author Mind to declare
-`code` and the reviewer Mind to declare at least `read`.
+Reading the room's project is auto-granted, not declared. Any room that targets a
+resolvable project grants read-only file access to every speaker, confined to the
+project root, with no `read` declaration and no coding tier. So even a plain
+Discussion can read the repo it targets. Declaring `read` only matters for the
+coding-review reviewer gate below.
+
+The `code` capability applies to coding rooms (rooms started with `coding: true` and
+a `projectId`): it lets a Mind run Bash, Edit, and Write. A coding review room
+requires the author Mind to declare `code` and the reviewer Mind to declare at least
+`read`.
 
 A fourth capability, `osdu`, lets a Mind consult read-only OSDU platform status
 during a room turn. Use it only when the osdu rib is co-installed, because those
@@ -136,5 +146,5 @@ deliberate click, not a typed command.
 
 - [Minds and genesis](../../concepts/minds/): why a Mind is shaped this way.
 - [Run a room](../run-a-room/): put several Minds in conversation.
-- [Author a lens](../author-a-lens/): what the `lens` capability authorizes.
+- [Exhibits](../../concepts/lenses/#exhibits--the-deliverable-sibling): what the `lens` capability authorizes.
 - [Workflows](../../reference/workflows/): the `chamber-genesis` workflow contract.

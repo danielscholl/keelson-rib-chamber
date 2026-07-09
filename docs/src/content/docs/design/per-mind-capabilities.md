@@ -9,6 +9,11 @@ A speaker reaches only the tools its Mind declares, intersected with what the
 room permits. Nothing more. A Mind that declares no capabilities runs text-only,
 which is the room default, never the full tool surface.
 
+The declares-only thesis has one additive exception. A room that targets a
+project auto-grants read-only `Read` to every speaker, whether or not the Mind
+declared it, confined to the project root. `Read` cannot mutate, so it is safe to
+grant room-wide. Write and exec still require the `code` coding tier.
+
 ## The decision
 
 `Mind.tools` is a list of capability **slugs**, not raw tool names. A slug is an
@@ -16,12 +21,17 @@ entry in a small curated vocabulary that maps to one or more concrete tools. Tod
 that vocabulary has four entries: `lens` (authorizes `chamber_table_exhibit` — mid-room publishing tables an exhibit), `read`
 (authorizes `Read`), `code` (authorizes `Bash`, `Edit`, `Write`), and `osdu`
 (authorizes read-only OSDU platform status tools when the osdu rib is
-co-installed). `read` and `code` are only active in coding rooms: in a standard
-room they resolve to nothing because the room-safe pool does not include
-filesystem/exec tools. A Mind that wants to table an exhibit mid-room declares
-`lens`; a coding-room Mind that needs to read or edit files declares `read` or
-`code`; a Mind that needs OSDU status declares `osdu`; a Mind that declares
-nothing gets an empty tool rail and can only speak.
+co-installed). `Read` is the exception: a room that targets a project auto-grants it to every
+speaker, coding or standard, confined to the project root. Selecting the project
+is the grant, so no coding tier and no per-Mind `read` declaration is required.
+`code` is the coding-room-only tier: its `Bash`, `Edit`, and `Write` resolve to
+nothing in a standard room. A Mind that wants to table an exhibit mid-room
+declares `lens`; a coding-room Mind that needs to edit files or run commands
+declares `code`; a Mind that needs OSDU status declares `osdu`; a Mind that
+declares nothing gets an empty tool rail and can only speak. Declaring `read`
+still matters in one case: a coding room with no resolvable project root, running
+at the neutral home cwd, where `Read` reaches the rail through the coding pool
+instead of the room-wide grant.
 
 The room supplies the ceiling. A room is given a room-safe pool of tool names it
 is willing to expose to any speaker. A Mind's resolved tools are the intersection
@@ -54,6 +64,10 @@ room.
   names. A slug not in the vocabulary maps to nothing.
 - The result keeps only names that are also in the pool, deduplicated, as the
   turn's tool rail.
+
+`resolveMindTools` is the per-Mind mapping only. In a project-targeted room the
+driver layers the room-wide `Read` grant on top of its result, so a
+no-declaration Mind can still reach `Read` even when the mapping returned `[]`.
 
 Genesis lets a soul declare capability slugs as part of authoring a Mind. The
 write seam filters the declared list down to the known set before persisting it,

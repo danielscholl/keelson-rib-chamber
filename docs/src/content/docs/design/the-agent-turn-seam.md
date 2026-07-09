@@ -54,7 +54,7 @@ The driver therefore kicks the turn and returns immediately:
 async onAction(action, ctx) {
   if (action.type === "room-start") {
     if (!ctx.runAgentTurn) {
-      return { ok: false, error: "rooms unavailable: no agent-turn capability" };
+      return { ok: false, error: "room controls require the C1 agent-turn seam and a snapshot manager" };
     }
     const { slug } = await this.driver.start(action.payload); // reserve the room
     void this.runLoop(slug);                                  // turns advance detached
@@ -101,8 +101,8 @@ fixed signature.
 
 The seam is optional, so an older harness may not provide it. When it is absent the
 room driver and the room tools are not built at all, and any room action fails closed
-with `rooms unavailable: no agent-turn capability` rather than falling back to some
-degraded path. A rib that needs to run turns and cannot will refuse to pretend it
+with `room controls require the C1 agent-turn seam and a snapshot manager` rather
+than falling back to some degraded path. A rib that needs to run turns and cannot will refuse to pretend it
 can. The full seam contract, and the convention for optional context seams, lives in
 the [keelson rib contract](https://danielscholl.github.io/keelson/docs/reference/rib-contract/).
 

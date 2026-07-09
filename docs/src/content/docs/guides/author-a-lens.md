@@ -33,6 +33,23 @@ harness per-surface region limit. If adding a panel would exceed it, the emit
 fails closed and unwinds cleanly, so a rejected lens never leaves a half-registered
 panel behind. Retire a lens you no longer need to make room.
 
+## Keep a lens current automatically
+
+Re-authoring the same subject is the manual way to keep a lens fresh. A lens can also
+keep itself current. Pass a `refresh` object when you author it, and the panel becomes
+a **living lens** that re-composes on a cadence:
+
+- `refresh: { workflow?, cadenceMs? }` makes the panel re-run a catalog workflow on
+  cadence, feeding it the lens id. `workflow` defaults to `chamber-lens-refresh` (the
+  bundled re-author), and `cadenceMs` defaults to one hour, floored at 30 seconds.
+- On a re-author, omitting `refresh` keeps the existing backing, an object patches it
+  (an omitted field keeps its prior value), and `refresh: null` clears it.
+
+A living lens also carries an on-demand **Refresh** verb on its panel head, so you can
+force a re-compose between cadence ticks. Each refresh is a paid agent turn, so the
+default cadence leans quiet. For how a refresh turn re-reads and re-emits the board,
+see [A living lens re-composes itself](../../concepts/lenses/#a-living-lens-re-composes-itself).
+
 ## Provenance on the index card
 
 A lens can carry three optional provenance fields, all supplied by the authoring
@@ -52,8 +69,8 @@ write.
 
 The `chamber-lens` workflow prompt asks the turn for `id`, `board`, `scope`, and
 `reason`, so a lens authored through the workflow usually carries no
-`maintainingMind`. That field is the path a Mind uses to sign a lens it authors
-mid-room.
+`maintainingMind`. That field is filled when `chamber_emit_lens` is called directly,
+for example from chat, and it is preserved across a `chamber-lens-refresh`.
 
 :::caution
 Provenance is replace-on-write. Re-authoring a lens without a field that was set
@@ -61,17 +78,22 @@ before clears the old value. If you want a `scope` or `reason` to persist, suppl
 it every time you re-author the subject.
 :::
 
-## Author a lens mid-room
+## Tabling a deliverable mid-room
 
-A Mind can author a lens during a room turn, for example to surface a findings
-summary after a discussion. This is opt-in per Mind: only a Mind that declares the
-`lens` capability gets the emit tool on its turn rail. A text-only Mind, the room
-default, cannot author a lens. To declare the capability on a Mind, see
+A Mind cannot author a lens during a room turn: `chamber_emit_lens` is never on a
+room turn rail. What a Mind can do mid-room is table an **exhibit**, a point-in-time
+deliverable (a findings summary, an assessment, a plan) that lands on the Exhibits
+shelf. This is opt-in per Mind: only a Mind that declares the `lens` capability gets
+the exhibit tool on its turn rail. The slug keeps the historical name `lens`, but it
+now authorizes `chamber_table_exhibit`, not lens authoring. A text-only Mind, the
+room default, cannot table one. To declare the capability, see
 [Author a Mind](../author-a-mind/).
 
-A Mind authoring mid-room sees the full emit tool, so it can set `maintainingMind`
-to sign the lens with its own name. That is the one place that field is normally
-filled.
+An exhibit is not a lens, and the two carry provenance differently. The exhibit tool
+takes only `{ id, board, reason? }`: there is no `maintainingMind` field, so a Mind
+cannot sign an exhibit. Instead the room driver witness-stamps the exhibit with the
+room it came from, so provenance is observed, not claimed. For the full lens/exhibit
+split, see [Exhibits](../../concepts/lenses/#exhibits--the-deliverable-sibling).
 
 ## Let viewers annotate a lens
 
@@ -86,9 +108,10 @@ promote the standing briefing (that path is reserved for Mind-authored substance
 
 ## Retire one
 
-A lens is always retireable. Use the **Retire** action on the lens card, or call
-the `chamber_retire_lens` tool with the lens id. Either removes the persisted lens
-record and its live panel together. Retiring an id that does not exist fails closed.
+A lens can always be retired. Use the **Retire** action on the lens card, the
+**Retire lens…** verb on the lens panel head, or call the `chamber_retire_lens` tool
+with the lens id. Each removes the persisted lens record and its live panel together.
+Retiring an id that does not exist fails closed.
 
 Unlike a room, a lens has no active state, so there is nothing to stop first: a
 retire takes effect immediately.
@@ -106,7 +129,7 @@ clear out stale lenses, the footer stays as it was until the next real change.
 
 ## Related
 
-- [Lenses](../../concepts/lenses/): why a lens is a turn, not a participant.
-- [Author a Mind](../author-a-mind/): declare the `lens` capability so a Mind can author mid-room.
-- [Workflows](../../reference/workflows/): the `chamber-lens` workflow contract.
+- [Lenses](../../concepts/lenses/): why a lens is a turn, not a participant, and how an exhibit differs.
+- [Author a Mind](../author-a-mind/): declare the `lens` capability so a Mind can table an exhibit mid-room.
+- [Workflows](../../reference/workflows/): the `chamber-lens` and `chamber-lens-refresh` workflow contracts.
 - [Tools and commands](../../reference/tools-and-commands/): the emit and retire tool schemas.

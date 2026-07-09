@@ -13,22 +13,23 @@ and guide pages; here are the exact names, schemas, and effects.
 
 ## Chat tools
 
-Fourteen tools, gated on which host seams are wired (see
+Eighteen tools, gated on which host seams are wired (see
 [Tool availability](#tool-availability)). Input fields are the Zod schemas; an
 optional field is marked `?`.
 
 | Tool | `state_changing` | `requires_confirmation` | Purpose | Input fields |
 |---|---|---|---|---|
-| `chamber_emit_genesis` | yes | no | Persist an authored Mind. Internal write seam for the `chamber-genesis` workflow, not a tool you call directly. | `name`, `role`, `voice`, `soul`, `tagline`, `tools?` |
+| `chamber_emit_genesis` | yes | no | Persist an authored Mind. Internal write seam for the `chamber-genesis` workflow, not a tool you call directly. | `name`, `role`, `voice`, `soul`, `tagline`, `model?`, `provider?`, `tools?` |
 | `chamber_emit_digest` | yes | no | Internal write-seam for the `chamber-digest` workflow: persist the standing digest board. Not called directly. | `board` |
 | `chamber_list_minds` | no | no | List all Minds: slug, name, role, tagline, pinned model/provider, capability tools. Read-only. | _(none)_ |
 | `chamber_list_rooms` | no | no | List rooms (active first, then ended) with slug, name, status, strategy, participants, and turn progress. Read-only. | _(none)_ |
 | `chamber_list_lenses` | no | no | List living lenses newest first: id, updatedAt, refresh backing, and optional provenance fields. Pass `{ id }` to fetch one lens in full, `board` included. Read-only. | `id?` |
 | `chamber_list_exhibits` | no | no | List exhibits (deliverables rooms tabled) newest first: id, tabledAt, producing room, gist. Read-only. | _(none)_ |
+| `chamber_room_transcript` | no | no | Page a room's persisted transcript with `offset`/`limit`, avoiding the truncation `chamber_room_status` applies to a long transcript. Read-only. | `room`, `offset?`, `limit?` |
 | `chamber_retire_mind` | yes | no | Permanently remove a Mind's record and SOUL.md from the roster. Fails closed if absent. | `slug` |
 | `chamber_room_delete` | yes | no | Permanently delete an ended room's record, transcript, and ledger. Stop first with `chamber_room_stop`. | `room` |
 | `chamber_emit_lens` | yes | no | Author a lens: render an agent-composed canvas board onto the surface as its own live panel. | `id`, `board`, `scope?`, `maintainingMind?`, `reason?` |
-| `chamber_emit_lens_html` | yes | no | Author an HTML lens: publish a literal HTML string to the sandboxed iframe canvas. | `html` |
+| `chamber_emit_lens_html` | yes | no | Author an HTML lens: publish a self-contained HTML page as its own live panel. A stable kebab-case `id` creates a per-subject panel that persists across restarts (re-emit to update); `title` names the panel head; omit `id` to target the shared legacy canvas. | `html`, `id?`, `title?` |
 | `chamber_retire_lens` | yes | no | Permanently remove a lens, both its record and its live panel. Fails closed if no such lens, or if the id names an exhibit. | `id` |
 | `chamber_table_exhibit` | yes | no | Table an exhibit: publish a canvas-board deliverable a discussion produced as its own panel on the Exhibits shelf. | `id`, `board`, `reason?` |
 | `chamber_delete_exhibit` | yes | no | Permanently remove an exhibit, both its record and its live panel. Fails closed if no such exhibit, or if the id names a lens. | `id` |
@@ -52,7 +53,9 @@ The room-start schema is the one with constraints worth stating exactly:
 - `turnBudget` is an integer in **1..50**, **default 8**. The default is applied
   after parse, not as a schema default.
 - `strategy` defaults to `sequential`. Setting `moderator` with no explicit
-  strategy infers `group-chat`.
+  strategy infers `group-chat`; setting `manager` with no explicit strategy
+  infers `magentic`. An explicit `strategy` still wins, and `moderator` takes
+  precedence if both are set.
 - `moderator` is required and validated only for `group-chat`; it must name a Mind
   that is not a participant.
 - `synthesizer` is an optional closing-summary Mind for `group-chat`.
@@ -93,9 +96,10 @@ plus the living-lens backing:
 
 Tool registration is conditional on the host seams the harness wires in:
 
-- **Always present (8):** `chamber_emit_genesis`, `chamber_emit_digest`,
+- **Always present (9):** `chamber_emit_genesis`, `chamber_emit_digest`,
   `chamber_list_minds`, `chamber_list_rooms`, `chamber_list_lenses`,
-  `chamber_list_exhibits`, `chamber_retire_mind`, `chamber_room_delete`.
+  `chamber_list_exhibits`, `chamber_room_transcript`, `chamber_retire_mind`,
+  `chamber_room_delete`.
 - **Snapshot manager + region registration seams (5 more):** `chamber_emit_lens`,
   `chamber_retire_lens`, `chamber_table_exhibit`, `chamber_delete_exhibit`,
   `chamber_emit_lens_html`.
@@ -148,6 +152,7 @@ without navigating.
 | `enter-mind` | `{ slug }` | `open-chat` (the composed seed) |
 | `author-archetype` | `{ slug }` | `run-workflow` `chamber-genesis` |
 | `describe-own` | `{ brief }` | `run-workflow` `chamber-genesis` |
+| `dismiss-genesis` | _(none)_ | data (no payload): ends a stalled genesis boot card, refreshes the roster |
 | `retire` | `{ slug }` | data (`{ slug }`) |
 | `room-start` | `{ participants, turnBudget?, name?, strategy?, topic?, ...config }` | data (`{ slug }`) |
 | `draft-set` | `{ slug }` | data (`{ excluded }`) |
@@ -156,6 +161,8 @@ without navigating.
 | `room-stop` | `{ slug }` | data (`{ slug }`) |
 | `room-delete` | `{ slug }` | data (`{ slug }`) |
 | `room-open` | `{ slug }` | `open-canvas` (the room-view key) |
+| `outcome-copy` | `{ slug }` | data (the room's outcome as a markdown string) |
+| `outcome-explore` | `{ slug }` | `open-chat` (seeded from the outcome document) |
 | `set-model` | `{ slug, model?, provider? }` | data (`{ slug, model? }`) |
 | `retire-lens` | `{ id }` | data (`{ id, key }`) |
 | `retire-lens-html` | `{ id }` | data (`{ id, key }`) |

@@ -11,20 +11,32 @@ room lives on the Chamber surface and responds to chat tools the same way the re
 of the harness does. For why rooms work the way they do, see
 [Rooms and strategies](../../concepts/rooms/).
 
-## Convene from the roster
+## Convene a room
 
-The fastest way to start a room is the Convene composer on the roster. It needs at
-least two Minds before it can open one.
+The fastest way to start a room is the Convene composer region, a separate
+collapsible board directly below the Roster. (The Roster itself is now Minds-only.)
+It needs at least two Minds before it can open one.
 
 The Convene draft is an exclusion set, not a pick list. Every current Mind starts
-selected. You deselect the ones you want to leave out, and Convene starts a room
+selected. You deselect the ones you want to leave out, and Convene opens a room
 with whoever is still selected. The first toggle drops a single Mind rather than
 clearing your whole roster, which matches the common case of running everyone but
 one.
 
-Convene starts a **sequential** room with the still-selected Minds and an optional
-topic. Once a room opens, the draft resets to all Minds selected, ready for the
-next one.
+Once two or more Minds stay selected, Convene surfaces a `…and how` shape picker
+with five tabs, each opening a small form and starting its own strategy:
+
+- **Discussion** (sequential): the default.
+- **Debate** (group-chat): needs a chair, a Mind left out of the cast.
+- **Open floor** (open-floor): unmoderated.
+- **Review**: a single-pass critique of exactly two Minds pinned to different
+  providers.
+- **Build** (magentic): needs a manager, a Mind left out of the cast.
+
+Shapes the current cast cannot satisfy are disabled with the reason shown. See
+[Choose a strategy](#choose-a-strategy) below and
+[Strategies](../../reference/strategies/) for the per-shape contract. Once a room
+opens, the draft resets to all Minds selected, ready for the next one.
 
 ## Start from chat
 
@@ -53,10 +65,13 @@ chamber_room_start({
 
 `participants` is required and needs at least two distinct Minds. `topic`,
 `strategy`, and `turnBudget` are optional. To target the room at a keelson
-project, pass `projectId`; add `coding: true` to opt into the coding tier so
-Minds with the `code` capability can run Bash/Edit/Write, and Minds with `read` can
-run the Read tool, confined to the project root. The tool schema and the full set of start fields
-live in [Tools and commands](../../reference/tools-and-commands/).
+project, pass `projectId`. That alone grants Read to every speaker, confined to the
+project root, so even a plain Discussion can read the repo it targets. Add
+`coding: true` to open the coding tier on top, so Minds that declare the `code`
+capability can run Bash, Edit, and Write, confined to the room cwd (the project
+root, or the neutral home if the project vanished). The tool schema and the full
+set of start fields live in
+[Tools and commands](../../reference/tools-and-commands/).
 
 ## Choose a strategy
 
@@ -81,7 +96,10 @@ A room runs its own turns until it hits its budget or you stop it.
 
 - **Turn budget** defaults to 8 and is capped at 50. Each turn is a billed agent
   call, so the ceiling keeps an over-large or accidental room from launching a
-  runaway sequence.
+  runaway sequence. When a room finishes by exhausting its budget, every strategy
+  except review appends one extra billed closing-synthesis turn, so it bills up to
+  `turnBudget + 1` agent calls (51 at the cap). A room you stop early, or run as
+  review, is unaffected.
 - **Concurrency**: several rooms can run at once, up to six. Each gets its own
   panel on the surface and its own turn loop.
 

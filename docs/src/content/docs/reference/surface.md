@@ -49,9 +49,10 @@ index sits alongside each lens's live panel.
 
 ## Dynamic regions
 
-Live rooms, live lenses, and live exhibits are not in the static layout. A
-producer registers each one at runtime with `registerRegion`, so the surface
-grows panels as rooms convene, lenses are authored, and exhibits are tabled. A
+Live rooms, live lenses, live exhibits, and per-subject HTML lenses are not in
+the static layout. A producer registers each one at runtime with
+`registerRegion`, so the surface grows panels as rooms convene, lenses and HTML
+lenses are authored, and exhibits are tabled. A
 lens or exhibit panel sheds when its record is retired or deleted. A room keeps
 its panel while active, and after it ends the most recently finished room stays
 visible until a newer room supersedes it, or the room is deleted. Every lens and
@@ -69,6 +70,7 @@ open and the panel head carries the "updated Xm ago" freshness clock.
 | Live room | `rib:chamber:room:{slug}` | room name (falls back to slug) | `rooms` | `Rooms` | `▦` brand |
 | Live lens | `rib:chamber:lens:{id}` | the lens `id` | `lens` | `Lenses` | `✦` accent |
 | Live exhibit | `rib:chamber:lens:{id}` | the exhibit `id` | `exhibit` | `Exhibits` | `▣` caution |
+| Live HTML lens | `rib:chamber:lens-html:{id}` | the lens `title` (falls back to `id`) | `lens` | `Lenses` | `❖` accent |
 
 Lenses and exhibits share one key family (`rib:chamber:lens:{id}`) and one id
 space — the record's kind decides which shelf its region joins — so the open
@@ -102,22 +104,26 @@ independent boards instead of colliding on one shared key.
 
 ## Canvas views
 
-The surface declares seven canvas views. These bind the standing keys to the
+The surface declares eight canvas views. These bind the standing keys to the
 canvas renderer; data arrives when the producers run.
 
 | Key | `canvasKind` | Title |
 |---|---|---|
 | `rib:chamber:roster` | `view` | Roster |
+| `rib:chamber:convene` | `view` | Convene |
 | `rib:chamber:rooms` | `view` | Rooms |
 | `rib:chamber:lenses` | `view` | Lenses |
-| `rib:chamber:activity` | `view` | Activity |
+| `rib:chamber:exhibits` | `view` | Exhibits |
 | `rib:chamber:digest` | `view` | Digest |
 | `rib:chamber:lens-html` | `html` | HTML Lens |
 | `rib:chamber:brief` | `view` | Briefing |
 
 The per-instance keys (`room:{slug}`, `lens:{id}`, `room-view:{slug}`) are not
 declared as views. They are bound at runtime, the room and lens keys through
-`registerRegion` and the room-view key through a snapshot registration alone.
+`registerRegion` and the room-view key through a snapshot registration alone. A
+per-subject HTML lens is the exception: its `rib:chamber:lens-html:{id}` key
+pushes its own `canvasKind: "html"` view at runtime, so the drawer renders the
+raw HTML frame directly rather than through the board pipeline.
 
 ## Every panel is a board
 

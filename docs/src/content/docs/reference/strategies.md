@@ -54,8 +54,13 @@ export type StrategyStep =
 | `end` | none | Close the room. |
 
 :::note
-`synthesize` is part of the contract but no shipped strategy returns it. The
-synthesizer turn is driver-emitted, not strategy-emitted, in the current code.
+`synthesize` is returned by the shipped strategies at budget exhaustion. Every
+strategy except `review` returns it (via `exhaustedSynthesis`) when `turnIndex`
+reaches `turnBudget`, choosing the configured `synthesizer`, the strategy's
+facilitator fallback (moderator or manager), or the last participant, and
+falling back to `end` only when none resolves. The driver runs that step as a
+single closing turn. `review` is exempt: the reviewer's critique is itself the
+closing artifact.
 :::
 
 ## The registry
@@ -89,10 +94,13 @@ union member that has no entry is a registry gap, not a type error.
 
 ## The six strategies
 
-All six start with the same structural guards, in order, each returning
-`{ kind: "end" }`: room not `active`, empty participant roster (review uses fewer
-than two), and `turnIndex` at or past `turnBudget`. After the guards, each
-decides differently.
+All six start with the same structural guards, in order. The first two return
+`{ kind: "end" }` uniformly: room not `active`, then an empty participant roster
+(review uses fewer than two). The third guard, `turnIndex` at or past
+`turnBudget`, differs by strategy: every strategy except `review` returns a
+closing `synthesize` step via `exhaustedSynthesis` (which falls back to `end`
+only when no synthesizer or prior speaker resolves), while `review` returns
+`end`. After the guards, each decides differently.
 
 | Strategy | Default | Decision | Special role |
 | --- | --- | --- | --- |

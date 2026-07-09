@@ -18,14 +18,21 @@ relative to that home.
 │   └── {slug}/
 ├── lenses/
 │   └── {id}/
+├── lenses-html/
+│   └── {id}/
+│       ├── lens.html
+│       └── meta.json
 ├── room-draft.json
 ├── digest.json
-└── brief-watermark.json
+├── brief-watermark.json
+└── pending-genesis.json
 ```
 
-The three subdirectories hold one entry per Mind, room, and lens. The three
-JSON files at the home root are small singletons: the Convene draft, the
-standing digest, and the briefing watermark.
+The four subdirectories hold one entry per Mind, room, board lens, and HTML
+lens. Three of the JSON files at the home root are durable singletons: the
+Convene draft, the standing digest, and the briefing watermark. The fourth,
+`pending-genesis.json`, is a transient marker that exists only while a genesis
+is in flight.
 
 ## A Mind
 
@@ -58,7 +65,9 @@ if `mind.json` carries a divergent `slug`, the directory name wins on read.
 `SOUL.md`. `model` and `provider` are optional. Genesis writes them when provided
 via workflow inputs, and the roster card's model dropdown can update or clear the
 pin later. `tools` is an optional array of capability slugs, written only when
-non-empty. `SOUL.md` holds the three named sections. `memory.md` and `rules.md`
+non-empty. `identitySlot` (a host identity-tone slot, an integer 0 through 4,
+assigned once at genesis) is written only when set. `SOUL.md` holds
+the three named sections. `memory.md` and `rules.md`
 are seeded as empty templates and `log.md` with a single genesis line; all three
 are ordinary inspectable files you can edit. `memory.md` and `log.md` are also
 written by the rib: when a room closes, each Mind that spoke runs a reflection turn
@@ -106,9 +115,13 @@ the transcript on resume:
 }
 ```
 
-`status` is one of `active`, `stopped`, or `done`. `topic`, `config`, and
-`pending` are optional. `round` is stored, not derived, so a director override
-or moderator pick can perturb rotation without losing the round count.
+`status` is one of `active`, `stopped`, or `done`. `topic`, `config`,
+`pending`, `projectId`, and `coding` are optional. `projectId` names the keelson
+project the room targets (stored as the id, not the resolved path); `coding` is
+the opt-in coding tier and requires a `projectId`, since the project root is the
+confinement boundary for coding turns. `round` is stored, not derived, so a
+director override or moderator pick can perturb rotation without losing the
+round count.
 
 `transcript.jsonl` is one `TurnEntry` per line, append-only:
 
@@ -167,6 +180,28 @@ supplies an object (only an explicit `refresh: null` clears it), and lens-only
 (an exhibit save strips it). A malformed or fractional-cadence `refresh` block
 folds to absent on read rather than hiding the record.
 
+## An HTML lens
+
+An HTML lens is a separate species from the board lens above: it holds a
+self-contained HTML page rather than a structured board. It lives in
+`lenses-html/{id}/` as a two-file record, one file for the markup and one for
+the commit metadata.
+
+```text
+lenses-html/{id}/
+├── lens.html
+└── meta.json
+```
+
+`lens.html` carries the authored markup verbatim, kept out of JSON so a large
+page never round-trips an encoder. `meta.json` is the `HtmlLensMeta`,
+`{ id, title?, updatedAt }`: `title` names the panel head and is written only
+when set, and `updatedAt` is server-stamped on every write. The store writes
+`lens.html` first and `meta.json` second, because `meta.json` is the commit
+record. A load or list skips any directory that has no `meta.json`, so a crash
+between the two writes leaves an invisible partial rather than a half-written
+lens.
+
 ## room-draft.json
 
 The Convene draft is an exclusion set, not a selection list:
@@ -220,6 +255,29 @@ publish collector reads the board back to refresh the bound key every tick. A
 missing or torn file degrades to null: the gate sees a changed subject and
 the publish collector falls back to the cold-start board, following the same
 fail-soft contract as `brief-watermark.json`.
+
+## pending-genesis.json
+
+Unlike the three durable singletons above, this file is a transient marker: the
+author action writes it before the `chamber-genesis` workflow runs and clears it
+on completion, so it exists only while a genesis is in flight. It drives the
+roster boot card that shows the seat being taken.
+
+```json
+{
+  "startedAt": "2026-06-23T12:00:00.000Z",
+  "name": "Moneypenny",
+  "role": "Chief of Staff"
+}
+```
+
+`startedAt` drives the elapsed counter and the stall timeout. `name` and `role`
+are optional: they are present when a starter archetype was authored (pinned as
+workflow inputs) and absent for a freeform brief, where the boot card reads
+`calibrating…` until the workflow fills them in. Only one marker exists at a
+time, so a second author overwrites it. A missing, corrupt, or torn file reads
+as no pending genesis, the same fail-soft contract the other root singletons
+keep.
 
 ## The board payload
 
