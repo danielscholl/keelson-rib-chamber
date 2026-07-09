@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildRosterBoard } from "../../src/boards/roster.ts";
+import { MODEL_CHOICES } from "../../src/models.ts";
 import { GENESIS_STARTERS } from "../../src/starters.ts";
 import type { Mind } from "../../src/types.ts";
 
@@ -261,12 +262,14 @@ describe("buildRosterBoard populated", () => {
     expect(mindCards(buildRosterBoard([mind({ role: "" })]))[0]?.pill?.label).toBe("Mind");
   });
 
-  test("fields: a truncated persona ((no persona) fallback) and model only when set", () => {
+  test("fields: a truncated persona ((no persona) fallback); the model reads off the set-model label, not a field", () => {
     const withModel = mindCards(buildRosterBoard([mind({ model: "claude-x" })]))[0];
     expect(withModel?.fields?.find((f) => f.label === "persona")?.value).toBe("You are Ada.");
-    expect(withModel?.fields?.find((f) => f.label === "model")?.value).toBe("claude-x");
+    // The read-only model field is gone — the model now rides the set-model action label.
+    expect(withModel?.fields?.some((f) => f.label === "model")).toBe(false);
+    expect(withModel?.actions?.find((a) => a.type === "set-model")?.label).toBe("Model — claude-x");
     const noModel = mindCards(buildRosterBoard([mind({ model: undefined })]))[0];
-    expect(noModel?.fields?.some((f) => f.label === "model")).toBe(false);
+    expect(noModel?.actions?.find((a) => a.type === "set-model")?.label).toBe("Model — default");
     const noPersona = mindCards(buildRosterBoard([mind({ persona: "   " })]))[0];
     expect(noPersona?.fields?.find((f) => f.label === "persona")?.value).toBe("(no persona)");
   });
@@ -309,24 +312,59 @@ describe("buildRosterBoard populated", () => {
     );
   });
 
-  test("each seated card carries a set-model action with model/provider fields", () => {
+  test("each seated card's set-model action is an at-rest indicator plus a model dropdown", () => {
     const board = buildRosterBoard([
-      mind({ slug: "ada", name: "Ada", model: "claude-opus-4.8", provider: "anthropic" }),
+      mind({ slug: "ada", name: "Ada", model: "claude-opus-4-7", provider: "anthropic" }),
     ]);
     const actions = mindCards(board)[0]?.actions ?? [];
     const setModel = actions.find((a) => a.type === "set-model");
     expect(setModel).toMatchObject({
       type: "set-model",
-      label: "Set model…",
+      label: "Model — claude-opus-4-7",
       glyph: "⚙",
       payload: { slug: "ada" },
     });
     expect(setModel?.destructive ?? false).toBe(false);
-    expect(setModel?.fields).toEqual([
-      { name: "model", label: "Model", placeholder: "claude-opus-4.8" },
-      { name: "provider", label: "Provider", placeholder: "anthropic" },
-    ]);
+    // Model is a non-required select opening on the current pin.
+    const modelField = setModel?.fields?.find((f) => f.name === "model");
+    expect(modelField?.required ?? false).toBe(false);
+    expect(modelField?.defaultValue).toBe("claude-opus-4-7");
+    const values = (modelField?.options ?? []).map((o) => o.value);
+    expect(values.length).toBeGreaterThan(0);
+    expect(new Set(values).size).toBe(values.length); // unique
+    for (const o of modelField?.options ?? []) expect(o.label.length).toBeGreaterThan(0);
+    for (const c of MODEL_CHOICES) expect(values).toContain(c.value); // curated set present
+    // Provider stays free-text, pre-filled with the current pin so an idle submit
+    // re-affirms it rather than dropping it via setMindModel.
+    const providerField = setModel?.fields?.find((f) => f.name === "provider");
+    expect(providerField?.options).toBeUndefined();
+    expect(providerField?.defaultValue).toBe("anthropic");
     expect(actions.findIndex((a) => a.type === "retire")).toBe(actions.length - 1);
+  });
+
+  test("a Mind pinned outside the curated set keeps that model selectable and default", () => {
+    const drift = "claude-opus-4.8"; // dot-format prose slug, not in the dash-format catalog
+    expect(MODEL_CHOICES.some((c) => c.value === drift)).toBe(false);
+    const board = buildRosterBoard([mind({ slug: "ada", model: drift })]);
+    const setModel = mindCards(board)[0]?.actions?.find((a) => a.type === "set-model");
+    const modelField = setModel?.fields?.find((f) => f.name === "model");
+    expect(modelField?.defaultValue).toBe(drift);
+    expect((modelField?.options ?? []).map((o) => o.value)).toContain(drift);
+    // The whole board still validates fail-closed with the drifted select present.
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("an unset Mind's model control reads default and opens on the empty option", () => {
+    const board = buildRosterBoard([mind({ slug: "ada", model: undefined })]);
+    const setModel = mindCards(board)[0]?.actions?.find((a) => a.type === "set-model");
+    expect(setModel?.label).toBe("Model — default");
+    const modelField = setModel?.fields?.find((f) => f.name === "model");
+    // No defaultValue → the non-required select opens on its empty "clear" option.
+    expect(modelField?.defaultValue).toBeUndefined();
+    expect((modelField?.options ?? []).map((o) => o.value)).toEqual(
+      MODEL_CHOICES.map((c) => c.value),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
   test("Enter lives on each Mind card; no standalone Enter/retire action item", () => {

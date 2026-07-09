@@ -72,8 +72,9 @@ guarded against traversal before it ever touches the filesystem).
 
 :::note
 Genesis can pin `model` and `provider` when you pass them as workflow inputs.
-You can also set or clear the pin later from the roster card's **Set model…**
-action. `provider` is only kept when `model` is set.
+You can also change or clear the pin later from the roster card's model control —
+an at-rest indicator whose dropdown re-pins the model (its blank option clears the
+pin). `provider` is only kept when `model` is set.
 :::
 
 With no pin, the provider depends on where the Mind runs: entering it for a direct

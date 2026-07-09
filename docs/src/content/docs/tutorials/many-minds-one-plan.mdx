@@ -99,7 +99,7 @@ reuse one you have. Genesis named mine **stoneplan**, **faultline**, and
 **ledger**, with **avery-slate** moderating. Yours will get their own names.
 
 A room is most useful when its Minds do not all read alike. Each Mind can pin its
-own model from the roster card's **Set model…** action, so the same contract gets
+own model from its roster card's model dropdown, so the same contract gets
 read by genuinely different engines. The goal here is spread, not picking a single
 best model: a review wants independent readings, and three models from three
 families disagree in useful ways. Copilot serves all three, so this is one
@@ -113,8 +113,8 @@ subscription, not three.
 Where a role has a clear bias you can play to it: opus-class models reason and
 orchestrate, which suits the moderator and the defender; a gpt-class model is
 blunt and literal, which is what you want in the skeptic. For a review, though,
-the spread matters more than the match. Pin from the card's **Set model…** action
-(`model` required, `provider` optional), or pre-pin at authoring time:
+the spread matters more than the match. Pin from the card's model dropdown
+(`provider` is kept only alongside a `model`), or pre-pin at authoring time:
 
 ```text
 keelson workflow run chamber-genesis --arguments "an adversarial contract skeptic who stress-tests API and data contracts" --inputs model=gpt-5.5 --inputs provider=copilot
