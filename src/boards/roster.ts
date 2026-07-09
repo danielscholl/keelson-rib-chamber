@@ -1,4 +1,5 @@
 import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
+import { modelOptions } from "../models.ts";
 import type { PendingGenesis } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from "../types.ts";
@@ -123,15 +124,15 @@ function forYouSection(): CanvasBoardView["sections"][number] {
 }
 
 // One Mind -> one card: its host identity-tone dot (keelson#390, assigned once
-// at genesis — see identityToneForSlot), the role in a single pill, persona
-// (and model when set) as fields, and two actions — Enter (the primary verb, a
-// non-destructive action the host renders inline on the card) and Retire (a
-// destructive overflow action with a confirm dialog).
+// at genesis — see identityToneForSlot), the role in a single pill, persona as a
+// field, and three actions — Enter (the primary verb, a non-destructive action
+// the host renders inline on the card), the model control (an at-rest indicator
+// whose dropdown re-pins the model), and Retire (a destructive overflow action
+// with a confirm dialog).
 function cardFor(mind: Mind) {
   const fields: { label: string; value: string }[] = [
     { label: "persona", value: truncate(mind.persona) },
   ];
-  if (mind.model) fields.push({ label: "model", value: mind.model });
   return {
     title: mind.name,
     dot: identityToneForSlot(mind.identitySlot),
@@ -144,21 +145,29 @@ function cardFor(mind: Mind) {
         glyph: "→",
         payload: { slug: mind.slug },
       },
+      // The current model reads off this action's label (the at-rest indicator);
+      // its `model` field is a select whose empty option clears the pin and whose
+      // defaultValue opens it on the current model — so an idle submit re-affirms
+      // the pin (and its provider) rather than wiping it via setMindModel's
+      // absent-as-clear path.
       {
         type: "set-model",
-        label: "Set model…",
+        label: `Model — ${mind.model ?? "default"}`,
         glyph: "⚙",
         payload: { slug: mind.slug },
         fields: [
           {
             name: "model",
             label: "Model",
-            placeholder: mind.model ?? "e.g. claude-opus-4.8 (blank to clear)",
+            placeholder: "default (inherit)",
+            options: modelOptions(mind.model),
+            ...(mind.model ? { defaultValue: mind.model } : {}),
           },
           {
             name: "provider",
             label: "Provider",
             placeholder: mind.provider ?? "optional, e.g. anthropic",
+            ...(mind.provider ? { defaultValue: mind.provider } : {}),
           },
         ],
       },
