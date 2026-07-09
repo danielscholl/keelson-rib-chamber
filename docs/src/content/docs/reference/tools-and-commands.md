@@ -24,11 +24,14 @@ optional field is marked `?`.
 | `chamber_list_minds` | no | no | List all Minds: slug, name, role, tagline, pinned model/provider, capability tools. Read-only. | _(none)_ |
 | `chamber_list_rooms` | no | no | List rooms (active first, then ended) with slug, name, status, strategy, participants, and turn progress. Read-only. | _(none)_ |
 | `chamber_list_lenses` | no | no | List living lenses newest first: id, updatedAt, and optional provenance fields. Read-only. | _(none)_ |
+| `chamber_list_exhibits` | no | no | List exhibits (deliverables rooms tabled) newest first: id, tabledAt, producing room, gist. Read-only. | _(none)_ |
 | `chamber_retire_mind` | yes | no | Permanently remove a Mind's record and SOUL.md from the roster. Fails closed if absent. | `slug` |
 | `chamber_room_delete` | yes | no | Permanently delete an ended room's record, transcript, and ledger. Stop first with `chamber_room_stop`. | `room` |
 | `chamber_emit_lens` | yes | no | Author a lens: render an agent-composed canvas board onto the surface as its own live panel. | `id`, `board`, `scope?`, `maintainingMind?`, `reason?` |
 | `chamber_emit_lens_html` | yes | no | Author an HTML lens: publish a literal HTML string to the sandboxed iframe canvas. | `html` |
-| `chamber_retire_lens` | yes | no | Permanently remove a lens, both its record and its live panel. Fails closed if no such lens. | `id` |
+| `chamber_retire_lens` | yes | no | Permanently remove a lens, both its record and its live panel. Fails closed if no such lens, or if the id names an exhibit. | `id` |
+| `chamber_table_exhibit` | yes | no | Table an exhibit: publish a canvas-board deliverable a discussion produced as its own panel on the Exhibits shelf. | `id`, `board`, `reason?` |
+| `chamber_delete_exhibit` | yes | no | Permanently remove an exhibit, both its record and its live panel. Fails closed if no such exhibit, or if the id names a lens. | `id` |
 | `chamber_room_status` | no | no | Return a room's participants, status, turn count, and transcript so far. Read-only. | `room?` |
 | `chamber_room_start` | yes | yes | Open a room where named Minds converse turn by turn. Dry-runs until `confirm` is set. | `participants`, `turnBudget?`, `name?`, `topic?`, `strategy?`, `moderator?`, `manager?`, `synthesizer?`, `minRounds?`, `maxSpeakerRepeats?`, `endVoteThreshold?`, `projectId?`, `coding?`, `confirm?` |
 | `chamber_room_say` | yes | no | Steer a live room: guide the next speaker, call on a Mind, or drop a director message. | `room?`, `direction?`, `callOn?`, `text?` |
@@ -76,16 +79,21 @@ The lens schema carries four optional provenance-bearing fields beyond the board
   board view), `scope?` (1..40), `maintainingMind?` (1..40), and `reason?`
   (1..120). The `scope`, `maintainingMind`, and `reason` fields are the lens index
   card's optional provenance. See [Lenses](../../concepts/lenses/).
+- `chamber_table_exhibit` takes `id`, `board`, and `reason?` (1..120, a one-line
+  gist). The producing room (`sourceRoom`) is deliberately NOT an input: the room
+  driver stamps it after witnessing the tool run in a turn it ran, so provenance
+  is observed, never claimed.
 
 ### Tool availability
 
 Tool registration is conditional on the host seams the harness wires in:
 
-- **Always present (7):** `chamber_emit_genesis`, `chamber_emit_digest`,
+- **Always present (8):** `chamber_emit_genesis`, `chamber_emit_digest`,
   `chamber_list_minds`, `chamber_list_rooms`, `chamber_list_lenses`,
-  `chamber_retire_mind`, `chamber_room_delete`.
-- **Snapshot manager + region registration seams (3 more):** `chamber_emit_lens`,
-  `chamber_retire_lens`, `chamber_emit_lens_html`.
+  `chamber_list_exhibits`, `chamber_retire_mind`, `chamber_room_delete`.
+- **Snapshot manager + region registration seams (5 more):** `chamber_emit_lens`,
+  `chamber_retire_lens`, `chamber_table_exhibit`, `chamber_delete_exhibit`,
+  `chamber_emit_lens_html`.
 - **All seams including agent-turn (4 more):** `chamber_room_status`,
   `chamber_room_start`, `chamber_room_say`, `chamber_room_stop`. See
   [The agent-turn seam](../../design/the-agent-turn-seam/).
@@ -145,6 +153,7 @@ without navigating.
 | `room-open` | `{ slug }` | `open-canvas` (the room-view key) |
 | `set-model` | `{ slug, model?, provider? }` | data (`{ slug, model? }`) |
 | `retire-lens` | `{ id }` | data (`{ id, key }`) |
+| `delete-exhibit` | `{ id }` | data (`{ id, key }`) |
 | `lens-open` | `{ id }` | `open-canvas` (the lens key) |
 | `lens-note` | `{ id, note }` | data (`{ id, key }`) |
 
@@ -161,7 +170,7 @@ so a steer from chat and a steer from the surface behave identically.
 
 ## Related
 
-- [Workflows](../workflows/): the seven contributed workflows that drive the standing
+- [Workflows](../workflows/): the contributed workflows that drive the standing
   panels, genesis, and lens authoring.
 - [Surface](../surface/): the snapshot keys and regions these tools publish to.
 - [Rooms and strategies](../../concepts/rooms/): the room loop the room tools steer.

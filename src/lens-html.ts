@@ -139,6 +139,9 @@ export function createHtmlLensRegistry(
         glyph: { char: "❖", tone: "accent" },
         group: "lens",
         groupTitle: "Lenses",
+        // Foldable like every other lens panel — a tall designed page shouldn't
+        // monopolize the surface with no way to put it away.
+        collapsible: true,
       });
     } catch (e) {
       // A failed region add (e.g. the harness per-surface ceiling) must not leak

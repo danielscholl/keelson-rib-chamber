@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { MessageChunk } from "@keelson/shared";
 import type { RibAgentTurnRequest, RunAgentTurn } from "../../src/agent-turn.ts";
 import { codingToolPool } from "../../src/capabilities.ts";
-import { LENS_TOOL_NAME } from "../../src/lens.ts";
+import { EXHIBIT_TOOL_NAME } from "../../src/lens.ts";
 import { createRoomDriver } from "../../src/room.ts";
 import type { Mind } from "../../src/types.ts";
 import { fixedClock, makeFakePublisher, makeFakeStore, seqIds } from "../helpers/fakes.ts";
@@ -77,7 +77,7 @@ describe("room driver — coding review loop (real file round-trip)", () => {
         publisher: pub.publisher,
         runAgentTurn: turns.run,
         minds: () => [AUTHOR, REVIEWER],
-        turnTools: [{ name: LENS_TOOL_NAME }],
+        turnTools: [{ name: EXHIBIT_TOOL_NAME }],
         codingTools: codingToolPool(),
         resolveProjectRoot: () => repo,
         turnCwd: "/neutral",

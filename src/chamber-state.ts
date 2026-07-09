@@ -1,4 +1,4 @@
-import { type LensRecord, listLenses } from "./lens-store.ts";
+import { isExhibit, type LensRecord, listLenses } from "./lens-store.ts";
 import { readMinds } from "./minds-store.ts";
 import { lensesDir, mindsDir, roomsDir } from "./paths.ts";
 import { listRooms } from "./room-store.ts";
@@ -79,7 +79,10 @@ export function reduceChamberState(
     mindCount: minds.length,
     activeRoomCount,
     endedRoomSlugs,
-    liveLensCount: lenses.length,
+    // The pulse's "Live views" counts standing lenses only — an exhibit is a tabled
+    // deliverable, not a living view. Fingerprints keep BOTH species: a tabled or
+    // re-tabled exhibit is briefing/digest substance like any lens change.
+    liveLensCount: lenses.filter((l) => !isExhibit(l)).length,
     lensFingerprints,
   };
 }
@@ -160,12 +163,18 @@ export function buildDigestSource(
 ): string {
   const active = rooms.filter((r) => !isEndedRoom(r.status));
   const ended = rooms.filter((r) => isEndedRoom(r.status));
+  const standing = lenses.filter((l) => !isExhibit(l));
+  const exhibits = lenses.filter(isExhibit);
   const names = <T>(xs: readonly T[], f: (x: T) => string): string =>
     xs.length ? xs.map(f).join(", ") : "none";
   return [
     `Minds (${minds.length}): ${names(minds, (m) => m.name)}`,
     `Active rooms (${active.length}): ${names(active, (r) => r.name || r.slug)}`,
     `Ended rooms (${ended.length}): ${names(ended, (r) => `${r.name || r.slug} (${r.status})`)}`,
-    `Lenses (${lenses.length}): ${names(lenses, (l) => l.board.title || l.id)}`,
+    `Lenses (${standing.length}): ${names(standing, (l) => l.board.title || l.id)}`,
+    `Exhibits (${exhibits.length}): ${names(
+      exhibits,
+      (l) => `${l.board.title || l.id}${l.sourceRoom ? ` (from ${l.sourceRoom})` : ""}`,
+    )}`,
   ].join("\n");
 }

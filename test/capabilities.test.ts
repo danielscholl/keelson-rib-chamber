@@ -11,7 +11,7 @@ import {
   readToolPool,
   resolveMindTools,
 } from "../src/capabilities.ts";
-import { LENS_TOOL_NAME } from "../src/lens.ts";
+import { EXHIBIT_TOOL_NAME } from "../src/lens.ts";
 
 const OSDU_TOOL_NAMES = [
   "osdu_quality",
@@ -28,14 +28,14 @@ const OSDU_WRITE_TOOL_NAMES = [
   "osdu_cluster_suspend",
   "osdu_cluster_resume",
 ];
-const POOL = [{ name: LENS_TOOL_NAME }];
+const POOL = [{ name: EXHIBIT_TOOL_NAME }];
 // The ceiling a coding room layers on: base (lens) + the coding built-ins.
-const CODING_POOL = [{ name: LENS_TOOL_NAME }, ...codingToolPool()];
-const OSDU_POOL = [{ name: LENS_TOOL_NAME }, ...externalToolPool()];
+const CODING_POOL = [{ name: EXHIBIT_TOOL_NAME }, ...codingToolPool()];
+const OSDU_POOL = [{ name: EXHIBIT_TOOL_NAME }, ...externalToolPool()];
 
 describe("resolveMindTools", () => {
   test("maps a declared slug to its tool name when the pool permits it", () => {
-    expect(resolveMindTools({ tools: ["lens"] }, POOL)).toEqual([{ name: LENS_TOOL_NAME }]);
+    expect(resolveMindTools({ tools: ["lens"] }, POOL)).toEqual([{ name: EXHIBIT_TOOL_NAME }]);
   });
 
   test("no declaration stays text-only", () => {
@@ -48,7 +48,7 @@ describe("resolveMindTools", () => {
   });
 
   test("a raw tool name is not a slug — only the curated vocabulary maps", () => {
-    expect(resolveMindTools({ tools: [LENS_TOOL_NAME] }, POOL)).toEqual([]);
+    expect(resolveMindTools({ tools: [EXHIBIT_TOOL_NAME] }, POOL)).toEqual([]);
   });
 
   test("a known slug absent from the room pool is dropped — the pool is the ceiling", () => {
@@ -57,7 +57,9 @@ describe("resolveMindTools", () => {
   });
 
   test("repeated slugs dedupe to one entry", () => {
-    expect(resolveMindTools({ tools: ["lens", "lens"] }, POOL)).toEqual([{ name: LENS_TOOL_NAME }]);
+    expect(resolveMindTools({ tools: ["lens", "lens"] }, POOL)).toEqual([
+      { name: EXHIBIT_TOOL_NAME },
+    ]);
   });
 
   test("KNOWN_CAPABILITY_SLUGS mirrors the map keys", () => {
@@ -148,7 +150,7 @@ describe("external capability tier", () => {
   });
 
   test("a non-osdu Mind cannot reach osdu tools from the external pool", () => {
-    expect(resolveMindTools({ tools: ["lens"] }, OSDU_POOL)).toEqual([{ name: LENS_TOOL_NAME }]);
+    expect(resolveMindTools({ tools: ["lens"] }, OSDU_POOL)).toEqual([{ name: EXHIBIT_TOOL_NAME }]);
   });
 
   test("CAPABILITIES.osdu is pinned to the read-only osdu tool names", () => {

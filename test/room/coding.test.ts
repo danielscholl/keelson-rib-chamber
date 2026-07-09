@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { codingToolPool } from "../../src/capabilities.ts";
-import { LENS_TOOL_NAME } from "../../src/lens.ts";
+import { EXHIBIT_TOOL_NAME } from "../../src/lens.ts";
 import { createRoomDriver } from "../../src/room.ts";
 import type { Mind } from "../../src/types.ts";
 import {
@@ -35,7 +35,7 @@ function harness(opts: {
     publisher: pub.publisher,
     runAgentTurn: turns.run,
     minds: () => opts.minds,
-    turnTools: [{ name: LENS_TOOL_NAME }],
+    turnTools: [{ name: EXHIBIT_TOOL_NAME }],
     ...(opts.withCodingTools === false ? {} : { codingTools: codingToolPool() }),
     ...(opts.turnCwd ? { turnCwd: opts.turnCwd } : {}),
     ...(opts.resolveProjectRoot ? { resolveProjectRoot: opts.resolveProjectRoot } : {}),

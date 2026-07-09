@@ -5,7 +5,7 @@
 // doesn't already permit (e.g. room-control or another rib's tools) even via a
 // hand-edited mind.json — the core turn seam does not scope a turn to its rib.
 
-import { LENS_TOOL_NAME } from "./lens.ts";
+import { EXHIBIT_TOOL_NAME } from "./lens.ts";
 import type { Mind } from "./types.ts";
 
 // Capability slug -> the rib tool name(s) it authorizes, plus a one-line gloss
@@ -14,7 +14,10 @@ import type { Mind } from "./types.ts";
 export const CAPABILITIES: Readonly<
   Record<string, { readonly tools: readonly string[]; readonly summary: string }>
 > = {
-  lens: { tools: [LENS_TOOL_NAME], summary: "author a live canvas board mid-room" },
+  // The slug stays `lens` (it is persisted in existing mind.json declarations)
+  // but now authorizes the exhibit seam: mid-room publishing is TABLING a
+  // deliverable, not maintaining a standing lens.
+  lens: { tools: [EXHIBIT_TOOL_NAME], summary: "table a canvas-board exhibit mid-room" },
   read: {
     tools: ["Read"],
     summary: "read files in the room's project (auto-granted in project rooms)",

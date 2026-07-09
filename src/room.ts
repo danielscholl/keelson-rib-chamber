@@ -2,6 +2,7 @@ import type { TokenUsage } from "@keelson/shared";
 import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
 import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
+import { EXHIBIT_TOOL_NAME } from "./lens.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
 import {
   allHeardInCycle,
@@ -77,9 +78,14 @@ export interface RoomDriverDeps {
   resolveProjectName?: (projectId: string) => string | undefined;
   // Tool names every room turn may invoke, forwarded as the turn's `tools` (the
   // C1 seam resolves them to the rib's registered defs). The rib decides what is
-  // safe for a room turn — today the lens write seam, so a Mind can author a lens
-  // mid-room. Omitted/empty keeps the turn text-only (the room default).
+  // safe for a room turn — today the exhibit write seam, so a discussion can table
+  // its deliverable mid-room. Omitted/empty keeps the turn text-only (the room default).
   turnTools?: readonly { name: string }[];
+  // Fired after a turn in which the driver WITNESSED the table-exhibit tool run,
+  // with the raw emitted ids (pre-canonicalization) and the room. The rib stamps
+  // sourceRoom off this — witnessed provenance, never agent-claimed. Fire-and-forget:
+  // the driver neither awaits nor observes it (a stamp must never block a turn).
+  onExhibitsTabled?: (ids: readonly string[], room: Room) => void;
   // The coding tier's pool, layered on top of turnTools only for a room that opted
   // in (`room.coding`) AND has a cwd to confine the turn to. These are host provider
   // built-ins (Bash/Edit/Write/Read), so a turn that gets them is confined to its
@@ -671,16 +677,26 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         ...(mind.model ? { model: mind.model } : {}),
         ...(mind.provider ? { provider: mind.provider } : {}),
       });
+      // The drain doubles as the exhibit witness: a tool_use chunk naming the
+      // table-exhibit seam proves THIS room's turn tabled that id, so the rib can
+      // stamp sourceRoom without trusting the agent to name its own room.
+      const tabledIds: string[] = [];
       try {
         // Draining the stream could drive throttled partial publishes later; for
         // now the result is the source of truth.
-        for await (const _chunk of turn.stream) {
-          // intentionally empty
+        for await (const chunk of turn.stream) {
+          if (chunk.type !== "tool_use" || chunk.toolName !== EXHIBIT_TOOL_NAME) continue;
+          const rawId = chunk.toolInput?.id;
+          if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
         }
       } catch {
         // a stream error surfaces via result.status below
       }
       const result = await turn.result;
+      // Stamp even on an aborted/errored result: the tool already ran server-side
+      // when its tool_use chunk streamed, so the record exists either way (the
+      // stamp itself load-checks and skips a record the emit never persisted).
+      if (tabledIds.length > 0) deps.onExhibitsTabled?.(tabledIds, room);
       aborted = result.status === "aborted" || controller.signal.aborted;
       errored = result.status === "error" || result.status === "timeout";
       text =

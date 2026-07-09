@@ -16,24 +16,29 @@ The surface has a stable identity:
 |---|---|
 | `id` | `chamber` |
 | `title` | `Chamber` |
-| `subtitle` | `Author Minds · convene Rooms · keep Lenses · read the Briefing` |
+| `subtitle` | `Author Minds · convene Rooms · keep Lenses · table Exhibits · read the Briefing` |
 
 ## Standing layout
 
-The surface declares six standing regions: a header, one row of four columns,
-and a footer. Each binds a snapshot key. The four collectors carry a workflow
-binding and a 120000 ms cadence so they self-populate on open and refresh
-without being hammered. The Briefing footer has no workflow: it is rib-driven,
-seeded with a quiet board at boot and republished only by the attention gate.
+The surface declares six standing regions: the Roster header, the Convene row,
+the Rooms + Lenses row, the Exhibits row, and the Briefing footer. Each binds a
+snapshot key. The index collectors carry a workflow binding and a 120000 ms
+cadence so they self-populate on open and refresh without being hammered. Convene
+and the Briefing footer have no workflow: both are rib-driven, recomposed on
+mutation (Convene) or republished only by the attention gate (the Briefing).
 
 | Region | Key | Workflow | Cadence (ms) | Collapsible | Glyph |
 |---|---|---|---|---|---|
-| Header | `rib:chamber:roster` | `chamber-roster` | 120000 | no | `◇` brand |
-| Row, column 1 | `rib:chamber:rooms` | `chamber-rooms` | 120000 | yes | `▦` brand |
-| Row, column 2 | `rib:chamber:lenses` | `chamber-lenses` | 120000 | yes | `✦` accent |
-| Row, column 3 | `rib:chamber:activity` | `chamber-activity` | 120000 | yes | `↻` info |
-| Row, column 4 | `rib:chamber:digest` | `chamber-digest` | 120000 | yes | `✶` brand |
+| Header | `rib:chamber:roster` | `chamber-roster` | 120000 | yes | `◇` brand |
+| Row 1 | `rib:chamber:convene` | none (rib-driven) | none | yes | `＋` brand |
+| Row 2, column 1 | `rib:chamber:rooms` | `chamber-rooms` | 120000 | yes | `▦` brand |
+| Row 2, column 2 | `rib:chamber:lenses` | `chamber-lenses` | 120000 | yes | `✦` accent |
+| Row 3 | `rib:chamber:exhibits` | `chamber-exhibits` | 120000 | yes | `▣` caution |
 | Footer | `rib:chamber:brief` | none (rib-driven) | none | yes | `❖` brand |
+
+The Exhibits row additionally sets `hideWhenEmpty`: its collector emits zero
+sections while no exhibits exist, so the shelf stays invisible until a
+discussion has tabled something.
 
 The Rooms index lists active rooms first, as status-only cards, then closed
 rooms with Open and Delete actions. An active room also gets its own live panel
@@ -41,16 +46,23 @@ rooms with Open and Delete actions. An active room also gets its own live panel
 
 ## Dynamic regions
 
-Live rooms and live lenses are not in the static layout. A producer registers
-each one at runtime with `registerRegion`, so the surface grows panels as rooms
-convene and lenses are authored. A lens panel sheds when the lens retires. A room
-keeps its panel while active, and after it ends the most recently finished room
-stays visible until a newer room supersedes it, or the room is deleted.
+Live rooms, live lenses, and live exhibits are not in the static layout. A
+producer registers each one at runtime with `registerRegion`, so the surface
+grows panels as rooms convene, lenses are authored, and exhibits are tabled. A
+lens or exhibit panel sheds when its record is retired or deleted. A room keeps
+its panel while active, and after it ends the most recently finished room stays
+visible until a newer room supersedes it, or the room is deleted. Every lens and
+exhibit panel is collapsible, so a tall board folds to its head strip.
 
 | Region | Key | Title | Group | Group title | Glyph |
 |---|---|---|---|---|---|
 | Live room | `rib:chamber:room:{slug}` | room name (falls back to slug) | `rooms` | `Rooms` | `▦` brand |
 | Live lens | `rib:chamber:lens:{id}` | the lens `id` | `lens` | `Lenses` | `✦` accent |
+| Live exhibit | `rib:chamber:lens:{id}` | the exhibit `id` | `exhibit` | `Exhibits` | `▣` caution |
+
+Lenses and exhibits share one key family (`rib:chamber:lens:{id}`) and one id
+space — the record's kind decides which shelf its region joins — so the open
+path and the briefing's jump chips resolve either kind through the same key.
 
 Each active room gets its own per-slug key and region, and each lens its own
 per-id key and region. The key routes a re-publish back to the same panel:
@@ -59,9 +71,9 @@ to its slug. The harness enforces a per-surface region ceiling; a region the
 harness rejects unwinds the snapshot registration it paired with, rather than
 leaving an orphaned key.
 
-The group string for lenses is `lens` (singular); the group title rendered for
-the lane is `Lenses`. The first room or lens to register sets the group title
-for its lane.
+The group string for lenses is `lens` and for exhibits `exhibit` (singular);
+the group titles rendered for the lanes are `Lenses` and `Exhibits`. The first
+room, lens, or exhibit to register sets the group title for its lane.
 
 ### The Rooms index Open key
 

@@ -1,28 +1,29 @@
 ---
 title: Workflows
-description: The seven workflows the Chamber rib contributes to the catalog, each defined in code with no YAML file
+description: The eight workflows the Chamber rib contributes to the catalog, each defined in code with no YAML file
 sidebar:
   order: 3
 ---
 
-Chamber contributes seven workflows to the catalog. They are defined in code, in
+Chamber contributes eight workflows to the catalog. They are defined in code, in
 the rib's `contributeWorkflows` hook, so there are no YAML files to edit. Four
 are deterministic bash collectors that read the data home and publish a board;
-two are single prompt turns that author content; and one (chamber-digest) is a
+three are single prompt turns that author content; and one (chamber-digest) is a
 three-node self-gating pipeline that pairs a cheap bash gate with a conditional
 agent turn.
 
-## The seven
+## The eight
 
 | Workflow | Kind | Node | Snapshot key | Publishes |
 |---|---|---|---|---|
 | `chamber-roster` | bash collector | `collect` | `ROSTER_KEY` | the Roster board |
 | `chamber-rooms` | bash collector | `collect` | `ROOMS_KEY` | the Rooms index |
 | `chamber-lenses` | bash collector | `collect` | `LENSES_KEY` | the Lenses index |
-| `chamber-activity` | bash collector | `collect` | `ACTIVITY_KEY` | the Activity standing board |
+| `chamber-exhibits` | bash collector | `collect` | `EXHIBITS_KEY` | the Exhibits index |
 | `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the standing digest panel |
 | `chamber-genesis` | prompt turn | `genesis` | none | nothing (writes a Mind) |
 | `chamber-lens` | prompt turn | `compose` | none | a per-subject lens panel |
+| `chamber-lens-html` | prompt turn | `compose` | none | a per-subject HTML lens panel |
 
 ## The collectors
 
@@ -38,7 +39,7 @@ and validates fail-closed: a board that does not parse, or whose `view` is not
 | `chamber-roster` | `bin/collect-roster.ts` | `ROSTER_KEY` | `expectView(ROSTER_KEY, "board")` |
 | `chamber-rooms` | `bin/collect-rooms.ts` | `ROOMS_KEY` | `expectView(ROOMS_KEY, "board")` |
 | `chamber-lenses` | `bin/collect-lenses.ts` | `LENSES_KEY` | `expectView(LENSES_KEY, "board")` |
-| `chamber-activity` | `bin/collect-activity.ts` | `ACTIVITY_KEY` | `expectView(ACTIVITY_KEY, "board")` |
+| `chamber-exhibits` | `bin/collect-exhibits.ts` | `EXHIBITS_KEY` | `expectView(EXHIBITS_KEY, "board")` |
 
 Each `collect` node carries an `output_schema` of `{ type: "object", required:
 ["view", "sections"] }`, and the script writes the JSON board its matching
@@ -46,28 +47,21 @@ builder produces. The roster collector also reads the watermark and assembles
 the roster pulse; the pulse is fail-soft, so a read error drops the pulse but
 never the board.
 
-These four are the producers behind the Roster, Rooms, Lenses, and Activity regions of
-the Chamber surface. On the surface each binds with a `cadenceMs` of `120000`,
-so the board re-collects every two minutes on its own. State changes that should
-show sooner (a new Mind, a room ending, stopping, or being deleted, a lens
-authored or retired) trigger a targeted `refreshWorkflow` so the right index
-republishes without waiting on the cadence. Starting a room is the exception: it
-creates the room's own live panel at once but does not refresh the Rooms index,
-which picks the new room up on its next cadence.
+These four are the producers behind the Roster, Rooms, Lenses, and Exhibits
+regions of the Chamber surface. On the surface each binds with a `cadenceMs` of
+`120000`, so the board re-collects every two minutes on its own. State changes
+that should show sooner (a new Mind, a room ending, stopping, or being deleted, a
+lens authored or retired, an exhibit tabled or deleted) trigger a targeted
+`refreshWorkflow` so the right index republishes without waiting on the cadence.
+Starting a room is the exception: it creates the room's own live panel at once
+but does not refresh the Rooms index, which picks the new room up on its next
+cadence.
 
-## chamber-activity
-
-`chamber-activity` is the fourth bash collector. Like the three index collectors
-it has a single `bash` node (`collect`) that reads the data home and publishes a
-board. Unlike them it reads all three stores (Minds, rooms, and lenses) and
-assembles a cumulative-pulse and a reverse-chronological recent-events feed in
-one board. It binds its output to `ACTIVITY_KEY` (`rib:chamber:activity`), so
-the Activity region of the Chamber surface always reflects the full current state.
-
-- No agent turn runs. Every refresh is a cheap disk read.
-- `bindSnapshotKey: ACTIVITY_KEY` and `validate: expectView(ACTIVITY_KEY, "board")`.
-- The host scheduler refreshes it on the same `120000` ms cadence as the three
-  index collectors, so the Activity board stays live with no manual trigger.
+The lenses and exhibits collectors read the SAME store and split it by record
+kind: `chamber-lenses` emits the standing views, `chamber-exhibits` the tabled
+deliverables. The exhibits index emits zero sections when no exhibits exist, and
+its region sets `hideWhenEmpty`, so the shelf stays invisible until a discussion
+has tabled something.
 
 ## chamber-digest
 
@@ -91,8 +85,8 @@ changed since the last digest.
   self-heals a failed authoring: an un-advanced fingerprint drives a re-author on
   the next tick.
 
-The cost-safety invariant: a quiet Chamber (no new Minds, rooms, or lenses since
-the last digest) never spends an agent turn. `publish` still runs every cadence
+The cost-safety invariant: a quiet Chamber (no new Minds, rooms, lenses, or
+exhibits since the last digest) never spends an agent turn. `publish` still runs every cadence
 so the panel stays live with a current `composedAt` timestamp.
 
 - `bindSnapshotKey: DIGEST_KEY` and `validate: expectView(DIGEST_KEY, "board")`.
@@ -128,16 +122,28 @@ for a subject and publishes it by calling `chamber_emit_lens`. It has:
 
 The workflow prompt asks the model for `{ id, board, scope?, reason? }`. The
 `chamber_emit_lens` tool accepts one more optional provenance field,
-`maintainingMind`, which a Mind authoring mid-room can set; see
-[Tools and commands](../tools-and-commands/) for the full schema.
+`maintainingMind`, which a Mind may set to record itself as the maintainer; see
+[Tools and commands](../tools-and-commands/) for the full schema. A deliverable a
+room discussion produced does not ride this workflow at all — a room turn tables
+it with `chamber_table_exhibit`, and it lands on the Exhibits shelf.
+
+## chamber-lens-html
+
+`chamber-lens-html` is the chamber-lens sibling: one `prompt` node, `compose`,
+whose turn composes a designed, self-contained HTML page for a subject and
+publishes it with `chamber_emit_lens_html`, rendered in a sandboxed iframe. It
+deliberately sets NO `fail_on_tool_error`: a rejected palette or a blocked
+external resource is the retry signal — the turn reads the error report, fixes
+the markup, and emits again within the same node. Like `chamber-lens` it has no
+`bindSnapshotKey`; the per-subject key is chosen at run time by the tool.
 
 ## The Briefing is not a workflow
 
 The Briefing footer is rib-driven, not a contributed workflow. There is no
 `chamber-brief` workflow and the footer region binds no `workflow`. The rib
 seeds a quiet board at boot, and a single gate decides when to spend a paid
-agent turn: only when a room has ended or a lens has changed since the last
-watermark. The quiet path authors nothing. See
+agent turn: only when a room has ended, a lens has changed, or an exhibit has
+been tabled since the last watermark. The quiet path authors nothing. See
 [Agent-authored lenses](../../design/agent-authored-lenses/) for why the
 briefing is gated this way.
 
