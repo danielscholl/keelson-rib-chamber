@@ -126,7 +126,7 @@ The workflow prompt asks the model for `{ id, board, scope?, reason? }`. The
 `chamber_emit_lens` tool accepts one more optional provenance field,
 `maintainingMind`, which a Mind may set to record itself as the maintainer; see
 [Tools and commands](../tools-and-commands/) for the full schema. A deliverable a
-room discussion produced does not ride this workflow at all — a room turn tables
+room discussion produced does not ride this workflow at all. A room turn tables
 it with `chamber_table_exhibit`, and it lands on the Exhibits shelf.
 
 ## chamber-lens-refresh
@@ -150,7 +150,7 @@ the panel-refresh route because a lens region declares it.
 whose turn composes a designed, self-contained HTML page for a subject and
 publishes it with `chamber_emit_lens_html`, rendered in a sandboxed iframe. It
 deliberately sets NO `fail_on_tool_error`: a rejected palette or a blocked
-external resource is the retry signal — the turn reads the error report, fixes
+external resource is the retry signal: the turn reads the error report, fixes
 the markup, and emits again within the same node. Like `chamber-lens` it has no
 `bindSnapshotKey`; the per-subject key is chosen at run time by the tool.
 

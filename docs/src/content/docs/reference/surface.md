@@ -73,7 +73,7 @@ open and the panel head carries the "updated Xm ago" freshness clock.
 | Live HTML lens | `rib:chamber:lens-html:{id}` | the lens `title` (falls back to `id`) | `lens` | `Lenses` | `❖` accent |
 
 Lenses and exhibits share one key family (`rib:chamber:lens:{id}`) and one id
-space — the record's kind decides which shelf its region joins — so the open
+space (the record's kind decides which shelf its region joins), so the open
 path and the briefing's jump chips resolve either kind through the same key.
 
 Each active room gets its own per-slug key and region, and each lens its own

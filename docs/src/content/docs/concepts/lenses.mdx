@@ -12,13 +12,13 @@ A **lens** is a standing view a Mind authors itself. One agent turn composes a
 canvas board and publishes it, and it renders as a live panel on the Chamber
 surface with no hand-coded UI. The view is produced by an agent, not written by
 hand. It is a distinctive durable output of Chamber: the reasoning does not just
-leave a transcript, it leaves a live board you can keep open — and keep updating
+leave a transcript, it leaves a live board you can keep open, and keep updating
 under the same subject id.
 
 Its sibling is the **exhibit**: a point-in-time deliverable a room discussion
 tabled (an assessment, a plan, a findings board). The two share one pipeline and
-one store but answer different questions — see
-[Exhibits — the deliverable sibling](#exhibits--the-deliverable-sibling) below.
+one store but answer different questions. See
+[Exhibits: the deliverable sibling](#exhibits-the-deliverable-sibling) below.
 
 Here is one a Mind authored on a release-readiness subject, rendered straight onto
 the surface:
@@ -129,7 +129,7 @@ was there before.
 - **Not during a room.** A room turn's publish seam is the exhibit tool, not the
   lens tool: a findings summary after a discussion is a deliverable, so it lands
   on the Exhibits shelf (below). Authoring a standing lens stays a deliberate,
-  named act — the workflow or a direct chat tool call.
+  named act: the workflow or a direct chat tool call.
 - **As an HTML canvas.** A Mind (or any tool call) can invoke `chamber_emit_lens_html`
   with a literal HTML string, rendered in a sandboxed iframe on the Chamber surface
   under the Lenses group. With an `id` it is per-subject and persisted like a board
@@ -138,11 +138,11 @@ was there before.
   has no index card, so its panel-head **⋯ → Retire lens…** is its one delete path
   (the sandboxed iframe rightly can't reach destructive verbs).
 
-## Exhibits — the deliverable sibling
+## Exhibits: the deliverable sibling
 
 An **exhibit** is what a room leaves on the table: the assessment, plan, or
 findings board a discussion converged on. Where a lens is a standing view with a
-maintainer and a freshness clock, an exhibit is its moment — it does not go
+maintainer and a freshness clock, an exhibit is its moment: it does not go
 stale, and a new discussion tables a *new* exhibit rather than updating an old
 one. The filing test: would re-running it produce the same thing? A lens says
 yes (same subject, fresher content); an exhibit says no.
@@ -153,7 +153,7 @@ record carries `kind: "exhibit"`, its panel joins the **Exhibits** group, and it
 index offers **Open** and a confirmed **Delete** instead of Retire.
 
 Provenance is the load-bearing difference. An exhibit's card names the producing
-room — and that field is **witnessed, not claimed**: the room driver stamps
+room, and that field is **witnessed, not claimed**: the room driver stamps
 `sourceRoom` after seeing `chamber_table_exhibit` fire in a turn it ran. The tool
 itself has no `sourceRoom` input, so a Mind cannot attribute an exhibit to a room
 it wasn't in. A Mind that declares the `lens` capability holds the exhibit tool in

@@ -93,7 +93,7 @@ An exhibit is not a lens, and the two carry provenance differently. The exhibit 
 takes only `{ id, board, reason? }`: there is no `maintainingMind` field, so a Mind
 cannot sign an exhibit. Instead the room driver witness-stamps the exhibit with the
 room it came from, so provenance is observed, not claimed. For the full lens/exhibit
-split, see [Exhibits](../../concepts/lenses/#exhibits--the-deliverable-sibling).
+split, see [Exhibits](../../concepts/lenses/#exhibits-the-deliverable-sibling).
 
 ## Let viewers annotate a lens
 
