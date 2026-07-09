@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.25.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.24.0...v0.25.0) (2026-07-09)
+
+
+### Added
+
+* **roster:** switch the model control to the host catalog picker ([#192](https://github.com/danielscholl/keelson-rib-chamber/issues/192)) ([5f25e52](https://github.com/danielscholl/keelson-rib-chamber/commit/5f25e52d78ec6501b89088392d92d6908d8d7444))
+
+
+### Documentation
+
+* drop em dashes from docs-site prose ([7c2c5f7](https://github.com/danielscholl/keelson-rib-chamber/commit/7c2c5f76d765f3733560749b2d6b5cc930fc0977))
+* realign chamber docs with current rib behavior ([25c052b](https://github.com/danielscholl/keelson-rib-chamber/commit/25c052bdb47c95c616c2f0a6f0ec9747bcf353c4))
+
 ## [0.24.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.23.0...v0.24.0) (2026-07-09)
 
 
