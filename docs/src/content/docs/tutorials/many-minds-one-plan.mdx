@@ -112,16 +112,17 @@ serves all three, so this is one subscription, not three.
 Where a role has a clear bias you can play to it: opus-class models reason and
 orchestrate, which suits the moderator and the defender; a gpt-class model is
 blunt and literal, which is what you want in the skeptic. For a review, though,
-the spread matters more than the match. The roster card's model dropdown offers a
-curated list of Claude models, so to hand a Mind a cross-family engine like a gpt
-or a gemini you pre-pin it at authoring time (or hand-edit its `mind.json`):
+the spread matters more than the match. The roster card's model picker offers the
+host's live provider catalog — searchable, every model carrying its provider — so a
+cross-family engine like a gpt or a gemini is one pick on the seated card. You can
+also pre-pin at authoring time:
 
 ```text
 keelson workflow run chamber-genesis --arguments "an adversarial contract skeptic who stress-tests API and data contracts" --inputs model=gpt-5.5 --inputs provider=copilot
 ```
 
-Once pinned, the model shows up in that Mind's dropdown as the current selection, and
-the dropdown then re-affirms or clears the pin (`provider` is kept only alongside a
+Once pinned, the model shows up in that Mind's picker as the current selection, and
+the picker then re-affirms or clears the pin (`provider` is kept only alongside a
 `model`). The pin is optional. The room runs with every Mind on one model; different
 models just buy more independent reading.
 

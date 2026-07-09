@@ -63,7 +63,7 @@ if `mind.json` carries a divergent `slug`, the directory name wins on read.
 
 `persona` is the roster tagline, one line, not the Persona section from
 `SOUL.md`. `model` and `provider` are optional. Genesis writes them when provided
-via workflow inputs, and the roster card's model dropdown can update or clear the
+via workflow inputs, and the roster card's model picker can update or clear the
 pin later. `tools` is an optional array of capability slugs, written only when
 non-empty. `identitySlot` (a host identity-tone slot, an integer 0 through 4,
 assigned once at genesis) is written only when set. `SOUL.md` holds

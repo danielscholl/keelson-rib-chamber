@@ -1,5 +1,4 @@
 import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
-import { modelOptions } from "../models.ts";
 import type { PendingGenesis } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from "../types.ts";
@@ -145,11 +144,12 @@ function cardFor(mind: Mind) {
         glyph: "→",
         payload: { slug: mind.slug },
       },
-      // The current model reads off this action's label (the at-rest indicator);
-      // its `model` field is a select whose empty option clears the pin and whose
-      // defaultValue opens it on the current model — so an idle submit re-affirms
-      // the pin (and its provider) rather than wiping it via setMindModel's
-      // absent-as-clear path.
+      // The current model reads off this action's label (the at-rest indicator).
+      // Its one `model` field is the host's live-catalog picker, so the button
+      // opens the catalog directly and picking dispatches at once: a pick also
+      // carries its provider (the `provider` companion key, which retired the
+      // old free-text provider field), the clear row drops the pin, and the
+      // defaults highlight the current provider/model pair.
       {
         type: "set-model",
         label: `Model — ${mind.model ?? "default"}`,
@@ -160,14 +160,11 @@ function cardFor(mind: Mind) {
             name: "model",
             label: "Model",
             placeholder: "default (inherit)",
-            options: modelOptions(mind.model),
+            modelPicker: {
+              providerField: "provider",
+              ...(mind.provider ? { providerDefault: mind.provider } : {}),
+            },
             ...(mind.model ? { defaultValue: mind.model } : {}),
-          },
-          {
-            name: "provider",
-            label: "Provider",
-            placeholder: mind.provider ?? "optional, e.g. anthropic",
-            ...(mind.provider ? { defaultValue: mind.provider } : {}),
           },
         ],
       },
