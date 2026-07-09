@@ -72,7 +72,7 @@ guarded against traversal before it ever touches the filesystem).
 
 :::note
 Genesis can pin `model` and `provider` when you pass them as workflow inputs.
-You can also change or clear the pin later from the roster card's model control —
+You can also change or clear the pin later from the roster card's model control,
 an at-rest indicator whose dropdown re-pins the model (its blank option clears the
 pin). `provider` is only kept when `model` is set.
 :::
@@ -106,7 +106,7 @@ in conversation is a [room](../run-a-room/).
 By default a Mind is text-only, the room default. Reading a room's project is the
 one exception: a project-targeted room auto-grants read-only file access to every
 speaker, covered below. To let a Mind table an
-[exhibit](../../concepts/lenses/#exhibits--the-deliverable-sibling) (a canvas board)
+[exhibit](../../concepts/lenses/#exhibits-the-deliverable-sibling) (a canvas board)
 during a room turn, declare the `lens` capability. The slug keeps the name `lens`
 for backward compatibility, but it now authorizes `chamber_table_exhibit`, which
 tables an exhibit (a room's deliverable), not a standing lens. The genesis turn asks
@@ -146,5 +146,5 @@ deliberate click, not a typed command.
 
 - [Minds and genesis](../../concepts/minds/): why a Mind is shaped this way.
 - [Run a room](../run-a-room/): put several Minds in conversation.
-- [Exhibits](../../concepts/lenses/#exhibits--the-deliverable-sibling): what the `lens` capability authorizes.
+- [Exhibits](../../concepts/lenses/#exhibits-the-deliverable-sibling): what the `lens` capability authorizes.
 - [Workflows](../../reference/workflows/): the `chamber-genesis` workflow contract.

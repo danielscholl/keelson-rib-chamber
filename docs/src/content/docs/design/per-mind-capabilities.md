@@ -18,7 +18,7 @@ grant room-wide. Write and exec still require the `code` coding tier.
 
 `Mind.tools` is a list of capability **slugs**, not raw tool names. A slug is an
 entry in a small curated vocabulary that maps to one or more concrete tools. Today
-that vocabulary has four entries: `lens` (authorizes `chamber_table_exhibit` — mid-room publishing tables an exhibit), `read`
+that vocabulary has four entries: `lens` (authorizes `chamber_table_exhibit`: mid-room publishing tables an exhibit), `read`
 (authorizes `Read`), `code` (authorizes `Bash`, `Edit`, `Write`), and `osdu`
 (authorizes read-only OSDU platform status tools when the osdu rib is
 co-installed). `Read` is the exception: a room that targets a project auto-grants it to every
