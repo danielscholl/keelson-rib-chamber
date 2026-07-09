@@ -4122,6 +4122,16 @@ function makeListLensesTool(): ToolDefinition {
         return;
       }
       const wanted = parsed.data.id ? canonicalLensId(parsed.data.id) : undefined;
+      // An id that canonicalizes to nothing fails closed (mirrors the emit and
+      // action guards) — a silent empty list would read as "no such lens".
+      if (parsed.data.id !== undefined && !wanted) {
+        emitResult(
+          ctx,
+          `chamber_list_lenses: unsafe lens id: ${JSON.stringify(parsed.data.id)}`,
+          true,
+        );
+        return;
+      }
       try {
         const lenses = (await listLenses(lensesDir())).filter(
           (l) => !isExhibit(l) && (wanted === undefined || l.id === wanted),

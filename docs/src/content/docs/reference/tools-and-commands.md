@@ -23,7 +23,7 @@ optional field is marked `?`.
 | `chamber_emit_digest` | yes | no | Internal write-seam for the `chamber-digest` workflow: persist the standing digest board. Not called directly. | `board` |
 | `chamber_list_minds` | no | no | List all Minds: slug, name, role, tagline, pinned model/provider, capability tools. Read-only. | _(none)_ |
 | `chamber_list_rooms` | no | no | List rooms (active first, then ended) with slug, name, status, strategy, participants, and turn progress. Read-only. | _(none)_ |
-| `chamber_list_lenses` | no | no | List living lenses newest first: id, updatedAt, refresh backing, and optional provenance fields. Pass `{ id }` to fetch one lens in full, `board` included. Read-only. | _(none)_ |
+| `chamber_list_lenses` | no | no | List living lenses newest first: id, updatedAt, refresh backing, and optional provenance fields. Pass `{ id }` to fetch one lens in full, `board` included. Read-only. | `id?` |
 | `chamber_list_exhibits` | no | no | List exhibits (deliverables rooms tabled) newest first: id, tabledAt, producing room, gist. Read-only. | _(none)_ |
 | `chamber_retire_mind` | yes | no | Permanently remove a Mind's record and SOUL.md from the roster. Fails closed if absent. | `slug` |
 | `chamber_room_delete` | yes | no | Permanently delete an ended room's record, transcript, and ledger. Stop first with `chamber_room_stop`. | `room` |

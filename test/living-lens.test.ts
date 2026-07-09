@@ -345,6 +345,11 @@ describe("living-lens emit + verbs", () => {
     expect(fetched).toHaveLength(1);
     // The refresh turn re-composes from this board — the record must carry it.
     expect(fetched[0]?.board?.title).toBe("Brief");
+    // An id that canonicalizes to nothing fails closed, not as an empty list.
+    const bad = makeToolCtx();
+    await tool("chamber_list_lenses").execute({ id: "!!!" }, bad.ctx);
+    expect(bad.errored()).toBe(true);
+    expect(bad.out()).toContain("unsafe lens id");
   });
 
   it("refresh-lens fires the record's workflow with the lens id as input", async () => {
