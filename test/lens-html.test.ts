@@ -70,6 +70,9 @@ function fakeHtmlLensStore() {
           }
         : undefined;
     },
+    async delete(id) {
+      if (!saved.delete(id)) throw new Error(`lens '${id}' not found`);
+    },
   };
   return { store, saved };
 }

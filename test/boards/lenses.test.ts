@@ -194,3 +194,28 @@ describe("buildLensesIndexBoard cards", () => {
     for (const a of actions) expect((a.payload as { id: string }).id).toBe("lens-xyz");
   });
 });
+
+describe("buildLensesIndexBoard living lenses", () => {
+  test("a refresh-backed lens gains the Refresh verb between Open and Retire; a plain lens doesn't", () => {
+    const living = cards(
+      buildLensesIndexBoard([
+        lens({ id: "morning-brief", refresh: { workflow: "chamber-lens-refresh" } }),
+      ]),
+    )[0];
+    expect(living?.actions?.map((a) => a.type)).toEqual([
+      "lens-open",
+      "refresh-lens",
+      "retire-lens",
+    ]);
+    const refresh = living?.actions?.find((a) => a.type === "refresh-lens");
+    expect(refresh).toMatchObject({
+      label: "Refresh",
+      glyph: "↻",
+      payload: { id: "morning-brief" },
+    });
+    expect(refresh?.destructive).toBeUndefined();
+
+    const plain = cards(buildLensesIndexBoard([lens({ id: "static" })]))[0];
+    expect(plain?.actions?.map((a) => a.type)).toEqual(["lens-open", "retire-lens"]);
+  });
+});

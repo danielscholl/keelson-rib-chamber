@@ -4,7 +4,7 @@ import type {
   SnapshotManager,
   SnapshotValidator,
 } from "@keelson/shared";
-import { CHAMBER_SURFACE_ID } from "./lens.ts";
+import { CHAMBER_SURFACE_ID, destructiveHeadAction } from "./lens.ts";
 import type { HtmlLensStore } from "./lens-html-store.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
@@ -97,6 +97,10 @@ export interface HtmlLensRegistry {
   // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving,
   // so the authored updatedAt is preserved (mirrors LensRegistry.reregister).
   reregister(id: string, html: string, title?: string): Promise<{ key: string }>;
+  // Drop one subject's live key + region + views entry (mirrors
+  // LensRegistry.remove; true when something live was released). Durable
+  // deletion is the caller's.
+  remove(id: string): boolean;
   dispose(): void;
 }
 
@@ -110,13 +114,14 @@ export function createHtmlLensRegistry(
   // default entry (a canonical id can never contain ":", so no collision).
   const entries = new Map<string, HtmlLensEntry>();
 
-  function release(mapKey: string): void {
+  function release(mapKey: string): boolean {
     const entry = entries.get(mapKey);
-    if (!entry) return;
+    if (!entry) return false;
     entry.unregisterRegion();
     entry.unregisterSnapshot();
     entry.undeclareView();
     entries.delete(mapKey);
+    return true;
   }
 
   // Register a subject's snapshot key, surface region, and (per-subject only)
@@ -142,6 +147,13 @@ export function createHtmlLensRegistry(
         // Foldable like every other lens panel — a tall designed page shouldn't
         // monopolize the surface with no way to put it away.
         collapsible: true,
+        // The head ⋯ verb is the ONLY delete path for an HTML lens: its
+        // sandboxed iframe rightly can't reach destructive actions, and it has
+        // no index card. The legacy fixed key is in-memory only — nothing
+        // durable to retire — so it carries no verb.
+        ...(id === undefined
+          ? {}
+          : { headActions: [destructiveHeadAction("retire-lens-html", "Retire", "lens", id)] }),
       });
     } catch (e) {
       // A failed region add (e.g. the harness per-surface ceiling) must not leak
@@ -198,6 +210,9 @@ export function createHtmlLensRegistry(
     // re-stamped by a restart.
     reregister(id, html, title) {
       return livePublish(html, id, title);
+    },
+    remove(id) {
+      return release(id);
     },
     dispose() {
       for (const mapKey of [...entries.keys()]) release(mapKey);

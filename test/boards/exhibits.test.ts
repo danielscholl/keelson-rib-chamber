@@ -62,4 +62,30 @@ describe("buildExhibitsIndexBoard cards", () => {
     expect(del?.confirm?.title).toBe("Delete exhibit");
     expect(del?.confirm?.body).toContain("Sample Assessment");
   });
+
+  test("the from field resolves the witnessed slug to the room's name, falling back to the raw value", () => {
+    const room = {
+      slug: "room-m3xyz-0",
+      name: "Sample Review",
+      status: "done",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      participants: [],
+      turnIndex: 2,
+      turnBudget: 2,
+      round: 0,
+      strategy: "group-chat",
+    } as never;
+    const board = buildExhibitsIndexBoard(
+      [
+        exhibit({ sourceRoom: "room-m3xyz-0" }),
+        // A deleted room (or a legacy record stamped with the display name)
+        // shows its raw sourceRoom rather than dropping the provenance.
+        exhibit({ id: "orphan", sourceRoom: "room-gone-1" }),
+      ],
+      [room],
+    );
+    const [resolved, orphan] = cards(board);
+    expect(resolved?.fields?.[0]?.value).toBe("room · Sample Review");
+    expect(orphan?.fields?.[0]?.value).toBe("room · room-gone-1");
+  });
 });

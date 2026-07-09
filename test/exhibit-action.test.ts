@@ -307,8 +307,9 @@ describe("the witnessed sourceRoom stamp (wiring)", () => {
       await new Promise((r) => setTimeout(r, 20));
     }
     const sourceRoom = await stamped();
-    expect(typeof sourceRoom).toBe("string");
-    expect((sourceRoom ?? "").length).toBeGreaterThan(0);
+    // The stamp is the room's SLUG — the stable id room cards join their tabled
+    // links on — never its display name.
+    expect(sourceRoom ?? "").toMatch(/^room-/);
   });
 });
 

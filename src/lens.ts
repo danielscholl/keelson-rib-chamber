@@ -1,6 +1,6 @@
 import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
-import type { LensKind, LensProvenance, LensStore } from "./lens-store.ts";
+import type { LensKind, LensProvenance, LensRefresh, LensStore } from "./lens-store.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
 // A Mind authors a lens by publishing a board under a per-subject key
@@ -26,6 +26,23 @@ export const EXHIBIT_TOOL_NAME = "chamber_table_exhibit";
 
 export function lensKey(id: string): string {
   return `rib:chamber:lens:${id}`;
+}
+
+// How often a refresh-backed lens re-composes when its emit named a workflow but
+// no cadence. Each refresh is a paid agent turn, so the default leans quiet; an
+// emit that wants livelier re-composition says so explicitly.
+export const DEFAULT_LENS_REFRESH_CADENCE_MS = 3_600_000;
+
+// The host floors region cadence at 30s; clamp here so a hand-edited record
+// can't make the region registration throw and take the whole panel with it.
+// Exported so the emit schema's floor and this clamp share one value.
+export const MIN_REFRESH_CADENCE_MS = 30_000;
+
+// The refresh invocation contract: the workflow input naming the lens. One
+// builder so the region's cadence wiring and the on-demand Refresh verb can't
+// drift from the $inputs.lens interpolation in the re-author prompt.
+export function lensRefreshInputs(id: string): Record<string, string> {
+  return { lens: id };
 }
 
 // The seed a panel renders before its board publishes: a valid, titled board so a
@@ -64,6 +81,32 @@ export function canonicalLensId(raw: string): string {
 
 type RegisterRegion = (surfaceId: string, region: RibSurfaceRegion) => () => void;
 
+// The panel's own destructive verb, in the region head's ⋯ menu — the same
+// confirm-gated action the index card carries, so a record can be put away from
+// the panel itself without hunting the index. One builder for all three verbs
+// (retire-lens, delete-exhibit, and the HTML twin's retire-lens-html) so the
+// confirm contract can't drift between shelves.
+export function destructiveHeadAction(type: string, verb: string, noun: string, id: string) {
+  return {
+    type,
+    label: `${verb} ${noun}…`,
+    glyph: "✕",
+    tone: "warn" as const,
+    destructive: true,
+    payload: { id },
+    confirm: {
+      title: `${verb} ${noun}`,
+      body: `${verb} ${id}? This permanently removes the ${noun}.`,
+      confirmLabel: verb,
+      cancelLabel: "Cancel",
+    },
+  };
+}
+
+function sameRefresh(a?: LensRefresh, b?: LensRefresh): boolean {
+  return a?.workflow === b?.workflow && a?.cadenceMs === b?.cadenceMs;
+}
+
 // Publishes a Mind-authored board to its per-subject lens key, registering the key
 // and a matching surface region the first time an id is seen; re-authoring the same
 // id updates the existing panel in place. Holds the snapshot + region handles per id
@@ -75,18 +118,27 @@ type RegisterRegion = (surfaceId: string, region: RibSurfaceRegion) => () => voi
 export interface LensRegistry {
   // `provenance` (scope / maintaining-Mind / reason / source-room) is forwarded to
   // the store for the index card; the live key + region are board-only, so
-  // reregister omits it.
+  // reregister omits it. `refresh` is the RESOLVED backing to persist and wire —
+  // the caller owns preserve-vs-clear semantics against the prior record.
   publish(
     id: string,
     board: CanvasBoardView,
     provenance?: LensProvenance,
     kind?: LensKind,
+    refresh?: LensRefresh,
   ): Promise<{ key: string }>;
   // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving, so
   // the authored updatedAt is preserved (a restart must not reset every lens's
   // freshness).
-  reregister(id: string, board: CanvasBoardView, kind?: LensKind): Promise<{ key: string }>;
-  remove(id: string): void;
+  reregister(
+    id: string,
+    board: CanvasBoardView,
+    kind?: LensKind,
+    refresh?: LensRefresh,
+  ): Promise<{ key: string }>;
+  // True when a live entry was released; false on an unknown id, so a delete
+  // path can tell "panel dropped" from "nothing was live".
+  remove(id: string): boolean;
   dispose(): void;
 }
 
@@ -95,6 +147,11 @@ interface LensEntry {
   publisher: { publish(board: CanvasBoardView): Promise<void> };
   unregisterSnapshot: () => void;
   unregisterRegion: () => void;
+  // The shelf wiring the live region was built from, so a re-publish that
+  // changes the refresh backing can swap the region in place (and a failed
+  // swap can restore this exact wiring).
+  kind: LensKind;
+  refresh?: LensRefresh;
 }
 
 export function createLensRegistry(
@@ -108,12 +165,48 @@ export function createLensRegistry(
   // of the per-entry handles dispose() invokes in bulk. No-op on an unknown id
   // (matches RoomRegionRegistry.release). Durable deletion (store.deleteLens) is
   // the caller's, so this stays a pure in-memory release.
-  function release(id: string): void {
+  function release(id: string): boolean {
     const entry = entries.get(id);
-    if (!entry) return;
+    if (!entry) return false;
     entry.unregisterRegion();
     entry.unregisterSnapshot();
     entries.delete(id);
+    return true;
+  }
+
+  // The kind decides the shelf (group/glyph/verb) and, for a refresh-backed
+  // lens, the region's re-compose wiring: the named workflow runs with input
+  // `lens` = this id, on the emit's cadence (clamped to the host floor).
+  function regionFor(id: string, kind: LensKind, refresh?: LensRefresh): RibSurfaceRegion {
+    const key = lensKey(id);
+    return {
+      key,
+      title: id,
+      collapsible: true,
+      ...(kind === "exhibit"
+        ? {
+            glyph: { char: "▣", tone: "caution" as const },
+            group: "exhibit",
+            groupTitle: "Exhibits",
+            headActions: [destructiveHeadAction("delete-exhibit", "Delete", "exhibit", id)],
+          }
+        : {
+            glyph: { char: "✦", tone: "accent" as const },
+            group: "lens",
+            groupTitle: "Lenses",
+            headActions: [destructiveHeadAction("retire-lens", "Retire", "lens", id)],
+            ...(refresh
+              ? {
+                  workflow: refresh.workflow,
+                  workflowArgs: lensRefreshInputs(id),
+                  cadenceMs: Math.max(
+                    MIN_REFRESH_CADENCE_MS,
+                    Math.round(refresh.cadenceMs ?? DEFAULT_LENS_REFRESH_CADENCE_MS),
+                  ),
+                }
+              : {}),
+          }),
+    };
   }
 
   // Register a new subject's snapshot key and surface region. Fully synchronous
@@ -121,7 +214,7 @@ export function createLensRegistry(
   // two concurrent publishes of the same new id — the tool is both a workflow seam
   // and a room turn-tool — can't both reach sm.register and trip its duplicate-key
   // guard; the second finds the entry and just republishes.
-  function register(id: string, kind: LensKind): LensEntry {
+  function register(id: string, kind: LensKind, refresh?: LensRefresh): LensEntry {
     const key = lensKey(id);
     const { publisher, latest } = createCoalescingPublisher(
       () => sm.recompose(key),
@@ -130,73 +223,96 @@ export function createLensRegistry(
     const unregisterSnapshot = sm.register(key, latest, { validate: expectView(key, "board") });
     let unregisterRegion: () => void;
     try {
-      // The kind decides the shelf: lenses group under "Lenses", exhibits under
-      // "Exhibits" — the harness merge keeps each group's panels contiguous and
-      // stamps the groupTitle as the zone heading.
-      unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, {
-        key,
-        title: id,
-        collapsible: true,
-        ...(kind === "exhibit"
-          ? {
-              glyph: { char: "▣", tone: "caution" as const },
-              group: "exhibit",
-              groupTitle: "Exhibits",
-            }
-          : { glyph: { char: "✦", tone: "accent" as const }, group: "lens", groupTitle: "Lenses" }),
-      });
+      unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, kind, refresh));
     } catch (e) {
       // A failed region add (e.g. the harness per-surface ceiling) must not leak
       // the snapshot registration we already made.
       unregisterSnapshot();
       throw e;
     }
-    const entry: LensEntry = { key, publisher, unregisterSnapshot, unregisterRegion };
+    const entry: LensEntry = {
+      key,
+      publisher,
+      unregisterSnapshot,
+      unregisterRegion,
+      kind,
+      refresh,
+    };
     entries.set(id, entry);
     return entry;
   }
 
-  // The live half of publish: validate the board, register the key + region if new,
-  // seed the cache, and push the board. Shared by publish (which then persists) and
-  // reregister (boot, which must NOT persist — see reregister).
+  // Swap an existing entry's region when a re-publish changes its shelf wiring
+  // (a refresh backing added/changed/cleared). The snapshot key and publisher
+  // stay put — only the layout re-registers, so the panel's frames are
+  // uninterrupted. A failed swap restores the prior wiring; if even that fails,
+  // release the whole entry so no orphaned key lingers behind a missing panel.
+  function rewireRegion(id: string, entry: LensEntry, kind: LensKind, refresh?: LensRefresh): void {
+    if (entry.kind === kind && sameRefresh(entry.refresh, refresh)) return;
+    entry.unregisterRegion();
+    try {
+      entry.unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, kind, refresh));
+      entry.kind = kind;
+      entry.refresh = refresh;
+    } catch (e) {
+      try {
+        entry.unregisterRegion = registerRegion(
+          CHAMBER_SURFACE_ID,
+          regionFor(id, entry.kind, entry.refresh),
+        );
+      } catch {
+        entry.unregisterSnapshot();
+        entries.delete(id);
+      }
+      throw e;
+    }
+  }
+
+  // The live half of publish: validate the board, register the key + region if new
+  // (re-wiring the region if the shelf config changed), seed the cache, and push the
+  // board. Shared by publish (which then persists) and reregister (boot, which must
+  // NOT persist — see reregister).
   async function liveRegister(
     id: string,
     board: CanvasBoardView,
     kind: LensKind,
+    refresh?: LensRefresh,
   ): Promise<{ key: string }> {
     // Validate the board BEFORE registering anything, so a board we can't render
     // fails closed loudly and never leaves a dangling key or empty panel behind.
     expectView(lensKey(id), "board")(board);
     let entry = entries.get(id);
     if (!entry) {
-      entry = register(id, kind);
+      entry = register(id, kind, refresh);
       // Seed the cache so a client subscribing the instant the panel appears gets
       // the seed board, not a 204 (the GET path doesn't lazy-compose). The entry is
       // already mapped, so this await can't reopen the duplicate-register race.
       await sm.recompose(entry.key);
+    } else {
+      rewireRegion(id, entry, kind, refresh);
     }
     await entry.publisher.publish(board);
     return { key: entry.key };
   }
 
   return {
-    async publish(id, board, provenance, kind = "lens") {
-      const result = await liveRegister(id, board, kind);
+    async publish(id, board, provenance, kind = "lens", refresh) {
+      const result = await liveRegister(id, board, kind, refresh);
       // Persist only AFTER the live validate + publish succeed, so a board we
       // can't render never reaches disk (fail-closed); the store stamps updatedAt
       // and carries the provenance through (absent fields stay absent).
-      await store.saveLens({ id, board, kind, ...provenance });
+      await store.saveLens({ id, board, kind, ...(refresh ? { refresh } : {}), ...provenance });
       return result;
     },
     // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving:
     // the record is already on disk with its authored updatedAt, and re-stamping it
     // would reset every lens's freshness on every restart. So boot goes through the
     // live half only.
-    reregister(id, board, kind = "lens") {
-      return liveRegister(id, board, kind);
+    reregister(id, board, kind = "lens", refresh) {
+      return liveRegister(id, board, kind, refresh);
     },
     remove(id) {
-      release(id);
+      return release(id);
     },
     dispose() {
       for (const id of [...entries.keys()]) release(id);

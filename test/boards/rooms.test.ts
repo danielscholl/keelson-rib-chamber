@@ -237,3 +237,57 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect((del?.payload as { slug: string }).slug).toBe("room-xyz");
   });
 });
+
+describe("buildRoomsIndexBoard tabled exhibits", () => {
+  const exhibit = (id: string, sourceRoom: string, title = "") => ({
+    id,
+    board: { view: "board" as const, title, sections: [] },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    kind: "exhibit" as const,
+    sourceRoom,
+  });
+
+  test("a closed card lists its tabled exhibits and links each one open, ahead of the room verbs", () => {
+    const board = buildRoomsIndexBoard(
+      [room({ slug: "review", status: "done" })],
+      [],
+      [exhibit("assessment", "review", "Sample Assessment"), exhibit("elsewhere", "other-room")],
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const [card] = cards(board);
+    // Only THIS room's exhibits ride the card — sourceRoom is the join key.
+    expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("Sample Assessment");
+    expect(card?.actions?.map((a) => a.type)).toEqual(["lens-open", "room-open", "room-delete"]);
+    const open = card?.actions?.find((a) => a.type === "lens-open");
+    expect(open?.label).toBe("▣ Sample Assessment");
+    expect(open?.payload).toEqual({ id: "assessment" });
+  });
+
+  test("an active card shows the tabled field but stays action-free; an untitled exhibit falls back to its id", () => {
+    const board = buildRoomsIndexBoard(
+      [room({ slug: "live", status: "active" })],
+      [],
+      [exhibit("draft-plan", "live")],
+    );
+    const [card] = cards(board);
+    expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("draft-plan");
+    expect(card?.actions).toBeUndefined();
+  });
+
+  test("no exhibits for a room → no tabled field (fail-soft like every provenance bit)", () => {
+    const board = buildRoomsIndexBoard([room({ slug: "bare" })], [], []);
+    expect(cards(board)[0]?.fields?.some((f) => f.label === "tabled")).toBe(false);
+  });
+
+  test("the builder itself keeps only exhibits — a raw store listing can't leak lenses onto a card", () => {
+    const standing = { ...exhibit("standing-view", "review"), kind: undefined };
+    const board = buildRoomsIndexBoard(
+      [room({ slug: "review", status: "done" })],
+      [],
+      [standing, exhibit("assessment", "review", "Sample Assessment")],
+    );
+    const [card] = cards(board);
+    expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("Sample Assessment");
+    expect(card?.actions?.filter((a) => a.type === "lens-open")).toHaveLength(1);
+  });
+});

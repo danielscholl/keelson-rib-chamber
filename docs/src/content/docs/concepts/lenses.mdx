@@ -72,12 +72,43 @@ fact that it rendered cleanly.
 
 Each lens is keyed by a short subject id, and each new subject gets its own panel
 on the Chamber surface. Re-authoring the same subject updates that panel in place
-rather than adding another. A lens is a persistent published view, not a background
-monitor: it changes only when a Mind or workflow authors the same id again, never on
-its own. One exception: if a lens was authored with a `lens-note` action attached,
-an operator can append a note to it directly from its panel without re-authoring
-the full board. The rib sets no fixed limit on how many lenses can exist; the harness
-enforces a per-surface ceiling.
+rather than adding another. By default a lens changes only when a Mind or workflow
+authors the same id again. One exception: if a lens was authored with a `lens-note`
+action attached, an operator can append a note to it directly from its panel without
+re-authoring the full board. The rib sets no fixed limit on how many lenses can
+exist; the harness enforces a per-surface ceiling.
+
+Every lens and exhibit panel also carries its own verbs in the head's **⋯** menu
+(**Retire lens…** on a lens, **Delete exhibit…** on an exhibit), so a panel can
+be put away without hunting its index card. Both confirm before acting.
+
+## A living lens re-composes itself
+
+Authoring a lens with `refresh` set turns the standing view into a **living** one:
+
+```
+chamber_emit_lens { id: "morning-brief", board: {...}, refresh: {} }
+```
+
+`refresh` names a workflow (default: the bundled **chamber-lens-refresh**
+re-author) and an optional `cadenceMs` (default: one hour; floored at 30s). The
+lens's panel then re-runs that workflow with input `lens` = the lens id: on its
+cadence while the surface is open, and on demand from the **Refresh** verb its
+index card gains. The workflow re-reads the record and re-emits a fresh board
+under the same id, which advances the panel's "updated Xm ago" clock and the
+index card's freshness.
+
+Two rules keep the backing honest. Re-authoring the lens **without** `refresh`
+preserves the existing backing (the refresh turn itself re-emits the board and
+must not strip its own wiring), and a `refresh` object PATCHES it: an omitted
+field keeps its prior value, so a cadence-only re-author cannot swap a bespoke
+workflow for the default. Only `refresh: null` removes the backing.
+And each refresh is a paid agent turn, so the cadence defaults lean quiet: the
+panel refreshes while you're watching, not overnight (the server heartbeat
+deliberately skips per-lens regions). A custom `refresh.workflow` must be a
+rib-contributed workflow for the panel's cadence to run it; the harness
+refuses to auto-refresh general catalog workflows, and a name it cannot find
+is a silent no-op (the emit reply carries a caveat when you name one).
 
 ## Provenance the card carries
 
@@ -100,10 +131,12 @@ was there before.
   on the Exhibits shelf (below). Authoring a standing lens stays a deliberate,
   named act — the workflow or a direct chat tool call.
 - **As an HTML canvas.** A Mind (or any tool call) can invoke `chamber_emit_lens_html`
-  with a literal HTML string. This publishes to the fixed key `rib:chamber:lens-html`,
-  renders in a sandboxed iframe on the Chamber surface under the Lenses group, and is
-  not per-subject: re-publishing replaces the single shared panel. Unlike board-type
-  lenses it is not persisted to the lens index.
+  with a literal HTML string, rendered in a sandboxed iframe on the Chamber surface
+  under the Lenses group. With an `id` it is per-subject and persisted like a board
+  lens; without one it lands on the legacy fixed key `rib:chamber:lens-html`,
+  in-memory only, and re-publishing replaces that single shared panel. An HTML lens
+  has no index card, so its panel-head **⋯ → Retire lens…** is its one delete path
+  (the sandboxed iframe rightly can't reach destructive verbs).
 
 ## Exhibits — the deliverable sibling
 

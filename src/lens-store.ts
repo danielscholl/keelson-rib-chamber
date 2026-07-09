@@ -1,7 +1,8 @@
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CanvasBoardView } from "@keelson/shared";
 import { assertSafeSlug } from "./genesis.ts";
+import { deleteRecordDir, isNodeError } from "./record-dir.ts";
 
 // A persisted lens: the authored board plus a server-stamped freshness time. The
 // optional scope/maintainingMind/reason fields are the index card's PROVENANCE —
@@ -12,11 +13,20 @@ import { assertSafeSlug } from "./genesis.ts";
 // agent-supplied, so a Mind cannot claim a room it wasn't in (see room.ts).
 export type LensKind = "lens" | "exhibit";
 
+// A lens's re-compose backing: the catalog workflow the panel's refresh runs
+// (with input `lens` = the record id) and how often. Lens-only — an exhibit is
+// its moment and never refreshes, so the exhibit emit carries no such field.
+export interface LensRefresh {
+  workflow: string;
+  cadenceMs?: number;
+}
+
 export interface LensRecord {
   id: string;
   board: CanvasBoardView;
   updatedAt: string;
   kind?: LensKind;
+  refresh?: LensRefresh;
   scope?: string;
   maintainingMind?: string;
   reason?: string;
@@ -59,6 +69,7 @@ export interface LensStore {
       id: string;
       board: CanvasBoardView;
       kind?: LensKind;
+      refresh?: LensRefresh;
       updatedAt?: string;
     } & LensProvenance,
   ): Promise<void>;
@@ -96,6 +107,8 @@ export function createFileLensStore(lensesRoot: string): LensStore {
         // Only the exhibit kind is written; lens stays the absent default so old
         // and new lens records serialize identically.
         ...(record.kind === "exhibit" ? { kind: record.kind } : {}),
+        // Refresh backing is lens-only: an exhibit is its moment (see LensRefresh).
+        ...(record.refresh && record.kind !== "exhibit" ? { refresh: record.refresh } : {}),
         ...(record.scope ? { scope: record.scope } : {}),
         ...(record.maintainingMind ? { maintainingMind: record.maintainingMind } : {}),
         ...(record.reason ? { reason: record.reason } : {}),
@@ -120,24 +133,11 @@ export function createFileLensStore(lensesRoot: string): LensStore {
 
     async deleteLens(id) {
       assertSafeSlug(id);
-      const dir = lensDir(id);
       // Fail closed on a missing lens (mirrors deleteRoom / retireMind): deleting
-      // an already-gone lens surfaces not-found rather than reporting success.
-      // Only ENOENT/ENOTDIR map to not-found — a permission/I/O error must surface,
-      // not masquerade as "gone" — and the path must be a directory. No active-guard
-      // (unlike deleteRoom): a lens has no live-turn status to protect, so it is
-      // always retireable.
-      let st: Awaited<ReturnType<typeof stat>>;
-      try {
-        st = await stat(dir);
-      } catch (e) {
-        if (isNodeError(e) && (e.code === "ENOENT" || e.code === "ENOTDIR")) {
-          throw new Error(`lens '${id}' not found`);
-        }
-        throw e;
-      }
-      if (!st.isDirectory()) throw new Error(`lens '${id}' not found`);
-      await rm(dir, { recursive: true, force: true });
+      // an already-gone lens surfaces not-found rather than reporting success. No
+      // active-guard (unlike deleteRoom): a lens has no live-turn status to
+      // protect, so it is always retireable.
+      await deleteRecordDir(lensDir(id), () => new Error(`lens '${id}' not found`));
     },
   };
 }
@@ -189,17 +189,37 @@ async function parseLensJson(path: string): Promise<LensRecord | undefined> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
     if (!isLensRecord(parsed)) return undefined;
+    let record = parsed;
     // Fold an unknown kind string to the lens default here, so the returned
     // record's type is honest and every reader sees the same degraded value.
-    const kind = (parsed as { kind?: unknown }).kind;
+    const kind = (record as { kind?: unknown }).kind;
     if (kind !== undefined && kind !== "exhibit" && kind !== "lens") {
-      const { kind: _dropped, ...rest } = parsed as LensRecord & { kind?: unknown };
-      return rest as LensRecord;
+      const { kind: _dropped, ...rest } = record as LensRecord & { kind?: unknown };
+      record = rest as LensRecord;
     }
-    return parsed;
+    // Same fold for a malformed refresh block: drop the field, keep the lens,
+    // so a corrupt config degrades to a non-refreshing panel, not a lost record.
+    if (!isValidRefresh((record as { refresh?: unknown }).refresh)) {
+      const { refresh: _dropped, ...rest } = record as LensRecord & { refresh?: unknown };
+      record = rest as LensRecord;
+    }
+    return record;
   } catch {
     return undefined;
   }
+}
+
+function isValidRefresh(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null) return false;
+  const r = value as Record<string, unknown>;
+  if (typeof r.workflow !== "string" || r.workflow.length === 0) return false;
+  // Integer only: the harness region schema rejects a fractional cadence at
+  // registration, which would take the whole panel down — the exact failure
+  // this fold exists to degrade past.
+  return (
+    r.cadenceMs === undefined || (typeof r.cadenceMs === "number" && Number.isInteger(r.cadenceMs))
+  );
 }
 
 function isLensRecord(value: unknown): value is LensRecord {
@@ -221,8 +241,4 @@ function isLensRecord(value: unknown): value is LensRecord {
 
 function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
-}
-
-function isNodeError(value: unknown): value is NodeJS.ErrnoException {
-  return value instanceof Error && "code" in value;
 }
