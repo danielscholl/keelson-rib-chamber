@@ -145,11 +145,9 @@ function cardFor(mind: Mind) {
         payload: { slug: mind.slug },
       },
       // The current model reads off this action's label (the at-rest indicator).
-      // Its one `model` field is the host's live-catalog picker, so the button
-      // opens the catalog directly and picking dispatches at once: a pick also
-      // carries its provider (the `provider` companion key, which retired the
-      // old free-text provider field), the clear row drops the pin, and the
-      // defaults highlight the current provider/model pair.
+      // A pick carries its provider via the `provider` companion key so the pin
+      // stays a coherent pair; the clear row dispatches "" which setMindModel
+      // reads as drop-the-pin.
       {
         type: "set-model",
         label: `Model — ${mind.model ?? "default"}`,
