@@ -66,7 +66,7 @@ if `mind.json` carries a divergent `slug`, the directory name wins on read.
 via workflow inputs, and the roster card's model dropdown can update or clear the
 pin later. `tools` is an optional array of capability slugs, written only when
 non-empty. `identitySlot` (a host identity-tone slot, an integer 0 through 4,
-assigned once at genesis, keelson#390) is written only when set. `SOUL.md` holds
+assigned once at genesis) is written only when set. `SOUL.md` holds
 the three named sections. `memory.md` and `rules.md`
 are seeded as empty templates and `log.md` with a single genesis line; all three
 are ordinary inspectable files you can edit. `memory.md` and `log.md` are also

@@ -57,7 +57,8 @@ A Mind is its identity first, its tools second.
   room's project, auto-granted in any project-targeted room), `code` (edit files and run
   commands in the room's project, coding rooms only), and `osdu` (consult read-only OSDU
   platform status, present only when the osdu rib is co-installed). Declaring nothing keeps
-  the Mind text-only, the room default.
+  the Mind text-only, the room default, though a room that targets a project still
+  auto-grants read-only `Read` to every speaker.
 
 Identity is at the Mind level, and capabilities are not addressable. Only a Mind is a
 participant you can put in a room or address in a transcript. A tool, a workflow, an

@@ -103,7 +103,9 @@ in conversation is a [room](../run-a-room/).
 
 ## Declare capabilities
 
-By default a Mind is text-only, which is the room default. To let a Mind table an
+By default a Mind is text-only, the room default. Reading a room's project is the
+one exception: a project-targeted room auto-grants read-only file access to every
+speaker, covered below. To let a Mind table an
 [exhibit](../../concepts/lenses/#exhibits--the-deliverable-sibling) (a canvas board)
 during a room turn, declare the `lens` capability. The slug keeps the name `lens`
 for backward compatibility, but it now authorizes `chamber_table_exhibit`, which

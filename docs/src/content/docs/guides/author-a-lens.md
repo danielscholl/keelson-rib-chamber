@@ -108,7 +108,7 @@ promote the standing briefing (that path is reserved for Mind-authored substance
 
 ## Retire one
 
-A lens is always retireable. Use the **Retire** action on the lens card, the
+A lens can always be retired. Use the **Retire** action on the lens card, the
 **Retire lens…** verb on the lens panel head, or call the `chamber_retire_lens` tool
 with the lens id. Each removes the persisted lens record and its live panel together.
 Retiring an id that does not exist fails closed.
