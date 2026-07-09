@@ -10,7 +10,7 @@
  */
 import { join } from "node:path";
 import { buildLensesIndexBoard } from "../src/boards/lenses.ts";
-import { listLenses } from "../src/lens-store.ts";
+import { isExhibit, listLenses } from "../src/lens-store.ts";
 import { readMinds } from "../src/minds-store.ts";
 import { chamberDataHome } from "../src/paths.ts";
 
@@ -20,10 +20,13 @@ async function main() {
   // collector derives both the lenses and minds dirs from it. Fall back to
   // chamberDataHome() for a manual/standalone run.
   const home = process.argv[2]?.trim() || chamberDataHome();
-  const [lenses, minds] = await Promise.all([
+  const [records, minds] = await Promise.all([
     listLenses(join(home, "lenses")).catch(() => []),
     readMinds(join(home, "minds")).catch(() => []),
   ]);
+  // The store holds both species; this index is the LENSES shelf only — the
+  // exhibits shelf has its own collector (collect-exhibits.ts).
+  const lenses = records.filter((r) => !isExhibit(r));
   process.stdout.write(JSON.stringify(buildLensesIndexBoard(lenses, minds)));
 }
 

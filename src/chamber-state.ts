@@ -1,4 +1,4 @@
-import { type LensRecord, listLenses } from "./lens-store.ts";
+import { isExhibit, type LensRecord, listLenses } from "./lens-store.ts";
 import { readMinds } from "./minds-store.ts";
 import { lensesDir, mindsDir, roomsDir } from "./paths.ts";
 import { listRooms } from "./room-store.ts";
@@ -17,6 +17,7 @@ export interface ChamberState {
   // "what ended since you last looked" candidates.
   endedRoomSlugs: string[];
   liveLensCount: number;
+  exhibitCount: number;
   // id -> the lens's server-stamped updatedAt, the freshness fingerprint the gate
   // diffs against the watermark to tell a changed/new lens from an unchanged one.
   lensFingerprints: Record<string, string>;
@@ -75,11 +76,16 @@ export function reduceChamberState(
   const lensFingerprints: Record<string, string> = {};
   for (const lens of lenses) lensFingerprints[lens.id] = lens.updatedAt;
 
+  // The pulse's "Live views" counts standing lenses only — an exhibit is a tabled
+  // deliverable, not a living view. Fingerprints keep BOTH species: a tabled or
+  // re-tabled exhibit is briefing/digest substance like any lens change.
+  const exhibitCount = lenses.filter(isExhibit).length;
   return {
     mindCount: minds.length,
     activeRoomCount,
     endedRoomSlugs,
-    liveLensCount: lenses.length,
+    liveLensCount: lenses.length - exhibitCount,
+    exhibitCount,
     lensFingerprints,
   };
 }
@@ -145,7 +151,10 @@ export function hasDigestContent(state: ChamberState): boolean {
     state.mindCount > 0 ||
     state.activeRoomCount > 0 ||
     state.endedRoomSlugs.length > 0 ||
-    state.liveLensCount > 0
+    state.liveLensCount > 0 ||
+    // An exhibit is renderable content the digest lists, so an exhibits-only
+    // chamber (rooms deleted, minds retired) is not "empty".
+    state.exhibitCount > 0
   );
 }
 
@@ -160,12 +169,18 @@ export function buildDigestSource(
 ): string {
   const active = rooms.filter((r) => !isEndedRoom(r.status));
   const ended = rooms.filter((r) => isEndedRoom(r.status));
+  const standing = lenses.filter((l) => !isExhibit(l));
+  const exhibits = lenses.filter(isExhibit);
   const names = <T>(xs: readonly T[], f: (x: T) => string): string =>
     xs.length ? xs.map(f).join(", ") : "none";
   return [
     `Minds (${minds.length}): ${names(minds, (m) => m.name)}`,
     `Active rooms (${active.length}): ${names(active, (r) => r.name || r.slug)}`,
     `Ended rooms (${ended.length}): ${names(ended, (r) => `${r.name || r.slug} (${r.status})`)}`,
-    `Lenses (${lenses.length}): ${names(lenses, (l) => l.board.title || l.id)}`,
+    `Lenses (${standing.length}): ${names(standing, (l) => l.board.title || l.id)}`,
+    `Exhibits (${exhibits.length}): ${names(
+      exhibits,
+      (l) => `${l.board.title || l.id}${l.sourceRoom ? ` (from ${l.sourceRoom})` : ""}`,
+    )}`,
   ].join("\n");
 }

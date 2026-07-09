@@ -13,12 +13,12 @@ which is the room default, never the full tool surface.
 
 `Mind.tools` is a list of capability **slugs**, not raw tool names. A slug is an
 entry in a small curated vocabulary that maps to one or more concrete tools. Today
-that vocabulary has four entries: `lens` (authorizes `chamber_emit_lens`), `read`
+that vocabulary has four entries: `lens` (authorizes `chamber_table_exhibit` — mid-room publishing tables an exhibit), `read`
 (authorizes `Read`), `code` (authorizes `Bash`, `Edit`, `Write`), and `osdu`
 (authorizes read-only OSDU platform status tools when the osdu rib is
 co-installed). `read` and `code` are only active in coding rooms: in a standard
 room they resolve to nothing because the room-safe pool does not include
-filesystem/exec tools. A Mind that wants to author a lens mid-room declares
+filesystem/exec tools. A Mind that wants to table an exhibit mid-room declares
 `lens`; a coding-room Mind that needs to read or edit files declares `read` or
 `code`; a Mind that needs OSDU status declares `osdu`; a Mind that declares
 nothing gets an empty tool rail and can only speak.

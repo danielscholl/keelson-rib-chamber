@@ -6,22 +6,62 @@ import { assertSafeSlug } from "./genesis.ts";
 // A persisted lens: the authored board plus a server-stamped freshness time. The
 // optional scope/maintainingMind/reason fields are the index card's PROVENANCE —
 // the authoring agent supplies whatever it can name (never fabricated), so each
-// stays absent when the emit omitted it and the index omits it in turn.
+// stays absent when the emit omitted it and the index omits it in turn. A record
+// with no `kind` is a lens (a standing view a Mind maintains); an exhibit is a
+// deliverable a discussion tabled. `sourceRoom` is driver-witnessed, never
+// agent-supplied, so a Mind cannot claim a room it wasn't in (see room.ts).
+export type LensKind = "lens" | "exhibit";
+
 export interface LensRecord {
   id: string;
   board: CanvasBoardView;
   updatedAt: string;
+  kind?: LensKind;
   scope?: string;
   maintainingMind?: string;
   reason?: string;
+  sourceRoom?: string;
 }
 
-// The provenance an emit may carry alongside { id, board }: all optional, all
-// agent-supplied. saveLens stamps updatedAt itself (freshness is server-owned).
-export type LensProvenance = Pick<LensRecord, "scope" | "maintainingMind" | "reason">;
+// The provenance an emit may carry alongside { id, board }: all optional. saveLens
+// stamps updatedAt itself (freshness is server-owned); sourceRoom rides here so the
+// driver-witnessed stamp and the note write-back can round-trip it.
+export type LensProvenance = Pick<
+  LensRecord,
+  "scope" | "maintainingMind" | "reason" | "sourceRoom"
+>;
+
+// The read-side kind fold: anything but a literal "exhibit" — absent, or a value a
+// corrupt record smuggled in — is a lens, so a bad kind degrades to the default
+// meaning instead of hiding the record from both indexes.
+export function isExhibit(record: Pick<LensRecord, "kind">): boolean {
+  return record.kind === "exhibit";
+}
+
+// Pick the provenance fields off a loaded record, so a write-back path can
+// round-trip them without hand-listing each (a missed field would be silently
+// stripped on the next save).
+export function lensProvenance(record: LensRecord): LensProvenance {
+  return {
+    scope: record.scope,
+    maintainingMind: record.maintainingMind,
+    reason: record.reason,
+    sourceRoom: record.sourceRoom,
+  };
+}
 
 export interface LensStore {
-  saveLens(record: { id: string; board: CanvasBoardView } & LensProvenance): Promise<void>;
+  // `updatedAt` is normally store-stamped at save; the optional override exists
+  // for the witness stamp, which annotates provenance on a record without
+  // advancing its freshness (a sourceRoom stamp is not a re-tabling).
+  saveLens(
+    record: {
+      id: string;
+      board: CanvasBoardView;
+      kind?: LensKind;
+      updatedAt?: string;
+    } & LensProvenance,
+  ): Promise<void>;
   loadLens(id: string): Promise<LensRecord | undefined>;
   deleteLens(id: string): Promise<void>;
 }
@@ -52,10 +92,14 @@ export function createFileLensStore(lensesRoot: string): LensStore {
       const stored: LensRecord = {
         id: record.id,
         board: record.board,
-        updatedAt: new Date().toISOString(),
+        updatedAt: record.updatedAt ?? new Date().toISOString(),
+        // Only the exhibit kind is written; lens stays the absent default so old
+        // and new lens records serialize identically.
+        ...(record.kind === "exhibit" ? { kind: record.kind } : {}),
         ...(record.scope ? { scope: record.scope } : {}),
         ...(record.maintainingMind ? { maintainingMind: record.maintainingMind } : {}),
         ...(record.reason ? { reason: record.reason } : {}),
+        ...(record.sourceRoom ? { sourceRoom: record.sourceRoom } : {}),
       };
       // lens.json is rewritten on every re-author; write a unique temp then
       // rename (atomic on the same filesystem) so a crash mid-write can't leave a
@@ -145,6 +189,13 @@ async function parseLensJson(path: string): Promise<LensRecord | undefined> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
     if (!isLensRecord(parsed)) return undefined;
+    // Fold an unknown kind string to the lens default here, so the returned
+    // record's type is honest and every reader sees the same degraded value.
+    const kind = (parsed as { kind?: unknown }).kind;
+    if (kind !== undefined && kind !== "exhibit" && kind !== "lens") {
+      const { kind: _dropped, ...rest } = parsed as LensRecord & { kind?: unknown };
+      return rest as LensRecord;
+    }
     return parsed;
   } catch {
     return undefined;
@@ -159,6 +210,9 @@ function isLensRecord(value: unknown): value is LensRecord {
   // record can't smuggle a non-string into the card's pill/field/reason.
   if (!isOptionalString(r.scope) || !isOptionalString(r.maintainingMind)) return false;
   if (!isOptionalString(r.reason)) return false;
+  // kind/sourceRoom follow the same rule; a non-"exhibit" kind string still
+  // parses and folds to lens at the read side (see isExhibit).
+  if (!isOptionalString(r.kind) || !isOptionalString(r.sourceRoom)) return false;
   const board = r.board;
   if (typeof board !== "object" || board === null) return false;
   const b = board as Record<string, unknown>;

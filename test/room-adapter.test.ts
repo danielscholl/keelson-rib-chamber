@@ -167,15 +167,18 @@ describe("room adapter — fails closed without the seams", () => {
       [
         "chamber_room_delete",
         "chamber_room_transcript",
+        "chamber_delete_exhibit",
         "chamber_emit_digest",
         "chamber_emit_genesis",
         "chamber_emit_lens",
         "chamber_emit_lens_html",
+        "chamber_list_exhibits",
         "chamber_list_lenses",
         "chamber_list_minds",
         "chamber_list_rooms",
         "chamber_retire_lens",
         "chamber_retire_mind",
+        "chamber_table_exhibit",
       ].sort(),
     );
     expect(registered.some((k) => k.startsWith("rib:chamber:room"))).toBe(false);

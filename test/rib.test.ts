@@ -46,7 +46,7 @@ describe("rib-chamber", () => {
   it("declares the surface subtitle and collapsible index columns (#284-p2 chrome)", () => {
     const surface = rib.surfaces?.[0];
     expect(surface?.subtitle).toBe(
-      "Author Minds · convene Rooms · keep Lenses · read the Briefing",
+      "Author Minds · convene Rooms · keep Lenses · table Exhibits · read the Briefing",
     );
     const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns);
     expect(cols.find((c) => c.key === "rib:chamber:rooms")?.collapsible).toBe(true);
@@ -95,6 +95,7 @@ describe("rib-chamber", () => {
     expect((rib.registerTools?.(ctx) ?? []).map((t) => t.name).sort()).toEqual([
       "chamber_emit_digest",
       "chamber_emit_genesis",
+      "chamber_list_exhibits",
       "chamber_list_lenses",
       "chamber_list_minds",
       "chamber_list_rooms",
@@ -191,6 +192,7 @@ describe("rib-chamber", () => {
     expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
       ["rib:chamber:convene"],
       ["rib:chamber:rooms", "rib:chamber:lenses"],
+      ["rib:chamber:exhibits"],
     ]);
     // Convene is in-process (no workflow binding) and folds to its head bar.
     const convene = rows[0]?.columns[0];

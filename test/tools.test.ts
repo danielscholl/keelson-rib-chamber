@@ -190,10 +190,12 @@ describe("chamber room-control chat tools", () => {
 
   it("registers the always-on seams (genesis/digest + list/cleanup), plus the lens and room tools with their seams", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "chamber_delete_exhibit",
       "chamber_emit_digest",
       "chamber_emit_genesis",
       "chamber_emit_lens",
       "chamber_emit_lens_html",
+      "chamber_list_exhibits",
       "chamber_list_lenses",
       "chamber_list_minds",
       "chamber_list_rooms",
@@ -205,6 +207,7 @@ describe("chamber room-control chat tools", () => {
       "chamber_room_status",
       "chamber_room_stop",
       "chamber_room_transcript",
+      "chamber_table_exhibit",
     ]);
     // No runAgentTurn -> no driver -> no room-control tools, but the always-on seams
     // (genesis + digest writes, the read-only list tools, and the retire-mind /
@@ -216,10 +219,12 @@ describe("chamber room-control chat tools", () => {
         .sort(),
     ).toEqual(
       [
+        "chamber_delete_exhibit",
         "chamber_emit_digest",
         "chamber_emit_genesis",
         "chamber_emit_lens",
         "chamber_emit_lens_html",
+        "chamber_list_exhibits",
         "chamber_list_lenses",
         "chamber_list_minds",
         "chamber_list_rooms",
@@ -227,6 +232,7 @@ describe("chamber room-control chat tools", () => {
         "chamber_retire_mind",
         "chamber_room_delete",
         "chamber_room_transcript",
+        "chamber_table_exhibit",
       ].sort(),
     );
     // Without the snapshot/registerRegion seams the lens tools are withheld fail-closed,
@@ -239,6 +245,7 @@ describe("chamber room-control chat tools", () => {
     ).toEqual([
       "chamber_emit_digest",
       "chamber_emit_genesis",
+      "chamber_list_exhibits",
       "chamber_list_lenses",
       "chamber_list_minds",
       "chamber_list_rooms",

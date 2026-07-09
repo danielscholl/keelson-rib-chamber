@@ -82,6 +82,7 @@ describe("buildChamberState", () => {
       activeRoomCount: 0,
       endedRoomSlugs: [],
       liveLensCount: 0,
+      exhibitCount: 0,
       lensFingerprints: {},
     });
   });
@@ -111,6 +112,7 @@ describe("diffAgainstWatermark", () => {
     activeRoomCount: 0,
     endedRoomSlugs: [],
     liveLensCount: 0,
+    exhibitCount: 0,
     lensFingerprints: {},
     ...over,
   });
@@ -247,6 +249,7 @@ describe("hasDigestContent", () => {
     activeRoomCount: 0,
     endedRoomSlugs: [],
     liveLensCount: 0,
+    exhibitCount: 0,
     lensFingerprints: {},
     ...over,
   });
@@ -260,6 +263,7 @@ describe("hasDigestContent", () => {
     expect(hasDigestContent(state({ activeRoomCount: 1 }))).toBe(true);
     expect(hasDigestContent(state({ endedRoomSlugs: ["r1"] }))).toBe(true);
     expect(hasDigestContent(state({ liveLensCount: 1 }))).toBe(true);
+    expect(hasDigestContent(state({ exhibitCount: 1 }))).toBe(true);
   });
 });
 

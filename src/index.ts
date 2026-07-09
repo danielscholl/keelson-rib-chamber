@@ -54,6 +54,7 @@ import {
   CHAMBER_SURFACE_ID,
   canonicalLensId,
   createLensRegistry,
+  EXHIBIT_TOOL_NAME,
   LENS_TOOL_NAME,
   type LensRegistry,
   lensKey,
@@ -68,7 +69,14 @@ import {
   htmlLensStructuralError,
 } from "./lens-html.ts";
 import { createFileHtmlLensStore, listHtmlLenses } from "./lens-html-store.ts";
-import { createFileLensStore, type LensStore, listLenses } from "./lens-store.ts";
+import {
+  createFileLensStore,
+  isExhibit,
+  type LensKind,
+  type LensStore,
+  lensProvenance,
+  listLenses,
+} from "./lens-store.ts";
 import {
   appendLog,
   listMindRecords,
@@ -118,6 +126,7 @@ const ROSTER_KEY = "rib:chamber:roster";
 const CONVENE_KEY = "rib:chamber:convene";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
+const EXHIBITS_KEY = "rib:chamber:exhibits";
 const DIGEST_KEY = "rib:chamber:digest";
 // The standing-digest write seam, referenced by both the tool registration and the
 // chamber-digest workflow's author node (allowed_tools) — one source of truth.
@@ -478,7 +487,8 @@ function reconcileLensPanels(registry: LensRegistry): void {
     }
     for (const rec of records) {
       try {
-        await registry.reregister(rec.id, rec.board);
+        // Kind rides through so an exhibit's panel comes back on its own shelf.
+        await registry.reregister(rec.id, rec.board, isExhibit(rec) ? "exhibit" : "lens");
       } catch (e) {
         console.error(`[rib-chamber] lens '${rec.id}' re-registration failed: ${errText(e)}`);
       }
@@ -730,11 +740,19 @@ async function composeBriefPrompt(
   if (delta.changedOrNewLenses.length > 0) {
     const lenses = await listLenses(lensesDir());
     const byId = new Map(lenses.map((l) => [l.id, l]));
-    lines.push("Lenses authored or updated since the last briefing:");
+    lines.push("Lenses authored or exhibits tabled since the last briefing:");
     for (const id of delta.changedOrNewLenses) {
       const lens = byId.get(id);
       const detail = lens
-        ? [lens.scope, lens.reason].filter((s): s is string => Boolean(s)).join(" — ")
+        ? [
+            isExhibit(lens)
+              ? `exhibit${lens.sourceRoom ? ` from room ${lens.sourceRoom}` : ""}`
+              : undefined,
+            lens.scope,
+            lens.reason,
+          ]
+            .filter((s): s is string => Boolean(s))
+            .join(" — ")
         : "";
       lines.push(`  - ${id}${detail ? ` (${detail})` : ""}`);
       // A lens retired between the diff and this read has no live key left to open.
@@ -1020,6 +1038,8 @@ const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", impor
 const ROOMS_COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.meta.url));
 // The lenses-index collector, resolved the same way (see ROSTER_COLLECTOR).
 const LENSES_COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", import.meta.url));
+// The exhibits-index collector, resolved the same way (see LENSES_COLLECTOR).
+const EXHIBITS_COLLECTOR = fileURLToPath(new URL("../bin/collect-exhibits.ts", import.meta.url));
 // The standing-digest collectors, resolved the same way (see ROSTER_COLLECTOR). The
 // gate reads all three stores + the digest, so it bakes in the data home (not a single
 // store dir); the publish collector reads the digest store from the same home.
@@ -1364,6 +1384,7 @@ const RIB_VIEWS: RibViewDescriptor[] = [
   { key: CONVENE_KEY, canvasKind: "view", title: "Convene" },
   { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
   { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
+  { key: EXHIBITS_KEY, canvasKind: "view", title: "Exhibits" },
   // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
   // into the Briefing footer's Digest register — but the chamber-digest workflow
   // still binds it (its store is what the footer reads), so the view stays declared.
@@ -1413,7 +1434,7 @@ const rib: Rib = {
     {
       id: CHAMBER_SURFACE_ID,
       title: "Chamber",
-      subtitle: "Author Minds · convene Rooms · keep Lenses · read the Briefing",
+      subtitle: "Author Minds · convene Rooms · keep Lenses · table Exhibits · read the Briefing",
       // Chamber panels are an authoring console, not snapshot cards to lift into chat,
       // so drop the host's per-region explore/select/expand chrome. Board actions
       // (Enter a Mind, room controls) still flow — only the head-strip icons go.
@@ -1477,6 +1498,24 @@ const rib: Rib = {
                 // A long living-views index can collapse to its head strip.
                 collapsible: true,
                 glyph: { char: "✦", tone: "accent" },
+              },
+            ],
+          },
+          {
+            columns: [
+              {
+                key: EXHIBITS_KEY,
+                workflow: "chamber-exhibits",
+                title: "Exhibits",
+                // The tabled-deliverables index, the lenses index's sibling: same
+                // cheap collector + cadence, refreshed on table/delete. hideWhenEmpty
+                // keeps the shelf invisible until a discussion has tabled something
+                // (the builder emits zero sections when empty), so a fresh Chamber
+                // doesn't advertise a concept it hasn't produced.
+                cadenceMs: 120_000,
+                collapsible: true,
+                hideWhenEmpty: true,
+                glyph: { char: "▣", tone: "caution" },
               },
             ],
           },
@@ -1577,6 +1616,30 @@ const rib: Rib = {
       },
       bindSnapshotKey: LENSES_KEY,
       validate: expectView(LENSES_KEY, "board"),
+    },
+    {
+      // The exhibits-index producer (the chamber-lenses sibling): a deterministic
+      // collector that reads the persisted exhibit-kind records from the data home
+      // and emits the tabled-deliverables index (one card per exhibit, each with
+      // Open + Delete). A table or a delete refreshes it; each exhibit also renders
+      // as its own live per-id panel on the Exhibits shelf.
+      definition: {
+        name: "chamber-exhibits",
+        description:
+          'Use when: you want a single index of the exhibits rooms have tabled — the deliverables discussions produced. Triggers: "show the exhibits", "list exhibits", "what did the room produce". Does: reads the persisted exhibits from the Chamber data home and publishes a tabled-deliverables index (one card per exhibit, each with Open and a Delete control) to the Chamber Exhibits canvas. NOT for: living lenses (the chamber-lenses index), tabling an exhibit (a room turn calls chamber_table_exhibit), or viewing one (each exhibit has its own live panel; Open focuses it).',
+        nodes: [
+          {
+            id: "collect",
+            // Out-of-process (a bash node), so bake the resolved data home in —
+            // captured in registerTools, which runs before this (see the lenses
+            // collector).
+            bash: `bun ${shQuote(EXHIBITS_COLLECTOR)} ${shQuote(chamberDataHome())}`,
+            output_schema: { type: "object", required: ["view", "sections"] },
+          },
+        ],
+      },
+      bindSnapshotKey: EXHIBITS_KEY,
+      validate: expectView(EXHIBITS_KEY, "board"),
     },
     {
       // The digest producer (agent-turn arm of the standing-lens cost guard): a
@@ -1763,6 +1826,7 @@ const rib: Rib = {
       makeListMindsTool(),
       makeListRoomsTool(),
       makeListLensesTool(),
+      makeListExhibitsTool(),
       makeRoomTranscriptTool(),
     ];
     const cleanupTools = [makeRetireMindTool(), makeRoomDeleteTool()];
@@ -1861,7 +1925,12 @@ const rib: Rib = {
     }
     const lensTools =
       sm && registerRegion && lensRegistry
-        ? [makeLensTool(lensRegistry), makeRetireLensTool(lensStore, lensRegistry)]
+        ? [
+            makeLensTool(lensStore, lensRegistry),
+            makeRetireLensTool(),
+            makeTableExhibitTool(lensStore, lensRegistry),
+            makeDeleteExhibitTool(),
+          ]
         : [];
     const htmlLensTools =
       sm && registerRegion && htmlLensRegistry ? [makeEmitLensHtmlTool(htmlLensRegistry)] : [];
@@ -1894,9 +1963,14 @@ const rib: Rib = {
         turnCwd: chamberDataHome(),
         resolveProjectRoot,
         resolveProjectName,
-        // Base room tools are still a ceiling: lens only when its seam is wired,
-        // plus external read-only names that resolve only for declaring Minds.
-        turnTools: [...(lensRegistry ? [{ name: LENS_TOOL_NAME }] : []), ...externalToolPool()],
+        // Base room tools are still a ceiling: the exhibit seam only when wired,
+        // plus external read-only names that resolve only for declaring Minds. Rooms
+        // table EXHIBITS (deliverables), not lenses — authoring a standing lens
+        // stays the operator's /lens act, so the two shelves can't re-cross.
+        turnTools: [...(lensRegistry ? [{ name: EXHIBIT_TOOL_NAME }] : []), ...externalToolPool()],
+        // The witnessed-provenance stamp: the driver saw the table-exhibit tool run
+        // in this room's turn, so record the room as the exhibit's source.
+        onExhibitsTabled: (ids, room) => stampExhibitSources(ids, room),
         // The coding pool (host built-ins), always handed over but inert until a
         // room opts in (room.coding) and is confined — the tier is gated per-room.
         codingTools: codingToolPool(),
@@ -1971,6 +2045,8 @@ const rib: Rib = {
         return outcomeExploreAction(action);
       case "retire-lens":
         return retireLensAction(action);
+      case "delete-exhibit":
+        return deleteExhibitAction(action);
       case "lens-open":
         return lensOpenAction(action);
       case "lens-note":
@@ -2843,33 +2919,107 @@ async function outcomeExploreAction(action: RibAction): Promise<RibActionResult>
   }
 }
 
-// Retire a lens: delete its lenses/<id>/ record AND drop its live panel + snapshot
-// key, then refresh the lenses index so the card drops. Fail-closed on a
-// missing/unsafe id (canonicalLensId rejects garbage) before any FS touch;
-// deleteLens throws on an already-gone lens (surfaced here, not as success).
-// registry.remove is a safe no-op if the id isn't live. The refresh is fail-soft
-// (the seam resolves on error / is absent on an older harness).
+// The witnessed-provenance stamp: the room driver saw the table-exhibit tool fire
+// in a turn it ran, so record the room as each exhibit's source — serialized on
+// lensWriteInFlight with the other record writers, fail-soft per id, and
+// preserving updatedAt (a provenance stamp is not a re-tabling).
+function stampExhibitSources(rawIds: readonly string[], room: Room): void {
+  const source = room.name.trim() || room.slug;
+  const apply = async (): Promise<void> => {
+    await lensReconcileInFlight?.catch(() => {});
+    const store = createFileLensStore(lensesDir());
+    let stamped = false;
+    for (const rawId of rawIds) {
+      const id = canonicalLensId(rawId);
+      if (!id) continue;
+      try {
+        const record = await store.loadLens(id);
+        if (!record || !isExhibit(record) || record.sourceRoom === source) continue;
+        await store.saveLens({ ...record, sourceRoom: source });
+        stamped = true;
+      } catch (e) {
+        console.error(`[rib-chamber] exhibit '${id}' source stamp failed: ${errText(e)}`);
+      }
+    }
+    // One index refresh for the batch — the card's "from" field just appeared.
+    if (stamped) await refreshWorkflow?.("chamber-exhibits")?.catch(() => {});
+  };
+  const run = lensWriteInFlight.then(apply, apply);
+  lensWriteInFlight = run.catch(() => {});
+}
+
+// One kind-checked delete backs all four delete verbs (two board actions, two
+// tools): serialize behind boot re-registration (a delete must not race a
+// reregister into resurrecting the record), verify the record's species, delete,
+// release the live panel, then refresh that shelf's index. `crossKind` supplies
+// the surface-appropriate steering message (board verbs name the sibling index,
+// tools name the sibling tool).
+async function deleteRecordOfKind(
+  rawId: string,
+  expected: LensKind,
+  crossKind: (id: string) => string,
+): Promise<{ ok: true; id: string; key: string } | { ok: false; error: string }> {
+  const noun = expected === "exhibit" ? "exhibit" : "lens";
+  const id = canonicalLensId(rawId);
+  if (!id) return { ok: false, error: `unsafe ${noun} id: ${JSON.stringify(rawId)}` };
+  try {
+    await lensReconcileInFlight?.catch(() => {});
+    const store = createFileLensStore(lensesDir());
+    const record = await store.loadLens(id);
+    if (record && isExhibit(record) !== (expected === "exhibit")) {
+      return { ok: false, error: crossKind(id) };
+    }
+    if (!record && expected === "exhibit") {
+      return { ok: false, error: `exhibit '${id}' not found` };
+    }
+    try {
+      await store.deleteLens(id);
+    } catch (e) {
+      // The store's not-found message says "lens"; keep the verb's noun honest
+      // when a concurrent delete wins the race.
+      if (expected === "exhibit" && /not found/.test(errText(e))) {
+        return { ok: false, error: `exhibit '${id}' not found` };
+      }
+      throw e;
+    }
+    lensRegistry?.remove(id);
+    if (expected === "exhibit") {
+      await refreshWorkflow?.("chamber-exhibits")?.catch(() => {});
+    } else {
+      await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+      // The retired lens drops from the roster pulse's "Live views" count too —
+      // refresh it so the count matches the just-updated index.
+      await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+    }
+    await refreshStandingPanels();
+    return { ok: true, id, key: lensKey(id) };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
 async function retireLensAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const raw = asNonEmptyString(payload.id);
   if (!raw) return { ok: false, error: "retire-lens requires payload { id }" };
-  const id = canonicalLensId(raw);
-  if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(raw)}` };
-  try {
-    // Let any in-flight boot re-registration finish first, so a retire can't race a
-    // reregister into resurrecting this lens.
-    await lensReconcileInFlight?.catch(() => {});
-    await createFileLensStore(lensesDir()).deleteLens(id);
-    lensRegistry?.remove(id);
-    await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
-    // The retired lens drops from the roster pulse's "Live views" count too — refresh
-    // it so the count matches the just-updated index (mirrors the emit path).
-    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
-    await refreshStandingPanels();
-    return { ok: true, data: { id, key: lensKey(id) } };
-  } catch (e) {
-    return { ok: false, error: errText(e) };
-  }
+  const res = await deleteRecordOfKind(
+    raw,
+    "lens",
+    (id) => `'${id}' is an exhibit — delete it from the Exhibits index`,
+  );
+  return res.ok ? { ok: true, data: { id: res.id, key: res.key } } : res;
+}
+
+async function deleteExhibitAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const raw = asNonEmptyString(payload.id);
+  if (!raw) return { ok: false, error: "delete-exhibit requires payload { id }" };
+  const res = await deleteRecordOfKind(
+    raw,
+    "exhibit",
+    (id) => `'${id}' is a lens — retire it from the Lenses index`,
+  );
+  return res.ok ? { ok: true, data: { id: res.id, key: res.key } } : res;
 }
 
 // Open a lens: return the host open-canvas effect focusing the lens's live board in
@@ -2956,15 +3106,23 @@ async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
       await lensReconcileInFlight?.catch(() => {});
       const record = await createFileLensStore(lensesDir()).loadLens(id);
       if (!record) return { ok: false, error: `lens '${id}' not found` };
-      const { key } = await registry.publish(id, appendLensNote(record.board, note), {
-        scope: record.scope,
-        maintainingMind: record.maintainingMind,
-        reason: record.reason,
-      });
-      // The lens's updatedAt advanced — refresh the index card and roster pulse (cheap
-      // deterministic collectors), fail-soft like the emit/retire paths.
-      await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
-      await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+      // Round-trip the provenance and the kind (lensProvenance picks every field),
+      // so an annotated exhibit can't come back as a lens with no source room.
+      const { key } = await registry.publish(
+        id,
+        appendLensNote(record.board, note),
+        lensProvenance(record),
+        isExhibit(record) ? "exhibit" : "lens",
+      );
+      // The record's updatedAt advanced — refresh its own index card (and, for a
+      // lens, the roster pulse; exhibits don't ride the "Live views" count), cheap
+      // deterministic collectors, fail-soft like the emit/retire paths.
+      if (isExhibit(record)) {
+        await refreshWorkflow?.("chamber-exhibits")?.catch(() => {});
+      } else {
+        await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+        await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+      }
       await refreshStandingPanels();
       return { ok: true, data: { id, key } };
     } catch (e) {
@@ -3321,11 +3479,11 @@ const lensEmitSchema = z.object({
   reason: z.string().min(1).max(120).optional(),
 });
 
-function makeLensTool(registry: LensRegistry): ToolDefinition {
+function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefinition {
   return {
     name: LENS_TOOL_NAME,
     description:
-      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a Mind surfacing what it sees (e.g. a findings summary after a room discussion). `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point.',
+      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit.',
     inputSchema: lensEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -3345,6 +3503,18 @@ function makeLensTool(registry: LensRegistry): ToolDefinition {
       }
       const { scope, maintainingMind, reason } = parsed.data;
       try {
+        // The two species share one id space, so the LENS verb must not overwrite
+        // an exhibit (it would flip the record's kind and drop its witnessed
+        // sourceRoom). Best-effort guard — the publish itself stays last-writer-wins.
+        const existing = await store.loadLens(id);
+        if (existing && isExhibit(existing)) {
+          emitResult(
+            ctx,
+            `chamber_emit_lens: '${id}' is an exhibit — update it with chamber_table_exhibit or pick another id`,
+            true,
+          );
+          return;
+        }
         const { key } = await registry.publish(id, parsed.data.board, {
           scope,
           maintainingMind,
@@ -3502,7 +3672,7 @@ const lensRetireSchema = z.object({ id: z.string().min(1).max(64) });
 // snapshot key, so an agent can retire a lens it (or another Mind) authored.
 // Mirrors the chamber-genesis refresh path: fail-closed on an unknown id
 // (deleteLens throws), then refresh the lenses index AFTER success only.
-function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefinition {
+function makeRetireLensTool(): ToolDefinition {
   return {
     name: "chamber_retire_lens",
     description:
@@ -3515,28 +3685,120 @@ function makeRetireLensTool(store: LensStore, registry: LensRegistry): ToolDefin
         emitResult(ctx, `chamber_retire_lens: ${parsed.error.message}`, true);
         return;
       }
-      const id = canonicalLensId(parsed.data.id);
-      if (!id) {
-        emitResult(ctx, "chamber_retire_lens: id has no usable characters", true);
+      const res = await deleteRecordOfKind(
+        parsed.data.id,
+        "lens",
+        (id) => `'${id}' is an exhibit — use chamber_delete_exhibit`,
+      );
+      if (!res.ok) {
+        emitResult(ctx, `chamber_retire_lens: ${res.error}`, true);
         return;
       }
-      try {
-        // Durable delete first (throws fail-closed on an unknown id), then the
-        // in-memory release, then refresh the index — all gated on the delete.
-        // Serialize with boot re-registration (see retireLensAction) so a retire
-        // can't race a reregister into resurrecting the lens.
-        await lensReconcileInFlight?.catch(() => {});
-        await store.deleteLens(id);
-        registry.remove(id);
-        await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
-        // The retired lens drops from the roster pulse's "Live views" count too —
-        // refresh it so the count matches the just-updated index (mirrors emit).
-        await refreshWorkflow?.("chamber-roster")?.catch(() => {});
-        await refreshStandingPanels();
-        emitResult(ctx, JSON.stringify({ ok: true, key: lensKey(id) }));
-      } catch (e) {
-        emitResult(ctx, `chamber_retire_lens failed: ${errText(e)}`, true);
+      emitResult(ctx, JSON.stringify({ ok: true, key: res.key }));
+    },
+  };
+}
+
+// Exhibit publish seam — the room driver's turn tool: a discussion tables its
+// deliverable (an assessment, a plan, a findings board) as a point-in-time record
+// on the Exhibits shelf. Deliberately NO sourceRoom input: the room driver stamps
+// the producing room after WITNESSING this tool fire in a turn it ran (see
+// stampExhibitSources), so provenance can't be claimed, only observed.
+const exhibitEmitSchema = z.object({
+  id: z.string().min(1).max(64),
+  board: canvasBoardViewSchema,
+  reason: z.string().min(1).max(120).optional(),
+});
+
+function makeTableExhibitTool(store: LensStore, registry: LensRegistry): ToolDefinition {
+  return {
+    name: EXHIBIT_TOOL_NAME,
+    description:
+      "Table an exhibit: publish a canvas `board` DELIVERABLE your discussion produced onto the Chamber surface, where it shows as its own panel on the Exhibits shelf — a point-in-time record (an assessment, a plan, a findings summary), kept until deleted. `id` is a short, stable kebab-case identifier for the deliverable; `board` is the canvas board view; optional `reason` is a one-line gist of what the exhibit holds. Call it once when the discussion has converged on something worth keeping. NOT for a standing view you intend to keep updating — author that with chamber_emit_lens.",
+    inputSchema: exhibitEmitSchema,
+    state_changing: true,
+    execute(input, ctx) {
+      // Serialized on lensWriteInFlight: the tool's load-check-publish, the witness
+      // stamp, and the note write-back all touch the same record files, and an
+      // unserialized publish could land inside a stamp's read-modify-write.
+      const apply = async (): Promise<void> => {
+        const parsed = exhibitEmitSchema.safeParse(input);
+        if (!parsed.success) {
+          emitResult(ctx, `chamber_table_exhibit: ${parsed.error.message}`, true);
+          return;
+        }
+        const id = canonicalLensId(parsed.data.id);
+        if (!id) {
+          emitResult(ctx, "chamber_table_exhibit: id has no usable characters", true);
+          return;
+        }
+        try {
+          await lensReconcileInFlight?.catch(() => {});
+          const existing = await store.loadLens(id);
+          // The two species share one id space, so the EXHIBIT verb must not
+          // overwrite a standing lens (it would flip the record's kind and drop
+          // its maintainer provenance).
+          if (existing && !isExhibit(existing)) {
+            emitResult(
+              ctx,
+              `chamber_table_exhibit: '${id}' is a lens — update it with chamber_emit_lens or pick another id`,
+              true,
+            );
+            return;
+          }
+          const { key } = await registry.publish(
+            id,
+            parsed.data.board,
+            // A re-table keeps the witnessed source until the driver re-stamps it
+            // (the record is rewritten whole, so an omitted field would clear it).
+            { reason: parsed.data.reason, sourceRoom: existing?.sourceRoom },
+            "exhibit",
+          );
+          // Mirror the lens emit's freshness path: the new exhibit appears in its
+          // index promptly, and a tabled deliverable is briefing substance. No roster
+          // refresh — exhibits don't ride the pulse's "Live views" count.
+          await refreshWorkflow?.("chamber-exhibits")?.catch(() => {});
+          void evaluateBriefGate().catch(() => {});
+          await refreshStandingPanels();
+          emitResult(ctx, JSON.stringify({ ok: true, key }));
+        } catch (e) {
+          emitResult(ctx, `chamber_table_exhibit failed: ${errText(e)}`, true);
+        }
+      };
+      const run = lensWriteInFlight.then(apply, apply);
+      lensWriteInFlight = run.catch(() => {});
+      return run;
+    },
+  };
+}
+
+// Exhibit delete seam: the chamber_retire_lens sibling for the Exhibits shelf,
+// kind-checked the other way (see deleteExhibitAction, the board-action twin).
+const exhibitDeleteSchema = z.object({ id: z.string().min(1).max(64) });
+
+function makeDeleteExhibitTool(): ToolDefinition {
+  return {
+    name: "chamber_delete_exhibit",
+    description:
+      "Delete an exhibit: permanently remove a tabled deliverable — its persisted record AND its live Chamber panel. `id` is the exhibit's stable kebab-case identifier (the same id chamber_table_exhibit used; see chamber_list_exhibits). Fails closed if no such exhibit exists. NOT for retiring a lens (chamber_retire_lens).",
+    inputSchema: exhibitDeleteSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = exhibitDeleteSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `chamber_delete_exhibit: ${parsed.error.message}`, true);
+        return;
       }
+      const res = await deleteRecordOfKind(
+        parsed.data.id,
+        "exhibit",
+        (id) => `'${id}' is a lens — use chamber_retire_lens`,
+      );
+      if (!res.ok) {
+        emitResult(ctx, `chamber_delete_exhibit: ${res.error}`, true);
+        return;
+      }
+      emitResult(ctx, JSON.stringify({ ok: true, key: res.key }));
     },
   };
 }
@@ -3637,12 +3899,12 @@ function makeListLensesTool(): ToolDefinition {
   return {
     name: "chamber_list_lenses",
     description:
-      "List the Chamber's living lenses (agent-authored canvas boards), newest first: each lens's id, when it was last updated, and any provenance (scope, maintaining Mind, reason). Read-only. NOT for authoring a lens (run the chamber-lens workflow) or retiring one (chamber_retire_lens).",
+      "List the Chamber's living lenses (agent-authored canvas boards), newest first: each lens's id, when it was last updated, and any provenance (scope, maintaining Mind, reason). Read-only. NOT for authoring a lens (run the chamber-lens workflow), retiring one (chamber_retire_lens), or the tabled deliverables (chamber_list_exhibits).",
     inputSchema: noToolInputSchema,
     state_changing: false,
     async execute(_input, ctx) {
       try {
-        const lenses = await listLenses(lensesDir());
+        const lenses = (await listLenses(lensesDir())).filter((l) => !isExhibit(l));
         const rows = lenses.map((l) => ({
           id: l.id,
           updatedAt: l.updatedAt,
@@ -3653,6 +3915,30 @@ function makeListLensesTool(): ToolDefinition {
         emitJsonList(ctx, "lenses", rows);
       } catch (e) {
         emitResult(ctx, `chamber_list_lenses failed: ${errText(e)}`, true);
+      }
+    },
+  };
+}
+
+function makeListExhibitsTool(): ToolDefinition {
+  return {
+    name: "chamber_list_exhibits",
+    description:
+      "List the Chamber's exhibits (deliverables discussions tabled), newest first: each exhibit's id, when it was tabled, the producing room when witnessed, and any gist. Read-only. NOT for tabling one (chamber_table_exhibit), deleting one (chamber_delete_exhibit), or the living lenses (chamber_list_lenses).",
+    inputSchema: noToolInputSchema,
+    state_changing: false,
+    async execute(_input, ctx) {
+      try {
+        const exhibits = (await listLenses(lensesDir())).filter(isExhibit);
+        const rows = exhibits.map((l) => ({
+          id: l.id,
+          tabledAt: l.updatedAt,
+          ...(l.sourceRoom ? { sourceRoom: l.sourceRoom } : {}),
+          ...(l.reason ? { reason: l.reason } : {}),
+        }));
+        emitJsonList(ctx, "exhibits", rows);
+      } catch (e) {
+        emitResult(ctx, `chamber_list_exhibits failed: ${errText(e)}`, true);
       }
     },
   };

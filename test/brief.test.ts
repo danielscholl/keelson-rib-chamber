@@ -38,7 +38,7 @@ describe("Chamber surface (attention chrome)", () => {
     expect(surface?.title).toBe("Chamber");
     // #284-p2 chrome: a static subtitle under the surface title.
     expect(surface?.subtitle).toBe(
-      "Author Minds · convene Rooms · keep Lenses · read the Briefing",
+      "Author Minds · convene Rooms · keep Lenses · table Exhibits · read the Briefing",
     );
     expect(ribSurfaceDescriptorSchema.safeParse(surface).success).toBe(true);
   });

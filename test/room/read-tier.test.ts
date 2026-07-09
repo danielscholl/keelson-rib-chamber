@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { codingToolPool, readToolPool } from "../../src/capabilities.ts";
-import { LENS_TOOL_NAME } from "../../src/lens.ts";
+import { EXHIBIT_TOOL_NAME } from "../../src/lens.ts";
 import { createRoomDriver } from "../../src/room.ts";
 import type { Mind } from "../../src/types.ts";
 import {
@@ -45,7 +45,7 @@ function harness(opts: {
     publisher: pub.publisher,
     runAgentTurn: turns.run,
     minds: () => opts.minds,
-    turnTools: [{ name: LENS_TOOL_NAME }],
+    turnTools: [{ name: EXHIBIT_TOOL_NAME }],
     ...(opts.withReadTools === false ? {} : { readTools: readToolPool() }),
     ...(opts.withCodingTools ? { codingTools: codingToolPool() } : {}),
     ...(opts.turnCwd ? { turnCwd: opts.turnCwd } : {}),
@@ -96,7 +96,7 @@ describe("room driver — read tier", () => {
     expect(await h.driver.step("demo")).toBe("ended");
 
     const req = h.turns.requests[0];
-    expect(names(req)).toEqual([LENS_TOOL_NAME, "Read"].sort());
+    expect(names(req)).toEqual([EXHIBIT_TOOL_NAME, "Read"].sort());
   });
 
   test("a room with no project grants nothing and stays unconfined, even with readTools available", async () => {
