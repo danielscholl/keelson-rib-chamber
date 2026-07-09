@@ -114,29 +114,54 @@ function shapeActions(
   projects: readonly ConveneProject[],
 ): CanvasActionItem[] {
   const proj = projectField(projects);
+  // `hint` is the room shape's purpose, surfaced on hover so the driver need not
+  // remember which tab does what. It stays put whether the tab is enabled or gated;
+  // on a gated tab the host joins it with the disabled `reason` (what it does — why
+  // it can't run now). Kept to one line, matching the concepts doc's voice.
   const defs: {
     strategy: string;
     label: string;
     glyph: string;
+    hint: string;
     fields: (CanvasActionField | null)[];
   }[] = [
-    { strategy: "sequential", label: "Discussion", glyph: "▸", fields: [topicField, proj] },
+    {
+      strategy: "sequential",
+      label: "Discussion",
+      glyph: "▸",
+      hint: "Round-robin — each Mind speaks in turn, building on the last. The default shape.",
+      fields: [topicField, proj],
+    },
     {
       strategy: "group-chat",
       label: "Debate",
       glyph: "◆",
+      hint: "A chaired panel — a Mind you leave out moderates the others toward one decision.",
       fields: [
         topicField,
         facilitatorField("moderator", "Chair — a Mind not in the room", out),
         turnsField,
       ],
     },
-    { strategy: "open-floor", label: "Open floor", glyph: "⊙", fields: [topicField, turnsField] },
-    { strategy: "review", label: "Review", glyph: "✓", fields: [topicField] },
+    {
+      strategy: "open-floor",
+      label: "Open floor",
+      glyph: "⊙",
+      hint: "Unchaired brainstorm — the Minds route themselves and stop when enough vote to end.",
+      fields: [topicField, turnsField],
+    },
+    {
+      strategy: "review",
+      label: "Review",
+      glyph: "✓",
+      hint: "A two-Mind cross-vendor pass — one authors, a different provider reviews for an independent second opinion.",
+      fields: [topicField],
+    },
     {
       strategy: "magentic",
       label: "Build",
       glyph: "⚑",
+      hint: "A manager you leave out splits the goal into tasks and delegates to the others until it's built.",
       fields: [
         topicField,
         facilitatorField("manager", "Manager — a Mind not in the room", out),
@@ -151,6 +176,7 @@ function shapeActions(
       type: "convene",
       label: s.label,
       glyph: s.glyph,
+      hint: s.hint,
       payload: { strategy: s.strategy },
     };
     if (!gate.ok) return { ...base, disabled: true, reason: gate.reason };
