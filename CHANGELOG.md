@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.22.0...v0.23.0) (2026-07-09)
+
+
+### Added
+
+* **exhibits:** split room deliverables onto an Exhibits shelf ([#183](https://github.com/danielscholl/keelson-rib-chamber/issues/183)) ([f2f5d67](https://github.com/danielscholl/keelson-rib-chamber/commit/f2f5d6791ec7e9ad2700dc3def92e7f7027b3b55))
+* **lens:** living lenses, panel head verbs, and room exhibit links ([#185](https://github.com/danielscholl/keelson-rib-chamber/issues/185)) ([bec22e1](https://github.com/danielscholl/keelson-rib-chamber/commit/bec22e1cd3e43cf530e9c320efaac85f9a6ac320))
+
 ## [0.22.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.21.0...v0.22.0) (2026-07-08)
 
 
