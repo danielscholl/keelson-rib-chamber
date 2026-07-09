@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
+import { hasDigestContent, reduceChamberState } from "../src/chamber-state.ts";
 import { createLensRegistry, lensKey } from "../src/lens.ts";
 import { createFileLensStore, isExhibit, type LensStore, listLenses } from "../src/lens-store.ts";
 
@@ -68,6 +69,46 @@ describe("lens store — the exhibit kind", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("lens store — the witness-stamp updatedAt override", () => {
+  test("a save carrying updatedAt preserves it (a provenance stamp is not a re-tabling)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "chamber-exhibit-store-"));
+    try {
+      const store = createFileLensStore(root);
+      await store.saveLens({ id: "assessment", board: board("A"), kind: "exhibit" });
+      const tabled = await store.loadLens("assessment");
+      await store.saveLens({
+        ...(tabled ?? { id: "assessment", board: board("A") }),
+        sourceRoom: "sample-review",
+      });
+      const stamped = await store.loadLens("assessment");
+      expect(stamped?.sourceRoom).toBe("sample-review");
+      expect(stamped?.updatedAt).toBe(tabled?.updatedAt ?? "");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("chamber state — exhibits count as digest content", () => {
+  test("an exhibits-only chamber is not 'empty' to the digest gate", () => {
+    const state = reduceChamberState(
+      [],
+      [],
+      [
+        {
+          id: "assessment",
+          board: board("Assessment"),
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          kind: "exhibit",
+        },
+      ],
+    );
+    expect(state.liveLensCount).toBe(0);
+    expect(state.exhibitCount).toBe(1);
+    expect(hasDigestContent(state)).toBe(true);
   });
 });
 

@@ -6,15 +6,10 @@ import { assertSafeSlug } from "./genesis.ts";
 // A persisted lens: the authored board plus a server-stamped freshness time. The
 // optional scope/maintainingMind/reason fields are the index card's PROVENANCE —
 // the authoring agent supplies whatever it can name (never fabricated), so each
-// stays absent when the emit omitted it and the index omits it in turn.
-//
-// `kind` splits the store's two record species: a LENS is a standing view a Mind
-// maintains (freshness matters, re-authoring the same id is the point); an EXHIBIT
-// is a deliverable a discussion tabled (point-in-time, provenance is the producing
-// room). Absent kind means lens, so every pre-split record keeps its meaning.
-// `sourceRoom` is exhibit provenance and is DRIVER-WITNESSED, never agent-supplied:
-// the room driver stamps it after seeing the table-exhibit tool fire in a turn it
-// ran, so a Mind cannot claim a room it wasn't in.
+// stays absent when the emit omitted it and the index omits it in turn. A record
+// with no `kind` is a lens (a standing view a Mind maintains); an exhibit is a
+// deliverable a discussion tabled. `sourceRoom` is driver-witnessed, never
+// agent-supplied, so a Mind cannot claim a room it wasn't in (see room.ts).
 export type LensKind = "lens" | "exhibit";
 
 export interface LensRecord {
@@ -37,15 +32,35 @@ export type LensProvenance = Pick<
 >;
 
 // The read-side kind fold: anything but a literal "exhibit" — absent, or a value a
-// corrupt record smuggled in — is a lens, so a bad kind degrades to the pre-split
+// corrupt record smuggled in — is a lens, so a bad kind degrades to the default
 // meaning instead of hiding the record from both indexes.
 export function isExhibit(record: Pick<LensRecord, "kind">): boolean {
   return record.kind === "exhibit";
 }
 
+// Pick the provenance fields off a loaded record, so a write-back path can
+// round-trip them without hand-listing each (a missed field would be silently
+// stripped on the next save).
+export function lensProvenance(record: LensRecord): LensProvenance {
+  return {
+    scope: record.scope,
+    maintainingMind: record.maintainingMind,
+    reason: record.reason,
+    sourceRoom: record.sourceRoom,
+  };
+}
+
 export interface LensStore {
+  // `updatedAt` is normally store-stamped at save; the optional override exists
+  // for the witness stamp, which annotates provenance on a record without
+  // advancing its freshness (a sourceRoom stamp is not a re-tabling).
   saveLens(
-    record: { id: string; board: CanvasBoardView; kind?: LensKind } & LensProvenance,
+    record: {
+      id: string;
+      board: CanvasBoardView;
+      kind?: LensKind;
+      updatedAt?: string;
+    } & LensProvenance,
   ): Promise<void>;
   loadLens(id: string): Promise<LensRecord | undefined>;
   deleteLens(id: string): Promise<void>;
@@ -77,9 +92,9 @@ export function createFileLensStore(lensesRoot: string): LensStore {
       const stored: LensRecord = {
         id: record.id,
         board: record.board,
-        updatedAt: new Date().toISOString(),
-        // Only the exhibit kind is written; lens stays the absent default so a
-        // pre-split record and a fresh lens record serialize identically.
+        updatedAt: record.updatedAt ?? new Date().toISOString(),
+        // Only the exhibit kind is written; lens stays the absent default so old
+        // and new lens records serialize identically.
         ...(record.kind === "exhibit" ? { kind: record.kind } : {}),
         ...(record.scope ? { scope: record.scope } : {}),
         ...(record.maintainingMind ? { maintainingMind: record.maintainingMind } : {}),

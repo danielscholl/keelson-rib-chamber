@@ -23,11 +23,9 @@ export function buildExhibitsIndexBoard(exhibits: readonly LensRecord[]): Canvas
   };
 }
 
-// One exhibit -> one card: the tabled board's title (or the id when untitled), the
-// producing room as a "from" field when the driver witnessed one, the tabling time,
-// the emit's reason as a "gist" line, and two actions — Open (the live key always
-// resolves; exhibits share the lens key namespace so lens-open covers both) and a
-// destructive Delete with a confirm dialog.
+// One exhibit -> one card. Provenance is fail-soft (absent on the record means
+// absent on the card); Open rides lens-open because both species share the lens
+// key namespace.
 function cardFor(exhibit: LensRecord) {
   const title = exhibit.board.title || exhibit.id;
   return {

@@ -393,19 +393,19 @@ describe("room driver — concurrency & model", () => {
     { slug: "a", name: "Ada", role: "agent", persona: "You are Ada.", tools: ["lens"] },
     { slug: "b", name: "Bo", role: "agent", persona: "You are Bo." },
   ];
-  const LENS_POOL = [{ name: "chamber_table_exhibit" }];
+  const EXHIBIT_POOL = [{ name: "chamber_table_exhibit" }];
 
-  test("maps a speaker's declared lens slug onto the turn's tools (a Mind can author a lens mid-room)", async () => {
-    const h = harness([{ text: "ok" }], { minds: TOOLED_MINDS, turnTools: LENS_POOL });
+  test("maps a speaker's declared lens slug onto the turn's tools (a Mind can table an exhibit mid-room)", async () => {
+    const h = harness([{ text: "ok" }], { minds: TOOLED_MINDS, turnTools: EXHIBIT_POOL });
     await h.driver.start(START);
-    await h.driver.step("demo"); // speaker a, declares lens
+    await h.driver.step("demo"); // speaker a, declares the lens slug
     expect(h.turns.requests[0]?.tools).toEqual([{ name: "chamber_table_exhibit" }]);
   });
 
   test("a Mind that declares no tools stays text-only even when the room pool is set", async () => {
     const h = harness([{ text: "a" }, { text: "b" }], {
       minds: TOOLED_MINDS,
-      turnTools: LENS_POOL,
+      turnTools: EXHIBIT_POOL,
     });
     await h.driver.start(START);
     await h.driver.step("demo"); // a: declares lens
@@ -417,7 +417,7 @@ describe("room driver — concurrency & model", () => {
   test("each parallel speaker gets its own tool rail by declaration", async () => {
     const h = harness([{ text: "ada" }, { text: "bo" }], {
       minds: TOOLED_MINDS,
-      turnTools: LENS_POOL,
+      turnTools: EXHIBIT_POOL,
     });
     await h.driver.start({ ...START, strategy: "concurrent", turnBudget: 4 });
     await h.driver.step("demo"); // one parallel batch = a + b

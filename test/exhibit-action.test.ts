@@ -179,6 +179,46 @@ describe("chamber_table_exhibit tool", () => {
     expect(t.errored()).toBe(true);
     expect(t.out()).toContain("no usable characters");
   });
+
+  it("refuses to overwrite a standing lens (the two species share one id space)", async () => {
+    await seedLens("morning-brief");
+    const t = makeToolCtx();
+    await tool("chamber_table_exhibit").execute(
+      { id: "morning-brief", board: board("Hijack") },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("is a lens");
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.kind).toBeUndefined();
+    expect(rec?.board.title).toBe("morning-brief");
+  });
+
+  it("a re-table preserves the witnessed sourceRoom", async () => {
+    await seedExhibit("assessment", "sample-review");
+    const t = makeToolCtx();
+    await tool("chamber_table_exhibit").execute(
+      { id: "assessment", board: board("Assessment v2") },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.board.title).toBe("Assessment v2");
+    expect(rec?.sourceRoom).toBe("sample-review");
+  });
+});
+
+describe("chamber_emit_lens kind guard", () => {
+  it("refuses to overwrite an exhibit (would flip its kind and drop sourceRoom)", async () => {
+    await seedExhibit("assessment", "sample-review");
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "assessment", board: board("Hijack") }, t.ctx);
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("is an exhibit");
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.kind).toBe("exhibit");
+    expect(rec?.sourceRoom).toBe("sample-review");
+  });
 });
 
 describe("chamber_delete_exhibit tool", () => {

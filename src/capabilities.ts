@@ -14,9 +14,8 @@ import type { Mind } from "./types.ts";
 export const CAPABILITIES: Readonly<
   Record<string, { readonly tools: readonly string[]; readonly summary: string }>
 > = {
-  // The slug stays `lens` (it is persisted in existing mind.json declarations)
-  // but now authorizes the exhibit seam: mid-room publishing is TABLING a
-  // deliverable, not maintaining a standing lens.
+  // The slug is persisted in mind.json declarations, so it keeps the historical
+  // name `lens`; it authorizes mid-room publishing, which tables an exhibit.
   lens: { tools: [EXHIBIT_TOOL_NAME], summary: "table a canvas-board exhibit mid-room" },
   read: {
     tools: ["Read"],
