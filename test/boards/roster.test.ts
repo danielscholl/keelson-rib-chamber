@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildRosterBoard } from "../../src/boards/roster.ts";
-import { MODEL_CHOICES } from "../../src/models.ts";
 import { GENESIS_STARTERS } from "../../src/starters.ts";
 import type { Mind } from "../../src/types.ts";
 
@@ -312,7 +311,7 @@ describe("buildRosterBoard populated", () => {
     );
   });
 
-  test("each seated card's set-model action is an at-rest indicator plus a model dropdown", () => {
+  test("each seated card's set-model action is an at-rest indicator plus the host model picker", () => {
     const board = buildRosterBoard([
       mind({ slug: "ada", name: "Ada", model: "claude-opus-4-7", provider: "anthropic" }),
     ]);
@@ -325,45 +324,41 @@ describe("buildRosterBoard populated", () => {
       payload: { slug: "ada" },
     });
     expect(setModel?.destructive ?? false).toBe(false);
-    // Model is a non-required select opening on the current pin.
+    // One field: the host's live-catalog picker, non-required (its clear row
+    // drops the pin), opening on the current provider/model pair so an idle
+    // submit re-affirms both rather than dropping them via setMindModel.
+    expect(setModel?.fields?.map((f) => f.name)).toEqual(["model"]);
     const modelField = setModel?.fields?.find((f) => f.name === "model");
     expect(modelField?.required ?? false).toBe(false);
     expect(modelField?.defaultValue).toBe("claude-opus-4-7");
-    const values = (modelField?.options ?? []).map((o) => o.value);
-    expect(values.length).toBeGreaterThan(0);
-    expect(new Set(values).size).toBe(values.length); // unique
-    for (const o of modelField?.options ?? []) expect(o.label.length).toBeGreaterThan(0);
-    for (const c of MODEL_CHOICES) expect(values).toContain(c.value); // curated set present
-    // Provider stays free-text, pre-filled with the current pin so an idle submit
-    // re-affirms it rather than dropping it via setMindModel.
-    const providerField = setModel?.fields?.find((f) => f.name === "provider");
-    expect(providerField?.options).toBeUndefined();
-    expect(providerField?.defaultValue).toBe("anthropic");
+    expect(modelField?.options).toBeUndefined(); // the catalog is the host's, never baked in
+    expect(modelField?.modelPicker).toEqual({
+      providerField: "provider",
+      providerDefault: "anthropic",
+    });
     expect(actions.findIndex((a) => a.type === "retire")).toBe(actions.length - 1);
   });
 
-  test("a Mind pinned outside the curated set keeps that model selectable and default", () => {
-    const drift = "claude-opus-4.8"; // dot-format prose slug, not in the dash-format catalog
-    expect(MODEL_CHOICES.some((c) => c.value === drift)).toBe(false);
+  test("a Mind pinned off-catalog keeps that model as the picker default", () => {
+    const drift = "claude-opus-4.8"; // dot-format prose slug, not a catalog id
     const board = buildRosterBoard([mind({ slug: "ada", model: drift })]);
     const setModel = mindCards(board)[0]?.actions?.find((a) => a.type === "set-model");
     const modelField = setModel?.fields?.find((f) => f.name === "model");
     expect(modelField?.defaultValue).toBe(drift);
-    expect((modelField?.options ?? []).map((o) => o.value)).toContain(drift);
-    // The whole board still validates fail-closed with the drifted select present.
+    // A provider-less pin seeds no providerDefault — nothing to re-affirm.
+    expect(modelField?.modelPicker).toEqual({ providerField: "provider" });
+    // The whole board still validates fail-closed with the drifted default present.
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
-  test("an unset Mind's model control reads default and opens on the empty option", () => {
+  test("an unset Mind's model control reads default and opens on the clear row", () => {
     const board = buildRosterBoard([mind({ slug: "ada", model: undefined })]);
     const setModel = mindCards(board)[0]?.actions?.find((a) => a.type === "set-model");
     expect(setModel?.label).toBe("Model — default");
     const modelField = setModel?.fields?.find((f) => f.name === "model");
-    // No defaultValue → the non-required select opens on its empty "clear" option.
+    // No defaultValue → the non-required picker opens on its clear row.
     expect(modelField?.defaultValue).toBeUndefined();
-    expect((modelField?.options ?? []).map((o) => o.value)).toEqual(
-      MODEL_CHOICES.map((c) => c.value),
-    );
+    expect(modelField?.modelPicker).toEqual({ providerField: "provider" });
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
