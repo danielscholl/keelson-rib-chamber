@@ -73,9 +73,10 @@ describe("buildConveneBoard cast + shapes", () => {
   });
 
   test("every shape carries a purpose hint — enabled and gated alike", () => {
-    // Three Minds all in: Debate/Build enabled (a chair is free), Review gated
-    // (not a pair). A gated tab must still carry its hint so the hover reminder
-    // survives the disable, joined with the reason by the host.
+    // Three Minds all in: Discussion enabled, but Debate/Build gated (no Mind is
+    // out to chair/manage) and Review gated (not a pair). A gated tab must still
+    // carry its hint so the hover reminder survives the disable, joined with the
+    // reason by the host.
     const board = buildConveneBoard([A, B, C]);
     const bs = byStrategy(board);
     for (const item of shapes(board)) {
@@ -84,6 +85,8 @@ describe("buildConveneBoard cast + shapes", () => {
     }
     expect(bs.get("review")?.disabled).toBe(true);
     expect(bs.get("review")?.hint).toContain("cross-vendor");
+    expect(bs.get("group-chat")?.disabled).toBe(true);
+    expect(bs.get("magentic")?.disabled).toBe(true);
     expect(bs.get("sequential")?.disabled ?? false).toBe(false);
     expect(bs.get("sequential")?.hint).toContain("Round-robin");
   });
