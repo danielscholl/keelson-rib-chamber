@@ -53,10 +53,11 @@ A Mind is its identity first, its tools second.
   reason with genuinely different engines. Unpinned, it runs on the session's
   provider.
 - **Capabilities** are an explicit, curated set of slugs that scope what the Mind may do
-  inside a room: `lens` (author a live canvas board mid-room), `read` (read files in the
-  room's project, coding rooms only), and `code` (edit files and run commands in the
-  room's project, coding rooms only). Declaring nothing keeps the Mind text-only, the
-  room default.
+  inside a room: `lens` (table a canvas-board exhibit mid-room), `read` (read files in the
+  room's project, auto-granted in any project-targeted room), `code` (edit files and run
+  commands in the room's project, coding rooms only), and `osdu` (consult read-only OSDU
+  platform status, present only when the osdu rib is co-installed). Declaring nothing keeps
+  the Mind text-only, the room default.
 
 Identity is at the Mind level, and capabilities are not addressable. Only a Mind is a
 participant you can put in a room or address in a transcript. A tool, a workflow, an
@@ -64,8 +65,9 @@ MCP server, or another rib is a capability a Mind invokes during its turn, behin
 harness permission layer, never a participant in its own right. A Mind can never
 reach a tool the room does not already permit, even through a hand-edited record. See
 [Lenses](../lenses/) for what the `lens` capability authorizes, and
-[Per-Mind capabilities](../../design/per-mind-capabilities/) for how `read` and `code`
-enter the pool only when `room.coding` is enabled.
+[Per-Mind capabilities](../../design/per-mind-capabilities/) for how `code` (write/exec)
+enters the pool only when `room.coding` is enabled, and how `read` is auto-granted
+room-wide to every speaker in any project-targeted room, no coding tier needed.
 
 ## What a Mind remembers
 

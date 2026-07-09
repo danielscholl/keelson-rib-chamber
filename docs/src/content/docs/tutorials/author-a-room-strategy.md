@@ -52,10 +52,13 @@ export type StrategyStep =
 - `assign` assigns a pending ledger task to the named worker Mind. Also magentic-specific.
 - `end` closes the room. It carries no field.
 
-One note on `synthesize`: it is part of the type, but none of the shipped
-strategies return it. A synthesizer turn is emitted by the driver, not by a
-strategy. You can return it from a new strategy, but only if you also teach the
-driver to run it (more on that below).
+One note on `synthesize`: five of the six shipped strategies (sequential,
+concurrent, group-chat, open-floor, magentic) return it at budget exhaustion
+through the `exhaustedSynthesis` helper, which asks a configured synthesizer or
+the last speaker to write a closing summary. `review` is the lone exception,
+because its reviewer critique is already the closing artifact. The driver already
+runs a `synthesize` step (`runCloseSynthesis`), so a new strategy can return it
+with no extra driver work.
 
 ## The pure rule
 
@@ -94,16 +97,24 @@ moderator's pick can perturb the rotation without losing the round count.
 ### 1. Write the strategy file
 
 Create `src/strategies/{name}.ts` and export a `const` of type `Strategy`. Every
-shipped strategy opens with the same three structural guards, in this order, each
-returning `{ kind: "end" }`:
+shipped strategy opens with the same three structural guards, in this order. The
+first two always return `{ kind: "end" }`:
 
 1. the room is not active (`room.status !== "active"`),
-2. there are no participants (`room.participants.length === 0`),
-3. the turn budget is spent (`room.turnIndex >= room.turnBudget`).
+2. there are no participants (`room.participants.length === 0`).
+
+The third guard, a spent turn budget (`room.turnIndex >= room.turnBudget`), is
+where the shipped strategies diverge. Five of the six (sequential, concurrent,
+group-chat, open-floor, magentic) return `exhaustedSynthesis(room, transcript)`,
+a closing `synthesize` turn that degrades to `{ kind: "end" }` only when no
+synthesizer Mind can be resolved. Only `review` returns `{ kind: "end" }` at
+budget, because its reviewer critique is already the closing artifact.
 
 Write those first, then decide. Here is a complete minimal strategy, a small
 variation on the unmoderated `open-floor` policy: it seeds the least-spoken
 participant each turn, but ends early once everyone has spoken at least one round.
+It takes the simpler `review`-style path and returns `{ kind: "end" }` when the
+budget is spent, rather than asking for a closing synthesis.
 
 ```ts
 import { leastSpoken, roundOf, speakerCounts } from "../routing.ts";
@@ -245,12 +256,12 @@ hang CI.
 ## When the driver has to learn the step too
 
 The strategy emits a `kind`; the driver executes it. For `speak`,
-`speak-parallel`, and `end`, that execution already exists, so a strategy that
-returns only those is complete after the three edits and a test. For `manage`
-and `assign`, the driver execution exists for the magentic strategy. But if your
-strategy returns `moderate` or `synthesize`, or relies on a routing tail (a
-moderator's pick, a peer nomination, an end vote), the matching execution and
-fallback live in the driver and in `src/routing.ts`, not in the strategy. The pure
+`speak-parallel`, `synthesize`, and `end`, that execution already exists, so a
+strategy that returns only those is complete after the three edits and a test. For
+`manage` and `assign`, the driver execution exists for the magentic strategy. But
+if your strategy returns `moderate`, or relies on a routing tail (a moderator's
+pick, a peer nomination, an end vote), the matching execution and fallback live in
+the driver and in `src/routing.ts`, not in the strategy. The pure
 function only names the step. Teaching the driver to run a new step is a larger
 change than authoring the policy, and the design record explains why the split is
 drawn there.

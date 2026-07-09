@@ -20,7 +20,7 @@ gate with a conditional agent turn.
 | `chamber-rooms` | bash collector | `collect` | `ROOMS_KEY` | the Rooms index |
 | `chamber-lenses` | bash collector | `collect` | `LENSES_KEY` | the Lenses index |
 | `chamber-exhibits` | bash collector | `collect` | `EXHIBITS_KEY` | the Exhibits index |
-| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the standing digest panel |
+| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, read by the Briefing footer's Digest register |
 | `chamber-genesis` | prompt turn | `genesis` | none | nothing (writes a Mind) |
 | `chamber-lens` | prompt turn | `compose` | none | a per-subject lens panel |
 | `chamber-lens-refresh` | prompt turn | `refresh` | none | re-emits an existing living lens |
@@ -51,12 +51,11 @@ never the board.
 These four are the producers behind the Roster, Rooms, Lenses, and Exhibits
 regions of the Chamber surface. On the surface each binds with a `cadenceMs` of
 `120000`, so the board re-collects every two minutes on its own. State changes
-that should show sooner (a new Mind, a room ending, stopping, or being deleted, a
-lens authored or retired, an exhibit tabled or deleted) trigger a targeted
-`refreshWorkflow` so the right index republishes without waiting on the cadence.
-Starting a room is the exception: it creates the room's own live panel at once
-but does not refresh the Rooms index, which picks the new room up on its next
-cadence.
+that should show sooner (a new Mind, a room starting, ending, stopping, or being
+deleted, a lens authored or retired, an exhibit tabled or deleted) trigger a
+targeted `refreshWorkflow` so the right index republishes without waiting on the
+cadence. Starting a room also creates the room's own live per-slug panel at once,
+so the active session shows immediately as well as in the refreshed Rooms index.
 
 The lenses and exhibits collectors read the SAME store and split it by record
 kind: `chamber-lenses` emits the standing views, `chamber-exhibits` the tabled
@@ -82,16 +81,18 @@ changed since the last digest.
   nothing.
 - `publish`: a `bash` node with `trigger_rule: "all_done"`. It runs whether
   `author` ran, was skipped, or failed, re-reads the digest store from disk, and
-  publishes the board to `DIGEST_KEY`. This keeps the panel live every tick and
-  self-heals a failed authoring: an un-advanced fingerprint drives a re-author on
-  the next tick.
+  publishes the board to `DIGEST_KEY`. This keeps the Digest register current on
+  each nudge and self-heals a failed authoring: an un-advanced fingerprint drives a
+  re-author on the next mutation.
 
 The cost-safety invariant: a quiet Chamber (no new Minds, rooms, lenses, or
-exhibits since the last digest) never spends an agent turn. `publish` still runs every cadence
-so the panel stays live with a current `composedAt` timestamp.
+exhibits since the last digest) never spends an agent turn. `publish` still runs on
+every nudge, so the Digest register stays current with a fresh `composedAt` timestamp.
 
 - `bindSnapshotKey: DIGEST_KEY` and `validate: expectView(DIGEST_KEY, "board")`.
-- The host scheduler runs the whole pipeline on a `120000` ms cadence.
+- The digest has no surface region or cadence of its own. The rib nudges the whole
+  pipeline via `refreshStandingPanels` on every Chamber mutation, so it re-evaluates
+  exactly when the fingerprint can have changed, and the gate keeps a no-op nudge free.
 
 ## chamber-genesis
 

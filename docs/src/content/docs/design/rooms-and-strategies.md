@@ -96,13 +96,21 @@ harness's; see the [Keelson docs](https://danielscholl.github.io/keelson/).
 
 ## Open-floor precedence
 
-Open-floor resolves the next speaker through three tiers, in order:
+Open-floor speakers route the room themselves: each turn carries a
+`nominate`/`pass`/`end` vocabulary, and the driver resolves the next speaker through
+four tiers, in order:
 
 1. A director **call-on** wins. A live operator instruction beats anything an agent
    said.
-2. Else a validated prior **nomination**: the last speaker's pick, if it parsed and
+2. Else a quorum **end-vote** closes the room. Once every participant has spoken its
+   minimum rounds and more than the threshold fraction of the roster votes to end,
+   open-floor returns `end` and the room self-closes. The comparison is a strict `>`
+   against `config.endVoteThreshold` (default `0.49`), and the gate is checked before
+   routing, so a quorum end-vote beats a pending nomination. This is how an
+   unmoderated room reaches its own close.
+3. Else a validated prior **nomination**: the last speaker's pick, if it parsed and
    passed validation.
-3. Else the strategy's **seed or fallback**: the least-spoken participant, or
+4. Else the strategy's **seed or fallback**: the least-spoken participant, or
    `participants[0]` when everyone is at zero.
 
 A nomination is an advisory routing hint, never an identity claim. The driver

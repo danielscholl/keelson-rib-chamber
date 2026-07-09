@@ -21,9 +21,13 @@ has no peer to talk to, it is orthogonal to rooms. It does not ride the room dri
 and does not depend on a strategy.
 
 One turn composes a board and publishes it to a `rib:chamber:lens:{id}` key, and
-that key renders as its own panel on the surface. The same write seam is reachable
-two ways, as a standalone workflow turn and as a tool a Mind can call mid-room, so
-the model has to hold whether the author is a workflow or a live speaker.
+that key renders as its own panel on the surface. The lens seam,
+`chamber_emit_lens`, is reachable two ways: as a standalone workflow turn
+(`chamber-lens` or `chamber-lens-refresh`) and as a chat tool. It is not a room
+turn-tool. Inside a room a Mind reaches a separate seam, `chamber_table_exhibit`,
+which tables a first-class exhibit rather than a lens: a sibling species that
+shares the store, id space, and key namespace but shelves on its own Exhibits
+region with a driver-witnessed `sourceRoom`.
 
 ## Fail closed before you register or persist
 
@@ -67,8 +71,12 @@ outright. The fixed pool and its eviction are not the shipped behavior.
 
 The standing briefing on the surface footer is also an agent-authored board on its
 own key, but it is a special case. It is not a per-subject lens and no Mind authors
-it on demand. It is rib-driven by an attention gate, and that gate is the cost-safety
-story for letting an agent author its own view.
+it on demand. The footer is composed in-process from three attention-ordered
+registers: the Delta, the Digest, and the Record. Only the Delta is agent-authored
+and paid: the attention gate governs it alone, and that gate is the cost-safety
+story for letting an agent author its own view. The Digest is read from
+`digest.json`, authored by the separate `chamber-digest` workflow, and the Record is
+a deterministic reverse-chron feed of recent activity that always renders.
 
 The footer is seeded with a quiet board at boot, and a single gate is the only path
 that may run the briefing turn. That turn is paid, so the gate runs it only when
@@ -91,5 +99,5 @@ triggers collapse to at most one paid turn.
 ## Related
 
 - [Lenses](../../concepts/lenses/): the concept, and the two ways to author one.
-- [Per-mind capabilities](../per-mind-capabilities/): the `lens` capability a Mind declares to author mid-room.
+- [Per-mind capabilities](../per-mind-capabilities/): the `lens` capability a Mind declares to table an exhibit mid-room.
 - [Keelson snapshots](https://danielscholl.github.io/keelson/docs/reference/snapshots/): the snapshot keys and board frames a lens publishes onto.

@@ -43,17 +43,20 @@ a plain-language brief to something you can act on and keep.
 3. **Room and strategy.** You convene several Minds, and a strategy routes their
    turns.
 4. **Attributed transcript.** The driver records who argued what, turn by turn.
-5. **Optional lens.** A Mind may publish an interpretation or decision as a live
-   board on the canvas, so it stays visible outside the transcript.
-6. **Outcome.** You use the transcript or lens to make a decision, or pass the result
-   into a deterministic workflow.
+5. **Exhibit.** A Mind tables the discussion's deliverable, an assessment, plan, or
+   findings board, as an exhibit via `chamber_table_exhibit`, and the driver stamps
+   the room that produced it. (A lens is the separate path: a standing view a Mind
+   maintains outside a room.)
+6. **Outcome.** You use the transcript, exhibit, or lens to make a decision, or pass
+   the result into a deterministic workflow.
 
 </Steps>
 
 Read the stages by what each one preserves. A **Mind** preserves a perspective. A
-**room** tests perspectives against one another. A **lens** preserves the useful
-result outside the transcript. All of it persists as inspectable files: the Minds,
-the saved transcript, and any lenses they author.
+**room** tests perspectives against one another. An **exhibit** preserves the room's
+deliverable outside the transcript, and a **lens** preserves a standing view a Mind
+maintains. All of it persists as inspectable files: the Minds, the saved transcript,
+and any exhibits or lenses they author.
 
 The briefing is separate from this path. It is rib-driven, not authored by a Mind on
 demand, and it sees only metadata about rooms that ended and lenses that changed,
@@ -69,8 +72,9 @@ Four ideas carry the rest of the rib.
   and they take turns on one topic.
 - **Strategies** encode the shape of the exchange: sequential, concurrent,
   group-chat, open-floor, review, or magentic.
-- **Lenses** turn a conclusion into a visible artifact: a Mind authors a live board
-  on the canvas, so the judgment does not stay trapped in the transcript.
+- **Lenses and exhibits** keep a result visible outside the transcript: a lens is a
+  standing view a Mind maintains, and an exhibit is the deliverable a room tables,
+  stamped by the driver with the room that produced it.
 
 <CardGrid>
   <LinkCard
@@ -84,9 +88,9 @@ Four ideas carry the rest of the rib.
     description="Put Minds in a room and let them take turns. The driver-as-router model and the six turn strategies."
   />
   <LinkCard
-    title="Lenses"
+    title="Lenses and exhibits"
     href="lenses/"
-    description="An agent authors its own canvas board. How a single turn renders a live panel with no hand-coded UI."
+    description="An agent authors its own canvas board. A lens is a standing view a Mind maintains; an exhibit is the deliverable a room tables."
   />
 </CardGrid>
 
@@ -134,4 +138,4 @@ extend, not what makes Chamber worth running. For the rest, follow the boundary:
 - [When to convene a room](when-to-convene-a-room/): the decisions a single agent cannot check on its own.
 - [Minds and genesis](minds/): the agents Chamber authors and runs.
 - [Rooms and strategies](rooms/): how Minds take turns together.
-- [Lenses](lenses/): how an agent renders its own view.
+- [Lenses and exhibits](lenses/): a standing view a Mind maintains, and the deliverable a room tables.

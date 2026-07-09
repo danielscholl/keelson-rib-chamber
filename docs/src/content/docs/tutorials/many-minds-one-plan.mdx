@@ -99,11 +99,10 @@ reuse one you have. Genesis named mine **stoneplan**, **faultline**, and
 **ledger**, with **avery-slate** moderating. Yours will get their own names.
 
 A room is most useful when its Minds do not all read alike. Each Mind can pin its
-own model from its roster card's model dropdown, so the same contract gets
-read by genuinely different engines. The goal here is spread, not picking a single
-best model: a review wants independent readings, and three models from three
-families disagree in useful ways. Copilot serves all three, so this is one
-subscription, not three.
+own model, so the same contract gets read by genuinely different engines. The goal
+here is spread, not picking a single best model: a review wants independent
+readings, and three models from three families disagree in useful ways. Copilot
+serves all three, so this is one subscription, not three.
 
 <figure>
   <Image src={rosterShot} alt="The Chamber roster showing the review panel: Ledger (Backend Realist) on gemini-3.1-pro-preview, Faultline (Contract Skeptic) on gpt-5.5, and Stoneplan (Build Planner) on claude-opus-4.8, each card showing its persona and pinned model." />
@@ -113,15 +112,18 @@ subscription, not three.
 Where a role has a clear bias you can play to it: opus-class models reason and
 orchestrate, which suits the moderator and the defender; a gpt-class model is
 blunt and literal, which is what you want in the skeptic. For a review, though,
-the spread matters more than the match. Pin from the card's model dropdown
-(`provider` is kept only alongside a `model`), or pre-pin at authoring time:
+the spread matters more than the match. The roster card's model dropdown offers a
+curated list of Claude models, so to hand a Mind a cross-family engine like a gpt
+or a gemini you pre-pin it at authoring time (or hand-edit its `mind.json`):
 
 ```text
 keelson workflow run chamber-genesis --arguments "an adversarial contract skeptic who stress-tests API and data contracts" --inputs model=gpt-5.5 --inputs provider=copilot
 ```
 
-The pin is optional. The room runs with every Mind on one model; different models
-just buy more independent reading.
+Once pinned, the model shows up in that Mind's dropdown as the current selection, and
+the dropdown then re-affirms or clears the pin (`provider` is kept only alongside a
+`model`). The pin is optional. The room runs with every Mind on one model; different
+models just buy more independent reading.
 
 ## Convene the room on the contract
 

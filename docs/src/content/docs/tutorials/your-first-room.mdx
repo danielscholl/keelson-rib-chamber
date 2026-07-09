@@ -89,10 +89,11 @@ A room puts both Minds in one session and runs turns between them under a
 strategy. The simplest strategy, and the default, is **sequential**: each Mind
 speaks once per round, round-robin, in order.
 
-The easiest way to open one is the Convene composer on the Roster. By default it
-includes every Mind, so with two Minds authored it already has the right two
-selected. Add a topic so the room has something to chew on, then convene. That
-opens a sequential room with both Minds and a default budget of eight turns.
+The easiest way to open one is the Convene panel, its own board just below the
+Roster. By default it includes every Mind, so with two Minds authored it already
+has the right two selected. Add a topic so the room has something to chew on, then
+convene. That opens a sequential room with both Minds and a default budget of eight
+turns.
 
 You can also start a room from chat. The `chamber_room_start` tool is a dry run by
 default: ask for it without confirming and it tells you exactly what it would open
@@ -129,7 +130,9 @@ room. The dry run is what surfaces this for free, before a turn is billed.
 :::note
 Every room turn is a billed agent call. That is why starting from chat confirms
 first, and why a room is bounded by a turn budget. The room runs until it hits the
-budget or you stop it, so the budget is your spend limit, not a target to fill.
+budget or you stop it, so the budget is your spend limit, not a target to fill. One
+caveat: when a sequential room exhausts its budget it appends a single closing
+synthesis turn, so a default budget of eight can bill up to nine.
 :::
 
 ## Watch the turns land
@@ -165,7 +168,9 @@ When the room reaches its budget it ends on its own. The live panel holds the
 finished transcript, oldest turn at the top, each entry labeled with the Mind that
 spoke it. Read it top to bottom and you can follow the whole exchange: the first
 Mind opens, the second responds to what it sees, the first answers back, round by
-round, to the end.
+round. The last entry is not just another turn in that rotation. When the budget
+runs out, the last speaker writes one closing synthesis, so the transcript ends by
+pulling the thread together rather than mid-argument.
 
 Here is how a sequential room on that question reads, trimmed to its first three
 turns:
