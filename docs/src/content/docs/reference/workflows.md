@@ -1,18 +1,18 @@
 ---
 title: Workflows
-description: The eight workflows the Chamber rib contributes to the catalog, each defined in code with no YAML file
+description: The nine workflows the Chamber rib contributes to the catalog, each defined in code with no YAML file
 sidebar:
   order: 3
 ---
 
-Chamber contributes eight workflows to the catalog. They are defined in code, in
+Chamber contributes nine workflows to the catalog. They are defined in code, in
 the rib's `contributeWorkflows` hook, so there are no YAML files to edit. Four
 are deterministic bash collectors that read the data home and publish a board;
-three are single prompt turns that author content; and one (chamber-digest) is a
-three-node self-gating pipeline that pairs a cheap bash gate with a conditional
-agent turn.
+four are single prompt turns that author or re-author content; and one
+(chamber-digest) is a three-node self-gating pipeline that pairs a cheap bash
+gate with a conditional agent turn.
 
-## The eight
+## The nine
 
 | Workflow | Kind | Node | Snapshot key | Publishes |
 |---|---|---|---|---|
@@ -23,6 +23,7 @@ agent turn.
 | `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the standing digest panel |
 | `chamber-genesis` | prompt turn | `genesis` | none | nothing (writes a Mind) |
 | `chamber-lens` | prompt turn | `compose` | none | a per-subject lens panel |
+| `chamber-lens-refresh` | prompt turn | `refresh` | none | re-emits an existing living lens |
 | `chamber-lens-html` | prompt turn | `compose` | none | a per-subject HTML lens panel |
 
 ## The collectors
@@ -126,6 +127,21 @@ The workflow prompt asks the model for `{ id, board, scope?, reason? }`. The
 [Tools and commands](../tools-and-commands/) for the full schema. A deliverable a
 room discussion produced does not ride this workflow at all — a room turn tables
 it with `chamber_table_exhibit`, and it lands on the Exhibits shelf.
+
+## chamber-lens-refresh
+
+`chamber-lens-refresh` is the re-author behind a [living
+lens](../../concepts/lenses/#a-living-lens-re-composes-itself): the default
+`refresh.workflow` a lens gets when its emit sets `refresh` without naming one.
+It runs with a required input, `lens` (the record id); the panel's cadence and
+the index card's Refresh verb both fire it that way. One `prompt` node,
+`refresh`, with `allowed_tools: [chamber_list_lenses, chamber_emit_lens]`: the
+turn fetches the record with `chamber_list_lenses { id }` (the single-lens
+fetch carries the prior board), re-composes the same subject, and re-emits
+under the same id (omitting `refresh` so the backing survives).
+`fail_on_tool_error: true` like chamber-lens, and no `bindSnapshotKey` (the
+emit tool republishes the per-subject key itself); the harness admits it to
+the panel-refresh route because a lens region declares it.
 
 ## chamber-lens-html
 

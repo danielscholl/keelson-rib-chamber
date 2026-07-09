@@ -157,6 +157,15 @@ This is a `LensRecord`. `id` and `board` are required. `updatedAt` is
 server-stamped on every write, never agent-supplied. `scope`,
 `maintainingMind`, and `reason` are optional provenance: each is spread in only
 when present, so re-authoring a lens without a field clears the prior value.
+Two more optional fields follow different rules: `kind: "exhibit"` marks a
+tabled deliverable (absent means lens; `sourceRoom` beside it is the producing
+room's slug, driver-witnessed and never agent-supplied), and `refresh`, a
+living lens's re-compose backing shaped
+`{ "workflow": "chamber-lens-refresh", "cadenceMs": 3600000 }`. It is
+PRESERVED when a re-author omits it, PATCHED field-by-field when a re-author
+supplies an object (only an explicit `refresh: null` clears it), and lens-only
+(an exhibit save strips it). A malformed or fractional-cadence `refresh` block
+folds to absent on read rather than hiding the record.
 
 ## room-draft.json
 

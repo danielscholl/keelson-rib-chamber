@@ -23,7 +23,7 @@ optional field is marked `?`.
 | `chamber_emit_digest` | yes | no | Internal write-seam for the `chamber-digest` workflow: persist the standing digest board. Not called directly. | `board` |
 | `chamber_list_minds` | no | no | List all Minds: slug, name, role, tagline, pinned model/provider, capability tools. Read-only. | _(none)_ |
 | `chamber_list_rooms` | no | no | List rooms (active first, then ended) with slug, name, status, strategy, participants, and turn progress. Read-only. | _(none)_ |
-| `chamber_list_lenses` | no | no | List living lenses newest first: id, updatedAt, and optional provenance fields. Read-only. | _(none)_ |
+| `chamber_list_lenses` | no | no | List living lenses newest first: id, updatedAt, refresh backing, and optional provenance fields. Pass `{ id }` to fetch one lens in full, `board` included. Read-only. | _(none)_ |
 | `chamber_list_exhibits` | no | no | List exhibits (deliverables rooms tabled) newest first: id, tabledAt, producing room, gist. Read-only. | _(none)_ |
 | `chamber_retire_mind` | yes | no | Permanently remove a Mind's record and SOUL.md from the roster. Fails closed if absent. | `slug` |
 | `chamber_room_delete` | yes | no | Permanently delete an ended room's record, transcript, and ledger. Stop first with `chamber_room_stop`. | `room` |
@@ -73,12 +73,17 @@ The steer schema requires at least one of its three intents:
   to require **at least one** of `direction`, `callOn`, or `text`. A `callOn` is
   rejected up front unless it names a current participant.
 
-The lens schema carries four optional provenance-bearing fields beyond the board:
+The lens schema carries four optional provenance-bearing fields beyond the board,
+plus the living-lens backing:
 
 - `chamber_emit_lens` takes `id` (1..64 chars, canonicalized), `board` (a canvas
   board view), `scope?` (1..40), `maintainingMind?` (1..40), and `reason?`
   (1..120). The `scope`, `maintainingMind`, and `reason` fields are the lens index
-  card's optional provenance. See [Lenses](../../concepts/lenses/).
+  card's optional provenance. `refresh?` makes it a living lens:
+  `{ workflow? (default chamber-lens-refresh), cadenceMs? (30s..24h, default 1h) }`.
+  Omitted on a re-author it PRESERVES the existing backing; an object PATCHES it
+  (an omitted field keeps its prior value); `refresh: null` clears it. See
+  [Lenses](../../concepts/lenses/).
 - `chamber_table_exhibit` takes `id`, `board`, and `reason?` (1..120, a one-line
   gist). The producing room (`sourceRoom`) is deliberately NOT an input: the room
   driver stamps it after witnessing the tool run in a turn it ran, so provenance
@@ -153,9 +158,15 @@ without navigating.
 | `room-open` | `{ slug }` | `open-canvas` (the room-view key) |
 | `set-model` | `{ slug, model?, provider? }` | data (`{ slug, model? }`) |
 | `retire-lens` | `{ id }` | data (`{ id, key }`) |
+| `retire-lens-html` | `{ id }` | data (`{ id, key }`) |
 | `delete-exhibit` | `{ id }` | data (`{ id, key }`) |
 | `lens-open` | `{ id }` | `open-canvas` (the lens key) |
 | `lens-note` | `{ id, note }` | data (`{ id, key }`) |
+| `refresh-lens` | `{ id }` | data (`{ id, workflow }`): fires the lens's refresh workflow with input `lens` |
+
+`retire-lens`, `retire-lens-html`, and `delete-exhibit` also ride each panel's
+own head **⋯** menu (`headActions` on the region), so a panel can be put away
+without its index card. For an HTML lens, that menu is the only delete path.
 
 Two verbs are restricted to the sandboxed HTML-lens iframe context
 (`origin: "canvas-html"`): `lens-html` (no-op ack returning the HTML lens canvas

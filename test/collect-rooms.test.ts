@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createFileLensStore } from "../src/lens-store.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
@@ -100,6 +101,32 @@ describe("collect-rooms", () => {
       expect(code).toBe(0);
       const board = JSON.parse(out) as { view: string };
       expect(board.view).toBe("board");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a room's tabled exhibits ride its card; sibling lenses stay off it", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      await createFileRoomStore(join(home, "rooms")).saveRoom(
+        room({ slug: "review", name: "Sample Review", status: "done" }),
+      );
+      const lensStore = createFileLensStore(join(home, "lenses"));
+      await lensStore.saveLens({
+        id: "assessment",
+        board: { view: "board", title: "Sample Assessment", sections: [] },
+        kind: "exhibit",
+        sourceRoom: "review",
+      });
+      await lensStore.saveLens({
+        id: "morning-brief",
+        board: { view: "board", title: "Morning Brief", sections: [] },
+      });
+      const { out, code } = await runCollector(home);
+      expect(code).toBe(0);
+      expect(out).toContain("Sample Assessment");
+      expect(out).not.toContain("Morning Brief");
     } finally {
       await rm(home, { recursive: true, force: true });
     }

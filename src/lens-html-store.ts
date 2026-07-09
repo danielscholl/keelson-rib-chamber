@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
+import { deleteRecordDir, isNodeError } from "./record-dir.ts";
 
 // A persisted HTML lens: the authored page markup plus a server-stamped
 // freshness time and an optional human title for the panel head. Mirrors the
@@ -23,6 +24,7 @@ interface HtmlLensMeta {
 export interface HtmlLensStore {
   save(record: { id: string; html: string; title?: string }): Promise<void>;
   load(id: string): Promise<HtmlLensRecord | undefined>;
+  delete(id: string): Promise<void>;
 }
 
 // File-based HTML lens store, mirroring createFileLensStore: one directory per
@@ -64,6 +66,11 @@ export function createFileHtmlLensStore(root: string): HtmlLensStore {
       assertSafeSlug(id);
       const record = await parseHtmlLens(root, id);
       return record;
+    },
+
+    async delete(id) {
+      assertSafeSlug(id);
+      await deleteRecordDir(lensDir(id), () => new Error(`lens '${id}' not found`));
     },
   };
 }
@@ -135,8 +142,4 @@ function isHtmlLensMeta(value: unknown): value is HtmlLensMeta {
   const r = value as Record<string, unknown>;
   if (typeof r.id !== "string" || typeof r.updatedAt !== "string") return false;
   return r.title === undefined || typeof r.title === "string";
-}
-
-function isNodeError(value: unknown): value is NodeJS.ErrnoException {
-  return value instanceof Error && "code" in value;
 }

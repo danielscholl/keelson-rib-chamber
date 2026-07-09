@@ -151,6 +151,24 @@ describe("rib-chamber", () => {
     expect(names).toContain("chamber-lens");
   });
 
+  it("contributes the chamber-lens-refresh re-author, unbound, with a required lens input", () => {
+    const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
+    const refresh = wfs.find(
+      (w) => (w.definition as { name?: string }).name === "chamber-lens-refresh",
+    );
+    expect(refresh).toBeDefined();
+    // Unbound: the emit tool republishes the per-lens key itself; the region-
+    // declared /refresh gate is what admits it.
+    expect(refresh?.bindSnapshotKey).toBeUndefined();
+    const def = refresh?.definition as {
+      inputs?: Record<string, { required?: boolean }>;
+      nodes?: { prompt?: string; allowed_tools?: string[] }[];
+    };
+    expect(def.inputs?.lens?.required).toBe(true);
+    expect(def.nodes?.[0]?.prompt).toContain("$inputs.lens");
+    expect(def.nodes?.[0]?.allowed_tools).toEqual(["chamber_list_lenses", "chamber_emit_lens"]);
+  });
+
   it("withholds chamber_emit_lens when the registerRegion seam is absent (fail closed)", () => {
     // Lenses render via registerRegion; without it the tool is withheld rather than
     // publishing invisible, unbounded keys. The genesis write seam is unaffected.

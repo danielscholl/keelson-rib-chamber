@@ -41,8 +41,11 @@ sections while no exhibits exist, so the shelf stays invisible until a
 discussion has tabled something.
 
 The Rooms index lists active rooms first, as status-only cards, then closed
-rooms with Open and Delete actions. An active room also gets its own live panel
-(below). The Lenses index sits alongside each lens's live panel.
+rooms with Open and Delete actions. A card also lists the exhibits its room
+tabled (a `tabled` field, joined on the witnessed `sourceRoom` slug), and a
+closed card links each one open ahead of the room verbs: the provenance link
+read the other way. An active room also gets its own live panel (below). The Lenses
+index sits alongside each lens's live panel.
 
 ## Dynamic regions
 
@@ -52,7 +55,14 @@ grows panels as rooms convene, lenses are authored, and exhibits are tabled. A
 lens or exhibit panel sheds when its record is retired or deleted. A room keeps
 its panel while active, and after it ends the most recently finished room stays
 visible until a newer room supersedes it, or the room is deleted. Every lens and
-exhibit panel is collapsible, so a tall board folds to its head strip.
+exhibit panel is collapsible, so a tall board folds to its head strip, and each
+carries its own verb in the head's **⋯** menu (Retire on a lens, board or
+HTML; Delete on an exhibit), confirm-gated and reachable even while collapsed.
+
+A [living lens](../../concepts/lenses/#a-living-lens-re-composes-itself)'s
+region additionally wires its refresh workflow with `workflowArgs: { lens: id }`
+and the record's cadence, so the host re-runs the re-author while the surface is
+open and the panel head carries the "updated Xm ago" freshness clock.
 
 | Region | Key | Title | Group | Group title | Glyph |
 |---|---|---|---|---|---|

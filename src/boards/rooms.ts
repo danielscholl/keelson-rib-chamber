@@ -1,4 +1,5 @@
 import type { CanvasBoardView, CanvasPerson, CanvasTone } from "@keelson/shared";
+import { isExhibit, type LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 
@@ -10,22 +11,38 @@ import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 // destructive Delete. No rooms at all renders a cold/empty state. `minds` resolves
 // each participant slug to its Mind's display name + identity tone for the `with`
 // people field; absent (a standalone call) the cast folds to bare slugs with the
-// muted dot, mirroring lenses.ts's maintainer fold. Validated against
-// canvasViewSchema in tests; the producer never parses (validation lives at the
-// binding edge).
+// muted dot, mirroring lenses.ts's maintainer fold. `lenses` may be the raw
+// store listing — the builder keeps only the exhibit kind itself (the invariant
+// lives in the mechanism, not in each caller) and joins on the driver-witnessed
+// sourceRoom SLUG: a card lists the deliverables the room tabled, and a closed
+// card links each one open. Validated against canvasViewSchema in tests; the
+// producer never parses (validation lives at the binding edge).
 export function buildRoomsIndexBoard(
   rooms: readonly Room[],
   minds: readonly Mind[] = [],
+  lenses: readonly LensRecord[] = [],
 ): CanvasBoardView {
   const active = rooms.filter((r) => r.status === "active");
   const closed = rooms.filter((r) => r.status !== "active");
   const ordered = [...active, ...closed];
   const bySlug = new Map(minds.map((m) => [m.slug, m]));
+  const tabledByRoom = new Map<string, LensRecord[]>();
+  for (const record of lenses) {
+    if (!isExhibit(record) || !record.sourceRoom) continue;
+    const list = tabledByRoom.get(record.sourceRoom) ?? [];
+    list.push(record);
+    tabledByRoom.set(record.sourceRoom, list);
+  }
 
   const sections: CanvasBoardView["sections"] =
     ordered.length === 0
       ? emptySections()
-      : [{ kind: "cards", items: ordered.map((r) => cardFor(r, bySlug)) }];
+      : [
+          {
+            kind: "cards",
+            items: ordered.map((r) => cardFor(r, bySlug, tabledByRoom.get(r.slug) ?? [])),
+          },
+        ];
 
   return {
     view: "board",
@@ -60,7 +77,7 @@ function personFor(slug: string, bySlug: ReadonlyMap<string, Mind>): CanvasPerso
 // room is status-only: it is already live in its inline panel, so a frozen drawer
 // snapshot would just go stale beside it (and the delete handler refuses a live
 // room anyway).
-function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>) {
+function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly LensRecord[]) {
   const tone = statusTone(room.status);
   const card = {
     title: room.name,
@@ -81,11 +98,29 @@ function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>) {
       // The Room model carries only createdAt — no end/close time — so this is an
       // honest "started <relative> ago", not an invented "ended" timestamp.
       { label: "started", value: agoLabel(room.createdAt) },
+      // The exhibits this room tabled (driver-witnessed sourceRoom), so the
+      // provenance link reads both ways: the exhibit names its room, the room
+      // lists its deliverables.
+      ...(tabled.length > 0
+        ? [{ label: "tabled", value: tabled.map((e) => e.board.title || e.id).join(" · ") }]
+        : []),
     ],
   };
-  return room.status === "active"
-    ? card
-    : { ...card, actions: [openAction(room), deleteAction(room)] };
+  if (room.status === "active") return card;
+  // Closed rooms link each tabled exhibit open ahead of the room verbs — the
+  // deliverable is usually what you came back for, the transcript second.
+  return {
+    ...card,
+    actions: [...tabled.map((e) => openExhibitAction(e)), openAction(room), deleteAction(room)],
+  };
+}
+
+function openExhibitAction(exhibit: LensRecord) {
+  return {
+    type: "lens-open",
+    label: `▣ ${exhibit.board.title || exhibit.id}`,
+    payload: { id: exhibit.id },
+  };
 }
 
 // The room's shape named for the meta line: the strategy in plain words, plus the

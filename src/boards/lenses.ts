@@ -86,6 +86,18 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
         glyph: "↗",
         payload: { id: lens.id },
       },
+      // Only a refresh-backed (living) lens offers the on-demand re-compose;
+      // a plain lens changes by re-authoring, so the verb would mislead.
+      ...(lens.refresh
+        ? [
+            {
+              type: "refresh-lens",
+              label: "Refresh",
+              glyph: "↻",
+              payload: { id: lens.id },
+            },
+          ]
+        : []),
       {
         type: "retire-lens",
         label: "Retire lens…",
