@@ -195,12 +195,14 @@ first-hand; `concurrent` (a parallel round), `review` (the cross-vendor pass
 above), and `magentic` (a manager-led build) round out the set, and the
 [strategies reference](../../reference/strategies/) has all six.
 
-You have the routing shapes; the next two tutorials put them to work on a real
-build before you write any code. In
+You have the routing shapes; the next three tutorials put them to work on a real
+build. In
 [Many minds, one plan](../many-minds-one-plan/) you convene a moderated room to
 red-team a plan and catch the defects a linear pipeline ships; in
 [One manager, many tasks](../one-manager-many-tasks/) you run a magentic room to
-produce a plan with no gaps and no overlap. Then the capstone,
+produce a plan with no gaps and no overlap; and in
+[A room that writes code](../a-room-that-writes-code/) you open the coding tier
+and let a build Mind implement a scoped change for real. Then the capstone,
 [author your own room strategy](../author-a-room-strategy/), has you write a
 routing policy of your own, a pure decision the rib drives through the same seam
 these six use.
