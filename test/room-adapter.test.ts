@@ -484,6 +484,23 @@ describe("room adapter — convene composer (draft-set + convene)", () => {
     expect([...(await readDraftExclusion())]).toEqual([]);
   });
 
+  it("the Debate shape pulls a selected moderator out of the cast", async () => {
+    const store = createFileRoomStore(roomsDir());
+    // The new model: every Mind stays selected and the chair is one of them —
+    // convene subtracts the named moderator from participants so it routes, not speaks.
+    const res = await onAction(
+      { type: "convene", payload: { strategy: "group-chat", moderator: "mod" } },
+      makeCtx({ sm: snap.sm }),
+    );
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
+    const room = await store.loadRoom(slug);
+    expect(room?.config?.moderator).toBe("mod");
+    // mod chairs, so the cast is alice + bob — pulled out despite being selected.
+    expect([...(room?.participants ?? [])].sort()).toEqual(["alice", "bob"]);
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+  });
+
   it("the Debate shape fails closed on a moderator that names no Mind", async () => {
     await onAction({ type: "draft-set", payload: { slug: "mod" } }, makeCtx());
     const res = await onAction(

@@ -47,10 +47,10 @@ function projectField(projects: readonly ConveneProject[]): CanvasActionField | 
   };
 }
 
-// The facilitator (Debate chair / Build manager) is drawn from the Minds NOT in the
-// cast — the "second selection" that ties to who's left out. Only built for an
-// enabled shape, where `eligible` is non-empty (evalShape gates on it), so the
-// select always carries at least one option.
+// The facilitator (Debate chair / Delegate manager) is one of the selected Minds the
+// driver names to run the room; the convene action pulls it out of the participant set
+// (a facilitator routes/plans, it does not speak/work). Only built for an enabled
+// shape, where `eligible` (the cast) is non-empty, so the select always has an option.
 function facilitatorField(
   name: "moderator" | "manager",
   label: string,
@@ -59,7 +59,7 @@ function facilitatorField(
   return {
     name,
     label,
-    placeholder: "A Mind not in the room",
+    placeholder: "One of the selected Minds",
     required: true,
     options: eligible.map((m) => ({ value: m.slug, label: m.name })),
   };
@@ -72,18 +72,23 @@ type ShapeEval = { readonly ok: true } | { readonly ok: false; readonly reason: 
 // Can this shape run against the current cast? Mirrors the structural slice of
 // validateStart (2+ speakers, a non-participant facilitator, a cross-vendor Review
 // pair) so a shape the cast can't satisfy is dimmed with a reason before convening,
-// rather than failing server-side. validateStart stays the source of truth; this only
-// gates the affordance.
-function evalShape(strategy: string, cast: readonly Mind[], out: readonly Mind[]): ShapeEval {
+// rather than failing server-side. A chaired/managed shape names its facilitator from
+// the cast and the convene action pulls it out, so it needs three selected — two to
+// run plus one to facilitate. validateStart stays the source of truth; this only gates
+// the affordance.
+function evalShape(strategy: string, cast: readonly Mind[]): ShapeEval {
   switch (strategy) {
     case "group-chat":
-      return out.length > 0
+      return cast.length >= 3
         ? { ok: true }
-        : { ok: false, reason: "Every Mind is in — free one from the cast to chair." };
+        : { ok: false, reason: "Select at least three Minds — two to debate and one to chair." };
     case "magentic":
-      return out.length > 0
+      return cast.length >= 3
         ? { ok: true }
-        : { ok: false, reason: "Every Mind is in — free one from the cast to manage." };
+        : {
+            ok: false,
+            reason: "Select at least three Minds — two to do the work and one to manage.",
+          };
     case "review": {
       if (cast.length !== 2) {
         return { ok: false, reason: "Review is a pair — select exactly two Minds." };
@@ -110,7 +115,6 @@ function evalShape(strategy: string, cast: readonly Mind[], out: readonly Mind[]
 // carries none (a disabled tab can't open a form) plus the reason it can't run.
 function shapeActions(
   cast: readonly Mind[],
-  out: readonly Mind[],
   projects: readonly ConveneProject[],
 ): CanvasActionItem[] {
   const proj = projectField(projects);
@@ -136,10 +140,10 @@ function shapeActions(
       strategy: "group-chat",
       label: "Debate",
       glyph: "◆",
-      hint: "A chaired panel — a Mind you leave out moderates the others toward one decision.",
+      hint: "A chaired panel — a Mind you name chairs the others toward one decision.",
       fields: [
         topicField,
-        facilitatorField("moderator", "Chair — a Mind not in the room", out),
+        facilitatorField("moderator", "Chair — one of the selected Minds", cast),
         turnsField,
       ],
     },
@@ -159,19 +163,19 @@ function shapeActions(
     },
     {
       strategy: "magentic",
-      label: "Build",
+      label: "Delegate",
       glyph: "⚑",
-      hint: "A manager you leave out splits the goal into tasks and delegates to the others until it's built.",
+      hint: "A manager you name splits the goal into tasks and delegates to the others until it's done. Magentic-style orchestration.",
       fields: [
         topicField,
-        facilitatorField("manager", "Manager — a Mind not in the room", out),
+        facilitatorField("manager", "Manager — one of the selected Minds", cast),
         proj,
         turnsField,
       ],
     },
   ];
   return defs.map((s) => {
-    const gate = evalShape(s.strategy, cast, out);
+    const gate = evalShape(s.strategy, cast);
     const base: CanvasActionItem = {
       type: "convene",
       label: s.label,
@@ -197,7 +201,6 @@ export function buildConveneBoard(
   sessionCount = 0,
 ): CanvasBoardView {
   const selected = minds.filter((m) => !draftExcluded.has(m.slug));
-  const out = minds.filter((m) => draftExcluded.has(m.slug));
   const sections: CanvasBoardView["sections"] = [];
 
   if (minds.length < 2) {
@@ -230,7 +233,7 @@ export function buildConveneBoard(
         kind: "actions",
         title: "…and how",
         tabs: true,
-        items: shapeActions(selected, out, projects),
+        items: shapeActions(selected, projects),
       });
     } else {
       sections.push({

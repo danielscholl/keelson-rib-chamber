@@ -27,11 +27,13 @@ Once two or more Minds stay selected, Convene surfaces a `…and how` shape pick
 with five tabs, each opening a small form and starting its own strategy:
 
 - **Discussion** (sequential): the default.
-- **Debate** (group-chat): needs a chair, a Mind left out of the cast.
+- **Debate** (group-chat): needs a chair — one of the selected Minds you name to
+  moderate the rest, so at least three selected.
 - **Open floor** (open-floor): unmoderated.
 - **Review**: a single-pass critique of exactly two Minds pinned to different
   providers.
-- **Build** (magentic): needs a manager, a Mind left out of the cast.
+- **Delegate** (magentic): needs a manager — one of the selected Minds you name to
+  plan and delegate, so at least three selected.
 
 Shapes the current cast cannot satisfy are disabled with the reason shown. See
 [Choose a strategy](#choose-a-strategy) below and

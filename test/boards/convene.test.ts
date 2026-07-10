@@ -54,7 +54,7 @@ describe("buildConveneBoard cast + shapes", () => {
       "Debate",
       "Open floor",
       "Review",
-      "Build",
+      "Delegate",
     ]);
     expect(shapes(board).map((i) => (i.payload as { strategy: string }).strategy)).toEqual([
       "sequential",
@@ -73,8 +73,8 @@ describe("buildConveneBoard cast + shapes", () => {
   });
 
   test("every shape carries a purpose hint — enabled and gated alike", () => {
-    // Three Minds all in: Discussion enabled, but Debate/Build gated (no Mind is
-    // out to chair/manage) and Review gated (not a pair). A gated tab must still
+    // Three Minds all in: Discussion, Debate, and Delegate enabled (three selected —
+    // two run, one facilitates), Review gated (not a pair). A gated tab must still
     // carry its hint so the hover reminder survives the disable, joined with the
     // reason by the host.
     const board = buildConveneBoard([A, B, C]);
@@ -85,15 +85,15 @@ describe("buildConveneBoard cast + shapes", () => {
     }
     expect(bs.get("review")?.disabled).toBe(true);
     expect(bs.get("review")?.hint).toContain("cross-vendor");
-    expect(bs.get("group-chat")?.disabled).toBe(true);
-    expect(bs.get("magentic")?.disabled).toBe(true);
+    expect(bs.get("group-chat")?.disabled ?? false).toBe(false);
+    expect(bs.get("magentic")?.disabled ?? false).toBe(false);
     expect(bs.get("sequential")?.disabled ?? false).toBe(false);
     expect(bs.get("sequential")?.hint).toContain("Round-robin");
   });
 });
 
 describe("buildConveneBoard capability gating", () => {
-  test("Debate/Build are disabled (no chair free) when every Mind is in the cast", () => {
+  test("Debate/Delegate are disabled (need a third to facilitate) with only two selected", () => {
     const bs = byStrategy(buildConveneBoard([A, B]));
     expect(bs.get("group-chat")?.disabled).toBe(true);
     expect(bs.get("group-chat")?.reason).toContain("chair");
@@ -103,14 +103,18 @@ describe("buildConveneBoard capability gating", () => {
     expect(bs.get("magentic")?.reason).toContain("manage");
   });
 
-  test("Debate enables with a chair select drawn from the out-of-cast Minds", () => {
-    // A + B in the cast, C left out → C is the only eligible chair.
-    const board = buildConveneBoard([A, B, C], new Set(["c"]));
+  test("Debate enables at three selected with a chair select drawn from the cast", () => {
+    // All three selected → any of them can be named chair; the other two debate.
+    const board = buildConveneBoard([A, B, C]);
     const debate = byStrategy(board).get("group-chat");
     expect(debate?.disabled ?? false).toBe(false);
     const chair = debate?.fields?.find((f) => f.name === "moderator");
     expect(chair?.required).toBe(true);
-    expect(chair?.options).toEqual([{ value: "c", label: "Cy" }]);
+    expect(chair?.options).toEqual([
+      { value: "a", label: "Ada" },
+      { value: "b", label: "Bo" },
+      { value: "c", label: "Cy" },
+    ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 

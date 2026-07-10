@@ -2762,8 +2762,11 @@ async function draftSetAction(action: RibAction): Promise<RibActionResult> {
   }
 }
 
-// Convene a room from the current draft and the chosen shape: participants are all
-// current Minds minus the draft's excluded set; the room shape (a `strategy` in the
+// Convene a room from the current draft and the chosen shape: participants are the
+// selected Minds (all current Minds minus the draft's excluded set) minus the named
+// facilitator — a Debate chair / Delegate manager is one of the selected Minds, pulled
+// out of the cast so it routes/plans rather than speaks/works. The room shape (a
+// `strategy` in the
 // action payload) and its per-shape fields (topic, project, moderator, manager, turns)
 // come from the shape action the operator clicked. Reuses the room start path
 // (startRoom → validateStart → driver), so the <2-participant / facilitator-rules /
@@ -2777,14 +2780,11 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   let allMinds: Mind[];
-  let participants: string[];
-  let displayNames: string[];
+  let draftedMinds: Mind[];
   try {
     const excluded = await readDraftExclusion();
     allMinds = await readMinds(mindsDir());
-    const drafted = allMinds.filter((m) => !excluded.has(m.slug));
-    participants = drafted.map((m) => m.slug);
-    displayNames = drafted.map((m) => m.name);
+    draftedMinds = allMinds.filter((m) => !excluded.has(m.slug));
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
@@ -2814,6 +2814,14 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
   if ("error" in mod) return { ok: false, error: mod.error };
   const mgr = resolveFacilitator(asNonEmptyString(payload.manager), "manager");
   if ("error" in mgr) return { ok: false, error: mgr.error };
+
+  // The facilitator (Debate chair / Delegate manager) is one of the selected Minds;
+  // pull it out of the participant set so validateStart's "the facilitator must not
+  // also be a participant" rule holds — it routes/plans, it does not speak/work.
+  const facilitator = mod.slug ?? mgr.slug;
+  const roomMinds = facilitator ? draftedMinds.filter((m) => m.slug !== facilitator) : draftedMinds;
+  const participants = roomMinds.map((m) => m.slug);
+  const displayNames = roomMinds.map((m) => m.name);
 
   // Turns: free text -> a positive integer, else the default; validateStart caps it.
   const turnsRaw = asNonEmptyString(payload.turns);
