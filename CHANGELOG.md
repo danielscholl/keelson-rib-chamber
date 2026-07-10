@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.27.0...v0.28.0) (2026-07-10)
+
+
+### Added
+
+* **convene:** rename build to delegate and require three minds to run ([#200](https://github.com/danielscholl/keelson-rib-chamber/issues/200)) ([8ebe366](https://github.com/danielscholl/keelson-rib-chamber/commit/8ebe366d2927c8d4a4c9d2cd992b67c2e970d892))
+
 ## [0.27.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.26.0...v0.27.0) (2026-07-10)
 
 
