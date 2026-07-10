@@ -40,10 +40,12 @@ A room's file access is tiered, and each tier is an explicit grant:
 | Project read | start the room with a `projectId` | read files under the project root; auto-granted to every speaker |
 | Coding | add `coding: true` to a project room | Minds that declare `code` also run Bash, Edit, and Write, confined to the project root |
 
-Two details matter before you open the third tier. First, the capability gate
-is per-Mind: `coding: true` opens the tier on the room, but only a Mind whose
-own record declares `code` can use it. A text-only Mind in a coding room stays
-text-only. Second, the Convene panel's Build tab targets a project (that is
+Two details matter before you open the third tier. First, the write tier's
+capability gate is per-Mind: `coding: true` opens it on the room, but only a
+Mind whose own record declares `code` can run Bash, Edit, or Write. Every
+speaker in a project room already holds the read tier; a Mind without `code`
+keeps that read access and nothing more. Second, the Convene panel's Build
+tab targets a project (that is
 the read tier) but never opens the coding tier. Opening it is a deliberate
 act you take from chat or the `chamber_room_start` tool, where the flag is
 spelled out in the call you confirm.
@@ -91,38 +93,46 @@ That is not a gap in the tutorial; it is the actual work.
 
 ## Start the coding room
 
-Make sure the project is registered (`keelson project add` from the keelson
-CLI if it is not), and note its **id**: the UUID `keelson project add` prints
-when it registers (and `keelson project list` prints thereafter). The
-`projectId` field below takes that id; the tool does not resolve a bare
-project name the way the Convene panel does, and rejects one with an
-`unknown project` error. Then start the room from chat. The start is a dry
-run until you confirm, and this is one start worth reading twice before you
-do, because you are granting write access:
+Make sure the project is registered, and note its **id**: the UUID
+`keelson project add` prints when it registers (and `keelson project list`
+prints thereafter):
 
-```json
-{
-  "participants": ["<builder>", "<reviewer>"],
-  "topic": "Implement backlog item 4, keyboard navigation, exactly as written in backlog.md. Builder: find where the catalog and detail views live in this build, implement the item, run the project's checks, and report what changed file by file. Reviewer: read what actually changed, judge it against the item's acceptance check, and say plainly what you would still fix.",
-  "projectId": "<your-project>",
-  "coding": true,
-  "turnBudget": 8,
-  "confirm": true
-}
+```sh
+keelson project add cosmos ~/code/my-frontend-mix
 ```
 
-The strategy is the default `sequential`, so the two Minds alternate: build,
-review, respond, review again. `coding: true` requires the `projectId`; a
-coding room with no project has nothing to confine to and is rejected. Before
-you confirm, do one operator move the room cannot do for you:
+The `projectId` field below takes that id; the tool does not resolve a bare
+project name the way the Convene panel does, and rejects one with an
+`unknown project` error.
+
+Next, one operator move the room cannot do for you. The room confines writes
+to the project root, but it does not manage your branches, so give the
+session its own branch before anything is granted write access:
 
 ```sh
 git switch -c room/keyboard-nav
 ```
 
-The room confines writes to the project root, but it does not manage your
-branches. Giving the session its own branch costs one command and makes
-everything that follows reversible.
+Now start the room from chat. The start is a dry run until you confirm, so
+ask for it without `confirm` first:
+
+```json
+{
+  "participants": ["<builder>", "<reviewer>"],
+  "topic": "Implement backlog item 4, keyboard navigation, exactly as written in backlog.md. Builder: find where the catalog and detail views live in this build, implement the item, run the project's checks, and report what changed file by file. Reviewer: read what actually changed, judge it against the item's acceptance check, and say plainly what you would still fix.",
+  "projectId": "<your-project-id>",
+  "coding": true,
+  "turnBudget": 8
+}
+```
+
+The dry run reports exactly what would open, names the coding tier, and
+starts nothing. This is one report worth reading twice, because you are
+granting write access. The strategy is the default `sequential`, so the two
+Minds will alternate: build, review, respond, review again. `coding: true`
+requires the `projectId`; a coding room with no project has nothing to
+confine to and is rejected. When the report reads right, re-call the tool
+with `confirm: true` added, and the room opens.
 
 ## Watch a turn that edits
 
@@ -158,30 +168,15 @@ is normal, coding turns are heavy; stop it, raise `turnBudget`, and convene
 again. The branch you cut keeps a half-landed session harmless.
 :::
 
-## Verify like an operator
-
-The room's claim is not the proof. When the room closes, verify the way you
-would verify a colleague's branch:
-
-```sh
-git status
-git diff --stat
-bun run dev
-```
-
-Then walk the item's own acceptance check: open an object, traverse the whole
-catalog from the keyboard, click into the search field and type. If the
-change holds, commit it; if it does not, you have a transcript that tells you
-what the builder thought it was doing, a diff that shows what it actually
-did, and a reviewer's verdict on the gap. That triangulation is exactly what
-a solo coding agent does not leave behind.
-
 ## Table the verdict as an exhibit
 
-One more move closes the loop. Your reviewer declared the `lens` capability,
+One more move closes the loop, and it has to happen **while the room is
+still live**: a stopped or exhausted room no longer takes a steer. Your
+reviewer declared the `lens` capability,
 which authorizes one tool inside a room turn: `chamber_table_exhibit`, which
 publishes a canvas board as an **exhibit**, a room's tabled deliverable.
-Steer the room before it closes, and pair the direction with a `callOn`:
+Once the review turns have settled the verdict, steer, pairing the direction
+with a `callOn`:
 
 ```ts
 chamber_room_say({
@@ -204,6 +199,30 @@ Long after the room panel rolls off the surface, the verdict card remains,
 pointing back at the session that produced it. See
 [Exhibits](../../concepts/lenses/#exhibits-the-deliverable-sibling) for the
 capability.
+
+With the exhibit tabled, let the room run out its budget, or stop it from
+the room panel (or `chamber_room_stop`); stopping is reversible, and the
+transcript stays as bounded history either way.
+
+## Verify like an operator
+
+The room's claim is not the proof. When the room closes, verify the way you
+would verify a colleague's branch: the summary first, then the actual edits,
+then the running app.
+
+```sh
+git status
+git diff --stat
+git diff
+bun run dev
+```
+
+Then walk the item's own acceptance check: open an object, traverse the whole
+catalog from the keyboard, click into the search field and type. If the
+change holds, commit it; if it does not, you have a transcript that tells you
+what the builder thought it was doing, a diff that shows what it actually
+did, and a reviewer's verdict on the gap. That triangulation is exactly what
+a solo coding agent does not leave behind.
 
 ## What you proved
 

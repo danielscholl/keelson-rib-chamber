@@ -319,12 +319,13 @@ contract edit can feel like paperwork until you watch it move real lines. Here a
 the three places the hardened contract decides differently from the original, the
 spots where the review actually shows up in a build.
 
-(Handing a reviewed contract straight back to the build is the obvious next move.
-Today you fold the changes into the brief and rebuild, or hand the contract to a
-coding-room Mind and let it implement inside the room's confinement, the session
-[A room that writes code](../a-room-that-writes-code/) walks end to end. A build
-that re-runs from this precise contract is
-[tracked upstream](https://github.com/danielscholl/keelson/issues/321).)
+(Handing a reviewed contract straight back to the build is a supported move:
+the sample's `frontend-mix` workflow takes an optional `PLAN` input, a path to
+an existing `plan.md` the plan phase adopts verbatim, so a rebuild can run
+from the hardened contract directly, `--inputs PLAN=<path>` on the run. Or
+hand the contract to a coding-room Mind and let it implement inside the
+room's confinement, the session
+[A room that writes code](../a-room-that-writes-code/) walks end to end.)
 
 **The daily object.** The original contract rotates on UTC milliseconds; the
 hardened one rotates on a calendar date in a configured timezone, with the
