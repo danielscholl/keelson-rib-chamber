@@ -2,14 +2,16 @@
 title: Author a room strategy
 description: Write a new pure strategy, register it, and unit-test it, the capstone of the Chamber tutorial rail
 sidebar:
-  order: 6
+  order: 7
 ---
 
-You have run rooms, moderated one, and put them to work on real plans. Now you
-will write the part that decides who speaks. A **strategy** is the turn policy for
+You have run rooms, moderated one, put them to work on real plans, and let one
+write code. Now you will write the part that decides who speaks. A **strategy**
+is the turn policy for
 a room: a small, pure function
 the driver consults every turn to ask "who is next?" This is the capstone, and it
-is the one tutorial that touches code. Chamber is a Keelson rib, so its strategies
+is the one tutorial where the code you touch is the rib's own. Chamber is a
+Keelson rib, so its strategies
 live in the rib's own source, and adding one is three edits and a test.
 
 The good news is that a strategy is the easiest kind of code to write, because the

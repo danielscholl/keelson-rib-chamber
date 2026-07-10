@@ -224,15 +224,12 @@ a lone planner cannot.
 - **Or let a Mind build it, in a coding room.** A coding room (started with
   `coding: true`) lifts the text-only default: a Mind that declares the `read` and
   `code` capabilities can read files and run Bash, Edit, and Write, confined to a
-  project you target when the room starts. Author a build engineer, pin it to a
-  gpt-class model (direct coding is its strength), give it `read` and `code`, and
-  convene a coding room pointed at your project. Hand it the manager's plan and ask it to implement the app. Because the
-  room is rooted in your project, the Mind reads not just the plan but whatever build
-  guidance the project ships, and writes the app into the tree inside the room's
-  confinement boundary. (The `keelson-sample` template, for instance, carries a set
-  of `frontend-mix-*` skills a build Mind can open and follow step by step.) See
-  [author a mind](../../guides/author-a-mind/) for the capability slugs and
-  [run a room](../../guides/run-a-room/) for starting a coding room.
+  project you target when the room starts. Hand a build Mind the manager's plan and
+  it implements inside the room's confinement boundary, reading whatever build
+  guidance the project ships along the way. That is the next tutorial,
+  [A room that writes code](../a-room-that-writes-code/), which walks the whole
+  session: authoring the builder, opening the tier deliberately, and verifying
+  what actually changed.
 
 Either way, the plan the manager assembled is the contract the build implements.
 Because it has no gaps, the build has nothing to guess at; because it has no overlap,
@@ -249,14 +246,18 @@ instead of a single planner who would have gone deep in one place and thin
 everywhere else.
 
 You have now driven the room shapes that matter: a sequential analysis, a
-moderated discussion, an unmoderated floor, and a manager-led build. The capstone
-is the one tutorial that touches code. In
-[author your own room strategy](../author-a-room-strategy/) you write the pure
-routing policy the driver consults every turn, the same seam all six shipped
-strategies plug into.
+moderated discussion, an unmoderated floor, and a manager-led build. Two
+tutorials remain, and they hand off to each other. First,
+[A room that writes code](../a-room-that-writes-code/) opens the coding tier
+and lets a build Mind implement a scoped change while a reviewer reads behind
+it. Then the capstone,
+[author your own room strategy](../author-a-room-strategy/), has you write the
+pure routing policy the driver consults every turn, the same seam all six
+shipped strategies plug into.
 
 ## Related
 
+- [A room that writes code](../a-room-that-writes-code/): the next step, a coding room implements what the manager planned.
 - [Author a room strategy](../author-a-room-strategy/): the capstone, write the routing policy these rooms run on.
 - [When to convene a room](../../concepts/when-to-convene-a-room/): which of the six strategies fits which decision.
 - [Many minds, one plan](../many-minds-one-plan/): the sibling job, *review* a plan with a moderated room rather than *produce* one with a manager.
