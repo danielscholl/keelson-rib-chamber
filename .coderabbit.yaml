@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Chamber is a Keelson rib (Bun TS). It uses Biome (see biome.json) for lint +
+# format. CodeRabbit's default ESLint hook can't find an eslint config and
+# emits a "tool skipped" warning on every PR — disable it explicitly so the
+# noise stops. CodeRabbit's LLM review and other tools still run unchanged.
+
+tone_instructions: >-
+  Chamber: a Keelson rib (Bun TS). Be terse; cite file:line. Comments are
+  optional and one-line soft-wraps are fine — do not flag them. Do not push
+  docstrings or narrate what just changed. No poems, jokes, or emoji.
+
+reviews:
+  poem: false
+  in_progress_fortune: false
+
+  path_instructions:
+    - path: "**/*.test.ts"
+      instructions: >-
+        Bun's test runner (bun:test). Do not flag mock-vs-real tradeoffs.
+        Do not require docstrings on test helpers.
+
+  tools:
+    eslint:
+      enabled: false
+
+  # CONTRIBUTING.md sets a "no-narration" comment policy: add a comment only
+  # when it captures non-obvious why. CodeRabbit's docstring-coverage check
+  # (default 80%) pushes the opposite direction, so turn it off.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
