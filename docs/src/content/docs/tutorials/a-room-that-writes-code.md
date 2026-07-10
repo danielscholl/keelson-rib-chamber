@@ -92,9 +92,13 @@ That is not a gap in the tutorial; it is the actual work.
 ## Start the coding room
 
 Make sure the project is registered (`keelson project add` from the keelson
-CLI if it is not), and start the room from chat. The start is a dry run until
-you confirm, and this is one start worth reading twice before you do, because
-you are granting write access:
+CLI if it is not), and note its **id**: the UUID `keelson project add` prints
+when it registers (and `keelson project list` prints thereafter). The
+`projectId` field below takes that id; the tool does not resolve a bare
+project name the way the Convene panel does, and rejects one with an
+`unknown project` error. Then start the room from chat. The start is a dry
+run until you confirm, and this is one start worth reading twice before you
+do, because you are granting write access:
 
 ```json
 {
@@ -146,7 +150,7 @@ before anything else.
 
 :::caution[If the room misbehaves]
 The failure modes are the tiers, misread. A rejected start with `coding: true`
-usually means no `projectId`, or a project name that is not registered. A
+usually means no `projectId`, or a project *name* where the id belongs. A
 builder that talks about the change but edits nothing is missing the `code`
 capability: check its roster card's tools list, and re-author it with the
 brief asking for `read` and `code`. And a room that hits its budget mid-fix
@@ -177,12 +181,20 @@ a solo coding agent does not leave behind.
 One more move closes the loop. Your reviewer declared the `lens` capability,
 which authorizes one tool inside a room turn: `chamber_table_exhibit`, which
 publishes a canvas board as an **exhibit**, a room's tabled deliverable.
-Steer the room before it closes:
+Steer the room before it closes, and pair the direction with a `callOn`:
 
-```text
-Direction: reviewer, table an exhibit with your verdict: the item, what
-changed, the acceptance result, and anything still open.
+```ts
+chamber_room_say({
+  callOn: "<reviewer>",
+  direction: "Table an exhibit with your verdict: the item, what changed, the acceptance result, and anything still open.",
+})
 ```
+
+The `callOn` matters. A bare direction lands on whoever speaks next, and in a
+sequential room that may be the builder, which does not hold `lens` and
+cannot table anything (the capability gate is per-Mind, and it holds even
+when the director asks). Calling on the reviewer hands it the turn and the
+direction together.
 
 The exhibit lands on the Chamber surface's Exhibits index, and its provenance
 is worth noticing: the producing room is stamped by the driver, which
