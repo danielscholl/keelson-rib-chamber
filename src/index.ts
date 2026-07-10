@@ -1471,6 +1471,15 @@ const rib: Rib = {
   id: "chamber",
   displayName: "Chamber",
 
+  contributeDocs: () => [
+    {
+      title: "Chamber",
+      summary:
+        "The Chamber rib for Keelson: convene Minds in multi-agent rooms, table exhibits, and publish standing lenses. Covers genesis, room strategies, agent-authored lenses, when to convene, and the rib's design.",
+      llmsFullUrl: "https://danielscholl.github.io/keelson-rib-chamber/llms-full.txt",
+    },
+  ],
+
   // Binds the agent-authored keys to the canvas renderer; data arrives when the
   // producers (the roster collector, the brief turn, the room driver) run.
   views: RIB_VIEWS,
