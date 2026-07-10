@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.27.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.26.0...v0.27.0) (2026-07-10)
+
+
+### Added
+
+* **docs:** contribute the Chamber docs corpus to keelson_docs ([#199](https://github.com/danielscholl/keelson-rib-chamber/issues/199)) ([be59aed](https://github.com/danielscholl/keelson-rib-chamber/commit/be59aed41a8debee7d9a4ffeef6eb5d43d679656))
+
+
+### Fixed
+
+* **room-start:** resolve projectId by name or id, not id only ([#198](https://github.com/danielscholl/keelson-rib-chamber/issues/198)) ([1153b57](https://github.com/danielscholl/keelson-rib-chamber/commit/1153b579359ae81c258b75cfc01833bae067a572))
+
+
+### Documentation
+
+* **tutorials:** add "A room that writes code" and wire the rail around it ([#195](https://github.com/danielscholl/keelson-rib-chamber/issues/195)) ([bee6ec8](https://github.com/danielscholl/keelson-rib-chamber/commit/bee6ec88676aae18b8438e9d7b58b3f981a3d1c0))
+
 ## [0.26.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.25.0...v0.26.0) (2026-07-09)
 
 
