@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.25.0...v0.26.0) (2026-07-09)
+
+
+### Added
+
+* **convene:** add per-room-type purpose hints on hover ([#193](https://github.com/danielscholl/keelson-rib-chamber/issues/193)) ([f9697a0](https://github.com/danielscholl/keelson-rib-chamber/commit/f9697a0d9d5afb6f80b62ef5ad1f57d1e439939c))
+
 ## [0.25.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.24.0...v0.25.0) (2026-07-09)
 
 
