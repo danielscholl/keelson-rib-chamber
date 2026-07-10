@@ -133,7 +133,7 @@ function shapeLabel(room: Room): string {
     case "group-chat":
       return mod ? `debate · ${mod} moderates` : "debate";
     case "magentic":
-      return mgr ? `build · ${mgr} manages` : "build";
+      return mgr ? `delegate · ${mgr} manages` : "delegate";
     case "open-floor":
       return "open floor";
     case "review":

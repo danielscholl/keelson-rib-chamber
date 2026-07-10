@@ -142,11 +142,11 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(debate[0]?.fields?.find((f) => f.label === "shape")?.value).toBe(
       "debate · moneypenny moderates",
     );
-    const build = cards(
+    const delegate = cards(
       buildRoomsIndexBoard([room({ strategy: "magentic", config: { manager: "mycroft" } })]),
     );
-    expect(build[0]?.fields?.find((f) => f.label === "shape")?.value).toBe(
-      "build · mycroft manages",
+    expect(delegate[0]?.fields?.find((f) => f.label === "shape")?.value).toBe(
+      "delegate · mycroft manages",
     );
   });
 
