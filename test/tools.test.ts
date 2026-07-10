@@ -1193,6 +1193,29 @@ describe("chamber_room_start — coding review capability guard", () => {
     expect(t.out()).toContain("coding tier ON");
   });
 
+  it("resolves projectId by name, not just id — the Convene board's convention", async () => {
+    // An agent driving the tool has the project name, not its UUID, and there is no
+    // chamber project-list tool to look one up, so a valid name must not be rejected.
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["smith", "wesson"], strategy: "review", coding: true, projectId: "Repo" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain('in project "Repo"');
+  });
+
+  it("errors with a where-to-find-an-id hint for an unknown project", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["smith", "wesson"], strategy: "review", projectId: "ghost" },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain('unknown project "ghost"');
+    expect(t.out()).toContain("keelson project list");
+  });
+
   it("rejects a coding review whose author can't `code`", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute(

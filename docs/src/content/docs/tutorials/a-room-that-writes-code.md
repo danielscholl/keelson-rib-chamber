@@ -101,9 +101,10 @@ prints thereafter):
 keelson project add cosmos ~/code/my-frontend-mix
 ```
 
-The `projectId` field below takes that id; the tool does not resolve a bare
-project name the way the Convene panel does, and rejects one with an
-`unknown project` error.
+The `projectId` field below takes that id or the project name: the tool
+resolves either against your project list, the same as the Convene panel, and
+rejects an unresolvable one with an `unknown project` error that names where to
+find a valid id.
 
 Next, one operator move the room cannot do for you. The room confines writes
 to the project root, but it does not manage your branches, so give the
@@ -160,7 +161,9 @@ before anything else.
 
 :::caution[If the room misbehaves]
 The failure modes are the tiers, misread. A rejected start with `coding: true`
-usually means no `projectId`, or a project *name* where the id belongs. A
+usually means no `projectId` at all: a coding room has nothing to confine to
+without one, and an unresolvable `projectId` (neither a known id nor a project
+name) is rejected with an `unknown project` error. A
 builder that talks about the change but edits nothing is missing the `code`
 capability: check its roster card's tools list, and re-author it with the
 brief asking for `read` and `code`. And a room that hits its budget mid-fix
