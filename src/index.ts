@@ -308,6 +308,24 @@ function resolveProjectByNameOrId(input: string): Project | undefined {
   );
 }
 
+// Resolve a free-text project reference (id or name) to its canonical Project, or a
+// uniform "unknown project" error that names where a valid id comes from. The two
+// free-text entry points — the Convene board field and the chamber_room_start tool arg —
+// resolve through here rather than accepting an id alone (the room-start action forwards
+// an existing room's already-canonical id, so it skips this).
+function resolveProjectInput(
+  input: string,
+): { ok: true; project: Project } | { ok: false; error: string } {
+  const project = resolveProjectByNameOrId(input);
+  if (!project) {
+    return {
+      ok: false,
+      error: `unknown project "${input}" — pass a project id or name from the host's project list (run \`keelson project list\`)`,
+    };
+  }
+  return { ok: true, project };
+}
+
 // Resolve a Convene composer's moderator/manager field (free text, id or name,
 // case-insensitive) to a Mind slug — the same convention the project field uses,
 // since a board action field is free text, not a picker. Returns the slug or
@@ -2765,12 +2783,11 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
   const topic = asNonEmptyString(payload.topic) || undefined;
 
   const projectInput = asNonEmptyString(payload.project);
-  const projectId = projectInput ? resolveProjectByNameOrId(projectInput)?.id : undefined;
-  if (projectInput && !projectId) {
-    return {
-      ok: false,
-      error: `unknown project "${projectInput}" — pick a project from the host's project list`,
-    };
+  let projectId: string | undefined;
+  if (projectInput) {
+    const resolved = resolveProjectInput(projectInput);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    projectId = resolved.project.id;
   }
 
   // Moderator (Debate) and manager (Build) are Mind name-or-slug free text; resolve
@@ -4365,7 +4382,19 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const minRounds = parsed.data.minRounds;
         const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;
         const endVoteThreshold = parsed.data.endVoteThreshold;
-        const projectId = (parsed.data.projectId ?? "").trim() || undefined;
+        // Canonicalize before the dry-run's validateStart: it and driver.start match
+        // projectId as an id only, so a name must resolve to its id up here or the
+        // dry-run would reject a project the confirm path (and the board) accept.
+        const projectInput = (parsed.data.projectId ?? "").trim() || undefined;
+        let projectId: string | undefined;
+        if (projectInput) {
+          const resolved = resolveProjectInput(projectInput);
+          if (!resolved.ok) {
+            emitResult(ctx, `chamber_room_start: ${resolved.error}`, true);
+            return;
+          }
+          projectId = resolved.project.id;
+        }
         const coding = parsed.data.coding ?? false;
         // Validate up front (including roster membership + group-chat moderator
         // rules + project resolution + the coding-tier project requirement) so the
