@@ -51,8 +51,12 @@ describe("rib-chamber", () => {
     const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns);
     expect(cols.find((c) => c.key === "rib:chamber:rooms")?.collapsible).toBe(true);
     expect(cols.find((c) => c.key === "rib:chamber:lenses")?.collapsible).toBe(true);
-    // The roster header collapses too, so a seated bench can fold to its head strip.
-    expect(surface?.layout.header?.collapsible).toBe(true);
+    // The roster now sits in a row (Presence leads the header); it still collapses so a
+    // seated bench can fold to its head strip.
+    expect(cols.find((c) => c.key === "rib:chamber:roster")?.collapsible).toBe(true);
+    // The Presence ribbon leads the header and never collapses — the ceremonial constant.
+    expect(surface?.layout.header?.key).toBe("rib:chamber:presence");
+    expect(surface?.layout.header?.collapsible).toBeUndefined();
   });
 
   it("the Briefing footer is rib-driven — keyed but with no workflow binding", () => {
@@ -205,15 +209,17 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:activity");
   });
 
-  it("Convene leads in its own collapsible row above the Rooms + Lenses row", () => {
+  it("the Roster leads the rows, Convene beneath it, above the Rooms + Lenses row", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
     expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
+      ["rib:chamber:roster"],
       ["rib:chamber:convene"],
       ["rib:chamber:rooms", "rib:chamber:lenses"],
       ["rib:chamber:exhibits"],
     ]);
     // Convene is in-process (no workflow binding) and folds to its head bar.
-    const convene = rows[0]?.columns[0];
+    const convene = rows[1]?.columns[0];
+    expect(convene?.key).toBe("rib:chamber:convene");
     expect(convene?.workflow).toBeUndefined();
     expect(convene?.collapsible).toBe(true);
     const cols = rows.flatMap((r) => r.columns);

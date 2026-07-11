@@ -31,6 +31,7 @@ import {
 import { listAgents, resolveAgent } from "./agents.ts";
 import { recordSection } from "./boards/activity.ts";
 import { buildConveneBoard, type ConveneProject } from "./boards/convene.ts";
+import { buildPresenceBoard } from "./boards/presence.ts";
 import { buildRoomBoard } from "./boards/room.ts";
 import {
   capabilityVocabulary,
@@ -127,6 +128,7 @@ import { readWatermark, writeWatermark } from "./watermark-store.ts";
 const BRIEF_KEY = "rib:chamber:brief";
 const ROSTER_KEY = "rib:chamber:roster";
 const CONVENE_KEY = "rib:chamber:convene";
+const PRESENCE_KEY = "rib:chamber:presence";
 const ROOMS_KEY = "rib:chamber:rooms";
 const LENSES_KEY = "rib:chamber:lenses";
 const EXHIBITS_KEY = "rib:chamber:exhibits";
@@ -363,6 +365,25 @@ async function composeConveneBoard(): Promise<CanvasView> {
 // it to a snapshot manager (fail closed on an older harness).
 function refreshConvene(): void {
   void conveneSm?.recompose(CONVENE_KEY).catch(() => {});
+}
+
+// The Presence ribbon leads the surface: an in-process board (like Convene) reading the
+// bench + rooms, so "N rooms live" tracks a room starting or ending. Recomposed whenever
+// a roster or rooms refresh fires (the refreshWorkflow wrapper). Fail closed on an older
+// harness (no snapshot manager).
+let presenceSm: SnapshotManager | undefined;
+let presenceUnregister: (() => void) | undefined;
+
+async function composePresenceBoard(): Promise<CanvasView> {
+  const [minds, rooms] = await Promise.all([
+    readMinds(mindsDir()).catch(() => [] as Mind[]),
+    listRooms(roomsDir()).catch(() => [] as Room[]),
+  ]);
+  return buildPresenceBoard(minds, rooms);
+}
+
+function refreshPresence(): void {
+  void presenceSm?.recompose(PRESENCE_KEY).catch(() => {});
 }
 // The briefing gate's seams + state, captured in registerTools (the only hook with
 // the full ctx). The publisher routes the brief board to BRIEF_KEY; briefRunAgentTurn
@@ -1441,6 +1462,7 @@ const FRAME_SAFE_ACTIONS: ReadonlySet<string> = new Set(["lens-html", "lens-open
 // or the drawer would render its string frame through the board pipeline. The
 // registry's declareView seam pushes/removes entries; the statics stay fixed.
 const RIB_VIEWS: RibViewDescriptor[] = [
+  { key: PRESENCE_KEY, canvasKind: "view", title: "The Chamber" },
   { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
   { key: CONVENE_KEY, canvasKind: "view", title: "Convene" },
   { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
@@ -1489,9 +1511,11 @@ const rib: Rib = {
   // needs a freeform brief); retire and the room controls (start/inject/stop) are
   // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
-  // The Chamber nav tab. The roster sits in the header (the Minds you genesis), the
-  // standing row pairs the sessions index (ended rooms) with the lenses index (the
-  // living views) at half width each, and the one narrator — the Briefing footer, which
+  // The Chamber nav tab. The Presence ribbon leads in the header (who is convened +
+  // how many rooms are live), the roster follows in the first row (the Minds you
+  // genesis), the standing row pairs the sessions index (ended rooms) with the lenses
+  // index (the living views) at half width each, and the one narrator — the Briefing
+  // footer, which
   // folds what were three what's-happening panels (delta / digest / record) into one —
   // settles into the footer. The live room panels and
   // lens panels are push-fed dynamic regions a producer registers at runtime — each
@@ -1510,25 +1534,37 @@ const rib: Rib = {
       // (Enter a Mind, room controls) still flow — only the head-strip icons go.
       hideRegionActions: true,
       layout: {
+        // The Presence ribbon leads: the always-on strip that says the room is
+        // assembled (who is convened) and how many rooms are live right now. Not
+        // collapsible — it is the ceremonial constant every visit. In-process (no
+        // workflow binding); the rib recomposes it on any roster/rooms mutation.
         header: {
-          key: ROSTER_KEY,
-          workflow: "chamber-roster",
-          title: "Roster",
-          // The roster is a cheap deterministic collector that only changes on
-          // genesis/retire; a modest cadence keeps it self-populating on open and
-          // fresh after a new Mind without hammering. The Briefing footer is left
-          // cadence-free on purpose — it is a paid agent turn, refreshed on demand.
-          cadenceMs: 120_000,
-          // Collapsible like the other regions: once the bench is seated an operator
-          // can fold the roster to its head strip and watch Rooms/Briefing, reopening
-          // it to author or convene. Default expanded — the cold start needs it open.
-          collapsible: true,
-          // While a genesis runs the rib pushes roster frames every ~2.5s (the boot
-          // card's tick); `live` pulses the head dot as those frames arrive (keelson#353).
-          live: true,
-          glyph: { char: "◇", tone: "brand" },
+          key: PRESENCE_KEY,
+          title: "The Chamber",
+          glyph: { char: "◈", tone: "brand" },
         },
         rows: [
+          {
+            columns: [
+              {
+                key: ROSTER_KEY,
+                workflow: "chamber-roster",
+                title: "Roster",
+                // A cheap deterministic collector that only changes on genesis/retire; a
+                // modest cadence self-populates it on open and after a new Mind. The
+                // Briefing footer stays cadence-free — it is a paid agent turn.
+                cadenceMs: 120_000,
+                // Collapsible: once the bench is seated an operator can fold it to its
+                // head strip and watch Rooms/Briefing. Default expanded — cold start
+                // needs it open.
+                collapsible: true,
+                // While a genesis runs the rib pushes roster frames every ~2.5s; `live`
+                // pulses the head dot as they arrive (keelson#353).
+                live: true,
+                glyph: { char: "◇", tone: "brand" },
+              },
+            ],
+          },
           {
             columns: [
               {
@@ -1883,11 +1919,14 @@ const rib: Rib = {
     // Wrapped so any roster refresh (genesis, retire, set-model — a Mind or its
     // provider changed) also recomposes the in-process Convene board, whose chips +
     // capability gating draw from the same Minds; draft-set / convene call
-    // refreshConvene directly.
+    // refreshConvene directly. The Presence ribbon draws from both the bench and the
+    // rooms, so recompose it on either a roster or a rooms refresh — every mutation that
+    // changes who is on the bench or how many rooms are live.
     const rawRefresh = ctx.refreshWorkflow;
     refreshWorkflow = rawRefresh
       ? (name, inputs) => {
           if (name === "chamber-roster") refreshConvene();
+          if (name === "chamber-roster" || name === "chamber-rooms") refreshPresence();
           return rawRefresh(name, inputs);
         }
       : undefined;
@@ -1970,6 +2009,17 @@ const rib: Rib = {
       });
       conveneSm = sm;
       void sm.recompose(CONVENE_KEY);
+    }
+    // The Presence ribbon: an in-process board (reads the bench + rooms) registered on
+    // the snapshot manager and primed once; rebound onto a new manager on a re-boot,
+    // like Convene.
+    if (sm && sm !== presenceSm) {
+      presenceUnregister?.();
+      presenceUnregister = sm.register(PRESENCE_KEY, composePresenceBoard, {
+        validate: expectView(PRESENCE_KEY, "board"),
+      });
+      presenceSm = sm;
+      void sm.recompose(PRESENCE_KEY);
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —
@@ -2218,6 +2268,9 @@ const rib: Rib = {
     conveneUnregister?.();
     conveneUnregister = undefined;
     conveneSm = undefined;
+    presenceUnregister?.();
+    presenceUnregister = undefined;
+    presenceSm = undefined;
     briefUnregister?.();
     briefUnregister = undefined;
     briefPublisher = undefined;
