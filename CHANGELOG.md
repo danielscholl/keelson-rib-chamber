@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.29.0...v0.30.0) (2026-07-11)
+
+
+### Added
+
+* **briefing:** promote the Briefing to an always-on banner ([#207](https://github.com/danielscholl/keelson-rib-chamber/issues/207)) ([d18f9e3](https://github.com/danielscholl/keelson-rib-chamber/commit/d18f9e3860b1bc9d03bc28e4f510a8703e19b6d6))
+
 ## [0.29.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.28.0...v0.29.0) (2026-07-11)
 
 
