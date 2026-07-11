@@ -118,14 +118,14 @@ retire takes effect immediately.
 
 ## How retiring relates to the briefing
 
-The standing briefing on the surface footer is also an agent-authored board, but it
+The standing briefing on the surface banner is also an agent-authored board, but it
 is not a per-subject lens. It is rib-driven and runs on demand. Its turn is promoted
 only when a room ends or a lens changes since the last briefing, which keeps a paid
 turn from firing on every surface refresh.
 
 Authoring or re-authoring a lens counts as a change and can promote the briefing.
 Retiring a lens does not: a retire alone never triggers a briefing turn. So if you
-clear out stale lenses, the footer stays as it was until the next real change.
+clear out stale lenses, the banner stays as it was until the next real change.
 
 ## Related
 

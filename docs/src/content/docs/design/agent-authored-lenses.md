@@ -69,27 +69,27 @@ outright. The fixed pool and its eviction are not the shipped behavior.
 
 ## The briefing is rib-driven, not a lens
 
-The standing briefing on the surface footer is also an agent-authored board on its
+The standing briefing on the surface banner is also an agent-authored board on its
 own key, but it is a special case. It is not a per-subject lens and no Mind authors
-it on demand. The footer is composed in-process from three attention-ordered
+it on demand. The banner is composed in-process from three attention-ordered
 registers: the Delta, the Digest, and the Record. Only the Delta is agent-authored
 and paid: the attention gate governs it alone, and that gate is the cost-safety
 story for letting an agent author its own view. The Digest is read from
 `digest.json`, authored by the separate `chamber-digest` workflow, and the Record is
 a deterministic reverse-chron feed of recent activity that always renders.
 
-The footer is seeded with a quiet board at boot, and a single gate is the only path
+The banner is seeded with a quiet board at boot, and a single gate is the only path
 that may run the briefing turn. That turn is paid, so the gate runs it only when
 there is substance to brief: a room ended or a lens changed since a persisted
 watermark. A retire alone is not substance, because a removed lens is no longer in
 the current fingerprints the watermark is compared against, so it never promotes the
-footer. When nothing has changed, the quiet path authors nothing: no turn, and in
+banner. When nothing has changed, the quiet path authors nothing: no turn, and in
 the steady state no publish or write either.
 
 The briefing turn composes a board from metadata only. It is handed the names,
 statuses, and turn counts of ended rooms and the scope and reason of changed lenses,
 never any transcript text, and it runs with no tools. It cannot reach into a room's
-content to write the footer.
+content to write the banner.
 
 Evaluations are serialized. A concurrent pair of triggers, a room ending as a lens
 lands, await-chains so the second runs after the first. The first turn advances the

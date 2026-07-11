@@ -1554,15 +1554,9 @@ const rib: Rib = {
           title: "The Chamber",
           glyph: { char: "◈", tone: "brand" },
         },
-        // The Briefing leads as a banner — the always-on heartbeat right under the
-        // Presence ribbon, never collapsing (a banner can't carry the collapse flags).
-        // NO `workflow` binding: rib-driven, not a cadence/refresh-fed collector. The rib
-        // composes it in-process from three registers — the promoted delta (its own
-        // attention gate, evaluateBriefGate), the standing digest (read from digest.json),
-        // and a compact record glance (the activity feed tail, tightened for the always-on
-        // banner) — re-publishing on every mutation (refreshStandingPanels) and on a
-        // promote/lapse. The former standalone Activity + Digest panels are gone; their
-        // producers survive as this banner's registers.
+        // Binds no `workflow`: the Briefing is rib-driven, composed and re-published
+        // in-process, so a binding would make the SPA try to refresh a workflow that
+        // does not exist.
         banner: {
           key: BRIEF_KEY,
           title: "Briefing",

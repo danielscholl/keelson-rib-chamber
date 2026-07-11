@@ -217,7 +217,7 @@ all-selected.
 
 ## brief-watermark.json
 
-The watermark drives the briefing substance gate: it records what the footer
+The watermark drives the briefing substance gate: it records what the banner
 has already accounted for, so a paid briefing turn runs only when something new
 happened since the last one.
 
@@ -232,7 +232,7 @@ happened since the last one.
 
 `ackedEndedRooms` is the ended-room slugs the briefing has already covered.
 `lensFingerprints` maps each lens `id` to its `updatedAt`, so a new or
-re-authored lens reads as changed. `briefPromoted` tracks whether the footer
+re-authored lens reads as changed. `briefPromoted` tracks whether the banner
 currently holds a promoted briefing (`true`) or the quiet board (`false`). A
 missing or torn file reads as empty, so a cold start treats everything as new
 and unpromoted.
