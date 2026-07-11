@@ -222,6 +222,39 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(JSON.stringify(lastBoard())).not.toContain("a stale synthesis");
   });
 
+  test("the composed Briefing caps the record register at the banner limit (4) with an overflow row", async () => {
+    // Seed more activity than the banner cap so the PRODUCTION composer's limit is
+    // exercised: a regression dropping the BANNER_RECORD_LIMIT argument would restore
+    // eight rows here, where the recordSection unit test (a direct limit call) stays green.
+    const base = Date.parse("2026-01-01T00:00:00.000Z");
+    for (let i = 0; i < 6; i++) {
+      await scaffoldMind(
+        mindsDir(),
+        {
+          slug: `m${i}`,
+          name: `M${i}`,
+          role: "r",
+          voice: "v",
+          persona: `I am m${i}.`,
+          createdAt: new Date(base + i * 60_000).toISOString(),
+        },
+        `soul m${i}`,
+      );
+    }
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    rib.registerTools?.(makeCtx(run, sm));
+    // Wait for the composed board: the seed's record holds one "…" row, the composed
+    // record overflows, so the overflow row proves we captured the real compose.
+    await waitFor(() => JSON.stringify(lastBoard() ?? {}).includes("…2 earlier"));
+    const record = lastBoard()?.sections.find((s) => s.title === "The record");
+    expect(record?.kind).toBe("rows");
+    if (record?.kind !== "rows") throw new Error("no record section");
+    // 6 events, cap 4 -> 4 shown + one overflow row.
+    expect(record.items).toHaveLength(5);
+    expect(record.items[4]?.text).toBe("…2 earlier");
+  });
+
   test("quiet (nothing new) runs ZERO agent turns and leaves the watermark unchanged", async () => {
     await seedMinds(); // minds alone are NOT substance
     const { sm } = fakeSnapshotManager();
