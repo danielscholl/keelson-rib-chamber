@@ -189,6 +189,11 @@ const roomViewEntries = new Map<
 // cadence — room-delete uses it to drop a deleted session's card. Optional and
 // fail-soft: undefined on an older harness, where the index falls back to cadence.
 let refreshWorkflow: RibContext["refreshWorkflow"];
+// The genuine host refresh seam (undefined on a harness without it), kept apart from
+// the always-defined `refreshWorkflow` fan-out above so a capability check — can the
+// host run a workflow at all? (the lens Refresh verb) — still reads true host support,
+// not the fan-out that always exists once registerTools has run.
+let hostRefreshWorkflow: RibContext["refreshWorkflow"];
 
 // Fan a Chamber mutation out to the one narrator (the Briefing footer). Nudge the
 // standing-digest gate — mutation-driven now, not a 120s poll, since every Chamber
@@ -1920,16 +1925,18 @@ const rib: Rib = {
     // provider changed) also recomposes the in-process Convene board, whose chips +
     // capability gating draw from the same Minds; draft-set / convene call
     // refreshConvene directly. The Presence ribbon draws from both the bench and the
-    // rooms, so recompose it on either a roster or a rooms refresh — every mutation that
-    // changes who is on the bench or how many rooms are live.
+    // rooms, so recompose it on either a roster or a rooms refresh.
     const rawRefresh = ctx.refreshWorkflow;
-    refreshWorkflow = rawRefresh
-      ? (name, inputs) => {
-          if (name === "chamber-roster") refreshConvene();
-          if (name === "chamber-roster" || name === "chamber-rooms") refreshPresence();
-          return rawRefresh(name, inputs);
-        }
-      : undefined;
+    hostRefreshWorkflow = rawRefresh;
+    // Always defined, even when the host has no refresh seam: Convene and Presence are
+    // cadence-free in-process boards, so their local recompose must fire on a
+    // roster/rooms mutation regardless — else they would freeze at their first snapshot
+    // on a host that provides a snapshot manager but no refreshWorkflow.
+    refreshWorkflow = (name, inputs) => {
+      if (name === "chamber-roster") refreshConvene();
+      if (name === "chamber-roster" || name === "chamber-rooms") refreshPresence();
+      return rawRefresh?.(name, inputs) ?? Promise.resolve();
+    };
     // Capture the host projects lookup so a room can be targeted at a project
     // (per-room turn cwd = project.rootPath). dispose() clears it like the above.
     getProjects = ctx.getProjects;
@@ -2264,6 +2271,7 @@ const rib: Rib = {
     stopGenesisTick();
     await clearPendingGenesis().catch(() => {});
     refreshWorkflow = undefined;
+    hostRefreshWorkflow = undefined;
     getProjects = undefined;
     conveneUnregister?.();
     conveneUnregister = undefined;
@@ -3243,7 +3251,7 @@ async function refreshLensAction(action: RibAction): Promise<RibActionResult> {
   const got = lensActionId(action, "refresh-lens");
   if ("error" in got) return { ok: false, error: got.error };
   const { id } = got;
-  if (!refreshWorkflow) {
+  if (!hostRefreshWorkflow) {
     return { ok: false, error: "workflow refresh unavailable on this harness" };
   }
   try {
@@ -3258,7 +3266,7 @@ async function refreshLensAction(action: RibAction): Promise<RibActionResult> {
         error: `lens '${id}' has no refresh backing — re-author it with chamber_emit_lens refresh: {}`,
       };
     }
-    await refreshWorkflow(record.refresh.workflow, lensRefreshInputs(id));
+    await hostRefreshWorkflow(record.refresh.workflow, lensRefreshInputs(id));
     return { ok: true, data: { id, workflow: record.refresh.workflow } };
   } catch (e) {
     return { ok: false, error: errText(e) };

@@ -1,16 +1,10 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 
-// Pure: the bench (Minds) + the rooms -> the Presence ribbon that leads the Chamber
-// surface. Two registers side by side: the BENCH (one identity seat per Mind, its
-// seat-for-life hue) and the LIVE PULSE (how many rooms are in session right now).
-// "Present" here is bench identity — a Mind exists on the bench whether or not a room
-// is running — so it stays honest under concurrency: a Mind can sit in several active
-// rooms at once (activeRooms is a set), and the ribbon never collapses that into one
-// per-Mind verb. The pulse counts sessions, not a single room; "who is speaking" stays
-// in each room's own live panel, where it is unambiguous. Validated against
-// canvasViewSchema in tests; the producer never parses (validation lives at the
-// binding edge, like every other board).
+// Live status is per (mind × room), never per Mind: a Mind can sit in several active
+// rooms at once (activeRooms is a set), so the pulse COUNTS live sessions rather than
+// naming one room or pinning a single "speaking" verb — per-turn liveness stays in each
+// room's own live panel.
 export function buildPresenceBoard(
   minds: readonly Mind[],
   rooms: readonly Room[] = [],
