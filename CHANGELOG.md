@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.28.0...v0.29.0) (2026-07-11)
+
+
+### Added
+
+* **presence:** lead the Chamber with a presence ribbon ([#205](https://github.com/danielscholl/keelson-rib-chamber/issues/205)) ([5858997](https://github.com/danielscholl/keelson-rib-chamber/commit/58589978742ab9ca38c9e3d57d67f11f2823b863))
+
 ## [0.28.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.27.0...v0.28.0) (2026-07-10)
 
 
