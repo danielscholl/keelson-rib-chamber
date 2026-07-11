@@ -65,7 +65,6 @@ describe("rib-chamber", () => {
     const banner = rib.surfaces?.[0]?.layout.banner;
     expect(banner?.key).toBe("rib:chamber:brief");
     expect(banner?.workflow).toBeUndefined();
-    // Promoted out of the footer — the surface leads with the heartbeat, no footer slot.
     expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
     const names = (rib.contributeWorkflows?.({} as RibContext) ?? []).map(
       (w) => (w.definition as { name?: string }).name,
@@ -228,7 +227,7 @@ describe("rib-chamber", () => {
     // Neither what's-happening narrator has a standing column anymore.
     expect(cols.some((c) => c.key === "rib:chamber:activity")).toBe(false);
     expect(cols.some((c) => c.key === "rib:chamber:digest")).toBe(false);
-    // The Briefing is the one narrator, promoted to the always-on banner (no footer).
+    // The Briefing is the one narrator, in the banner.
     expect(rib.surfaces?.[0]?.layout.banner?.key).toBe("rib:chamber:brief");
     expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
   });

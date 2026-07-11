@@ -50,7 +50,6 @@ describe("Chamber surface (attention chrome)", () => {
     // Rib-driven, not refresh-fed: the banner must not bind a workflow (there is no
     // chamber-brief workflow), or the SPA would try to refresh a non-existent one.
     expect(banner?.workflow).toBeUndefined();
-    // Promoted out of the footer — the surface leads with the heartbeat, no footer slot.
     expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
   });
 

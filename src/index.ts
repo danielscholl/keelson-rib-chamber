@@ -1192,9 +1192,7 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
     if (first) sections.push({ ...first, title: "Digest" }, ...rest);
   }
 
-  // 3. Record — always present. Tightened to a short glance: the briefing now rides
-  //    the always-on banner (can't be folded away), so the grounding feed stays a few
-  //    lines — the Rooms and Lenses indexes hold the full history.
+  // 3. Record — always present.
   sections.push(recordSection(mindRecords, rooms, lenses, Date.now(), BANNER_RECORD_LIMIT));
 
   return {

@@ -25,9 +25,11 @@ banner, the Roster row, the Convene row, the Rooms + Lenses row, and the Exhibit
 row. Each binds a snapshot key. The index collectors carry a workflow binding and
 a 120000 ms cadence so they self-populate on open and refresh without being
 hammered. Presence, Convene, and the Briefing have no workflow: all three are
-rib-driven, recomposed in-process on mutation (Presence and Convene) or
-republished by the attention gate (the Briefing). The header and banner never
-collapse — the Presence ribbon and the Briefing heartbeat are always on.
+rib-driven and recomposed in-process. Presence and Convene recompose on any
+mutation. The Briefing has two publish paths: it is re-published on every mutation
+so its record and digest registers stay current, and its attention gate separately
+promotes or lapses the delta register. The header and banner never collapse, so the
+Presence ribbon and the Briefing heartbeat are always on.
 
 | Region | Key | Workflow | Cadence (ms) | Collapsible | Glyph |
 |---|---|---|---|---|---|
