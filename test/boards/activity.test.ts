@@ -130,4 +130,21 @@ describe("recordSection feed", () => {
     expect(section.items[8]?.text).toBe("…7 earlier");
     expect(section.items[8]?.trailing).toBeUndefined();
   });
+
+  test("a caller may pass a tighter cap for the always-on banner glance", () => {
+    const many = Array.from({ length: 15 }, (_, i) =>
+      lens({
+        id: `l${i}`,
+        board: { view: "board", title: `L${i}`, sections: [] },
+        updatedAt: at((i + 1) * MIN),
+      }),
+    );
+    // limit 4 → 4 shown + one overflow row naming the remainder (15 - 4 = 11).
+    const section = recordSection([], [], many, NOW, 4);
+    expect(canvasViewSchema.safeParse(wrap(section)).success).toBe(true);
+    expect(section.items).toHaveLength(5);
+    expect(section.items[0]?.text).toBe('Lens "L0"');
+    expect(section.items[4]?.text).toBe("…11 earlier");
+    expect(section.items[4]?.trailing).toBeUndefined();
+  });
 });

@@ -195,11 +195,11 @@ let refreshWorkflow: RibContext["refreshWorkflow"];
 // not the fan-out that always exists once registerTools has run.
 let hostRefreshWorkflow: RibContext["refreshWorkflow"];
 
-// Fan a Chamber mutation out to the one narrator (the Briefing footer). Nudge the
+// Fan a Chamber mutation out to the one narrator (the Briefing banner). Nudge the
 // standing-digest gate — mutation-driven now, not a 120s poll, since every Chamber
 // mutation flows through the rib, so the gate re-evaluates exactly when the fingerprint
 // can have changed (and still spends a paid turn ONLY when it actually did) — then
-// re-publish the footer so its record + digest registers reflect the change. The delta
+// re-publish the banner so its record + digest registers reflect the change. The delta
 // register rides its own attention gate (evaluateBriefGate).
 async function refreshStandingPanels(): Promise<void> {
   await refreshWorkflow?.("chamber-digest")?.catch(() => {});
@@ -345,7 +345,7 @@ function resolveMindByNameOrId(minds: readonly Mind[], input: string): string | 
   );
 }
 
-// The Convene composer is an in-process snapshot (like the Briefing footer, not a
+// The Convene composer is an in-process snapshot (like the Briefing banner, not a
 // bound collector) because its shape gating and project picker need the host's live
 // project list — an out-of-process collector can't reach ctx.getProjects. Registered
 // in registerTools and recomposed whenever the Minds it draws chips + capability
@@ -409,11 +409,11 @@ let briefInFlight: Promise<void> = Promise.resolve();
 // instead of writing post-teardown. registerTools installs a fresh controller each
 // boot, so an orphaned pre-dispose turn stays aborted (gated out) even after re-boot.
 let briefAbort = new AbortController();
-// The Briefing footer is the surface's one narrator: three registers composed
-// in-process (the footer is rib-driven, not a collector) — the promoted delta (from
+// The Briefing banner is the surface's one narrator: three registers composed
+// in-process (the banner is rib-driven, not a collector) — the promoted delta (from
 // the last paid brief turn, held here), the standing digest (read from digest.json),
 // and the always-on record (the activity feed tail). `promotedDelta` holds the delta
-// turn's sections so a record/digest refresh re-assembles the footer without re-running
+// turn's sections so a record/digest refresh re-assembles the banner without re-running
 // the paid turn; `promotedCount` is the "N new" the header shows.
 let promotedDelta: CanvasBoardView["sections"] | undefined;
 let promotedCount = 0;
@@ -427,7 +427,7 @@ interface PromotedSource {
   ref: string;
 }
 let promotedSources: readonly PromotedSource[] = [];
-// Serializes footer re-publishes so a mutation-driven refresh and a gate promote can't
+// Serializes banner re-publishes so a mutation-driven refresh and a gate promote can't
 // interleave two composes onto one publish; reset on dispose.
 let briefingPublishInFlight: Promise<void> = Promise.resolve();
 
@@ -618,7 +618,7 @@ export function evaluateBriefGate(): Promise<void> {
 }
 
 async function runBriefGate(): Promise<void> {
-  // Seam absent (older harness, or a ctx without the snapshot/turn seams): the footer
+  // Seam absent (older harness, or a ctx without the snapshot/turn seams): the banner
   // keeps whatever board it has (the boot-seeded quiet one) and no turn ever runs.
   if (!briefPublisher || !briefRunAgentTurn) return;
   const runTurn = briefRunAgentTurn;
@@ -654,7 +654,7 @@ async function runBriefGate(): Promise<void> {
         });
         await publishBriefing();
         // The just-cleared briefPromoted flips the roster pulse's "For you" back to
-        // calm — refresh it so the footer and pulse agree without the 120s cadence.
+        // calm — refresh it so the banner and pulse agree without the 120s cadence.
         void refreshWorkflow?.("chamber-roster")?.catch(() => {});
       } catch (e) {
         console.error(`[rib-chamber] brief quiet republish failed: ${errText(e)}`);
@@ -721,10 +721,10 @@ async function runBriefGate(): Promise<void> {
     });
     await publishBriefing();
     // The just-set briefPromoted flips the roster pulse's "For you" to the waiting
-    // briefing — refresh it so the footer and pulse agree without the 120s cadence.
+    // briefing — refresh it so the banner and pulse agree without the 120s cadence.
     void refreshWorkflow?.("chamber-roster")?.catch(() => {});
   } catch (e) {
-    // Stored the delta but the watermark write failed: the footer is live, but a later
+    // Stored the delta but the watermark write failed: the banner is live, but a later
     // trigger may re-promote. Logged; never thrown into a fire-and-forget hook.
     console.error(`[rib-chamber] brief watermark advance failed: ${errText(e)}`);
   }
@@ -787,7 +787,7 @@ function firstJsonObject(text: string): string | null {
 // by id + scope/reason. METADATA ONLY (no transcript text) so a briefing never reads
 // a room's content. Reads the rooms/lenses once on the promote path (rare, and a paid
 // turn is about to run anyway) to resolve the slugs/ids the delta carries to metadata
-// — the same read also yields the structured `sources` the footer renders as jump
+// — the same read also yields the structured `sources` the banner renders as jump
 // chips, so the chips can never name anything the prompt didn't.
 async function composeBriefPrompt(
   delta: ChamberDelta,
@@ -837,9 +837,9 @@ ${lines.join("\n")}`,
   };
 }
 
-// Boot reconciliation: the footer is re-seeded with the quiet board on every
+// Boot reconciliation: the banner is re-seeded with the quiet board on every
 // registerTools, so a persisted briefPromoted:true must be cleared or the roster
-// pulse ("For you") would advertise a waiting briefing the quiet footer doesn't have.
+// pulse ("For you") would advertise a waiting briefing the quiet banner doesn't have.
 // Preserves the acks (a real promote still needs fresh substance to fire). Fail-soft:
 // a missing/unpromoted watermark is a no-op, and any error is swallowed at boot.
 async function clearPersistedBriefPromoted(): Promise<void> {
@@ -1125,9 +1125,9 @@ function shQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-// The synchronous seed the footer holds for the instant between registration and the
+// The synchronous seed the banner holds for the instant between registration and the
 // first async compose (createCoalescingPublisher needs a sync default). A valid, calm
-// board; publishBriefing() replaces it with the composed three-register footer.
+// board; publishBriefing() replaces it with the composed three-register banner.
 function seedBriefingBoard(): CanvasBoardView {
   return {
     view: "board",
@@ -1136,6 +1136,10 @@ function seedBriefingBoard(): CanvasBoardView {
     sections: [{ kind: "rows", title: "The record", items: [{ glyph: "neutral", text: "…" }] }],
   };
 }
+
+// The record register's cap in the always-on banner: fewer rows than the store-level
+// default so the heartbeat stays a glance, not a scrollable log.
+const BANNER_RECORD_LIMIT = 4;
 
 // The one narrator, composed in-process from three producers and published to
 // BRIEF_KEY. Attention-ordered top to bottom: the delta leads (what's new since you
@@ -1181,7 +1185,7 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
   const hasContent = mindRecords.length > 0 || rooms.length > 0 || lenses.length > 0;
   if (hasContent && digest?.board) {
     // readDigest only checks `board` is an object; guard `sections` so a torn digest.json
-    // can't throw here and drop the WHOLE footer publish (delta + record too).
+    // can't throw here and drop the WHOLE banner publish (delta + record too).
     const digestSections = Array.isArray(digest.board.sections) ? digest.board.sections : [];
     const kept = digestSections.filter((s) => s.kind !== "stats");
     const [first, ...rest] = kept;
@@ -1189,7 +1193,7 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
   }
 
   // 3. Record — always present.
-  sections.push(recordSection(mindRecords, rooms, lenses));
+  sections.push(recordSection(mindRecords, rooms, lenses, Date.now(), BANNER_RECORD_LIMIT));
 
   return {
     view: "board",
@@ -1204,7 +1208,7 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
   };
 }
 
-// Re-compose and publish the footer. Serialized so a mutation-driven refresh and a gate
+// Re-compose and publish the banner. Serialized so a mutation-driven refresh and a gate
 // promote can't race two composes onto one publish; never throws into a fire-and-forget
 // caller. A no-op when the publisher seam is absent (older harness).
 function publishBriefing(): Promise<void> {
@@ -1334,7 +1338,7 @@ If the tool rejects the emit (a failing palette report or a blocked external scr
 // The standing-digest authoring prompt: one agent turn synthesizes the Chamber's
 // current shape into a canvas board and calls chamber_emit_digest to persist it. No
 // $ARGUMENTS — the digest is scheduler-driven, so the gate hands it the live state via
-// $gate.output.summary. Distinct from the Briefing (the delta footer): this is a
+// $gate.output.summary. Distinct from the Briefing (the delta banner): this is a
 // standing synthesis of what IS, not what just changed.
 const DIGEST_WF_PROMPT = `You are authoring the standing DIGEST for Keelson's Chamber — a multi-agent operating layer (Minds you author, agent-to-agent Rooms, agent-authored Lenses). The digest is a one-screen canvas \`board\` view that tells an operator what the bench's work ADDS UP TO, rendered live on the Chamber surface with no hand-coded UI. It re-composes only when the Chamber changes, so write an honest SYNTHESIS of the state below — NOT a changelog of what just happened (the Briefing covers deltas), and NOT a restatement of how many Minds / Rooms / Lenses exist (the surface shows those structurally — a count is not a synthesis).
 
@@ -1474,8 +1478,8 @@ const RIB_VIEWS: RibViewDescriptor[] = [
   { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
   { key: EXHIBITS_KEY, canvasKind: "view", title: "Exhibits" },
   // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
-  // into the Briefing footer's Digest register — but the chamber-digest workflow
-  // still binds it (its store is what the footer reads), so the view stays declared.
+  // into the Briefing banner's Digest register — but the chamber-digest workflow
+  // still binds it (its store is what the banner reads), so the view stays declared.
   { key: DIGEST_KEY, canvasKind: "view", title: "Digest" },
   { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
   { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
@@ -1517,12 +1521,11 @@ const rib: Rib = {
   // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
   // The Chamber nav tab. The Presence ribbon leads in the header (who is convened +
-  // how many rooms are live), the roster follows in the first row (the Minds you
-  // genesis), the standing row pairs the sessions index (ended rooms) with the lenses
-  // index (the living views) at half width each, and the one narrator — the Briefing
-  // footer, which
-  // folds what were three what's-happening panels (delta / digest / record) into one —
-  // settles into the footer. The live room panels and
+  // how many rooms are live), the Briefing banner follows as the always-on heartbeat
+  // (the one narrator, folding what were three what's-happening panels — delta / digest
+  // / record — into one), the roster comes next (the Minds you genesis), and the
+  // standing row pairs the sessions index (ended rooms) with the lenses index (the
+  // living views) at half width each. The live room panels and
   // lens panels are push-fed dynamic regions a producer registers at runtime — each
   // ACTIVE room registers its own per-slug region (group "rooms") on start via
   // room-region-registry, and a Mind authors lenses (chamber_emit_lens, group "lens"),
@@ -1548,6 +1551,14 @@ const rib: Rib = {
           title: "The Chamber",
           glyph: { char: "◈", tone: "brand" },
         },
+        // Binds no `workflow`: the Briefing is rib-driven, composed and re-published
+        // in-process, so a binding would make the SPA try to refresh a workflow that
+        // does not exist.
+        banner: {
+          key: BRIEF_KEY,
+          title: "Briefing",
+          glyph: { char: "❖", tone: "brand" },
+        },
         rows: [
           {
             columns: [
@@ -1557,7 +1568,7 @@ const rib: Rib = {
                 title: "Roster",
                 // A cheap deterministic collector that only changes on genesis/retire; a
                 // modest cadence self-populates it on open and after a new Mind. The
-                // Briefing footer stays cadence-free — it is a paid agent turn.
+                // Briefing banner stays cadence-free — it is a paid agent turn.
                 cadenceMs: 120_000,
                 // Collapsible: once the bench is seated an operator can fold it to its
                 // head strip and watch Rooms/Briefing. Default expanded — cold start
@@ -1631,19 +1642,6 @@ const rib: Rib = {
             ],
           },
         ],
-        // The Briefing footer has NO `workflow` binding: it is rib-driven, not a
-        // cadence/refresh-fed collector. The rib composes it in-process from three
-        // registers — the promoted delta (its own attention gate, evaluateBriefGate),
-        // the standing digest (read from digest.json), and the always-on record (the
-        // activity feed tail) — re-publishing on every mutation (refreshStandingPanels)
-        // and on a promote/lapse. The former standalone Activity + Digest panels are
-        // gone; their producers survive as this footer's registers.
-        footer: {
-          key: BRIEF_KEY,
-          title: "Briefing",
-          collapsible: true,
-          glyph: { char: "❖", tone: "brand" },
-        },
       },
     },
   ],
@@ -1760,7 +1758,7 @@ const rib: Rib = {
       // composing the board from the gate's summary and persisting it via
       // chamber_emit_digest (which advances the fingerprint); `publish` always runs
       // (trigger_rule all_done) and re-reads the store to drive the key. The store it
-      // writes (digest.json) is what the Briefing footer's Digest register reads — the
+      // writes (digest.json) is what the Briefing banner's Digest register reads — the
       // digest no longer has a standing surface region of its own. It is MUTATION-DRIVEN,
       // not polled: refreshStandingPanels nudges it on every Chamber mutation (exactly
       // when the fingerprint can have changed), and the fingerprint gate keeps a no-op
@@ -1770,7 +1768,7 @@ const rib: Rib = {
       definition: {
         name: "chamber-digest",
         description:
-          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it to the store the Briefing footer\'s Digest register reads. Nudged by the rib on each Chamber mutation, but spends a turn only when the Chamber changed. NOT for: the deterministic record feed, the delta Briefing, or authoring a Mind/room/lens.',
+          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it to the store the Briefing banner\'s Digest register reads. Nudged by the rib on each Chamber mutation, but spends a turn only when the Chamber changed. NOT for: the deterministic record feed, the delta Briefing, or authoring a Mind/room/lens.',
         nodes: [
           {
             id: "gate",
@@ -1846,7 +1844,7 @@ const rib: Rib = {
       definition: {
         name: "chamber-lens",
         description:
-          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber Briefing (the rib-driven footer), genesis-ing agents, or running a room.',
+          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber Briefing (the rib-driven banner), genesis-ing agents, or running a room.',
         nodes: [
           {
             id: "compose",
@@ -1972,11 +1970,11 @@ const rib: Rib = {
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
     const run = ctx.runAgentTurn;
-    // The Briefing footer is rib-driven (no workflow binding): wire its publisher
+    // The Briefing banner is rib-driven (no workflow binding): wire its publisher
     // here, gated on the snapshot + agent-turn seams the gate needs to run a turn.
     // Mirrors ensureRoomViewPublisher — a coalescing publisher on BRIEF_KEY, rebound
     // onto a new manager on a re-bootstrap. Seed the cache with the quiet board so the
-    // footer renders calm copy immediately (not the idle "Load" state), and capture
+    // banner renders calm copy immediately (not the idle "Load" state), and capture
     // runAgentTurn so the gate can promote to a paid turn when substance appears.
     if (sm && run && (sm !== briefSm || !briefPublisher)) {
       briefUnregister?.();
@@ -1995,12 +1993,12 @@ const rib: Rib = {
       promotedDelta = undefined;
       promotedCount = 0;
       promotedSources = [];
-      // Prime BRIEF_KEY so a client subscribing the instant the footer appears reads the
-      // seed, then compose the real three-register footer (record + any standing digest)
+      // Prime BRIEF_KEY so a client subscribing the instant the banner appears reads the
+      // seed, then compose the real three-register banner (record + any standing digest)
       // in the background so it doesn't wait on the next mutation.
       void sm.recompose(BRIEF_KEY);
       void publishBriefing();
-      // The footer's delta register is empty, but a persisted briefPromoted:true would
+      // The banner's delta register is empty, but a persisted briefPromoted:true would
       // make the pulse ("For you") read "1 waiting" against it until the next event.
       // Clear the flag (preserving the acks) so the two agree from boot. Serialized
       // through briefInFlight so it can't lose-update a concurrent gate promotion's
@@ -2290,7 +2288,7 @@ const rib: Rib = {
     // briefInFlight parked on a never-settling promise (that would wedge a later boot).
     briefAbort.abort();
     briefInFlight = Promise.resolve();
-    // Reset the footer's in-memory registers so a re-boot starts with an empty delta
+    // Reset the banner's in-memory registers so a re-boot starts with an empty delta
     // and a fresh publish chain.
     promotedDelta = undefined;
     promotedCount = 0;
@@ -3857,7 +3855,7 @@ function makeDigestTool(): ToolDefinition {
   return {
     name: DIGEST_TOOL_NAME,
     description:
-      "Internal write-seam for the chamber-digest workflow: persist the standing digest board the author turn composed. The workflow's gate-conditioned author node calls this once with { board } when the Chamber changed; this tool validates the board fail-closed, stamps it with the current chamber fingerprint, and writes it so the Briefing footer's Digest register refreshes. The chamber-digest workflow (nudged by the rib on each Chamber mutation) is the entry point — don't call this directly.",
+      "Internal write-seam for the chamber-digest workflow: persist the standing digest board the author turn composed. The workflow's gate-conditioned author node calls this once with { board } when the Chamber changed; this tool validates the board fail-closed, stamps it with the current chamber fingerprint, and writes it so the Briefing banner's Digest register refreshes. The chamber-digest workflow (nudged by the rib on each Chamber mutation) is the entry point — don't call this directly.",
     inputSchema: digestEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -3880,7 +3878,7 @@ function makeDigestTool(): ToolDefinition {
           board: parsed.data.board,
           fingerprint: chamberFingerprint(minds, rooms, lenses),
         });
-        // The digest register reads digest.json — re-publish the footer so the new
+        // The digest register reads digest.json — re-publish the banner so the new
         // synthesis lands without waiting on the next mutation.
         await publishBriefing();
         emitResult(ctx, JSON.stringify({ ok: true }));

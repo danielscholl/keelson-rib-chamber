@@ -20,7 +20,7 @@ gate with a conditional agent turn.
 | `chamber-rooms` | bash collector | `collect` | `ROOMS_KEY` | the Rooms index |
 | `chamber-lenses` | bash collector | `collect` | `LENSES_KEY` | the Lenses index |
 | `chamber-exhibits` | bash collector | `collect` | `EXHIBITS_KEY` | the Exhibits index |
-| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, read by the Briefing footer's Digest register |
+| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, read by the Briefing banner's Digest register |
 | `chamber-genesis` | prompt turn | `genesis` | none | nothing (writes a Mind) |
 | `chamber-lens` | prompt turn | `compose` | none | a per-subject lens panel |
 | `chamber-lens-refresh` | prompt turn | `refresh` | none | re-emits an existing living lens |
@@ -156,8 +156,8 @@ the markup, and emits again within the same node. Like `chamber-lens` it has no
 
 ## The Briefing is not a workflow
 
-The Briefing footer is rib-driven, not a contributed workflow. There is no
-`chamber-brief` workflow and the footer region binds no `workflow`. The rib
+The Briefing banner is rib-driven, not a contributed workflow. There is no
+`chamber-brief` workflow and the banner region binds no `workflow`. The rib
 seeds a quiet board at boot, and a single gate decides when to spend a paid
 agent turn: only when a room has ended, a lens has changed, or an exhibit has
 been tabled since the last watermark. The quiet path authors nothing. See

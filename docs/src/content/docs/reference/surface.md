@@ -20,21 +20,26 @@ The surface has a stable identity:
 
 ## Standing layout
 
-The surface declares six standing regions: the Roster header, the Convene row,
-the Rooms + Lenses row, the Exhibits row, and the Briefing footer. Each binds a
-snapshot key. The index collectors carry a workflow binding and a 120000 ms
-cadence so they self-populate on open and refresh without being hammered. Convene
-and the Briefing footer have no workflow: both are rib-driven, recomposed on
-mutation (Convene) or republished only by the attention gate (the Briefing).
+The surface declares seven standing regions: the Presence header, the Briefing
+banner, the Roster row, the Convene row, the Rooms + Lenses row, and the Exhibits
+row. Each binds a snapshot key. The index collectors carry a workflow binding and
+a 120000 ms cadence so they self-populate on open and refresh without being
+hammered. Presence, Convene, and the Briefing have no workflow: all three are
+rib-driven and recomposed in-process. Presence and Convene recompose on any
+mutation. The Briefing has two publish paths: it is re-published on every mutation
+so its record and digest registers stay current, and its attention gate separately
+promotes or lapses the delta register. The header and banner never collapse, so the
+Presence ribbon and the Briefing heartbeat are always on.
 
 | Region | Key | Workflow | Cadence (ms) | Collapsible | Glyph |
 |---|---|---|---|---|---|
-| Header | `rib:chamber:roster` | `chamber-roster` | 120000 | yes | `◇` brand |
-| Row 1 | `rib:chamber:convene` | none (rib-driven) | none | yes | `＋` brand |
-| Row 2, column 1 | `rib:chamber:rooms` | `chamber-rooms` | 120000 | yes | `▦` brand |
-| Row 2, column 2 | `rib:chamber:lenses` | `chamber-lenses` | 120000 | yes | `✦` accent |
-| Row 3 | `rib:chamber:exhibits` | `chamber-exhibits` | 120000 | yes | `▣` caution |
-| Footer | `rib:chamber:brief` | none (rib-driven) | none | yes | `❖` brand |
+| Header | `rib:chamber:presence` | none (rib-driven) | none | no | `◈` brand |
+| Banner | `rib:chamber:brief` | none (rib-driven) | none | no | `❖` brand |
+| Row 1 | `rib:chamber:roster` | `chamber-roster` | 120000 | yes | `◇` brand |
+| Row 2 | `rib:chamber:convene` | none (rib-driven) | none | yes | `＋` brand |
+| Row 3, column 1 | `rib:chamber:rooms` | `chamber-rooms` | 120000 | yes | `▦` brand |
+| Row 3, column 2 | `rib:chamber:lenses` | `chamber-lenses` | 120000 | yes | `✦` accent |
+| Row 4 | `rib:chamber:exhibits` | `chamber-exhibits` | 120000 | yes | `▣` caution |
 
 The Exhibits row additionally sets `hideWhenEmpty`: its collector emits zero
 sections while no exhibits exist, so the shelf stays invisible until a
