@@ -22,6 +22,7 @@ const stubCtx = {
 } as RibContext;
 
 const ROSTER_KEY = "rib:chamber:roster";
+const PRESENCE_KEY = "rib:chamber:presence";
 
 function contributions() {
   const ctx = {} as Parameters<NonNullable<typeof rib.contributeWorkflows>>[0];
@@ -57,10 +58,15 @@ describe("chamber-roster producer (Phase 1)", () => {
 });
 
 describe("Chamber surface (Phase 1)", () => {
-  test("the roster is the header region in the rib namespace", () => {
-    const header = rib.surfaces?.[0]?.layout.header;
-    expect(header?.key).toBe(ROSTER_KEY);
-    expect(header?.workflow).toBe("chamber-roster");
+  test("the Presence ribbon leads the header; the roster follows in the first row", () => {
+    const layout = rib.surfaces?.[0]?.layout;
+    // Presence is the always-on ribbon in the header — in-process, no workflow binding.
+    expect(layout?.header?.key).toBe(PRESENCE_KEY);
+    expect(layout?.header?.workflow).toBeUndefined();
+    // The roster moved into the first row, still bound to its collector.
+    const roster = layout?.rows[0]?.columns[0];
+    expect(roster?.key).toBe(ROSTER_KEY);
+    expect(roster?.workflow).toBe("chamber-roster");
     expect(ribSurfaceDescriptorSchema.safeParse(rib.surfaces?.[0]).success).toBe(true);
   });
 
