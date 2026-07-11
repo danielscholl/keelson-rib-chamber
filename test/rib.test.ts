@@ -59,12 +59,14 @@ describe("rib-chamber", () => {
     expect(surface?.layout.header?.collapsible).toBeUndefined();
   });
 
-  it("the Briefing footer is rib-driven — keyed but with no workflow binding", () => {
+  it("the Briefing banner is rib-driven — keyed but with no workflow binding", () => {
     // The brief moved off a contributed workflow onto the rib-owned attention gate,
-    // so the footer keeps the key but binds no workflow (none exists to refresh).
-    const footer = rib.surfaces?.[0]?.layout.footer;
-    expect(footer?.key).toBe("rib:chamber:brief");
-    expect(footer?.workflow).toBeUndefined();
+    // so the banner keeps the key but binds no workflow (none exists to refresh).
+    const banner = rib.surfaces?.[0]?.layout.banner;
+    expect(banner?.key).toBe("rib:chamber:brief");
+    expect(banner?.workflow).toBeUndefined();
+    // Promoted out of the footer — the surface leads with the heartbeat, no footer slot.
+    expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
     const names = (rib.contributeWorkflows?.({} as RibContext) ?? []).map(
       (w) => (w.definition as { name?: string }).name,
     );
@@ -226,8 +228,9 @@ describe("rib-chamber", () => {
     // Neither what's-happening narrator has a standing column anymore.
     expect(cols.some((c) => c.key === "rib:chamber:activity")).toBe(false);
     expect(cols.some((c) => c.key === "rib:chamber:digest")).toBe(false);
-    // The Briefing is the one narrator, in the footer.
-    expect(rib.surfaces?.[0]?.layout.footer?.key).toBe("rib:chamber:brief");
+    // The Briefing is the one narrator, promoted to the always-on banner (no footer).
+    expect(rib.surfaces?.[0]?.layout.banner?.key).toBe("rib:chamber:brief");
+    expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
   });
 
   it("no longer contributes a chamber-activity workflow (the record is composed in-process)", () => {

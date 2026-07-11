@@ -1137,6 +1137,10 @@ function seedBriefingBoard(): CanvasBoardView {
   };
 }
 
+// The record register's cap in the always-on banner: fewer rows than the store-level
+// default so the heartbeat stays a glance, not a scrollable log.
+const BANNER_RECORD_LIMIT = 4;
+
 // The one narrator, composed in-process from three producers and published to
 // BRIEF_KEY. Attention-ordered top to bottom: the delta leads (what's new since you
 // last looked), the digest interprets (the standing synthesis), the record grounds
@@ -1188,8 +1192,10 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
     if (first) sections.push({ ...first, title: "Digest" }, ...rest);
   }
 
-  // 3. Record — always present.
-  sections.push(recordSection(mindRecords, rooms, lenses));
+  // 3. Record — always present. Tightened to a short glance: the briefing now rides
+  //    the always-on banner (can't be folded away), so the grounding feed stays a few
+  //    lines — the Rooms and Lenses indexes hold the full history.
+  sections.push(recordSection(mindRecords, rooms, lenses, Date.now(), BANNER_RECORD_LIMIT));
 
   return {
     view: "board",
@@ -1548,6 +1554,20 @@ const rib: Rib = {
           title: "The Chamber",
           glyph: { char: "◈", tone: "brand" },
         },
+        // The Briefing leads as a banner — the always-on heartbeat right under the
+        // Presence ribbon, never collapsing (a banner can't carry the collapse flags).
+        // NO `workflow` binding: rib-driven, not a cadence/refresh-fed collector. The rib
+        // composes it in-process from three registers — the promoted delta (its own
+        // attention gate, evaluateBriefGate), the standing digest (read from digest.json),
+        // and a compact record glance (the activity feed tail, tightened for the always-on
+        // banner) — re-publishing on every mutation (refreshStandingPanels) and on a
+        // promote/lapse. The former standalone Activity + Digest panels are gone; their
+        // producers survive as this banner's registers.
+        banner: {
+          key: BRIEF_KEY,
+          title: "Briefing",
+          glyph: { char: "❖", tone: "brand" },
+        },
         rows: [
           {
             columns: [
@@ -1631,19 +1651,6 @@ const rib: Rib = {
             ],
           },
         ],
-        // The Briefing footer has NO `workflow` binding: it is rib-driven, not a
-        // cadence/refresh-fed collector. The rib composes it in-process from three
-        // registers — the promoted delta (its own attention gate, evaluateBriefGate),
-        // the standing digest (read from digest.json), and the always-on record (the
-        // activity feed tail) — re-publishing on every mutation (refreshStandingPanels)
-        // and on a promote/lapse. The former standalone Activity + Digest panels are
-        // gone; their producers survive as this footer's registers.
-        footer: {
-          key: BRIEF_KEY,
-          title: "Briefing",
-          collapsible: true,
-          glyph: { char: "❖", tone: "brand" },
-        },
       },
     },
   ],

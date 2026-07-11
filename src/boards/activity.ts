@@ -22,7 +22,7 @@ interface ActivityEvent {
 
 // The Briefing's always-on RECORD register is a glance, not a log: cap the feed and
 // name the remainder in an overflow row. The Rooms and Lenses indexes hold the full
-// history.
+// history. The default cap; a caller (the banner heartbeat) may pass a tighter one.
 const FEED_LIMIT = 8;
 
 type RowsSection = Extract<CanvasBoardView["sections"][number], { kind: "rows" }>;
@@ -37,6 +37,7 @@ export function recordSection(
   rooms: readonly Room[],
   lenses: readonly LensRecord[],
   now: number = Date.now(),
+  limit: number = FEED_LIMIT,
 ): RowsSection {
   const events = collectEvents(minds, rooms, lenses);
   if (events.length === 0) {
@@ -51,7 +52,7 @@ export function recordSection(
       ],
     };
   }
-  const shown = events.slice(0, FEED_LIMIT);
+  const shown = events.slice(0, limit);
   const items: RowsSection["items"] = shown.map((e) => {
     return {
       icon: e.icon,

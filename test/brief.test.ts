@@ -43,13 +43,15 @@ describe("Chamber surface (attention chrome)", () => {
     expect(ribSurfaceDescriptorSchema.safeParse(surface).success).toBe(true);
   });
 
-  test("the Briefing footer carries the key with NO workflow binding", () => {
-    const footer = rib.surfaces?.[0]?.layout.footer;
-    expect(footer?.key).toBe(BRIEF_KEY);
-    expect(footer?.key.startsWith("rib:chamber:")).toBe(true);
-    // Rib-driven, not refresh-fed: the footer must not bind a workflow (there is no
+  test("the Briefing banner carries the key with NO workflow binding", () => {
+    const banner = rib.surfaces?.[0]?.layout.banner;
+    expect(banner?.key).toBe(BRIEF_KEY);
+    expect(banner?.key.startsWith("rib:chamber:")).toBe(true);
+    // Rib-driven, not refresh-fed: the banner must not bind a workflow (there is no
     // chamber-brief workflow), or the SPA would try to refresh a non-existent one.
-    expect(footer?.workflow).toBeUndefined();
+    expect(banner?.workflow).toBeUndefined();
+    // Promoted out of the footer — the surface leads with the heartbeat, no footer slot.
+    expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
   });
 
   test("the rooms and lenses index columns are collapsible", () => {
