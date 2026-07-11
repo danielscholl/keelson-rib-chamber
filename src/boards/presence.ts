@@ -1,6 +1,13 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 
+// Leaf sections only (no nested columns) — what a column may hold and what this ribbon
+// emits; a leaf is assignable both at top level and inside a `columns` column.
+type Section = Extract<
+  CanvasBoardView["sections"][number],
+  { kind: "columns" }
+>["columns"][number]["sections"][number];
+
 // Live status is per (mind × room), never per Mind: a Mind can sit in several active
 // rooms at once (activeRooms is a set), so the pulse COUNTS live sessions rather than
 // naming one room or pinning a single "speaking" verb — per-turn liveness stays in each
@@ -10,6 +17,7 @@ export function buildPresenceBoard(
   rooms: readonly Room[] = [],
 ): CanvasBoardView {
   const live = rooms.filter((r) => r.status === "active").length;
+  const pulse = pulseSection(live);
 
   const assembled =
     minds.length === 0
@@ -19,24 +27,24 @@ export function buildPresenceBoard(
           tone: "brand" as CanvasTone,
         };
 
-  // Cold start: the seats section needs at least one item, so a benchless Chamber is a
-  // single calm line pointing at genesis rather than an empty identity row.
+  // No bench: the seats section needs at least one item. Retiring every Mind while a room
+  // is still live is reachable (retire doesn't gate on active-room membership), so keep
+  // the pulse whenever a session runs — the ribbon must never hide a live room.
   if (minds.length === 0) {
+    const nudge: Section = {
+      kind: "rows",
+      items: [{ glyph: "neutral", text: "Author a Mind in the Roster to assemble the bench." }],
+    };
     return {
       view: "board",
       header: { status: assembled },
-      sections: [
-        {
-          kind: "rows",
-          items: [{ glyph: "neutral", text: "Author a Mind in the Roster to assemble the bench." }],
-        },
-      ],
+      sections: live > 0 ? [pulse, nudge] : [nudge],
     };
   }
 
-  // The bench: one identity seat per Mind, its hue for life (a sixth past the ramp
-  // folds to neutral + name, the same rule the roster dot follows).
-  const seats: CanvasBoardView["sections"][number] = {
+  // One identity seat per Mind, its hue for life (a sixth past the ramp folds to neutral
+  // + name, the same rule the roster dot follows).
+  const seats: Section = {
     kind: "seats",
     items: minds.map((m) => ({
       tone: identityToneForSlot(m.identitySlot),
@@ -45,10 +53,23 @@ export function buildPresenceBoard(
     })),
   };
 
-  // The live pulse: one stat that reads honestly at zero. A COUNT, not a room name —
-  // a Mind may be seated in several concurrent rooms, so the ribbon counts sessions and
-  // leaves "which room" to the Rooms region and each room's own live panel.
-  const pulse: CanvasBoardView["sections"][number] = {
+  return {
+    view: "board",
+    header: { status: assembled },
+    sections: [
+      {
+        kind: "columns",
+        columns: [
+          { weight: 3, sections: [seats] },
+          { weight: 1, sections: [pulse] },
+        ],
+      },
+    ],
+  };
+}
+
+function pulseSection(live: number): Section {
+  return {
     kind: "stats",
     items: [
       live > 0
@@ -64,21 +85,6 @@ export function buildPresenceBoard(
             sub: "on the bench",
             tone: "neutral" as CanvasTone,
           },
-    ],
-  };
-
-  // Side by side: the bench reads left (identity), the pulse right (what is live).
-  return {
-    view: "board",
-    header: { status: assembled },
-    sections: [
-      {
-        kind: "columns",
-        columns: [
-          { weight: 3, sections: [seats] },
-          { weight: 1, sections: [pulse] },
-        ],
-      },
     ],
   };
 }

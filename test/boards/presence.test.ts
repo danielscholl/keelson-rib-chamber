@@ -50,6 +50,18 @@ describe("buildPresenceBoard cold start", () => {
     const rows = board.sections.find((s) => s.kind === "rows");
     expect(rows?.kind === "rows" && rows.items[0]?.text).toContain("assemble the bench");
   });
+
+  test("an empty bench still shows the live pulse when a room is active", () => {
+    // Reachable: retiring every Mind while a room runs (retire doesn't gate on active-room
+    // membership). The ribbon must surface the live room, not hide it behind the nudge.
+    const board = buildPresenceBoard([], [room({ status: "active" })]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(board.header?.status?.label).toBe("No minds yet");
+    const stats = board.sections.find((s) => s.kind === "stats");
+    expect(stats?.kind === "stats" && stats.items[0]?.value).toBe("1 room");
+    // The genesis nudge still rides alongside the pulse.
+    expect(board.sections.some((s) => s.kind === "rows")).toBe(true);
+  });
 });
 
 describe("buildPresenceBoard seated", () => {
