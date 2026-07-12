@@ -160,11 +160,7 @@ describe("buildRoomBoard", () => {
       entry({ from: "a", round: 0, parts: [{ text: "**Q1 — Ship it. Pinned.**\n\nYes." }] }),
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    expect(journeyItems(board)?.map((item) => item.title)).toEqual([
-      "Frame",
-      "Explore",
-      "Decide",
-    ]);
+    expect(journeyItems(board)?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide"]);
   });
 
   test("a stopped room with decisions but no outcome does not reach Record", () => {
@@ -172,11 +168,7 @@ describe("buildRoomBoard", () => {
       entry({ from: "a", round: 0, parts: [{ text: "**Q1 — Ship it. Pinned.**\n\nYes." }] }),
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    expect(journeyItems(board)?.map((item) => item.title)).toEqual([
-      "Frame",
-      "Explore",
-      "Decide",
-    ]);
+    expect(journeyItems(board)?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide"]);
   });
 
   test("one row per entry in the debate column; Voices carries the turn counts", () => {
