@@ -59,15 +59,15 @@ describe("buildLensesIndexBoard empty", () => {
 
     for (const [index, item] of actions.items.entries()) {
       const starter = STARTER_LENSES[index];
-      expect(starter).toBeDefined();
+      if (!starter) throw new Error(`missing starter at ${index}`);
       expect(item.type).toBe("author-lens");
-      expect(item.label).toBe(starter?.label);
+      expect(item.label).toBe(starter.label);
       expect(item.destructive).toBeUndefined();
       expect(item.confirm).toBeUndefined();
       const subject = (item.payload as { subject?: unknown } | undefined)?.subject;
-      expect(subject).toBe(starter?.subject);
+      expect(subject).toBe(starter.subject);
       expect(typeof subject).toBe("string");
-      if (typeof subject === "string" && starter) {
+      if (typeof subject === "string") {
         expect(subject.length).toBeGreaterThan(starter.label.length);
       }
     }
