@@ -404,6 +404,15 @@ describe("deriveRoomName", () => {
     expect(deriveRoomName(long, [])).toBe(`${"x".repeat(60)}…`);
   });
 
+  it("keeps a final word that ends exactly at the cap", () => {
+    // "word " ×11 (55 chars) + "12345" puts the cut right after a complete word.
+    expect(deriveRoomName(`${"word ".repeat(11)}12345 and more beyond`, [])).toBe(
+      `${"word ".repeat(11)}12345…`,
+    );
+    // The cut landing ON trailing whitespace also keeps every complete word.
+    expect(deriveRoomName(`${"y".repeat(59)} tail words`, [])).toBe(`${"y".repeat(59)}…`);
+  });
+
   it("falls back to participants when there is no topic", () => {
     expect(deriveRoomName(undefined, ["Alice"])).toBe("Alice");
     expect(deriveRoomName("", ["Alice", "Bob"])).toBe("Alice & Bob");

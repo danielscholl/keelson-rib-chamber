@@ -36,7 +36,11 @@ export function deriveRoomName(topic: string | undefined, participants: readonly
 
 function truncateRoomTopic(topic: string): string {
   if (topic.length <= ROOM_NAME_TOPIC_CAP) return topic;
-  const capped = topic.slice(0, ROOM_NAME_TOPIC_CAP).trimEnd();
+  const raw = topic.slice(0, ROOM_NAME_TOPIC_CAP);
+  const capped = raw.trimEnd();
+  // Backtrack only when the cut lands inside a token — a cut falling between
+  // words keeps the final complete word.
+  if (/\s$/.test(raw) || /\s/.test(topic.charAt(ROOM_NAME_TOPIC_CAP))) return `${capped}…`;
   const wordBoundary = capped.search(/\s+\S*$/);
   if (wordBoundary > 0) return `${capped.slice(0, wordBoundary)}…`;
   return `${capped}…`;

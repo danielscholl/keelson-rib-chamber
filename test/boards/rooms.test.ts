@@ -133,7 +133,7 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(stopped[0]?.fields?.find((f) => f.label === "turns")?.value).toBe("3/8");
   });
 
-  test("synthesis overflow is labeled while the bar stays capped", () => {
+  test("closing-turn overflow is labeled while the bar stays capped", () => {
     const [card] = cards(
       buildRoomsIndexBoard([room({ status: "done", turnIndex: 9, turnBudget: 8 })]),
     );
@@ -142,7 +142,7 @@ describe("buildRoomsIndexBoard closed sessions", () => {
         .success,
     ).toBe(true);
     expect(card?.bar).toEqual({ value: 8, total: 8 });
-    expect(card?.fields?.find((f) => f.label === "turns")?.value).toBe("8/8 + synthesis");
+    expect(card?.fields?.find((f) => f.label === "turns")?.value).toBe("8/8 + closing");
   });
 
   test("the shape field names the strategy and its facilitator", () => {

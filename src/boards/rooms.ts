@@ -80,9 +80,12 @@ function personFor(slug: string, bySlug: ReadonlyMap<string, Mind>): CanvasPerso
 function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly LensRecord[]) {
   const tone = statusTone(room.status);
   const cappedTurnIndex = Math.min(room.turnIndex, room.turnBudget);
+  // Overflow means closing turns ran past the budget (synthesis and/or the
+  // grounding fidelity pass — a stop mid-fidelity persists overflow with no
+  // synthesis), so the label stays generic rather than naming synthesis.
   const turnsLabel =
     room.turnIndex > room.turnBudget
-      ? `${room.turnBudget}/${room.turnBudget} + synthesis`
+      ? `${room.turnBudget}/${room.turnBudget} + closing`
       : `${room.turnIndex}/${room.turnBudget}`;
   const card = {
     title: room.name,
