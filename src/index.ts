@@ -2172,6 +2172,8 @@ const rib: Rib = {
         return enterMindAction(action);
       case "author-archetype":
         return authorArchetypeAction(action);
+      case "author-lens":
+        return authorLensAction(action);
       case "describe-own":
         return describeOwnAction(action);
       case "dismiss-genesis":
@@ -3524,6 +3526,23 @@ async function authorArchetypeAction(action: RibAction): Promise<RibActionResult
         role: starter.role,
         voice: starter.voice,
       },
+    },
+  };
+}
+
+async function authorLensAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const subject = asNonEmptyString(payload.subject);
+  if (!subject) return { ok: false, error: "author-lens requires payload { subject }" };
+  return {
+    ok: true,
+    // ribClientEffectSchema wants args as a string map (the slash-command path
+    // takes a bare string — different schema); ARGUMENTS is the $ARGUMENTS binding.
+    data: {
+      effect: "run-workflow",
+      workflow: "chamber-lens",
+      stay: true,
+      args: { ARGUMENTS: subject },
     },
   };
 }

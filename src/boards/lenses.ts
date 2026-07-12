@@ -1,7 +1,39 @@
-import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { identityToneForSlot, type Mind } from "../types.ts";
+
+export const STARTER_LENSES = [
+  {
+    label: "Architecture",
+    subject: "Architecture — how the pieces fit together, and where the seams strain",
+  },
+  {
+    label: "Risk",
+    subject: "Risk — what could break next, ranked by blast radius and likelihood",
+  },
+  {
+    label: "Cost",
+    subject: "Cost — where the money and tokens go, and what is drifting",
+  },
+  {
+    label: "Customer",
+    subject: "Customer — what users feel first, friction before features",
+  },
+  {
+    label: "Security",
+    subject: "Security — exposed surfaces, trust boundaries, and doors left open",
+  },
+] as const satisfies readonly { label: string; subject: string }[];
+
+function starterLensAction(starter: (typeof STARTER_LENSES)[number]): CanvasActionItem {
+  return {
+    type: "author-lens",
+    label: starter.label,
+    glyph: "❖",
+    payload: { subject: starter.subject },
+  };
+}
 
 // A lens's dot carries the identity of the Mind that MAINTAINS it (keelson#390),
 // never a hash across the status ramp — a lens could otherwise wear error-red for no
@@ -32,7 +64,7 @@ function dotFor(maintainingMind: string | undefined, tones: Map<string, CanvasTo
 // and a destructive Retire. The provenance is fail-soft: a field the agent omitted is
 // omitted from the card, so an emit of just { id, board } yields the plain title +
 // freshness card (and a neutral dot). `minds` resolves the maintainer's tone; absent
-// (a standalone call) folds every dot to neutral. No lenses renders a single rows hint.
+// (a standalone call) folds every dot to neutral. No lenses renders starter chips.
 // Validated against canvasViewSchema in tests; the producer never parses.
 export function buildLensesIndexBoard(
   lenses: readonly LensRecord[],
@@ -116,18 +148,18 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
   };
 }
 
-// The empty/cold state: a single rows hint, so the region is a valid board even
-// with no lenses yet (a fresh Chamber, or every lens retired).
+// Teach by example while keeping the empty region a valid board.
 function emptySections(): CanvasBoardView["sections"] {
   return [
     {
+      kind: "actions",
+      title: "Author a lens on…",
+      wrap: true,
+      items: STARTER_LENSES.map(starterLensAction),
+    },
+    {
       kind: "rows",
-      items: [
-        {
-          glyph: "neutral",
-          text: "No lenses yet — a Mind authors one with /workflow run chamber-lens <subject>.",
-        },
-      ],
+      items: [{ glyph: "neutral", text: "a standing way of seeing — a Mind keeps it fresh." }],
     },
   ];
 }

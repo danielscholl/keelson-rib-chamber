@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type CanvasTone, canvasViewSchema } from "@keelson/shared";
-import { buildLensesIndexBoard } from "../../src/boards/lenses.ts";
+import { buildLensesIndexBoard, STARTER_LENSES } from "../../src/boards/lenses.ts";
 import type { LensRecord } from "../../src/lens-store.ts";
 import type { Mind } from "../../src/types.ts";
 
@@ -47,14 +47,37 @@ describe("buildLensesIndexBoard empty", () => {
     expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
   });
 
-  test("the empty state is a single rows hint pointing at the chamber-lens workflow", () => {
+  test("the empty state teaches lens authoring with starter brief chips", () => {
     const board = buildLensesIndexBoard([]);
-    const first = board.sections[0];
-    expect(first?.kind).toBe("rows");
-    if (first?.kind === "rows") {
-      expect(first.items).toHaveLength(1);
-      expect(first.items[0]?.text).toContain("chamber-lens");
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+
+    const actions = board.sections.find((s) => s.kind === "actions");
+    expect(actions?.kind).toBe("actions");
+    if (actions?.kind !== "actions") throw new Error("no actions section");
+    expect(actions.wrap).toBe(true);
+    expect(actions.items).toHaveLength(STARTER_LENSES.length);
+
+    for (const [index, item] of actions.items.entries()) {
+      const starter = STARTER_LENSES[index];
+      if (!starter) throw new Error(`missing starter at ${index}`);
+      expect(item.type).toBe("author-lens");
+      expect(item.label).toBe(starter.label);
+      expect(item.destructive).toBeUndefined();
+      expect(item.confirm).toBeUndefined();
+      const subject = (item.payload as { subject?: unknown } | undefined)?.subject;
+      expect(subject).toBe(starter.subject);
+      expect(typeof subject).toBe("string");
+      if (typeof subject === "string") {
+        expect(subject.length).toBeGreaterThan(starter.label.length);
+      }
     }
+
+    const caption = board.sections.find((s) => s.kind === "rows");
+    expect(caption?.kind).toBe("rows");
+    if (caption?.kind !== "rows") throw new Error("no caption section");
+    expect(caption.items).toHaveLength(1);
+    expect(caption.items[0]?.text).toContain("standing way of seeing");
+    expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
   });
 });
 
