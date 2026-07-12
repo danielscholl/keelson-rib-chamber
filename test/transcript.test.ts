@@ -455,4 +455,17 @@ describe("buildFidelityPrompt", () => {
     expect(prompt).toContain("different vendor");
     expect(prompt).toContain("Divergences:");
   });
+
+  test("renders the full discussion but caps a very large room at a bounded size", () => {
+    const small = [entry({ from: "a", parts: [{ text: "resolved criterion 1 early" }] })];
+    expect(buildFidelityPrompt({ grounding: GROUNDING, transcript: small })).toContain(
+      "resolved criterion 1 early", // a normal room's early turns are included, not windowed away
+    );
+    const huge = Array.from({ length: 100 }, (_, i) =>
+      entry({ from: "a", parts: [{ text: `turn ${i} ${"x".repeat(1000)}` }] }),
+    );
+    const prompt = buildFidelityPrompt({ grounding: GROUNDING, transcript: huge });
+    expect(prompt).toContain("earlier turns omitted"); // ~100k chars → capped with a marker
+    expect(prompt.length).toBeLessThan(30_000);
+  });
 });

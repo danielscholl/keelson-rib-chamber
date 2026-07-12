@@ -23,6 +23,12 @@ export function renderGrounding(grounding: Brief | undefined): string | undefine
 // caps rooms that approach the budget, not just hypothetical larger ones.
 export const TRANSCRIPT_WINDOW_TURNS = 40;
 
+// Hard character cap on the discussion fed to the pre-close fidelity check. It reads the
+// whole room (not the turn window) to catch an early-resolved criterion, but director
+// injects and reply lengths are unbounded, so the render is capped to keep the paid
+// close-time prompt from exhausting context — roughly 6k tokens.
+export const MAX_FIDELITY_CONTEXT_CHARS = 24_000;
+
 // Render a transcript as the prompt context fed to the next speaker — oldest to
 // newest, one "from: text" block per turn, bounded to the last TRANSCRIPT_WINDOW_TURNS
 // with a one-line elision marker when truncated. A trailing control directive (a
@@ -203,10 +209,15 @@ export function buildFidelityPrompt(input: {
       : "The room was convened to satisfy this brief:",
   );
   parts.push(criteria.map((c, i) => `${i + 1}. ${c}`).join("\n"));
-  // The whole room, not the windowed view every other prompt uses: a criterion resolved
-  // in an early turn (beyond the last window) must not read as a divergence. Bounded by
-  // MAX_ROOM_TURN_BUDGET, so this stays a single close-time turn.
-  const context = renderTranscript(input.transcript, input.transcript.length);
+  // The whole room, not the windowed view every other prompt uses, so a criterion
+  // resolved in an early turn does not read as a divergence — but hard-capped by
+  // characters (director injects and reply lengths are unbounded, so a turn count would
+  // not bound the prompt), keeping the most recent text behind an elision marker.
+  const full = renderTranscript(input.transcript, input.transcript.length);
+  const context =
+    full.length > MAX_FIDELITY_CONTEXT_CHARS
+      ? `…(earlier turns omitted)\n\n${full.slice(-MAX_FIDELITY_CONTEXT_CHARS)}`
+      : full;
   if (context.length > 0) parts.push(`The discussion so far:\n\n${context}`);
   parts.push(
     "You are the fidelity checker for this room, running on a different vendor than the Mind that will write the closing summary. For EACH acceptance criterion above, judge whether the emerging outcome MEETS, PARTIALLY meets, or DIVERGES from it — one line per criterion, quoting the criterion. Then, under a final `Divergences:` line, list every gap the closing summary must resolve (or “None — all criteria met”). Be concise and concrete; do not rewrite the outcome or emit any routing JSON.",
