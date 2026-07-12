@@ -64,7 +64,7 @@ function dotFor(maintainingMind: string | undefined, tones: Map<string, CanvasTo
 // and a destructive Retire. The provenance is fail-soft: a field the agent omitted is
 // omitted from the card, so an emit of just { id, board } yields the plain title +
 // freshness card (and a neutral dot). `minds` resolves the maintainer's tone; absent
-// (a standalone call) folds every dot to neutral. No lenses renders a single rows hint.
+// (a standalone call) folds every dot to neutral. No lenses renders starter chips.
 // Validated against canvasViewSchema in tests; the producer never parses.
 export function buildLensesIndexBoard(
   lenses: readonly LensRecord[],
@@ -148,18 +148,18 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
   };
 }
 
-// The empty/cold state: a single rows hint, so the region is a valid board even
-// with no lenses yet (a fresh Chamber, or every lens retired).
+// Teach by example while keeping the empty region a valid board.
 function emptySections(): CanvasBoardView["sections"] {
   return [
     {
+      kind: "actions",
+      title: "Author a lens on…",
+      wrap: true,
+      items: STARTER_LENSES.map(starterLensAction),
+    },
+    {
       kind: "rows",
-      items: [
-        {
-          glyph: "neutral",
-          text: "No lenses yet — a Mind authors one with /workflow run chamber-lens <subject>.",
-        },
-      ],
+      items: [{ glyph: "neutral", text: "a standing way of seeing — a Mind keeps it fresh." }],
     },
   ];
 }
