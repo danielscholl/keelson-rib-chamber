@@ -2676,8 +2676,11 @@ export function normalizeGrounding(
 ): Brief | undefined {
   if (!input) return undefined;
   const sourceUrl = input.sourceUrl?.trim().slice(0, MAX_GROUNDING_URL_LEN) || undefined;
+  // Collapse internal whitespace so each criterion is a single line: the convene form is
+  // one-per-line and the restart payload rejoins with newlines, so an embedded newline
+  // would otherwise split one criterion into two on the round trip.
   const criteria = (input.criteria ?? [])
-    .map((c) => c.trim().slice(0, MAX_CRITERION_LEN))
+    .map((c) => c.trim().replace(/\s+/g, " ").slice(0, MAX_CRITERION_LEN))
     .filter(Boolean)
     .slice(0, MAX_GROUNDING_CRITERIA);
   if (!sourceUrl && criteria.length === 0) return undefined;
@@ -3609,8 +3612,8 @@ const roomStartSchema = z.object({
   // them before the closing synthesis. Omit for a room with no grounding.
   grounding: z
     .object({
-      sourceUrl: z.string().optional(),
-      criteria: z.array(z.string()).optional(),
+      sourceUrl: z.string().max(MAX_GROUNDING_URL_LEN).optional(),
+      criteria: z.array(z.string().max(MAX_CRITERION_LEN)).max(MAX_GROUNDING_CRITERIA).optional(),
     })
     .optional(),
   // Optional: target the room at a keelson project (turns run at its rootPath).
@@ -4599,7 +4602,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         // human sees the true ceiling, not just the base budget.
         const groundingNote =
           grounding && grounding.criteria.length > 0 && strategy !== "review"
-            ? ` It carries a grounding brief, so a cross-vendor fidelity turn and the closing synthesis add up to 2 more paid turns (up to ${turnBudget + 2} total).`
+            ? ` It carries a grounding brief: the closing synthesis, plus a cross-vendor fidelity turn when the Minds span two providers, add up to 2 more paid turns (up to ${turnBudget + 2} total).`
             : "";
         if (!confirm) {
           emitResult(

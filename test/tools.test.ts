@@ -568,6 +568,18 @@ describe("chamber room-control chat tools", () => {
     expect(t.out()).toContain("up to 4 total");
   });
 
+  it("rejects an over-limit grounding brief instead of silently truncating it", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      {
+        participants: ["alice", "bob"],
+        grounding: { criteria: Array.from({ length: 25 }, (_, i) => `c${i}`) },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+  });
+
   it("rejects a start with fewer than two participants", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute({ participants: ["alice"], confirm: true }, t.ctx);

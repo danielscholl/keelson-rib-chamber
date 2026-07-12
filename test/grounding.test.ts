@@ -14,6 +14,11 @@ describe("normalizeGrounding", () => {
     expect(normalizeGrounding({ sourceUrl: "   " })).toBeUndefined();
   });
 
+  test("collapses internal whitespace so a criterion stays single-line (lossless restart join)", () => {
+    const g = normalizeGrounding({ criteria: ["first line\ncontinuation", "  a\t b "] });
+    expect(g?.criteria).toEqual(["first line continuation", "a b"]);
+  });
+
   test("bounds an oversized brief: caps the criteria count and each length", () => {
     // The brief is re-serialized into every prompt, so an unbounded one would multiply
     // billed input — normalization is the choke point that caps it.
