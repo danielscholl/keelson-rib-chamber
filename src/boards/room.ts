@@ -272,6 +272,13 @@ function taskTone(status: LedgerTask["status"]): CanvasTone {
 // a fresh room. Each control carries the room slug so onAction targets it.
 function roomControls(room: Room): CanvasBoardView["sections"][number] {
   if (room.status !== "active") {
+    // Carry the grounding brief (flat, the shape roomStartAction parses) so every
+    // restart reruns with the same acceptance criteria rather than an ungrounded room.
+    const groundingFlat: Record<string, string> = {};
+    if (room.grounding?.sourceUrl) groundingFlat.groundingUrl = room.grounding.sourceUrl;
+    if (room.grounding && room.grounding.criteria.length > 0) {
+      groundingFlat.criteria = room.grounding.criteria.join("\n");
+    }
     return {
       kind: "actions",
       title: "Controls",
@@ -293,6 +300,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
             ...flatFromRoomConfig(room.config),
           },
         },
@@ -312,6 +320,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
           },
           fields: [
             {
@@ -336,6 +345,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
           },
         },
         {
@@ -354,6 +364,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
           },
           fields: [
             {

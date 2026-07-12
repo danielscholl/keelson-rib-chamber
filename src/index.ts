@@ -2659,16 +2659,27 @@ function parseCriteriaLines(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+// Bounds on a grounding brief. It is re-serialized into every turn, fidelity, and
+// synthesis prompt, so an unbounded brief would multiply billed input and can exhaust
+// context — cap the count and lengths at the normalization choke point (both entry
+// points pass through here) rather than trust the caller.
+const MAX_GROUNDING_CRITERIA = 20;
+const MAX_CRITERION_LEN = 500;
+const MAX_GROUNDING_URL_LEN = 500;
+
 // Normalize a room grounding brief from either entry point (the chamber_room_start
 // tool's structured input or the convene form's parsed fields) into the shared Brief
 // shape, or undefined when it carries neither a source nor any criterion — so a room
 // convened without grounding is byte-for-byte unchanged.
-function normalizeGrounding(
+export function normalizeGrounding(
   input: { sourceUrl?: string; criteria?: readonly string[] } | undefined,
 ): Brief | undefined {
   if (!input) return undefined;
-  const sourceUrl = input.sourceUrl?.trim() || undefined;
-  const criteria = (input.criteria ?? []).map((c) => c.trim()).filter(Boolean);
+  const sourceUrl = input.sourceUrl?.trim().slice(0, MAX_GROUNDING_URL_LEN) || undefined;
+  const criteria = (input.criteria ?? [])
+    .map((c) => c.trim().slice(0, MAX_CRITERION_LEN))
+    .filter(Boolean)
+    .slice(0, MAX_GROUNDING_CRITERIA);
   if (!sourceUrl && criteria.length === 0) return undefined;
   return { ...(sourceUrl ? { sourceUrl } : {}), criteria };
 }
@@ -4575,10 +4586,17 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const codingNote = coding
           ? " with the coding tier ON (Minds that declare `code`/`read` can run Bash/Edit/Write/Read, confined to the project repo)"
           : "";
+        // Disclose the extra paid turns a grounded design-bearing room spends at close
+        // (a cross-vendor fidelity turn plus the closing synthesis) so the approving
+        // human sees the true ceiling, not just the base budget.
+        const groundingNote =
+          grounding && grounding.criteria.length > 0 && strategy !== "review"
+            ? ` It carries a grounding brief, so a cross-vendor fidelity turn and the closing synthesis add up to 2 more paid turns (up to ${turnBudget + 2} total).`
+            : "";
         if (!confirm) {
           emitResult(
             ctx,
-            `Would open a room with ${who}${topicNote}${modeNote}${projectNote}${codingNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
+            `Would open a room with ${who}${topicNote}${modeNote}${projectNote}${codingNote} for ${turnBudget} turns (each turn is a paid agent call).${groundingNote} Re-call chamber_room_start with confirm:true once the user approves.`,
           );
           return;
         }

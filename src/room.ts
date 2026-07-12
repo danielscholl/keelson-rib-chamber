@@ -149,11 +149,12 @@ export interface RoomDriver {
   isDisposed(): boolean;
 }
 
-// Pick the pre-close fidelity checker: a participant Mind other than the synthesizer,
-// preferring one pinned to a DIFFERENT provider (the cross-vendor check is the point,
-// as in the review strategy) and otherwise the last-listed participant. Undefined when
-// the synthesizer is the only participant, so a degenerate room skips the check rather
-// than auditing its own closer. Pure — the driver resolves the returned slug to a Mind.
+// Pick the pre-close fidelity checker: a participant Mind on a genuinely DIFFERENT,
+// pinned provider than the synthesizer (the cross-vendor check is the point, as in the
+// review strategy). A real cross-vendor read needs BOTH providers pinned and differing —
+// so an unpinned synthesizer, or no differing-provider participant, yields undefined and
+// the driver skips the check rather than run a same-vendor (or unconfirmable) auditor
+// whose prompt would falsely claim a second vendor. Pure — the driver resolves the slug.
 export function pickFidelityChecker(
   room: Room,
   synthSlug: MindSlug | undefined,
@@ -161,12 +162,12 @@ export function pickFidelityChecker(
 ): MindSlug | undefined {
   const bySlug = new Map(roster.map((m) => [m.slug, m]));
   const synthProvider = synthSlug ? bySlug.get(synthSlug)?.provider : undefined;
-  const candidates = room.participants.filter((p) => p !== synthSlug);
-  const crossVendor = candidates.find((p) => {
+  if (!synthProvider) return undefined;
+  return room.participants.find((p) => {
+    if (p === synthSlug) return false;
     const provider = bySlug.get(p)?.provider;
     return provider !== undefined && provider !== synthProvider;
   });
-  return crossVendor ?? candidates[candidates.length - 1];
 }
 
 export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
@@ -832,6 +833,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       const artifact = authorEntry?.parts.map((p) => p.text).join("\n") ?? "";
       return buildReviewPrompt({
         ...(room.topic ? { contract: room.topic } : {}),
+        ...(room.grounding ? { grounding: room.grounding } : {}),
         artifact,
         ...(authorSlug ? { author: authorSlug } : {}),
         ...(directionInjection ? { directionInjection } : {}),
@@ -1219,10 +1221,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         // An operator stop landed during the check — it is recorded; close now without
         // burning a second paid turn on synthesis.
         if (fidelity.closed) return fidelity.active;
+        // A stop can also land in the gap AFTER the fidelity turn but before synthesis;
+        // re-check here (the pre-fidelity guard above no longer covers this window) so a
+        // stopped room skips the synthesis turn rather than appending a phantom,
+        // never-run entry. The stop path already recorded the close.
+        if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
         const cursor = room.turnIndex + fidelity.turns;
         const prompt = buildSynthesisPrompt({
           ...(room.topic ? { topic: room.topic } : {}),
           ...(room.grounding ? { grounding: room.grounding } : {}),
+          fidelityChecked: fidelity.turns > 0,
           transcript: await loadCachedTranscript(room.slug),
         });
         const turn = await runOneTurn(room, synth, prompt, controller);

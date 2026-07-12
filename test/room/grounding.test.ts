@@ -121,6 +121,33 @@ describe("room driver — grounding + pre-close fidelity check", () => {
     expect(h.turns.requests.at(-1)?.prompt).toContain("https://example.test/spec");
   });
 
+  test("skips the fidelity turn when no participant is cross-vendor to the synthesizer", async () => {
+    // `a` and `c` share provider px; the synthesizer falls back to `a`, and no
+    // participant is on a different pinned provider — so an honest cross-vendor check
+    // is impossible. The room closes with synthesis alone, and the synthesis prompt
+    // does NOT claim a check ran.
+    const h = harness([{ text: "a-opens" }, { text: "closing" }]);
+    await h.driver.start({
+      slug: "sv",
+      name: "sv",
+      strategy: "sequential" as RoomStrategyName,
+      participants: ["a", "c"],
+      turnBudget: 1,
+      grounding: GROUNDING,
+    });
+
+    await drain(h.driver, "sv");
+
+    const transcript = await h.store.loadTranscript("sv");
+    expect(transcript.map((e) => e.from)).toEqual(["a", "a"]); // author + synthesis, no fidelity
+    const synthReq = h.turns.requests.at(-1);
+    expect(synthReq?.prompt).not.toContain("independent fidelity checker");
+    expect(synthReq?.prompt).not.toContain("cross-vendor fidelity check");
+    // Grounding criteria still surface, and the synthesizer still records their status.
+    expect(synthReq?.prompt).toContain("Grounding brief:");
+    expect(synthReq?.prompt).toContain("### Acceptance criteria");
+  });
+
   test("an operator stop during the fidelity check closes the room without a synthesis turn", async () => {
     const { store } = makeFakeStore();
     const pub = makeFakePublisher();

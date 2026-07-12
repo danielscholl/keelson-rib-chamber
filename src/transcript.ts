@@ -151,14 +151,15 @@ export function buildOpenFloorPrompt(input: {
 }
 
 // The closing synthesis prompt: the discussion so far plus an instruction to sum
-// up. No routing JSON — synthesis is the room's last act. When the room carries
-// grounding criteria the transcript above already holds an independent cross-vendor
-// fidelity check, so the synthesizer is told to fold its divergences into the closing
-// document: an `### Acceptance criteria` section (whose bullet count the outcome
-// receipt reads) and a document-only `### Fidelity` section. Always non-empty.
+// up. No routing JSON — synthesis is the room's last act. With grounding criteria the
+// synthesizer is told to write an `### Acceptance criteria` section (one Markdown
+// bullet per criterion, so the outcome receipt's bullet count matches); when a
+// cross-vendor fidelity check actually ran (`fidelityChecked`), it also folds the
+// check's divergences into a document-only `### Fidelity` section. Always non-empty.
 export function buildSynthesisPrompt(input: {
   topic?: string;
   grounding?: Brief;
+  fidelityChecked?: boolean;
   transcript: readonly TurnEntry[];
 }): string {
   const parts = promptPreamble({
@@ -167,10 +168,17 @@ export function buildSynthesisPrompt(input: {
     transcript: input.transcript,
   });
   const hasCriteria = input.grounding?.criteria.some((c) => c.trim().length > 0) ?? false;
+  const base =
+    "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation.";
+  const criteriaSection =
+    " Include an `### Acceptance criteria` section with exactly one Markdown bullet (`- `) per criterion, in the brief's order, each restating the criterion and whether the outcome met, partially met, or diverged from it.";
+  const foldFidelity =
+    " An independent cross-vendor fidelity check against those criteria is in the discussion above — fold its findings in, and add an `### Fidelity` section listing any divergences the outcome does not yet resolve (or “No divergences — all criteria met”).";
+  const tail = " Speak in your own voice. Do not emit any routing JSON.";
   parts.push(
     hasCriteria
-      ? "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. An independent cross-vendor fidelity check against the acceptance criteria is in the discussion above: fold its findings in. Include an `### Acceptance criteria` section stating each criterion's status, and an `### Fidelity` section listing any divergences the outcome does not yet resolve (or “No divergences — all criteria met”). Speak in your own voice. Do not emit any routing JSON."
-      : "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. Speak in your own voice. Do not emit any routing JSON.",
+      ? base + criteriaSection + (input.fidelityChecked ? foldFidelity : "") + tail
+      : base + tail,
   );
   return parts.join("\n\n");
 }
@@ -211,6 +219,7 @@ export function buildFidelityPrompt(input: {
 // the files the author changed — read/run the real change, don't grade the prose.
 export function buildReviewPrompt(input: {
   contract?: string;
+  grounding?: Brief;
   artifact: string;
   author?: MindSlug;
   directionInjection?: string;
@@ -219,6 +228,8 @@ export function buildReviewPrompt(input: {
   const parts: string[] = [];
   const contract = input.contract?.trim();
   if (contract) parts.push(`Contract / acceptance criteria:\n\n${contract}`);
+  const grounding = renderGrounding(input.grounding);
+  if (grounding) parts.push(grounding);
   const who = input.author ? ` from ${input.author}` : "";
   const artifact = input.artifact.trim();
   if (input.coding) {

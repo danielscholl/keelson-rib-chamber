@@ -404,17 +404,44 @@ describe("grounding in turn prompts", () => {
 });
 
 describe("buildSynthesisPrompt grounding fold", () => {
-  test("instructs folding the fidelity check in when criteria are present", () => {
-    const prompt = buildSynthesisPrompt({ grounding: GROUNDING, transcript: [] });
+  test("folds the fidelity check in when one actually ran (fidelityChecked)", () => {
+    const prompt = buildSynthesisPrompt({
+      grounding: GROUNDING,
+      fidelityChecked: true,
+      transcript: [],
+    });
     expect(prompt).toContain("cross-vendor fidelity check");
     expect(prompt).toContain("### Acceptance criteria");
+    expect(prompt).toContain("one Markdown bullet");
     expect(prompt).toContain("### Fidelity");
+  });
+
+  test("with criteria but no check, records per-criterion status without claiming a check", () => {
+    const prompt = buildSynthesisPrompt({ grounding: GROUNDING, transcript: [] });
+    expect(prompt).toContain("### Acceptance criteria");
+    expect(prompt).not.toContain("cross-vendor fidelity check");
+    expect(prompt).not.toContain("### Fidelity");
   });
 
   test("keeps the plain closing instruction without grounding criteria", () => {
     const prompt = buildSynthesisPrompt({ topic: "Decide", transcript: [] });
     expect(prompt).toContain("Synthesize the discussion");
     expect(prompt).not.toContain("fidelity check");
+    expect(prompt).not.toContain("### Acceptance criteria");
+  });
+});
+
+describe("buildReviewPrompt grounding", () => {
+  test("surfaces the grounding brief to the reviewer alongside the contract", () => {
+    const prompt = buildReviewPrompt({
+      contract: "Ship it",
+      grounding: GROUNDING,
+      artifact: "the change",
+      author: "ada",
+    });
+    expect(prompt).toContain("Grounding brief:");
+    expect(prompt).toContain("1. Rooms can carry grounding");
+    expect(prompt).toContain("You are the reviewer");
   });
 });
 
