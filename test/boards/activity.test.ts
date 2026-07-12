@@ -74,7 +74,7 @@ describe("recordSection feed", () => {
       "New Mind · Ada",
     ]);
     expect(section.items.map((i) => i.icon)).toEqual(["❖", "▦", "✦"]);
-    expect(section.items.map((i) => i.glyph)).toEqual(["accent", "info", "brand"]);
+    expect(section.items.map((i) => i.glyph)).toEqual(["accent", "info", "neutral"]);
     expect(section.items.map((i) => i.trailing)).toEqual([
       "30 minutes ago",
       "2 hours ago",
@@ -89,6 +89,15 @@ describe("recordSection feed", () => {
     const stopped = recordSection([], [room({ status: "stopped" })], [], NOW).items[0];
     expect(stopped?.glyph).toBe("neutral");
     expect(stopped?.text).toContain("· stopped");
+  });
+
+  test("a genesis row follows the Mind identity slot", () => {
+    const section = recordSection([mind({ identitySlot: 2 })], [], [], NOW);
+    expect(canvasViewSchema.safeParse(wrap(section)).success).toBe(true);
+    expect(section.items[0]).toMatchObject({
+      glyph: "id-teal",
+      text: "New Mind · Ada",
+    });
   });
 
   test("a fresh event reads 'just now', not 'just now ago'", () => {
