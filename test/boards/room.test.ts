@@ -328,7 +328,6 @@ describe("buildRoomBoard", () => {
         "Start Open floor",
         "Start Delegate",
       ]);
-      // Start Delegate collects the manager via a field (a Mind not in the room).
       const magentic = actions.items.find((i) => i.label === "Start Delegate");
       expect(magentic?.fields?.map((f) => f.name)).toEqual(["manager"]);
       expect(magentic?.payload).toMatchObject({ strategy: "magentic" });
