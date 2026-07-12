@@ -45,6 +45,22 @@ export async function readPendingGenesis(
   }
 }
 
+// The stall window past which a pending genesis is presumed wedged (the workflow
+// failed without clearing the marker), and the skew tolerance past which a FUTURE
+// startedAt (a clock rollback mid-genesis) is treated as wedged too — a clock we
+// can't count forward from must present the Dismiss, not tick indefinitely.
+export const GENESIS_STALL_MS = 180_000;
+export const FUTURE_SKEW_MS = 30_000;
+
+// The one elapsed rule the boot card and the boot-time tick reconcile both read, so
+// the card's stalled flip and the ticker's budget can never disagree: unparseable or
+// future-beyond-skew stamps count as fully stalled.
+export function pendingElapsedMs(marker: PendingGenesis, now: number): number {
+  const started = Date.parse(marker.startedAt);
+  if (!Number.isFinite(started) || started - now > FUTURE_SKEW_MS) return GENESIS_STALL_MS;
+  return Math.max(0, now - started);
+}
+
 // Monotonic per-write suffix so two overlapping writes never share a temp path
 // (watermark-store / room-draft do the same) — the rename stays atomic under a race.
 let writeSeq = 0;

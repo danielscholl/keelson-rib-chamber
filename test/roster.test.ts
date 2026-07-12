@@ -58,15 +58,16 @@ describe("chamber-roster producer (Phase 1)", () => {
 });
 
 describe("Chamber surface (Phase 1)", () => {
-  test("the Presence ribbon leads the header; the roster follows in the first row", () => {
+  test("the Chamber panel leads the header; no roster row remains (rib#214)", () => {
     const layout = rib.surfaces?.[0]?.layout;
-    // Presence is the always-on ribbon in the header — in-process, no workflow binding.
+    // The merged bench is the header panel — in-process, no workflow binding.
     expect(layout?.header?.key).toBe(PRESENCE_KEY);
     expect(layout?.header?.workflow).toBeUndefined();
-    // The roster moved into the first row, still bound to its collector.
-    const roster = layout?.rows[0]?.columns[0];
-    expect(roster?.key).toBe(ROSTER_KEY);
-    expect(roster?.workflow).toBe("chamber-roster");
+    // The Roster region folded in; the standalone roster view/workflow survive
+    // off-surface, so no row binds ROSTER_KEY.
+    const keys = layout?.rows.flatMap((r) => r.columns.map((c) => c.key)) ?? [];
+    expect(keys).not.toContain(ROSTER_KEY);
+    expect(layout?.rows[0]?.columns[0]?.key).toBe("rib:chamber:convene");
     expect(ribSurfaceDescriptorSchema.safeParse(rib.surfaces?.[0]).success).toBe(true);
   });
 

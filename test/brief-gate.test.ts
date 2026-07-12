@@ -502,7 +502,10 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect((await readWatermark(home)).briefPromoted).toBe(false);
   });
 
-  test("a promote refreshes the roster pulse so its 'For you' tracks briefPromoted", async () => {
+  test("a promote runs no roster workflow — the banner itself is the on-surface signal", async () => {
+    // The merged Chamber panel carries no "for you" pulse (the Briefing banner sits
+    // directly beneath it), so a promote must not spend a collector subprocess on the
+    // off-surface roster view.
     await seedMinds();
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
@@ -518,8 +521,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await evaluateBriefGate();
 
     expect((await readWatermark(home)).briefPromoted).toBe(true);
-    // The just-set briefPromoted must reach the roster pulse without the 120s cadence.
-    expect(refreshed).toContain("chamber-roster");
+    expect(refreshed).not.toContain("chamber-roster");
   });
 
   test("a gate turn that settles after dispose() does not publish or advance the watermark", async () => {

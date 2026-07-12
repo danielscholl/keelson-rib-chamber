@@ -32,7 +32,7 @@ import {
 import { listAgents, resolveAgent } from "./agents.ts";
 import { recordSection } from "./boards/activity.ts";
 import { buildConveneBoard, type ConveneProject } from "./boards/convene.ts";
-import { buildPresenceBoard } from "./boards/presence.ts";
+import { buildChamberBoard } from "./boards/presence.ts";
 import { buildRoomBoard } from "./boards/room.ts";
 import {
   capabilityVocabulary,
@@ -106,7 +106,11 @@ import {
 } from "./paths.ts";
 import {
   clearPendingGenesis,
+  FUTURE_SKEW_MS,
+  GENESIS_STALL_MS,
   type PendingGenesis,
+  pendingElapsedMs,
+  readPendingGenesis,
   writePendingGenesis,
 } from "./pending-genesis.ts";
 import type { RoomStore } from "./ports.ts";
@@ -208,18 +212,23 @@ async function refreshStandingPanels(): Promise<void> {
 }
 
 // The genesis boot-card ticker. While a genesis runs (a pending-genesis marker on disk),
-// the rib re-publishes the roster every GENESIS_TICK_MS so the boot card's elapsed count
-// advances and the live-region head dot pulses (keelson#353 — streaming is derived from
-// frame cadence). Ticking is bounded to the stall window: a wedged genesis stops ticking
-// and the collector shows the stalled card + Dismiss. All timers unref so they never hold
-// the process open, and stopGenesisTick clears them on emit / dismiss / dispose.
+// the rib recomposes the Chamber panel every GENESIS_TICK_MS so the boot card's elapsed
+// count advances and the live head dot pulses (keelson#353 — streaming is derived from
+// frame cadence). An in-process recompose, not a chamber-roster workflow run — the panel
+// reads the marker itself, so ticking must not spawn a collector subprocess ~72 times per
+// genesis. Ticking is bounded to the stall window: a wedged genesis stops ticking and the
+// panel shows the stalled card + Dismiss. All timers unref so they never hold the process
+// open, and stopGenesisTick clears them on emit / dismiss / dispose.
 const GENESIS_TICK_MS = 2_500;
-const GENESIS_STALL_MS = 180_000;
 let genesisTicker: ReturnType<typeof setInterval> | undefined;
 let genesisTickerDeadline: ReturnType<typeof setTimeout> | undefined;
+// Bumped by every stopGenesisTick (emit / dismiss / dispose / a fresh start), so an
+// async continuation that read the marker before the stop can prove its read is
+// still current before starting the ticker.
+let genesisTickEpoch = 0;
 
-function tickRoster(): void {
-  void refreshWorkflow?.("chamber-roster")?.catch(() => {});
+function tickChamber(): void {
+  refreshPresence();
 }
 
 // The rooms-index ticker. The index card's bar reads room.turnIndex/turnBudget,
@@ -245,20 +254,24 @@ function stopRoomsTick(): void {
   roomsTicker = undefined;
 }
 
-function startGenesisTick(): void {
+// `deadlineMs` bounds the tick to the stall budget REMAINING — a fresh genesis gets
+// the full window; the boot reconcile passes what's left on the marker's own clock so
+// a near-stalled marker doesn't earn three extra minutes of pulsing.
+function startGenesisTick(deadlineMs: number = GENESIS_STALL_MS): void {
   stopGenesisTick();
-  tickRoster(); // show the boot card at once
-  genesisTicker = setInterval(tickRoster, GENESIS_TICK_MS);
+  tickChamber(); // show the boot card at once
+  genesisTicker = setInterval(tickChamber, GENESIS_TICK_MS);
   genesisTicker.unref?.();
   genesisTickerDeadline = setTimeout(() => {
-    tickRoster(); // one last frame flips the card to its stalled state
+    tickChamber(); // one last frame flips the card to its stalled state
     if (genesisTicker) clearInterval(genesisTicker);
     genesisTicker = undefined;
-  }, GENESIS_STALL_MS);
+  }, deadlineMs);
   genesisTickerDeadline.unref?.();
 }
 
 function stopGenesisTick(): void {
+  genesisTickEpoch++;
   if (genesisTicker) clearInterval(genesisTicker);
   if (genesisTickerDeadline) clearTimeout(genesisTickerDeadline);
   genesisTicker = undefined;
@@ -373,19 +386,21 @@ function refreshConvene(): void {
   void conveneSm?.recompose(CONVENE_KEY).catch(() => {});
 }
 
-// The Presence ribbon leads the surface: an in-process board (like Convene) reading the
-// bench + rooms, so "N rooms live" tracks a room starting or ending. Recomposed whenever
-// a roster or rooms refresh fires (the refreshWorkflow wrapper). Fail closed on an older
-// harness (no snapshot manager).
+// The Chamber panel leads the surface: an in-process board (like Convene) reading the
+// bench + rooms + the pending-genesis marker, so seats, status footers, the live pulse,
+// and the boot card all track mutations. Recomposed whenever a roster or rooms refresh
+// fires (the refreshWorkflow wrapper) — which is also how the genesis/rooms tickers
+// advance it. Fail closed on an older harness (no snapshot manager).
 let presenceSm: SnapshotManager | undefined;
 let presenceUnregister: (() => void) | undefined;
 
 async function composePresenceBoard(): Promise<CanvasView> {
-  const [minds, rooms] = await Promise.all([
+  const [minds, rooms, pending] = await Promise.all([
     readMinds(mindsDir()).catch(() => [] as Mind[]),
     listRooms(roomsDir()).catch(() => [] as Room[]),
+    readPendingGenesis(),
   ]);
-  return buildPresenceBoard(minds, rooms);
+  return buildChamberBoard(minds, rooms, pending);
 }
 
 function refreshPresence(): void {
@@ -654,9 +669,6 @@ async function runBriefGate(): Promise<void> {
           updatedAt: new Date().toISOString(),
         });
         await publishBriefing();
-        // The just-cleared briefPromoted flips the roster pulse's "For you" back to
-        // calm — refresh it so the banner and pulse agree without the 120s cadence.
-        void refreshWorkflow?.("chamber-roster")?.catch(() => {});
       } catch (e) {
         console.error(`[rib-chamber] brief quiet republish failed: ${errText(e)}`);
       }
@@ -721,9 +733,6 @@ async function runBriefGate(): Promise<void> {
       updatedAt: new Date().toISOString(),
     });
     await publishBriefing();
-    // The just-set briefPromoted flips the roster pulse's "For you" to the waiting
-    // briefing — refresh it so the banner and pulse agree without the 120s cadence.
-    void refreshWorkflow?.("chamber-roster")?.catch(() => {});
   } catch (e) {
     // Stored the delta but the watermark write failed: the banner is live, but a later
     // trigger may re-promote. Logged; never thrown into a fire-and-forget hook.
@@ -1521,10 +1530,10 @@ const rib: Rib = {
   // needs a freeform brief); retire and the room controls (start/inject/stop) are
   // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
-  // The Chamber nav tab. The Presence ribbon leads in the header (who is convened +
-  // how many rooms are live), the Briefing banner follows as the always-on heartbeat
-  // (the one narrator, folding what were three what's-happening panels — delta / digest
-  // / record — into one), the roster comes next (the Minds you genesis), and the
+  // The Chamber nav tab. The Chamber panel leads in the header (the bench itself:
+  // seat cards, authoring, live pulse), the Briefing banner follows as the
+  // always-on heartbeat (the one narrator, folding what were three what's-happening
+  // panels — delta / digest / record — into one), and the
   // standing row pairs the sessions index (ended rooms) with the lenses index (the
   // living views) at half width each. The live room panels and
   // lens panels are push-fed dynamic regions a producer registers at runtime — each
@@ -1543,14 +1552,16 @@ const rib: Rib = {
       // (Enter a Mind, room controls) still flow — only the head-strip icons go.
       hideRegionActions: true,
       layout: {
-        // The Presence ribbon leads: the always-on strip that says the room is
-        // assembled (who is convened) and how many rooms are live right now. Not
-        // collapsible — it is the ceremonial constant every visit. In-process (no
-        // workflow binding); the rib recomposes it on any roster/rooms mutation.
+        // The Chamber panel leads: the bench itself — seat cards, boot card,
+        // authoring launchpad, live pulse.
+        // Not collapsible — it is the focal panel every visit. In-process (no
+        // workflow binding); the rib recomposes it on any roster/rooms mutation,
+        // and the genesis ticker's frames pulse the head dot (keelson#353).
         header: {
           key: PRESENCE_KEY,
           title: "The Chamber",
           glyph: { char: "◈", tone: "brand" },
+          live: true,
         },
         // Binds no `workflow`: the Briefing is rib-driven, composed and re-published
         // in-process, so a binding would make the SPA try to refresh a workflow that
@@ -1561,27 +1572,6 @@ const rib: Rib = {
           glyph: { char: "❖", tone: "brand" },
         },
         rows: [
-          {
-            columns: [
-              {
-                key: ROSTER_KEY,
-                workflow: "chamber-roster",
-                title: "Roster",
-                // A cheap deterministic collector that only changes on genesis/retire; a
-                // modest cadence self-populates it on open and after a new Mind. The
-                // Briefing banner stays cadence-free — it is a paid agent turn.
-                cadenceMs: 120_000,
-                // Collapsible: once the bench is seated an operator can fold it to its
-                // head strip and watch Rooms/Briefing. Default expanded — cold start
-                // needs it open.
-                collapsible: true,
-                // While a genesis runs the rib pushes roster frames every ~2.5s; `live`
-                // pulses the head dot as they arrive (keelson#353).
-                live: true,
-                glyph: { char: "◇", tone: "brand" },
-              },
-            ],
-          },
           {
             columns: [
               {
@@ -1685,7 +1675,7 @@ const rib: Rib = {
       definition: {
         name: "chamber-rooms",
         description:
-          'Use when: you want to see Chamber sessions — active rooms and ended history. Triggers: "show rooms", "list sessions", "room history". Does: reads the persisted rooms from the Chamber data home and publishes a sessions index (active rooms first as status-only cards, then ended rooms each with Open + a Delete control) to the Chamber Rooms canvas. NOT for: starting a room (the Roster\'s Convene) or stopping a live room (its inline controls).',
+          'Use when: you want to see Chamber sessions — active rooms and ended history. Triggers: "show rooms", "list sessions", "room history". Does: reads the persisted rooms from the Chamber data home and publishes a sessions index (active rooms first as status-only cards, then ended rooms each with Open + a Delete control) to the Chamber Rooms canvas. NOT for: starting a room (the Convene composer) or stopping a live room (its inline controls).',
         nodes: [
           {
             id: "collect",
@@ -2016,9 +2006,9 @@ const rib: Rib = {
       conveneSm = sm;
       void sm.recompose(CONVENE_KEY);
     }
-    // The Presence ribbon: an in-process board (reads the bench + rooms) registered on
-    // the snapshot manager and primed once; rebound onto a new manager on a re-boot,
-    // like Convene.
+    // The Chamber panel: an in-process board (reads the bench + rooms + the pending
+    // marker) registered on the snapshot manager and primed once; rebound onto a new
+    // manager on a re-boot, like Convene.
     if (sm && sm !== presenceSm) {
       presenceUnregister?.();
       presenceUnregister = sm.register(PRESENCE_KEY, composePresenceBoard, {
@@ -2026,6 +2016,24 @@ const rib: Rib = {
       });
       presenceSm = sm;
       void sm.recompose(PRESENCE_KEY);
+      // A crash can orphan a pending-genesis marker (only graceful dispose clears it),
+      // and no cadence re-reads the in-process panel — the boot card would freeze short
+      // of its stalled Dismiss. Restart the tick for the stall budget REMAINING on the
+      // marker's own clock (an already-stalled or unparseable marker gets one frame —
+      // it composes straight to Dismiss). The epoch check guards the async gap: an
+      // emit / dismiss / dispose landing between the read and this callback bumps it,
+      // so a settled genesis can never resurrect the ticker.
+      const epoch = genesisTickEpoch;
+      void readPendingGenesis().then((marker) => {
+        if (!marker || epoch !== genesisTickEpoch) return;
+        const elapsed = pendingElapsedMs(marker, Date.now());
+        if (elapsed >= GENESIS_STALL_MS) refreshPresence();
+        // + FUTURE_SKEW_MS: a marker up to the skew tolerance in the future clamps
+        // elapsed to 0, so the deadline must outlast the card's own clock reaching
+        // the stall — the final tick has to compose the stalled card, never stop
+        // one frame short of its Dismiss.
+        else startGenesisTick(GENESIS_STALL_MS - elapsed + FUTURE_SKEW_MS);
+      });
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —
@@ -4502,7 +4510,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns, default 8; at budget exhaustion every strategy except review appends one extra paid closing-synthesis turn, so a completed room runs up to turnBudget + 1 room turns — turnBudget + 2 when a design-bearing room is grounded with acceptance criteria (a cross-vendor fidelity turn before synthesis); every Mind that spoke then also runs one paid reflection turn at close, so the total paid calls exceed the room-turn count). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. Optionally provide `grounding` — a `{ sourceUrl?, criteria?: string[] }` brief distinct from the topic: it is injected into every turn prompt, and its acceptance criteria drive an independent cross-vendor fidelity check — when the room's Minds span two providers — that folds any divergences into the closing document before a design-bearing room (sequential/concurrent/group-chat/open-floor/magentic) synthesizes. Strategy role rules: sequential/concurrent need only at least two participant Mind slugs and no manager; group-chat requires a `moderator` Mind slug that is real, safe, and NOT among participants, with optional `synthesizer` that is also real/safe and neither a participant nor the moderator; open-floor has no moderator or synthesizer; review requires exactly two participants pinned to different providers — first author, second reviewer — with no moderator or synthesizer and turnBudget at least 2; magentic requires a real/safe `manager` Mind slug NOT among participants, no moderator or synthesizer, and at least two worker participants. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster). Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).",
+        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns, default 8; at budget exhaustion every strategy except review appends one extra paid closing-synthesis turn, so a completed room runs up to turnBudget + 1 room turns — turnBudget + 2 when a design-bearing room is grounded with acceptance criteria (a cross-vendor fidelity turn before synthesis); every Mind that spoke then also runs one paid reflection turn at close, so the total paid calls exceed the room-turn count). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. Optionally provide `grounding` — a `{ sourceUrl?, criteria?: string[] }` brief distinct from the topic: it is injected into every turn prompt, and its acceptance criteria drive an independent cross-vendor fidelity check — when the room's Minds span two providers — that folds any divergences into the closing document before a design-bearing room (sequential/concurrent/group-chat/open-floor/magentic) synthesizes. Strategy role rules: sequential/concurrent need only at least two participant Mind slugs and no manager; group-chat requires a `moderator` Mind slug that is real, safe, and NOT among participants, with optional `synthesizer` that is also real/safe and neither a participant nor the moderator; open-floor has no moderator or synthesizer; review requires exactly two participants pinned to different providers — first author, second reviewer — with no moderator or synthesizer and turnBudget at least 2; magentic requires a real/safe `manager` Mind slug NOT among participants, no moderator or synthesizer, and at least two worker participants. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see chamber_list_minds). Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).",
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,

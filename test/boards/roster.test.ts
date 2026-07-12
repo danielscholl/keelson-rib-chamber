@@ -213,6 +213,18 @@ describe("buildRosterBoard genesis boot card", () => {
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
+  test("a startedAt in the future beyond clock skew (a rollback) also stalls to Dismiss", () => {
+    const board = buildRosterBoard(
+      [],
+      undefined,
+      { startedAt: new Date(START + 120_000).toISOString(), name: "Mycroft" },
+      START,
+    );
+    const boot = cards(board).find((c) => c.title === "Mycroft");
+    expect(boot?.pill).toEqual({ label: "stalled", tone: "warn" });
+    expect(boot?.actions?.some((a) => a.type === "dismiss-genesis")).toBe(true);
+  });
+
   test("the quiet Author action and lone-Mind nudge are withheld while a genesis is pending", () => {
     const one = buildRosterBoard([mind({ slug: "a" })], undefined, pending(), START);
     expect(

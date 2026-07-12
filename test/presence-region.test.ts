@@ -7,6 +7,7 @@ import { canvasViewSchema } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, setChamberDataHome } from "../src/paths.ts";
+import { writePendingGenesis } from "../src/pending-genesis.ts";
 
 const PRESENCE_KEY = "rib:chamber:presence";
 
@@ -88,13 +89,11 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     expect(compose).toBeDefined();
     const board = (await compose?.()) as CanvasBoardView;
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const cols = board.sections.find((s) => s.kind === "columns");
-    const seats =
-      cols?.kind === "columns"
-        ? cols.columns.flatMap((c) => c.sections).find((s) => s.kind === "seats")
-        : undefined;
+    // The merged Chamber panel renders the bench as seat cards (rib#214).
+    const cardsSection = board.sections.find((s) => s.kind === "cards");
     // readMinds order is disk-dependent, so compare the bench as a set.
-    const labels = seats?.kind === "seats" ? seats.items.map((i) => i.label).sort() : [];
+    const labels =
+      cardsSection?.kind === "cards" ? cardsSection.items.map((i) => i.title).sort() : [];
     expect(labels).toEqual(["Jarvis", "Mycroft"]);
   });
 
@@ -109,7 +108,7 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     // refreshWorkflow — the ribbon tracks the bench without a host seam.
     expect(recomposeCounts.get(PRESENCE_KEY) ?? 0).toBeGreaterThan(before);
     const board = (await composers.get(PRESENCE_KEY)?.()) as CanvasBoardView;
-    expect(board.header?.status?.label).toBe("1 mind convene here");
+    expect(board.header?.status?.label).toBe("1 mind convenes here");
   });
 
   it("lens Refresh still reports the missing host capability", async () => {
@@ -119,5 +118,50 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     );
     expect(res?.ok).toBe(false);
     expect(res && !res.ok && res.error).toContain("unavailable on this harness");
+  });
+});
+
+// A crash can leave a pending-genesis marker behind (only graceful dispose clears
+// it). Boot must reconcile it: an already-stalled marker composes straight to the
+// dismissable stalled card — never the frozen "authoring" card that wedged the
+// panel with the launchpad withheld and no way out.
+describe("boot reconcile — crash-orphaned pending-genesis marker", () => {
+  let home: string;
+
+  afterAll(async () => {
+    await rib.dispose?.();
+    setChamberDataHome(undefined);
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it("an already-stalled orphan composes the Dismiss card at boot, launchpad withheld", async () => {
+    home = await mkdtemp(join(tmpdir(), "chamber-orphan-"));
+    setChamberDataHome(home);
+    await scaffoldMind(mindsDir(), record("jarvis", "Jarvis", 0), "soul");
+    await writePendingGenesis(
+      { startedAt: new Date(Date.now() - 10 * 60_000).toISOString(), name: "Athena" },
+      home,
+    );
+    const cap = capturingSm();
+    registerTools({
+      getDataDir: () => home,
+      getExec: () => ({
+        runJSON: async () => ({ ok: true as const, data: undefined }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+      getSnapshotManager: () => cap.sm,
+      registerRegion: () => () => {},
+    } as unknown as RibContext);
+    // Let the reconcile's marker read settle; it fires one extra presence frame.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(cap.recomposeCounts.get(PRESENCE_KEY) ?? 0).toBeGreaterThanOrEqual(2);
+    const board = (await cap.composers.get(PRESENCE_KEY)?.()) as CanvasBoardView;
+    const cards = board.sections.find((s) => s.kind === "cards");
+    const boot =
+      cards?.kind === "cards" ? cards.items.find((c) => c.title === "Athena") : undefined;
+    expect(boot?.pill).toEqual({ label: "stalled", tone: "warn" });
+    expect(boot?.actions?.some((a) => a.type === "dismiss-genesis")).toBe(true);
+    // While the orphan is pending the authoring launchpad stays withheld.
+    expect(board.sections.some((s) => s.kind === "actions")).toBe(false);
   });
 });
