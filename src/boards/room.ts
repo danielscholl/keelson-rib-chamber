@@ -131,7 +131,7 @@ export function buildRoomBoard(
       ...planSection,
       columnsSection,
       ...outcomeSection,
-      roomControls(room),
+      roomControls(room, mindBySlug),
     ],
   };
 }
@@ -285,7 +285,10 @@ function taskTone(status: LedgerTask["status"]): CanvasTone {
 // <slug>" (a one-shot nextSpeaker override) and Stop (turns advance on their
 // own); once it ends, a single "Start again" that re-runs the same config under
 // a fresh room. Each control carries the room slug so onAction targets it.
-function roomControls(room: Room): CanvasBoardView["sections"][number] {
+function roomControls(
+  room: Room,
+  mindBySlug: Map<string, Mind>,
+): CanvasBoardView["sections"][number] {
   if (room.status !== "active") {
     // Carry the grounding brief (flat, the shape roomStartAction parses) so every
     // restart reruns with the same acceptance criteria rather than an ungrounded room.
@@ -405,7 +408,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
         ? []
         : room.participants.map((p) => ({
             type: "room-inject",
-            label: `Call on ${p}`,
+            label: `Call on ${mindBySlug.get(p)?.name ?? p}`,
             glyph: "↳",
             payload: { slug: room.slug, nextSpeaker: p },
           }))),

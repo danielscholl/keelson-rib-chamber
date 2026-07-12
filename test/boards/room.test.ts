@@ -133,7 +133,12 @@ describe("buildRoomBoard", () => {
   });
 
   test("an active room bakes Call-on-<participant> + Stop controls carrying the slug", () => {
-    const board = buildRoomBoard(room({ slug: "r", participants: ["a", "b"] }), []);
+    const board = buildRoomBoard(
+      room({ slug: "r", participants: ["a", "b"] }),
+      [],
+      undefined,
+      [mind({ slug: "a", name: "Ada" })],
+    );
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const actions = actionsSection(board);
     const byType = (t: string) => actions.items.filter((i) => i.type === t);
@@ -146,6 +151,7 @@ describe("buildRoomBoard", () => {
       { slug: "r", nextSpeaker: "a" },
       { slug: "r", nextSpeaker: "b" },
     ]);
+    expect(byType("room-inject").map((i) => i.label)).toEqual(["Call on Ada", "Call on b"]);
   });
 
   test("a closed room offers Start-again + Start group-chat + open-floor + magentic", () => {
