@@ -1,9 +1,10 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { PendingGenesis } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
-import { IDENTITY_SLOT_COUNT, identityToneForSlot, type Mind, type Room } from "../types.ts";
+import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 import {
   bootCard,
+  bootSlotFor,
   describeOwnAction,
   freeSlots,
   launchpadSections,
@@ -68,13 +69,12 @@ function seatedSections(
   pending: PendingGenesis | null,
   now: number,
 ): Section[] {
-  const open = freeSlots(minds);
   const sections: Section[] = [
     {
       kind: "cards",
       items: [
         ...minds.map((m) => seatCard(m, rooms)),
-        ...(pending ? [bootCard(pending, open[0] ?? IDENTITY_SLOT_COUNT, now)] : []),
+        ...(pending ? [bootCard(pending, bootSlotFor(pending, minds), now)] : []),
       ],
     },
   ];
@@ -91,7 +91,7 @@ function seatedSections(
 }
 
 // One Mind -> one seat card: identity dot, the role pill wearing the same hue,
-// the mission line (persona until an authored mission field lands — rib#210),
+// the mission line (persona until an authored mission field lands),
 // a room-scoped status footer, and the shared management verbs.
 function seatCard(mind: Mind, rooms: readonly Room[]) {
   const active = rooms.filter((r) => r.status === "active" && seatsMind(r, mind.slug));

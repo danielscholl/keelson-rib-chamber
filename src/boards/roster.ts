@@ -240,6 +240,18 @@ export function launchpadSections(
   return sections;
 }
 
+// The seat a pending genesis will land on: a starter's reserved seat when free
+// (chamber_emit_genesis honors it — the marker carries a name ONLY for a starter,
+// so the match can't misfire on a freeform brief), else the lowest free slot,
+// mirroring nextFreeSlot's allocator. Shared by both benches so the boot card's
+// hue always predicts the seat the Mind actually takes.
+export function bootSlotFor(pending: PendingGenesis, minds: readonly Mind[]): number {
+  const open = freeSlots(minds);
+  const starter = pending.name ? GENESIS_STARTERS.find((s) => s.name === pending.name) : undefined;
+  if (starter && open.includes(starter.seat)) return starter.seat;
+  return open[0] ?? IDENTITY_SLOT_COUNT;
+}
+
 // The seat being taken while a genesis runs — the original Chamber's boot screen quoted
 // in keelson's own ink: stacked mono lines (the card's `stacked` presentation), each a
 // dim `>` prompt label with the readout riding the green `ok` field tone. The liturgy
@@ -291,7 +303,7 @@ function seatedSections(
 ): CanvasBoardView["sections"] {
   const open = freeSlots(minds);
   // The boot card takes the first free slot (or folds to neutral past the ramp).
-  const bootItems = pending ? [bootCard(pending, open[0] ?? IDENTITY_SLOT_COUNT, now)] : [];
+  const bootItems = pending ? [bootCard(pending, bootSlotFor(pending, minds), now)] : [];
 
   const sections: CanvasBoardView["sections"] = [
     { kind: "cards", items: [...minds.map(cardFor), ...bootItems] },
