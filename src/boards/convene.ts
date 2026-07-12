@@ -43,7 +43,7 @@ const groundingUrlField: CanvasActionField = {
 const criteriaField: CanvasActionField = {
   name: "criteria",
   label: "Acceptance criteria (optional)",
-  placeholder: "One criterion per line — checked before the room closes",
+  placeholder: "One criterion per line (a cross-vendor room checks these before it closes)",
   multiline: true,
 };
 
