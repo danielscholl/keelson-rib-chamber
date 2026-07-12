@@ -1,7 +1,39 @@
-import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { identityToneForSlot, type Mind } from "../types.ts";
+
+export const STARTER_LENSES = [
+  {
+    label: "Architecture",
+    subject: "Architecture — how the pieces fit together, and where the seams strain",
+  },
+  {
+    label: "Risk",
+    subject: "Risk — what could break next, ranked by blast radius and likelihood",
+  },
+  {
+    label: "Cost",
+    subject: "Cost — where the money and tokens go, and what is drifting",
+  },
+  {
+    label: "Customer",
+    subject: "Customer — what users feel first, friction before features",
+  },
+  {
+    label: "Security",
+    subject: "Security — exposed surfaces, trust boundaries, and doors left open",
+  },
+] as const satisfies readonly { label: string; subject: string }[];
+
+function starterLensAction(starter: (typeof STARTER_LENSES)[number]): CanvasActionItem {
+  return {
+    type: "author-lens",
+    label: starter.label,
+    glyph: "❖",
+    payload: { subject: starter.subject },
+  };
+}
 
 // A lens's dot carries the identity of the Mind that MAINTAINS it (keelson#390),
 // never a hash across the status ramp — a lens could otherwise wear error-red for no
