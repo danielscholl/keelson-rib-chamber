@@ -34,7 +34,7 @@ optional field is marked `?`.
 | `chamber_table_exhibit` | yes | no | Table an exhibit: publish a canvas-board deliverable a discussion produced as its own panel on the Exhibits shelf. | `id`, `board`, `reason?` |
 | `chamber_delete_exhibit` | yes | no | Permanently remove an exhibit, both its record and its live panel. Fails closed if no such exhibit, or if the id names a lens. | `id` |
 | `chamber_room_status` | no | no | Return a room's participants, status, turn count, and transcript so far. Read-only. | `room?` |
-| `chamber_room_start` | yes | yes | Open a room where named Minds converse turn by turn. Dry-runs until `confirm` is set. | `participants`, `turnBudget?`, `name?`, `topic?`, `strategy?`, `moderator?`, `manager?`, `synthesizer?`, `minRounds?`, `maxSpeakerRepeats?`, `endVoteThreshold?`, `projectId?`, `coding?`, `confirm?` |
+| `chamber_room_start` | yes | yes | Open a room where named Minds converse turn by turn. Dry-runs until `confirm` is set. `grounding` adds a brief (source + criteria) that drives a cross-vendor fidelity check before a design-bearing room closes. | `participants`, `turnBudget?`, `name?`, `topic?`, `grounding?`, `strategy?`, `moderator?`, `manager?`, `synthesizer?`, `minRounds?`, `maxSpeakerRepeats?`, `endVoteThreshold?`, `projectId?`, `coding?`, `confirm?` |
 | `chamber_room_say` | yes | no | Steer a live room: guide the next speaker, call on a Mind, or drop a director message. | `room?`, `direction?`, `callOn?`, `text?` |
 | `chamber_room_stop` | yes | no | Stop a room, halting its turns. Reversible. | `room?` |
 
@@ -154,9 +154,9 @@ without navigating.
 | `describe-own` | `{ brief }` | `run-workflow` `chamber-genesis` |
 | `dismiss-genesis` | _(none)_ | data (no payload): ends a stalled genesis boot card, refreshes the roster |
 | `retire` | `{ slug }` | data (`{ slug }`) |
-| `room-start` | `{ participants, turnBudget?, name?, strategy?, topic?, ...config }` | data (`{ slug }`) |
+| `room-start` | `{ participants, turnBudget?, name?, strategy?, topic?, groundingUrl?, criteria?, ...config }` | data (`{ slug }`) |
 | `draft-set` | `{ slug }` | data (`{ excluded }`) |
-| `convene` | `{ topic? }` | data (`{ slug }`) |
+| `convene` | `{ topic?, groundingUrl?, criteria? }` | data (`{ slug }`) |
 | `room-inject` | `{ slug, directionInjection?, nextSpeaker?, text? }` | data (`{ slug }`) |
 | `room-stop` | `{ slug }` | data (`{ slug }`) |
 | `room-delete` | `{ slug }` | data (`{ slug }`) |

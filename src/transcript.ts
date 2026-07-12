@@ -1,6 +1,22 @@
-import type { TokenUsage } from "@keelson/shared";
+import type { Brief, TokenUsage } from "@keelson/shared";
 import { stripControlJson } from "./routing.ts";
 import type { MindSlug, TaskLedger, TurnEntry } from "./types.ts";
+
+// The grounding brief rendered for a turn prompt: the source (if any) and the numbered
+// acceptance criteria the room is convened to satisfy, so every speaker sees the
+// contract distinct from the free-text topic. Undefined when the brief carries no
+// source and no criterion, so a room without grounding adds nothing to the prompt.
+export function renderGrounding(grounding: Brief | undefined): string | undefined {
+  if (!grounding) return undefined;
+  const lines: string[] = [];
+  const source = grounding.sourceUrl?.trim();
+  if (source) lines.push(`Source: ${source}`);
+  const criteria = grounding.criteria.map((c) => c.trim()).filter(Boolean);
+  if (criteria.length > 0) {
+    lines.push("Acceptance criteria:", ...criteria.map((c, i) => `${i + 1}. ${c}`));
+  }
+  return lines.length > 0 ? `Grounding brief:\n${lines.join("\n")}` : undefined;
+}
 
 // Cap on history turns carried in a prompt (and the status-tool view): unbounded
 // history grows prompt cost linearly per turn (worse under concurrent rounds, which
@@ -27,10 +43,12 @@ export function renderTranscript(transcript: readonly TurnEntry[]): string {
 }
 
 // The shared head of every speaker/moderator/synthesis prompt: the room topic (if
-// any), then the rendered (windowed) discussion so far, or `emptyContext` when there
-// is no history yet — omit `emptyContext` (synthesis) to push nothing. Pure.
+// any), the grounding brief (if any), then the rendered (windowed) discussion so far,
+// or `emptyContext` when there is no history yet — omit `emptyContext` (synthesis) to
+// push nothing. Pure.
 function promptPreamble(input: {
   topic?: string;
+  grounding?: Brief;
   projectContext?: string;
   transcript: readonly TurnEntry[];
   emptyContext?: string;
@@ -38,6 +56,8 @@ function promptPreamble(input: {
   const parts: string[] = [];
   const topic = input.topic?.trim();
   if (topic) parts.push(`Room topic: ${topic}`);
+  const grounding = renderGrounding(input.grounding);
+  if (grounding) parts.push(grounding);
   const projectContext = input.projectContext?.trim();
   if (projectContext) parts.push(projectContext);
   const context = renderTranscript(input.transcript);
@@ -53,12 +73,14 @@ function promptPreamble(input: {
 // CLI errors on that). Pure.
 export function buildTurnPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   projectContext?: string;
   transcript: readonly TurnEntry[];
   directionInjection?: string;
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     ...(input.projectContext ? { projectContext: input.projectContext } : {}),
     transcript: input.transcript,
     emptyContext: "You are the first to speak — open the discussion.",
@@ -78,12 +100,14 @@ export function buildTurnPrompt(input: {
 // trailing JSON is stripped from the next speaker's context. Always non-empty.
 export function buildModeratorPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   transcript: readonly TurnEntry[];
   participants: readonly MindSlug[];
   directionInjection?: string;
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     transcript: input.transcript,
     emptyContext: "The discussion has not started yet — open it by directing the first speaker.",
   });
@@ -104,12 +128,14 @@ export function buildModeratorPrompt(input: {
 // prompt, parser, and stripper never drift. Always non-empty.
 export function buildOpenFloorPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   transcript: readonly TurnEntry[];
   participants: readonly MindSlug[];
   directionInjection?: string;
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     transcript: input.transcript,
     emptyContext: "You are the first to speak — open the discussion.",
   });
@@ -125,14 +151,52 @@ export function buildOpenFloorPrompt(input: {
 }
 
 // The closing synthesis prompt: the discussion so far plus an instruction to sum
-// up. No routing JSON — synthesis is the room's last act. Always non-empty.
+// up. No routing JSON — synthesis is the room's last act. When the room carries
+// grounding criteria the transcript above already holds an independent cross-vendor
+// fidelity check, so the synthesizer is told to fold its divergences into the closing
+// document: an `### Acceptance criteria` section (whose bullet count the outcome
+// receipt reads) and a document-only `### Fidelity` section. Always non-empty.
 export function buildSynthesisPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   transcript: readonly TurnEntry[];
 }): string {
-  const parts = promptPreamble({ topic: input.topic, transcript: input.transcript });
+  const parts = promptPreamble({
+    topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
+    transcript: input.transcript,
+  });
+  const hasCriteria = input.grounding?.criteria.some((c) => c.trim().length > 0) ?? false;
   parts.push(
-    "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. Speak in your own voice. Do not emit any routing JSON.",
+    hasCriteria
+      ? "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. An independent cross-vendor fidelity check against the acceptance criteria is in the discussion above: fold its findings in. Include an `### Acceptance criteria` section stating each criterion's status, and an `### Fidelity` section listing any divergences the outcome does not yet resolve (or “No divergences — all criteria met”). Speak in your own voice. Do not emit any routing JSON."
+      : "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. Speak in your own voice. Do not emit any routing JSON.",
+  );
+  return parts.join("\n\n");
+}
+
+// The pre-close fidelity check: an independent, cross-vendor Mind diffs the emerging
+// outcome against the grounding brief's acceptance criteria — per criterion — so the
+// closing synthesis can fold the divergences in. Reuses the review idiom (a
+// different-vendor auditor) but reads the whole discussion, not one artifact. The
+// driver only runs it when the brief carries criteria, so `criteria` is non-empty here.
+export function buildFidelityPrompt(input: {
+  grounding: Brief;
+  transcript: readonly TurnEntry[];
+}): string {
+  const parts: string[] = [];
+  const source = input.grounding.sourceUrl?.trim();
+  const criteria = input.grounding.criteria.map((c) => c.trim()).filter(Boolean);
+  parts.push(
+    source
+      ? `The room was convened to satisfy this brief (source: ${source}):`
+      : "The room was convened to satisfy this brief:",
+  );
+  parts.push(criteria.map((c, i) => `${i + 1}. ${c}`).join("\n"));
+  const context = renderTranscript(input.transcript);
+  if (context.length > 0) parts.push(`The discussion so far:\n\n${context}`);
+  parts.push(
+    "You are an independent fidelity checker, from a different vendor than the room's speakers. For EACH acceptance criterion above, judge whether the emerging outcome MEETS, PARTIALLY meets, or DIVERGES from it — one line per criterion, quoting the criterion. Then, under a final `Divergences:` line, list every gap the closing summary must resolve (or “None — all criteria met”). Be concise and concrete; do not rewrite the outcome or emit any routing JSON.",
   );
   return parts.join("\n\n");
 }
@@ -201,6 +265,7 @@ function renderLedger(ledger: TaskLedger | undefined): string {
 // only the trailing JSON is stripped from the next prompt's context. Always non-empty.
 export function buildManagerPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   ledger?: TaskLedger;
   transcript: readonly TurnEntry[];
   workers: readonly MindSlug[];
@@ -209,6 +274,8 @@ export function buildManagerPrompt(input: {
   const parts: string[] = [];
   const topic = input.topic?.trim();
   if (topic) parts.push(`Goal: ${topic}`);
+  const grounding = renderGrounding(input.grounding);
+  if (grounding) parts.push(grounding);
   parts.push(`Plan so far:\n\n${renderLedger(input.ledger)}`);
   const context = renderTranscript(input.transcript);
   if (context.length > 0) parts.push(`Workers' progress so far:\n\n${context}`);
@@ -228,6 +295,7 @@ export function buildManagerPrompt(input: {
 // plan. Always non-empty.
 export function buildWorkerPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   task: string;
   transcript: readonly TurnEntry[];
   directionInjection?: string;
@@ -235,6 +303,7 @@ export function buildWorkerPrompt(input: {
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     transcript: input.transcript,
     emptyContext: "No work has been done yet — you are starting.",
   });

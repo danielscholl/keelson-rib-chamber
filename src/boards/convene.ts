@@ -32,6 +32,20 @@ const turnsField: CanvasActionField = {
   label: "Turns (optional)",
   placeholder: "default 8",
 };
+// Grounding is a brief distinct from the topic: a source and the acceptance criteria
+// the room is convened to satisfy. When criteria are given, a design-bearing room runs
+// a cross-vendor fidelity check against them before it closes.
+const groundingUrlField: CanvasActionField = {
+  name: "groundingUrl",
+  label: "Grounding source (optional)",
+  placeholder: "Link to the issue / spec / acceptance criteria",
+};
+const criteriaField: CanvasActionField = {
+  name: "criteria",
+  label: "Acceptance criteria (optional)",
+  placeholder: "One criterion per line — checked before the room closes",
+  multiline: true,
+};
 
 // The project field is a real picker over the host's projects (option value = id,
 // which the convene action resolves the same as a typed id). Null when the host
@@ -134,7 +148,7 @@ function shapeActions(
       label: "Discussion",
       glyph: "▸",
       hint: "Round-robin — each Mind speaks in turn, building on the last. The default shape.",
-      fields: [topicField, proj],
+      fields: [topicField, proj, groundingUrlField, criteriaField],
     },
     {
       strategy: "group-chat",
@@ -145,6 +159,8 @@ function shapeActions(
         topicField,
         facilitatorField("moderator", "Chair — one of the selected Minds", cast),
         turnsField,
+        groundingUrlField,
+        criteriaField,
       ],
     },
     {
@@ -152,7 +168,7 @@ function shapeActions(
       label: "Open floor",
       glyph: "⊙",
       hint: "Unchaired brainstorm — the Minds route themselves and stop when enough vote to end.",
-      fields: [topicField, turnsField],
+      fields: [topicField, turnsField, groundingUrlField, criteriaField],
     },
     {
       strategy: "review",
@@ -171,6 +187,8 @@ function shapeActions(
         facilitatorField("manager", "Manager — one of the selected Minds", cast),
         proj,
         turnsField,
+        groundingUrlField,
+        criteriaField,
       ],
     },
   ];

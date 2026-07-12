@@ -2,7 +2,7 @@
 // Rib-internal types — only canvas boards cross the wire, so these stay plain TS
 // (no Zod). None exist in @keelson/shared; they are defined here.
 
-import type { CanvasTone, TokenUsage } from "@keelson/shared";
+import type { Brief, CanvasTone, TokenUsage } from "@keelson/shared";
 
 export type MindSlug = string;
 
@@ -146,6 +146,12 @@ export interface Room {
   // prompt. Optional: a room without one still runs (the prompt builder supplies
   // a non-empty fallback), it just has no shared subject.
   topic?: string;
+  // An optional grounding brief distinct from the free-text topic — a source URL and
+  // the acceptance criteria the room is convened to satisfy (the shared @keelson/shared
+  // Brief). Injected into turn prompts alongside the topic; when it carries criteria, a
+  // design-bearing room runs a cross-vendor fidelity check against them before the
+  // closing synthesis. Absent for a room without grounding (unchanged behavior).
+  grounding?: Brief;
   config?: RoomConfig;
   // The keelson project this room targets, if any. Stored as the id, not the
   // resolved path, so the host projects store stays the single source of truth —

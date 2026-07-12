@@ -63,6 +63,18 @@ describe("createFileRoomStore", () => {
     expect(await store.loadRoom("room")).toEqual(room);
   });
 
+  it("round-trips a room's grounding brief (no migration — spread through the load boundary)", async () => {
+    const store = createFileRoomStore(root);
+    const room = makeRoom({
+      grounding: { sourceUrl: "https://example.test/issue/204", criteria: ["A", "B"] },
+    });
+    await store.saveRoom(room);
+    expect((await store.loadRoom("room"))?.grounding).toEqual({
+      sourceUrl: "https://example.test/issue/204",
+      criteria: ["A", "B"],
+    });
+  });
+
   it("returns undefined for an unknown room", async () => {
     const store = createFileRoomStore(root);
     expect(await store.loadRoom("nope")).toBeUndefined();

@@ -167,3 +167,23 @@ describe("buildConveneBoard project picker + collapse", () => {
     expect(buildConveneBoard([A, B], new Set(), [], 2).header?.defaultCollapsed).toBe(true);
   });
 });
+
+describe("buildConveneBoard grounding fields", () => {
+  test("the design-bearing shapes expose the grounding source + criteria fields", () => {
+    const bs = byStrategy(buildConveneBoard([A, B, C]));
+    for (const strategy of ["sequential", "group-chat", "open-floor", "magentic"]) {
+      const names = bs.get(strategy)?.fields?.map((f) => f.name) ?? [];
+      expect(names).toContain("groundingUrl");
+      expect(names).toContain("criteria");
+    }
+    const criteria = bs.get("sequential")?.fields?.find((f) => f.name === "criteria");
+    expect(criteria?.multiline).toBe(true);
+  });
+
+  test("Review carries no grounding fields — its cross-vendor pass is not a synthesis close", () => {
+    const review = byStrategy(buildConveneBoard([A, B])).get("review");
+    const names = review?.fields?.map((f) => f.name) ?? [];
+    expect(names).not.toContain("groundingUrl");
+    expect(names).not.toContain("criteria");
+  });
+});

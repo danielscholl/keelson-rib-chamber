@@ -550,6 +550,20 @@ describe("chamber room-control chat tools", () => {
     expect(s.out()).toContain("No Chamber room yet");
   });
 
+  it("accepts a grounding brief in the input schema and dry-runs cleanly", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      {
+        participants: ["alice", "bob"],
+        turnBudget: 2,
+        grounding: { sourceUrl: "https://example.test/issue/204", criteria: ["A", "B"] },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("Would open a room with alice, bob");
+  });
+
   it("rejects a start with fewer than two participants", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute({ participants: ["alice"], confirm: true }, t.ctx);
