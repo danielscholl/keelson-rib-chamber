@@ -136,10 +136,8 @@ function mission(persona: string): string {
   return trimmed.length > 200 ? `${trimmed.slice(0, 199)}…` : trimmed;
 }
 
-// The seated bench's authoring path, folded into the grid as its open seat: the
-// freeform brief closed at rest (click opens its form; the cold-start hero stays
-// expanded) plus the free starter voices — the same items the wrap row carried,
-// now living in the ghost seat they would fill.
+// The seated bench's authoring path: the freeform brief closed at rest (click
+// opens its form; the cold-start hero stays expanded) plus the free starter voices.
 function openSeat(minds: readonly Mind[]) {
   const seated = new Set(minds.map((m) => m.slug));
   const free = new Set(freeSlots(minds));
