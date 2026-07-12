@@ -1045,7 +1045,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const minRounds = afterMod.config?.minRounds ?? DEFAULT_MIN_ROUNDS;
 
     if (decision?.action === "close" && allHeardInCycle(afterMod.participants, counts, minRounds)) {
-      return await runCloseSynthesis(afterMod, controller, gen);
+      // A grounded Debate closes through fidelity + synthesis too, with the moderator as
+      // the fallback synthesizer (the Convene Debate form configures none). An ungrounded
+      // close passes no fallback, so it ends without an extra turn, exactly as before.
+      return await runCloseSynthesis(
+        afterMod,
+        controller,
+        gen,
+        groundedCloseSynthesizer(afterMod, postMod),
+      );
     }
 
     const speaker = pickGroupChatSpeaker(decision, afterMod, counts);
@@ -1252,17 +1260,17 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         // An operator stop landed during the check — it is recorded; close now without
         // burning a second paid turn on synthesis.
         if (fidelity.closed) return fidelity.active;
-        // A stop can also land in the gap AFTER the fidelity turn but before synthesis;
-        // re-check here (the pre-fidelity guard above no longer covers this window) so a
-        // stopped room skips the synthesis turn rather than appending a phantom,
-        // never-run entry. The stop path already recorded the close.
-        if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
         const cursor = room.turnIndex + fidelity.turns;
+        // Load the transcript, THEN re-check abort/generation immediately before the paid
+        // turn — a stop landing in the fidelity or transcript-load gap must skip synthesis
+        // rather than append a phantom, never-run entry. The stop path already closed.
+        const synthTranscript = await loadCachedTranscript(room.slug);
+        if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
         const prompt = buildSynthesisPrompt({
           ...(room.topic ? { topic: room.topic } : {}),
           ...(room.grounding ? { grounding: room.grounding } : {}),
           fidelityChecked: fidelity.checked,
-          transcript: await loadCachedTranscript(room.slug),
+          transcript: synthTranscript,
         });
         const turn = await runOneTurn(room, synth, prompt, controller);
         if (turn === "disposed") return false;

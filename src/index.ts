@@ -3664,9 +3664,6 @@ async function renderRoomStatus(store: RoomStore, target?: string): Promise<stri
   const head =
     `Room "${room.name}" (${slug}) — ${room.status}, turn ${room.turnIndex}/${room.turnBudget}; ` +
     `participants: ${room.participants.join(", ")}.`;
-  // Surface the grounding brief distinct from the topic so a chat reader sees the
-  // source and acceptance criteria the room is held to (issue #204's "visible in the
-  // transcript") — including a source-only brief with no criteria.
   const groundingSource = room.grounding?.sourceUrl?.trim();
   const criteria = room.grounding?.criteria.filter((c) => c.trim().length > 0) ?? [];
   const criteriaText =

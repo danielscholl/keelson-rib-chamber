@@ -19,6 +19,7 @@ const MINDS: Mind[] = [
   { slug: "b", name: "Bo", role: "agent", persona: "You are Bo.", provider: "py" },
   { slug: "c", name: "Cy", role: "agent", persona: "You are Cy.", provider: "px" },
   { slug: "mgr", name: "Mgr", role: "manager", persona: "You manage.", provider: "px" },
+  { slug: "m", name: "Mod", role: "moderator", persona: "You moderate.", provider: "px" },
 ];
 
 const GROUNDING = {
@@ -175,6 +176,40 @@ describe("room driver — grounding + pre-close fidelity check", () => {
     expect(transcript.map((e) => e.from)).toEqual(["mgr", "b", "mgr"]); // manage → fidelity → synthesis
     expect((await h.store.loadRoom("mg"))?.status).toBe("done");
     expect(h.turns.requests[1]?.prompt).toContain("fidelity checker for this room");
+  });
+
+  test("a grounded group-chat closes through fidelity + synthesis on a moderator close", async () => {
+    // The Debate form configures no synthesizer, so a moderator close would otherwise
+    // end with no summary. Grounded, the moderator becomes the close synthesizer and a
+    // cross-vendor worker (b) runs the fidelity turn first.
+    const direct = (slug: string) => `{"action":"direct","next_speaker":"${slug}"}`;
+    const h = harness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+      { text: "fidelity-report" },
+      { text: "closing" },
+    ]);
+    await h.driver.start({
+      slug: "gc",
+      name: "gc",
+      strategy: "group-chat" as RoomStrategyName,
+      participants: ["a", "b"],
+      turnBudget: 10,
+      config: { moderator: "m", minRounds: 1 },
+      grounding: GROUNDING,
+    });
+
+    await drain(h.driver, "gc");
+
+    const transcript = await h.store.loadTranscript("gc");
+    // mod→a→mod→b→mod(close)→fidelity(b, cross-vendor to mod)→synthesis(mod).
+    expect(transcript.map((e) => e.from)).toEqual(["m", "a", "m", "b", "m", "b", "m"]);
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    expect(h.turns.requests.at(-2)?.prompt).toContain("fidelity checker for this room");
+    expect(h.turns.requests.at(-1)?.prompt).toContain("cross-vendor fidelity check");
   });
 
   test("an errored fidelity turn is not reported to the synthesizer as a valid check", async () => {

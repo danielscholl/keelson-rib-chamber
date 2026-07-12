@@ -221,10 +221,8 @@ function buildTopicSection(
   ];
 }
 
-// The grounding brief as a board section: the source (when set) and each acceptance
-// criterion, so an operator reading the room sees the contract the Minds are held to,
-// distinct from the topic (issue #204's "visible in the transcript"). Empty (no section)
-// for a room without grounding criteria.
+// The grounding brief as a board section — its source (when set) and each acceptance
+// criterion. Empty when the brief carries neither.
 function buildGroundingSection(grounding: Brief | undefined): CanvasBoardView["sections"] {
   if (!grounding) return [];
   const source = grounding.sourceUrl?.trim();
