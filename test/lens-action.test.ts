@@ -54,6 +54,29 @@ const actionCtx = {
   }),
 } as unknown as RibContext;
 
+describe("author-lens onAction", () => {
+  it("runs chamber-lens with the supplied subject and stays on the surface", async () => {
+    const res = await onAction(
+      { type: "author-lens", payload: { subject: "Architecture" } },
+      actionCtx,
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.data).toEqual({
+      effect: "run-workflow",
+      workflow: "chamber-lens",
+      stay: true,
+      args: "Architecture",
+    });
+  });
+
+  it("fails closed on a missing subject", async () => {
+    const res = await onAction({ type: "author-lens", payload: {} }, actionCtx);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/requires payload/);
+  });
+});
+
 describe("retire-lens onAction", () => {
   let workspace: string;
   beforeAll(async () => {
