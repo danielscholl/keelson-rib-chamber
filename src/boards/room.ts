@@ -210,7 +210,8 @@ function buildJourneySection(
   const hasRecord = hasFrame && (!!outcome || room.status === "done");
 
   if (hasFrame) {
-    items.push({ title: "Frame", text: `Round ${room.round + 1} opened` });
+    // The framing moment is static — progression belongs to Explore's turn count.
+    items.push({ title: "Frame", text: "Round 1 opened" });
   }
   if (hasExplore) {
     items.push({
