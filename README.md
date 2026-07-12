@@ -67,7 +67,7 @@ if you need stability.
 
 Open `http://127.0.0.1:7878` → the **Chamber** surface, then:
 
-- **Create an agent** — `keelson workflow run chamber-genesis --arguments "a terse SRE who reasons about blast radius"` (or ask chat to create one). It authors a Mind you'll see on the Roster.
+- **Create an agent** — `keelson workflow run chamber-genesis --arguments "a terse SRE who reasons about blast radius"` (or ask chat to create one). It authors a Mind you'll see seated in the Chamber panel.
 - **Run a room** — ask chat to start a room between two Minds, or use the **Convene** composer on the surface; steer it live and watch the transcript render as turns land.
 - **See a lens** — `keelson workflow run chamber-lens --arguments "release risks"` runs one agent turn that authors a canvas board on the subject, published fail-closed and rendered with no hand-coded UI. The standing **Briefing** banner fills itself in — it promotes to an agent-authored board when a room ends or a lens changes, and stays quiet otherwise.
 

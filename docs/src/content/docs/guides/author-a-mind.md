@@ -41,8 +41,8 @@ tool directly. Run the workflow.
 
 ## Start from a preset
 
-A fresh workspace has no Minds, so the roster offers three preset archetypes as a
-first move:
+A fresh workspace has no Minds, so the Chamber panel offers three preset
+archetypes as a first move:
 
 - **Moneypenny**, a chief of staff for briefings, priorities, and follow-through.
 - **Mycroft**, a research partner for synthesis, patterns, and framing.

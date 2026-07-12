@@ -88,13 +88,11 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     expect(compose).toBeDefined();
     const board = (await compose?.()) as CanvasBoardView;
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const cols = board.sections.find((s) => s.kind === "columns");
-    const seats =
-      cols?.kind === "columns"
-        ? cols.columns.flatMap((c) => c.sections).find((s) => s.kind === "seats")
-        : undefined;
+    // The merged Chamber panel renders the bench as seat cards (rib#214).
+    const cardsSection = board.sections.find((s) => s.kind === "cards");
     // readMinds order is disk-dependent, so compare the bench as a set.
-    const labels = seats?.kind === "seats" ? seats.items.map((i) => i.label).sort() : [];
+    const labels =
+      cardsSection?.kind === "cards" ? cardsSection.items.map((i) => i.title).sort() : [];
     expect(labels).toEqual(["Jarvis", "Mycroft"]);
   });
 

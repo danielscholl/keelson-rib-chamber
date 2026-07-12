@@ -17,7 +17,7 @@ export interface RosterPulse {
 // words). The board's one filled brand primary, its brief field open inline — no
 // disclosure step between the operator and the authored path. Cold start and the
 // seated "author another Mind" launchpad share it.
-function describeOwnAction(): CanvasActionItem {
+export function describeOwnAction(): CanvasActionItem {
   return {
     type: "describe-own",
     label: "Author",
@@ -40,7 +40,7 @@ function describeOwnAction(): CanvasActionItem {
 // free. Only tone the preview when that seat is actually free (`free` unset, or the
 // seat is in it): on a populated roster whose ramp already claimed the starter's seat
 // the Mind would land elsewhere, so promising the hue would lie.
-function starterAction(
+export function starterAction(
   starter: (typeof GENESIS_STARTERS)[number],
   free?: ReadonlySet<number>,
 ): CanvasActionItem {
@@ -137,57 +137,64 @@ function cardFor(mind: Mind) {
     dot: identityToneForSlot(mind.identitySlot),
     pill: { label: mind.role.trim() || "Mind" },
     fields,
-    actions: [
-      {
-        type: "enter-mind",
-        label: `Enter ${mind.name}`,
-        glyph: "→",
-        payload: { slug: mind.slug },
-      },
-      // The current model reads off this action's label (the at-rest indicator).
-      // A pick carries its provider via the `provider` companion key so the pin
-      // stays a coherent pair; the clear row dispatches "" which setMindModel
-      // reads as drop-the-pin.
-      {
-        type: "set-model",
-        label: `Model — ${mind.model ?? "default"}`,
-        glyph: "⚙",
-        payload: { slug: mind.slug },
-        fields: [
-          {
-            name: "model",
-            label: "Model",
-            placeholder: "default (inherit)",
-            modelPicker: {
-              providerField: "provider",
-              ...(mind.provider ? { providerDefault: mind.provider } : {}),
-            },
-            ...(mind.model ? { defaultValue: mind.model } : {}),
-          },
-        ],
-      },
-      {
-        type: "retire",
-        label: "Retire Mind…",
-        glyph: "✕",
-        tone: "warn" as CanvasTone,
-        destructive: true,
-        payload: { slug: mind.slug },
-        confirm: {
-          title: "Retire Mind",
-          body: `Retire ${mind.name}? This permanently deletes the Mind and its SOUL.`,
-          confirmLabel: "Retire",
-          cancelLabel: "Cancel",
-        },
-      },
-    ],
+    actions: mindCardActions(mind),
   };
+}
+
+// The three management verbs a Mind's card carries wherever it renders — the
+// merged Chamber panel and this standalone roster board share them so the two
+// benches can't drift on what a seat can do.
+export function mindCardActions(mind: Mind): CanvasActionItem[] {
+  return [
+    {
+      type: "enter-mind",
+      label: `Enter ${mind.name}`,
+      glyph: "→",
+      payload: { slug: mind.slug },
+    },
+    // The current model reads off this action's label (the at-rest indicator).
+    // A pick carries its provider via the `provider` companion key so the pin
+    // stays a coherent pair; the clear row dispatches "" which setMindModel
+    // reads as drop-the-pin.
+    {
+      type: "set-model",
+      label: `Model — ${mind.model ?? "default"}`,
+      glyph: "⚙",
+      payload: { slug: mind.slug },
+      fields: [
+        {
+          name: "model",
+          label: "Model",
+          placeholder: "default (inherit)",
+          modelPicker: {
+            providerField: "provider",
+            ...(mind.provider ? { providerDefault: mind.provider } : {}),
+          },
+          ...(mind.model ? { defaultValue: mind.model } : {}),
+        },
+      ],
+    },
+    {
+      type: "retire",
+      label: "Retire Mind…",
+      glyph: "✕",
+      tone: "warn" as CanvasTone,
+      destructive: true,
+      payload: { slug: mind.slug },
+      confirm: {
+        title: "Retire Mind",
+        body: `Retire ${mind.name}? This permanently deletes the Mind and its SOUL.`,
+        confirmLabel: "Retire",
+        cancelLabel: "Cancel",
+      },
+    },
+  ];
 }
 
 // The identity slots (0..4) no seated Mind wears — the seats still open to author
 // into, in ramp order. A Mind with no valid slot (authored before the field, or the
 // neutral overflow) occupies nothing, mirroring nextFreeSlot's allocator.
-function freeSlots(minds: readonly Mind[]): number[] {
+export function freeSlots(minds: readonly Mind[]): number[] {
   const taken = new Set<number>();
   for (const m of minds) {
     if (isValidSlot(m.identitySlot)) taken.add(m.identitySlot);
@@ -206,7 +213,7 @@ function freeSlots(minds: readonly Mind[]): number[] {
 // only while a hue seat is free (a sixth Mind can still be authored freeform — it
 // folds to neutral); an already-seated starter drops off (filtered by slug), and a
 // starter whose preferred hue is taken stays but shows untoned.
-function launchpadSections(
+export function launchpadSections(
   minds: readonly Mind[],
   opts: { title: string; rest?: string },
 ): CanvasBoardView["sections"] {
@@ -244,7 +251,7 @@ const GENESIS_STALL_S = 180;
 // "calibrating…"), and "voice: calibrating…" holds with a real elapsed count that each
 // roster re-publish advances. Past the stall window it flips to a warn card with a
 // Dismiss.
-function bootCard(pending: PendingGenesis, slot: number, now: number) {
+export function bootCard(pending: PendingGenesis, slot: number, now: number) {
   const started = Date.parse(pending.startedAt);
   // An unparseable startedAt (a hand-edited marker) has no honest elapsed — present it
   // as stalled so it always carries a Dismiss, never a stuck "NaNs" card.

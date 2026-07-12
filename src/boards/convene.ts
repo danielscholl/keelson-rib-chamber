@@ -229,8 +229,8 @@ export function buildConveneBoard(
           glyph: "neutral",
           text:
             minds.length === 0
-              ? "Author a Mind in the Roster, then seat a second to convene a Room."
-              : "Seat a second Mind in the Roster to convene a Room.",
+              ? "Author a Mind in the Chamber panel above, then seat a second to convene a Room."
+              : "Seat a second Mind in the Chamber panel above to convene a Room.",
         },
       ],
     });

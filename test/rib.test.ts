@@ -51,12 +51,14 @@ describe("rib-chamber", () => {
     const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns);
     expect(cols.find((c) => c.key === "rib:chamber:rooms")?.collapsible).toBe(true);
     expect(cols.find((c) => c.key === "rib:chamber:lenses")?.collapsible).toBe(true);
-    // The roster now sits in a row (Presence leads the header); it still collapses so a
-    // seated bench can fold to its head strip.
-    expect(cols.find((c) => c.key === "rib:chamber:roster")?.collapsible).toBe(true);
-    // The Presence ribbon leads the header and never collapses — the ceremonial constant.
+    // The Roster region folded into the Chamber header panel (rib#214) — no roster
+    // row remains; the standalone roster view + workflow survive off-surface.
+    expect(cols.some((c) => c.key === "rib:chamber:roster")).toBe(false);
+    // The Chamber panel leads the header and never collapses — the focal constant.
+    // Its live dot pulses on the genesis ticker's frames (keelson#353).
     expect(surface?.layout.header?.key).toBe("rib:chamber:presence");
     expect(surface?.layout.header?.collapsible).toBeUndefined();
+    expect(surface?.layout.header?.live).toBe(true);
   });
 
   it("the Briefing banner is rib-driven — keyed but with no workflow binding", () => {
@@ -210,16 +212,15 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:activity");
   });
 
-  it("the Roster leads the rows, Convene beneath it, above the Rooms + Lenses row", () => {
+  it("Convene leads the rows, above the Rooms + Lenses row (the bench lives in the header)", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
     expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
-      ["rib:chamber:roster"],
       ["rib:chamber:convene"],
       ["rib:chamber:rooms", "rib:chamber:lenses"],
       ["rib:chamber:exhibits"],
     ]);
     // Convene is in-process (no workflow binding) and folds to its head bar.
-    const convene = rows[1]?.columns[0];
+    const convene = rows[0]?.columns[0];
     expect(convene?.key).toBe("rib:chamber:convene");
     expect(convene?.workflow).toBeUndefined();
     expect(convene?.collapsible).toBe(true);

@@ -118,8 +118,8 @@ the write tool directly: run the workflow.
 
 ### Starters
 
-A fresh workspace has no Minds, so the roster offers a few preset archetypes as a
-first move: Moneypenny (a chief of staff), Mycroft (a research partner), and Jarvis
+A fresh workspace has no Minds, so the Chamber panel offers a few preset
+archetypes as a first move: Moneypenny (a chief of staff), Mycroft (a research partner), and Jarvis
 (an engineering partner). Each is a brief, not a baked soul. Convening one runs
 genesis to author fresh artifacts that capture the character's energy for your
 workspace, from the model's own knowledge.
