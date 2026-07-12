@@ -1244,9 +1244,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       });
     });
     // `turns` counts the appended turn (cursor + billing); `checked` is whether it
-    // produced real findings — an errored/timed-out check leaves an error string in the
-    // transcript, so the synthesizer must NOT be told a valid check is there to fold in.
-    return { turns: 1, closed: false, active: true, checked: !turn.errored };
+    // produced real findings — an errored/timed-out OR empty check leaves no usable
+    // findings in the transcript, so the synthesizer must NOT be told a valid check is
+    // there to fold in.
+    return {
+      turns: 1,
+      closed: false,
+      active: true,
+      checked: !turn.errored && turn.text.trim().length > 0,
+    };
   }
 
   // The closing act: a configured synthesizer, or a strategy-chosen fallback,

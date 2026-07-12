@@ -238,6 +238,24 @@ describe("room driver — grounding + pre-close fidelity check", () => {
     expect(synthReq?.prompt).toContain("### Acceptance criteria"); // status still requested
   });
 
+  test("an empty (non-errored) fidelity turn is not reported to the synthesizer as a valid check", async () => {
+    const h = harness([{ text: "a-opens" }, { text: "   " }, { text: "closing" }]);
+    await h.driver.start({
+      slug: "empty",
+      name: "empty",
+      strategy: "sequential" as RoomStrategyName,
+      participants: ["a", "b"],
+      turnBudget: 1,
+      grounding: GROUNDING,
+    });
+
+    await drain(h.driver, "empty");
+
+    const synthReq = h.turns.requests.at(-1);
+    expect(synthReq?.prompt).not.toContain("cross-vendor fidelity check");
+    expect(synthReq?.prompt).toContain("### Acceptance criteria"); // status still requested
+  });
+
   test("an operator stop during the fidelity check closes the room without a synthesis turn", async () => {
     const { store } = makeFakeStore();
     const pub = makeFakePublisher();
