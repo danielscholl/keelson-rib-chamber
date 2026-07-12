@@ -17,6 +17,7 @@ const MINDS: Mind[] = [
   { slug: "a", name: "Ada", role: "agent", persona: "You are Ada.", provider: "px" },
   { slug: "b", name: "Bo", role: "agent", persona: "You are Bo.", provider: "py" },
   { slug: "c", name: "Cy", role: "agent", persona: "You are Cy.", provider: "px" },
+  { slug: "mgr", name: "Mgr", role: "manager", persona: "You manage.", provider: "px" },
 ];
 
 const GROUNDING = {
@@ -70,7 +71,7 @@ describe("room driver — grounding + pre-close fidelity check", () => {
     const [, fidelityReq, synthReq] = h.turns.requests;
     // The fidelity turn ran on the cross-vendor Mind and was handed the criteria.
     expect(fidelityReq?.provider).toBe("py");
-    expect(fidelityReq?.prompt).toContain("independent fidelity checker");
+    expect(fidelityReq?.prompt).toContain("fidelity checker for this room");
     expect(fidelityReq?.prompt).toContain("different vendor");
     expect(fidelityReq?.prompt).toContain("The fidelity check runs before close");
     // The synthesis turn ran on the synthesizer and was told to fold the check in.
@@ -146,6 +147,33 @@ describe("room driver — grounding + pre-close fidelity check", () => {
     // Grounding criteria still surface, and the synthesizer still records their status.
     expect(synthReq?.prompt).toContain("Grounding brief:");
     expect(synthReq?.prompt).toContain("### Acceptance criteria");
+  });
+
+  test("a grounded room routes a natural (pre-budget) close through fidelity + synthesis", async () => {
+    // A magentic manager that declares the plan done closes the room via `end` before
+    // budget. Grounded, that natural close still runs the fidelity turn (b, cross-vendor
+    // to the mgr synthesizer) and a closing synthesis — not a bare terminal commit.
+    const h = harness([
+      { text: 'Plan complete.\n{"action":"done","summary":"all done"}' },
+      { text: "fidelity-report" },
+      { text: "closing" },
+    ]);
+    await h.driver.start({
+      slug: "mg",
+      name: "mg",
+      strategy: "magentic" as RoomStrategyName,
+      participants: ["a", "b"],
+      turnBudget: 4,
+      config: { manager: "mgr" },
+      grounding: GROUNDING,
+    });
+
+    await drain(h.driver, "mg");
+
+    const transcript = await h.store.loadTranscript("mg");
+    expect(transcript.map((e) => e.from)).toEqual(["mgr", "b", "mgr"]); // manage → fidelity → synthesis
+    expect((await h.store.loadRoom("mg"))?.status).toBe("done");
+    expect(h.turns.requests[1]?.prompt).toContain("fidelity checker for this room");
   });
 
   test("an operator stop during the fidelity check closes the room without a synthesis turn", async () => {

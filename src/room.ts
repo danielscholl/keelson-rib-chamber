@@ -21,6 +21,7 @@ import {
 import { getStrategy } from "./strategies/index.ts";
 import { magentic } from "./strategies/magentic.ts";
 import { openFloor } from "./strategies/open-floor.ts";
+import { exhaustedSynthesis } from "./strategies/synthesis.ts";
 import {
   buildFidelityPrompt,
   buildManagerPrompt,
@@ -168,6 +169,23 @@ export function pickFidelityChecker(
     const provider = bySlug.get(p)?.provider;
     return provider !== undefined && provider !== synthProvider;
   });
+}
+
+// The synthesizer for a grounded design-bearing room's NATURAL close (an open-floor
+// end-vote, a magentic ledger completing) — so a grounded room always closes with a
+// fidelity-checked synthesis, not only on budget exhaustion. Reuses exhaustedSynthesis'
+// precedence (config.synthesizer → facilitator → last participant). Undefined for review
+// (its cross-vendor pass is its own close) and for an ungrounded room, which ends direct.
+export function groundedCloseSynthesizer(
+  room: Room,
+  transcript: readonly TurnEntry[],
+): MindSlug | undefined {
+  if (room.strategy === "review") return undefined;
+  const hasCriteria = room.grounding?.criteria.some((c) => c.trim().length > 0) ?? false;
+  if (!hasCriteria) return undefined;
+  const facilitator = room.config?.manager ?? room.config?.moderator;
+  const decision = exhaustedSynthesis(room, transcript, facilitator);
+  return decision.kind === "synthesize" ? decision.mind : undefined;
 }
 
 export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
@@ -495,6 +513,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // (3) execute. commitTerminal / runSpeakTurn report "is the room still
       // active" as a boolean; map that to the StepOutcome the loop drives on.
       if (decision.kind === "end") {
+        // A grounded design-bearing room routes even a natural close (an open-floor
+        // end-vote, a magentic ledger completing before budget) through the fidelity +
+        // synthesis path, so its criteria are checked and folded into a closing document
+        // however the room reaches its end. Ungrounded rooms and review end directly.
+        const groundedSynth = groundedCloseSynthesizer(room, await loadCachedTranscript(slug));
+        if (groundedSynth) {
+          const active = await runCloseSynthesis(room, controller, gen, groundedSynth);
+          return active ? "advanced" : "ended";
+        }
         await commitTerminal(slug, gen, { ...room, status: "done" });
         return "ended";
       }

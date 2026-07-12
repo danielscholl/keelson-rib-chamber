@@ -204,7 +204,7 @@ export function buildFidelityPrompt(input: {
   const context = renderTranscript(input.transcript);
   if (context.length > 0) parts.push(`The discussion so far:\n\n${context}`);
   parts.push(
-    "You are an independent fidelity checker, from a different vendor than the room's speakers. For EACH acceptance criterion above, judge whether the emerging outcome MEETS, PARTIALLY meets, or DIVERGES from it — one line per criterion, quoting the criterion. Then, under a final `Divergences:` line, list every gap the closing summary must resolve (or “None — all criteria met”). Be concise and concrete; do not rewrite the outcome or emit any routing JSON.",
+    "You are the fidelity checker for this room, running on a different vendor than the Mind that will write the closing summary. For EACH acceptance criterion above, judge whether the emerging outcome MEETS, PARTIALLY meets, or DIVERGES from it — one line per criterion, quoting the criterion. Then, under a final `Divergences:` line, list every gap the closing summary must resolve (or “None — all criteria met”). Be concise and concrete; do not rewrite the outcome or emit any routing JSON.",
   );
   return parts.join("\n\n");
 }

@@ -3664,6 +3664,15 @@ async function renderRoomStatus(store: RoomStore, target?: string): Promise<stri
   const head =
     `Room "${room.name}" (${slug}) — ${room.status}, turn ${room.turnIndex}/${room.turnBudget}; ` +
     `participants: ${room.participants.join(", ")}.`;
+  // Surface the grounding brief distinct from the topic so a chat reader sees the
+  // acceptance criteria the room is held to (issue #204's "visible in the transcript").
+  const criteria = room.grounding?.criteria.filter((c) => c.trim().length > 0) ?? [];
+  const grounding =
+    criteria.length > 0
+      ? `\nGrounding${room.grounding?.sourceUrl ? ` (${room.grounding.sourceUrl})` : ""}: ${criteria
+          .map((c, i) => `${i + 1}. ${c}`)
+          .join("; ")}`
+      : "";
   const body = transcript.length > 0 ? renderTranscript(transcript) : "(no turns yet)";
   let index = "";
   if (!explicit && activeRooms.size > 1) {
@@ -3678,7 +3687,7 @@ async function renderRoomStatus(store: RoomStore, target?: string): Promise<stri
     );
     index = `\n\n${activeRooms.size} rooms active — pass room:<slug> to read another:\n${lines.join("\n")}`;
   }
-  return boundedText(`${head}\n\n${body}${index}`);
+  return boundedText(`${head}${grounding}\n\n${body}${index}`);
 }
 
 // Genesis write seam: the chamber-genesis workflow's prompt node authors the soul

@@ -723,3 +723,24 @@ describe("buildRoomBoard — magentic plan + manager", () => {
     expect(actions.items.map((i) => i.type)).toEqual(["room-stop"]);
   });
 });
+
+describe("grounding section", () => {
+  test("a grounded room's board shows the source and criteria under Grounding", () => {
+    const board = buildRoomBoard(
+      room({ grounding: { sourceUrl: "https://x/204", criteria: ["First", "Second"] } }),
+      [],
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const g = board.sections.find((s) => s.kind === "rows" && s.title === "Grounding");
+    expect(g?.kind).toBe("rows");
+    const texts = g?.kind === "rows" ? g.items.map((i) => i.text) : [];
+    expect(texts).toContain("https://x/204");
+    expect(texts).toContain("First");
+    expect(texts).toContain("Second");
+  });
+
+  test("an ungrounded room's board has no Grounding section", () => {
+    const board = buildRoomBoard(room(), []);
+    expect(board.sections.some((s) => s.kind === "rows" && s.title === "Grounding")).toBe(false);
+  });
+});

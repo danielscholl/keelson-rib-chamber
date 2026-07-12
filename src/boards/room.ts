@@ -1,4 +1,4 @@
-import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { Brief, CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
 import {
   clockTime,
@@ -80,6 +80,7 @@ export function buildRoomBoard(
   // once here too, or the topic's "produces N decisions" tail disagrees with
   // the Decisions rail's own deduped "N decided" metric below it.
   const topicSection = buildTopicSection(room.topic, distinctQuestionCount(decisions));
+  const groundingSection = buildGroundingSection(room.grounding);
   const vitalsSection = buildVitalsSection(transcript, projectLabel);
   const planSection = buildPlanSection(ledger);
 
@@ -126,6 +127,7 @@ export function buildRoomBoard(
     sections: [
       ...vitalsSection,
       ...topicSection,
+      ...groundingSection,
       ...planSection,
       columnsSection,
       ...outcomeSection,
@@ -217,6 +219,20 @@ function buildTopicSection(
       ],
     },
   ];
+}
+
+// The grounding brief as a board section: the source (when set) and each acceptance
+// criterion, so an operator reading the room sees the contract the Minds are held to,
+// distinct from the topic (issue #204's "visible in the transcript"). Empty (no section)
+// for a room without grounding criteria.
+function buildGroundingSection(grounding: Brief | undefined): CanvasBoardView["sections"] {
+  const criteria = grounding?.criteria.map((c) => c.trim()).filter(Boolean) ?? [];
+  if (!grounding || criteria.length === 0) return [];
+  const items: FeedItem[] = [];
+  const source = grounding.sourceUrl?.trim();
+  if (source) items.push({ glyph: "neutral", text: source });
+  for (const c of criteria) items.push({ glyph: "brand", text: c });
+  return [{ kind: "rows", title: "Grounding", items }];
 }
 
 // The magentic task ledger as a board section: one row per task — the status as a

@@ -451,7 +451,7 @@ describe("buildFidelityPrompt", () => {
     expect(prompt).toContain("1. Rooms can carry grounding");
     expect(prompt).toContain("2. The fidelity check runs before close");
     expect(prompt).toContain("source: https://example.test/issue/204");
-    expect(prompt).toContain("independent fidelity checker");
+    expect(prompt).toContain("fidelity checker for this room");
     expect(prompt).toContain("different vendor");
     expect(prompt).toContain("Divergences:");
   });
