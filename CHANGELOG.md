@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.33.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.32.0...v0.33.0) (2026-07-12)
+
+
+### Added
+
+* **boards:** show convene mode subtitles inline ([#226](https://github.com/danielscholl/keelson-rib-chamber/issues/226)) ([e7f8f01](https://github.com/danielscholl/keelson-rib-chamber/commit/e7f8f013f274ca9387f30be2b8600c948bc02483))
+
+
+### Fixed
+
+* **room:** clamp the header turns chip and label Start chips with shape words ([#225](https://github.com/danielscholl/keelson-rib-chamber/issues/225)) ([2b4ff6e](https://github.com/danielscholl/keelson-rib-chamber/commit/2b4ff6e6e861e6150228e368a9819fa96762ce74))
+
 ## [0.32.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.31.0...v0.32.0) (2026-07-12)
 
 
