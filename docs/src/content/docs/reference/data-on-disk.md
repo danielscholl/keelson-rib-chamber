@@ -115,13 +115,17 @@ the transcript on resume:
 }
 ```
 
-`status` is one of `active`, `stopped`, or `done`. `topic`, `config`,
-`pending`, `projectId`, and `coding` are optional. `projectId` names the keelson
-project the room targets (stored as the id, not the resolved path); `coding` is
-the opt-in coding tier and requires a `projectId`, since the project root is the
-confinement boundary for coding turns. `round` is stored, not derived, so a
-director override or moderator pick can perturb rotation without losing the
-round count.
+`status` is one of `active`, `stopped`, or `done`. `topic`, `grounding`,
+`config`, `pending`, `projectId`, and `coding` are optional. `grounding` is the
+room's brief distinct from the free-text topic, a `{ sourceUrl?, criteria: string[] }`
+object (the shared `Brief`); when it carries criteria, a design-bearing room runs
+a cross-vendor fidelity check against them before it closes, if the cast spans two
+providers. `projectId` names
+the keelson project the room targets (stored as the id, not the resolved path);
+`coding` is the opt-in coding tier and requires a `projectId`, since the project
+root is the confinement boundary for coding turns. `round` is stored, not
+derived, so a director override or moderator pick can perturb rotation without
+losing the round count.
 
 `transcript.jsonl` is one `TurnEntry` per line, append-only:
 

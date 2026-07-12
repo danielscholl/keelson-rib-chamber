@@ -467,6 +467,39 @@ describe("chamber room-control chat tools", () => {
     expect(t.out()).toContain("No Chamber room yet");
   });
 
+  it("chamber_room_status surfaces the grounding brief (criteria-bearing and source-only)", async () => {
+    const store = createFileRoomStore(roomsDir());
+    const base: Room = {
+      slug: "room-grounded",
+      name: "Grounded",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: "active",
+      turnBudget: 8,
+      turnIndex: 0,
+      round: 0,
+      grounding: { sourceUrl: "https://x/204", criteria: ["First", "Second"] },
+      createdAt: "2026-01-02T00:00:00.000Z",
+    };
+    await store.saveRoom(base);
+    const t1 = makeToolCtx();
+    await tool("chamber_room_status").execute({ room: "room-grounded" }, t1.ctx);
+    expect(t1.out()).toContain("Grounding");
+    expect(t1.out()).toContain("https://x/204");
+    expect(t1.out()).toContain("First");
+    expect(t1.out()).toContain("Second");
+
+    await store.saveRoom({
+      ...base,
+      slug: "room-source-only",
+      grounding: { sourceUrl: "https://x/spec", criteria: [] },
+    });
+    const t2 = makeToolCtx();
+    await tool("chamber_room_status").execute({ room: "room-source-only" }, t2.ctx);
+    expect(t2.out()).toContain("Grounding");
+    expect(t2.out()).toContain("https://x/spec");
+  });
+
   it("chamber_room_transcript pages the full persisted transcript exactly", async () => {
     const store = createFileRoomStore(roomsDir());
     const room: Room = {
@@ -548,6 +581,37 @@ describe("chamber room-control chat tools", () => {
     const s = makeToolCtx();
     await tool("chamber_room_status").execute({}, s.ctx);
     expect(s.out()).toContain("No Chamber room yet");
+  });
+
+  it("accepts a grounding brief and discloses the extra paid turns in the dry-run", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      {
+        participants: ["alice", "bob"],
+        turnBudget: 2,
+        grounding: { sourceUrl: "https://example.test/issue/204", criteria: ["A", "B"] },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("Would open a room with alice, bob");
+    // The confirm gate must disclose the cross-vendor fidelity + synthesis room turns and
+    // note the separate per-speaker reflection pass, so the approver isn't told a false total.
+    expect(t.out()).toContain("cross-vendor fidelity turn");
+    expect(t.out()).toContain("up to 4");
+    expect(t.out()).toContain("reflection pass");
+  });
+
+  it("rejects an over-limit grounding brief instead of silently truncating it", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      {
+        participants: ["alice", "bob"],
+        grounding: { criteria: Array.from({ length: 25 }, (_, i) => `c${i}`) },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
   });
 
   it("rejects a start with fewer than two participants", async () => {

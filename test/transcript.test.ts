@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildFidelityPrompt,
   buildManagerPrompt,
   buildModeratorPrompt,
   buildOpenFloorPrompt,
@@ -8,6 +9,7 @@ import {
   buildTurnEntry,
   buildTurnPrompt,
   buildWorkerPrompt,
+  renderGrounding,
   renderTranscript,
   TRANSCRIPT_WINDOW_TURNS,
 } from "../src/transcript.ts";
@@ -344,5 +346,126 @@ describe("buildWorkerPrompt", () => {
     const coding = buildWorkerPrompt({ task: "x", transcript: [], coding: true });
     expect(coding.toLowerCase()).toContain("repository at your working directory");
     expect(plain.toLowerCase()).not.toContain("repository at your working directory");
+  });
+});
+
+const GROUNDING = {
+  sourceUrl: "https://example.test/issue/204",
+  criteria: ["Rooms can carry grounding", "The fidelity check runs before close"],
+};
+
+describe("renderGrounding", () => {
+  test("renders the source and numbered criteria under a Grounding brief head", () => {
+    expect(renderGrounding(GROUNDING)).toBe(
+      "Grounding brief:\nSource: https://example.test/issue/204\nAcceptance criteria:\n1. Rooms can carry grounding\n2. The fidelity check runs before close",
+    );
+  });
+
+  test("renders criteria alone when there is no source", () => {
+    expect(renderGrounding({ criteria: ["Only a criterion"] })).toBe(
+      "Grounding brief:\nAcceptance criteria:\n1. Only a criterion",
+    );
+  });
+
+  test("renders the source alone when there are no criteria", () => {
+    expect(renderGrounding({ sourceUrl: "https://example.test/spec", criteria: [] })).toBe(
+      "Grounding brief:\nSource: https://example.test/spec",
+    );
+  });
+
+  test("is undefined for absent grounding or an all-empty brief", () => {
+    expect(renderGrounding(undefined)).toBeUndefined();
+    expect(renderGrounding({ criteria: ["  ", ""] })).toBeUndefined();
+  });
+});
+
+describe("grounding in turn prompts", () => {
+  test("buildTurnPrompt surfaces the grounding brief alongside the topic", () => {
+    const prompt = buildTurnPrompt({ topic: "Decide", grounding: GROUNDING, transcript: [] });
+    expect(prompt).toContain("Room topic: Decide");
+    expect(prompt).toContain("Grounding brief:");
+    expect(prompt).toContain("1. Rooms can carry grounding");
+  });
+
+  test("buildTurnPrompt without grounding is unchanged (no grounding block)", () => {
+    expect(buildTurnPrompt({ topic: "Decide", transcript: [] })).not.toContain("Grounding brief:");
+  });
+
+  test("buildManagerPrompt surfaces grounding under the goal", () => {
+    const prompt = buildManagerPrompt({
+      topic: "Ship it",
+      grounding: GROUNDING,
+      transcript: [],
+      workers: ["a", "b"],
+    });
+    expect(prompt).toContain("Goal: Ship it");
+    expect(prompt).toContain("Grounding brief:");
+  });
+});
+
+describe("buildSynthesisPrompt grounding fold", () => {
+  test("folds the fidelity check in when one actually ran (fidelityChecked)", () => {
+    const prompt = buildSynthesisPrompt({
+      grounding: GROUNDING,
+      fidelityChecked: true,
+      transcript: [],
+    });
+    expect(prompt).toContain("cross-vendor fidelity check");
+    expect(prompt).toContain("### Acceptance criteria");
+    expect(prompt).toContain("one Markdown bullet");
+    expect(prompt).toContain("### Fidelity");
+  });
+
+  test("with criteria but no check, records per-criterion status without claiming a check", () => {
+    const prompt = buildSynthesisPrompt({ grounding: GROUNDING, transcript: [] });
+    expect(prompt).toContain("### Acceptance criteria");
+    expect(prompt).not.toContain("cross-vendor fidelity check");
+    expect(prompt).not.toContain("### Fidelity");
+  });
+
+  test("keeps the plain closing instruction without grounding criteria", () => {
+    const prompt = buildSynthesisPrompt({ topic: "Decide", transcript: [] });
+    expect(prompt).toContain("Synthesize the discussion");
+    expect(prompt).not.toContain("fidelity check");
+    expect(prompt).not.toContain("### Acceptance criteria");
+  });
+});
+
+describe("buildReviewPrompt grounding", () => {
+  test("surfaces the grounding brief to the reviewer alongside the contract", () => {
+    const prompt = buildReviewPrompt({
+      contract: "Ship it",
+      grounding: GROUNDING,
+      artifact: "the change",
+      author: "ada",
+    });
+    expect(prompt).toContain("Grounding brief:");
+    expect(prompt).toContain("1. Rooms can carry grounding");
+    expect(prompt).toContain("You are the reviewer");
+  });
+});
+
+describe("buildFidelityPrompt", () => {
+  test("lists the criteria and asks for a cross-vendor per-criterion verdict", () => {
+    const prompt = buildFidelityPrompt({ grounding: GROUNDING, transcript: [] });
+    expect(prompt).toContain("1. Rooms can carry grounding");
+    expect(prompt).toContain("2. The fidelity check runs before close");
+    expect(prompt).toContain("source: https://example.test/issue/204");
+    expect(prompt).toContain("fidelity checker for this room");
+    expect(prompt).toContain("different vendor");
+    expect(prompt).toContain("Divergences:");
+  });
+
+  test("renders the full discussion but caps a very large room at a bounded size", () => {
+    const small = [entry({ from: "a", parts: [{ text: "resolved criterion 1 early" }] })];
+    expect(buildFidelityPrompt({ grounding: GROUNDING, transcript: small })).toContain(
+      "resolved criterion 1 early", // a normal room's early turns are included, not windowed away
+    );
+    const huge = Array.from({ length: 100 }, (_, i) =>
+      entry({ from: "a", parts: [{ text: `turn ${i} ${"x".repeat(1000)}` }] }),
+    );
+    const prompt = buildFidelityPrompt({ grounding: GROUNDING, transcript: huge });
+    expect(prompt).toContain("earlier turns omitted"); // ~100k chars → capped with a marker
+    expect(prompt.length).toBeLessThan(30_000);
   });
 });

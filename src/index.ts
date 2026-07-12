@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type {
+  Brief,
   CanvasBoardView,
   CanvasView,
   CommandCompletion,
@@ -2649,6 +2650,43 @@ async function validateStart(
   return { ok: true, participants: deduped };
 }
 
+// The convene form's free-text criteria (one per line) split into a trimmed list.
+function parseCriteriaLines(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+// Bounds on a grounding brief. It is re-serialized into every turn, fidelity, and
+// synthesis prompt, so an unbounded brief would multiply billed input and can exhaust
+// context — cap the count and lengths at the normalization choke point (both entry
+// points pass through here) rather than trust the caller.
+const MAX_GROUNDING_CRITERIA = 20;
+const MAX_CRITERION_LEN = 500;
+const MAX_GROUNDING_URL_LEN = 500;
+
+// Normalize a room grounding brief from either entry point (the chamber_room_start
+// tool's structured input or the convene form's parsed fields) into the shared Brief
+// shape, or undefined when it carries neither a source nor any criterion — so a room
+// convened without grounding is byte-for-byte unchanged.
+export function normalizeGrounding(
+  input: { sourceUrl?: string; criteria?: readonly string[] } | undefined,
+): Brief | undefined {
+  if (!input) return undefined;
+  const sourceUrl = input.sourceUrl?.trim().slice(0, MAX_GROUNDING_URL_LEN) || undefined;
+  // Collapse internal whitespace so each criterion is a single line: the convene form is
+  // one-per-line and the restart payload rejoins with newlines, so an embedded newline
+  // would otherwise split one criterion into two on the round trip.
+  const criteria = (input.criteria ?? [])
+    .map((c) => c.trim().replace(/\s+/g, " ").slice(0, MAX_CRITERION_LEN))
+    .filter(Boolean)
+    .slice(0, MAX_GROUNDING_CRITERIA);
+  if (!sourceUrl && criteria.length === 0) return undefined;
+  return { ...(sourceUrl ? { sourceUrl } : {}), criteria };
+}
+
 // Open a fresh-slug room and kick its auto-advance loop. The shared core behind
 // both the board's room-start action and the chamber_room_start chat tool, so
 // validation, the concurrency cap, and the fresh-slug discipline live in one
@@ -2663,6 +2701,7 @@ async function startRoom(
     name?: string;
     strategy?: string;
     topic?: string;
+    grounding?: Brief;
     projectId?: string;
     coding?: boolean;
   } & RoomConfigInput,
@@ -2714,6 +2753,7 @@ async function startRoom(
       participants: valid.participants,
       turnBudget: input.turnBudget,
       ...(topic ? { topic } : {}),
+      ...(input.grounding ? { grounding: input.grounding } : {}),
       ...(valid.config ? { config: valid.config } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.coding ? { coding: input.coding } : {}),
@@ -2784,13 +2824,19 @@ function roomStartAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   // Routing config arrives as flat payload keys — a board action's collected
   // `fields` (base #120) merge in flat, so `moderator`/`endVoteThreshold` etc. are
-  // plain keys, not nested. roomConfigFromFlat owns that flat-key contract.
+  // plain keys, not nested. roomConfigFromFlat owns that flat-key contract, and the
+  // grounding brief follows the same flat shape (`groundingUrl` + one-per-line `criteria`).
+  const grounding = normalizeGrounding({
+    sourceUrl: asNonEmptyString(payload.groundingUrl),
+    criteria: parseCriteriaLines(asNonEmptyString(payload.criteria)),
+  });
   return startRoom({
     participants: asStringArray(payload.participants),
     turnBudget: typeof payload.turnBudget === "number" ? payload.turnBudget : 0,
     name: asNonEmptyString(payload.name) || undefined,
     strategy: asNonEmptyString(payload.strategy) || undefined,
     topic: asNonEmptyString(payload.topic) || undefined,
+    ...(grounding ? { grounding } : {}),
     projectId: asNonEmptyString(payload.projectId) || undefined,
     coding: payload.coding === true,
     ...roomConfigFromFlat(payload),
@@ -2849,6 +2895,12 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
   }
   const strategy = asNonEmptyString(payload.strategy) || "sequential";
   const topic = asNonEmptyString(payload.topic) || undefined;
+  // Grounding is a source URL plus one criterion per line of the criteria field; an
+  // empty/whitespace pair normalizes to no grounding (the convene default is ungrounded).
+  const grounding = normalizeGrounding({
+    sourceUrl: asNonEmptyString(payload.groundingUrl),
+    criteria: parseCriteriaLines(asNonEmptyString(payload.criteria)),
+  });
 
   const projectInput = asNonEmptyString(payload.project);
   let projectId: string | undefined;
@@ -2894,6 +2946,7 @@ async function conveneAction(action: RibAction): Promise<RibActionResult> {
     participants,
     turnBudget,
     topic,
+    ...(grounding ? { grounding } : {}),
     ...(projectId ? { projectId } : {}),
     ...(mod.slug ? { moderator: mod.slug } : {}),
     ...(mgr.slug ? { manager: mgr.slug } : {}),
@@ -3553,6 +3606,16 @@ const roomStartSchema = z.object({
   turnBudget: z.number().int().min(1).max(MAX_ROOM_TURN_BUDGET).optional(),
   name: z.string().optional(),
   topic: z.string().optional(),
+  // Optional grounding brief distinct from the free-text topic: a source URL and the
+  // acceptance criteria the room must satisfy. Injected into turn prompts; when it
+  // carries criteria, a design-bearing room runs a cross-vendor fidelity check against
+  // them before the closing synthesis. Omit for a room with no grounding.
+  grounding: z
+    .object({
+      sourceUrl: z.string().max(MAX_GROUNDING_URL_LEN).optional(),
+      criteria: z.array(z.string().max(MAX_CRITERION_LEN)).max(MAX_GROUNDING_CRITERIA).optional(),
+    })
+    .optional(),
   // Optional: target the room at a keelson project (turns run at its rootPath).
   projectId: z.string().optional(),
   // Opt into the coding tier (default off): a Mind that declares `code`/`read` can
@@ -3604,6 +3667,14 @@ async function renderRoomStatus(store: RoomStore, target?: string): Promise<stri
   const head =
     `Room "${room.name}" (${slug}) — ${room.status}, turn ${room.turnIndex}/${room.turnBudget}; ` +
     `participants: ${room.participants.join(", ")}.`;
+  const groundingSource = room.grounding?.sourceUrl?.trim();
+  const criteria = room.grounding?.criteria.filter((c) => c.trim().length > 0) ?? [];
+  const criteriaText =
+    criteria.length > 0 ? `: ${criteria.map((c, i) => `${i + 1}. ${c}`).join("; ")}` : "";
+  const grounding =
+    groundingSource || criteria.length > 0
+      ? `\nGrounding${groundingSource ? ` (${groundingSource})` : ""}${criteriaText}`
+      : "";
   const body = transcript.length > 0 ? renderTranscript(transcript) : "(no turns yet)";
   let index = "";
   if (!explicit && activeRooms.size > 1) {
@@ -3618,7 +3689,7 @@ async function renderRoomStatus(store: RoomStore, target?: string): Promise<stri
     );
     index = `\n\n${activeRooms.size} rooms active — pass room:<slug> to read another:\n${lines.join("\n")}`;
   }
-  return boundedText(`${head}\n\n${body}${index}`);
+  return boundedText(`${head}${grounding}\n\n${body}${index}`);
 }
 
 // Genesis write seam: the chamber-genesis workflow's prompt node authors the soul
@@ -4431,7 +4502,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns, default 8; at budget exhaustion every strategy except review appends one extra paid closing-synthesis turn, so a completed room bills up to turnBudget + 1). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. Strategy role rules: sequential/concurrent need only at least two participant Mind slugs and no manager; group-chat requires a `moderator` Mind slug that is real, safe, and NOT among participants, with optional `synthesizer` that is also real/safe and neither a participant nor the moderator; open-floor has no moderator or synthesizer; review requires exactly two participants pinned to different providers — first author, second reviewer — with no moderator or synthesizer and turnBudget at least 2; magentic requires a real/safe `manager` Mind slug NOT among participants, no moderator or synthesizer, and at least two worker participants. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster). Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).",
+        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns, default 8; at budget exhaustion every strategy except review appends one extra paid closing-synthesis turn, so a completed room runs up to turnBudget + 1 room turns — turnBudget + 2 when a design-bearing room is grounded with acceptance criteria (a cross-vendor fidelity turn before synthesis); every Mind that spoke then also runs one paid reflection turn at close, so the total paid calls exceed the room-turn count). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. Optionally provide `grounding` — a `{ sourceUrl?, criteria?: string[] }` brief distinct from the topic: it is injected into every turn prompt, and its acceptance criteria drive an independent cross-vendor fidelity check — when the room's Minds span two providers — that folds any divergences into the closing document before a design-bearing room (sequential/concurrent/group-chat/open-floor/magentic) synthesizes. Strategy role rules: sequential/concurrent need only at least two participant Mind slugs and no manager; group-chat requires a `moderator` Mind slug that is real, safe, and NOT among participants, with optional `synthesizer` that is also real/safe and neither a participant nor the moderator; open-floor has no moderator or synthesizer; review requires exactly two participants pinned to different providers — first author, second reviewer — with no moderator or synthesizer and turnBudget at least 2; magentic requires a real/safe `manager` Mind slug NOT among participants, no moderator or synthesizer, and at least two worker participants. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see the Roster). Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).",
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,
@@ -4443,6 +4514,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         }
         const { participants, name } = parsed.data;
         const topic = (parsed.data.topic ?? "").trim() || undefined;
+        const grounding = normalizeGrounding(parsed.data.grounding);
         const turnBudget = parsed.data.turnBudget ?? DEFAULT_ROOM_TURN_BUDGET;
         const confirm = parsed.data.confirm ?? false;
         const moderator = (parsed.data.moderator ?? "").trim() || undefined;
@@ -4525,10 +4597,17 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
         const codingNote = coding
           ? " with the coding tier ON (Minds that declare `code`/`read` can run Bash/Edit/Write/Read, confined to the project repo)"
           : "";
+        // Disclose the extra paid turns a grounded design-bearing room spends at close
+        // (a cross-vendor fidelity turn plus the closing synthesis) so the approving
+        // human sees the true ceiling, not just the base budget.
+        const groundingNote =
+          grounding && grounding.criteria.length > 0 && strategy !== "review"
+            ? ` It carries a grounding brief: the closing synthesis, plus a cross-vendor fidelity turn when the Minds span two providers, add up to 2 more room turns (up to ${turnBudget + 2}), before the per-speaker reflection pass at close.`
+            : "";
         if (!confirm) {
           emitResult(
             ctx,
-            `Would open a room with ${who}${topicNote}${modeNote}${projectNote}${codingNote} for ${turnBudget} turns (each turn is a paid agent call). Re-call chamber_room_start with confirm:true once the user approves.`,
+            `Would open a room with ${who}${topicNote}${modeNote}${projectNote}${codingNote} for ${turnBudget} turns (each turn is a paid agent call).${groundingNote} Re-call chamber_room_start with confirm:true once the user approves.`,
           );
           return;
         }
@@ -4539,6 +4618,7 @@ function roomControlTools(store: RoomStore): ToolDefinition[] {
           turnBudget,
           name,
           topic,
+          ...(grounding ? { grounding } : {}),
           strategy,
           projectId,
           coding,

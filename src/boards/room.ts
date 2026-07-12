@@ -1,4 +1,4 @@
-import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { Brief, CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
 import {
   clockTime,
@@ -80,6 +80,7 @@ export function buildRoomBoard(
   // once here too, or the topic's "produces N decisions" tail disagrees with
   // the Decisions rail's own deduped "N decided" metric below it.
   const topicSection = buildTopicSection(room.topic, distinctQuestionCount(decisions));
+  const groundingSection = buildGroundingSection(room.grounding);
   const vitalsSection = buildVitalsSection(transcript, projectLabel);
   const planSection = buildPlanSection(ledger);
 
@@ -126,6 +127,7 @@ export function buildRoomBoard(
     sections: [
       ...vitalsSection,
       ...topicSection,
+      ...groundingSection,
       ...planSection,
       columnsSection,
       ...outcomeSection,
@@ -219,6 +221,19 @@ function buildTopicSection(
   ];
 }
 
+// The grounding brief as a board section — its source (when set) and each acceptance
+// criterion. Empty when the brief carries neither.
+function buildGroundingSection(grounding: Brief | undefined): CanvasBoardView["sections"] {
+  if (!grounding) return [];
+  const source = grounding.sourceUrl?.trim();
+  const criteria = grounding.criteria.map((c) => c.trim()).filter(Boolean);
+  if (!source && criteria.length === 0) return [];
+  const items: FeedItem[] = [];
+  if (source) items.push({ glyph: "neutral", text: source });
+  for (const c of criteria) items.push({ glyph: "brand", text: c });
+  return [{ kind: "rows", title: "Grounding", items }];
+}
+
 // The magentic task ledger as a board section: one row per task — the status as a
 // tone glyph + a leading icon, the assignee as a chip, any outcome note in the
 // trailing. Empty (no section) for a non-magentic room or a ledger with no tasks yet.
@@ -272,6 +287,13 @@ function taskTone(status: LedgerTask["status"]): CanvasTone {
 // a fresh room. Each control carries the room slug so onAction targets it.
 function roomControls(room: Room): CanvasBoardView["sections"][number] {
   if (room.status !== "active") {
+    // Carry the grounding brief (flat, the shape roomStartAction parses) so every
+    // restart reruns with the same acceptance criteria rather than an ungrounded room.
+    const groundingFlat: Record<string, string> = {};
+    if (room.grounding?.sourceUrl) groundingFlat.groundingUrl = room.grounding.sourceUrl;
+    if (room.grounding && room.grounding.criteria.length > 0) {
+      groundingFlat.criteria = room.grounding.criteria.join("\n");
+    }
     return {
       kind: "actions",
       title: "Controls",
@@ -293,6 +315,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
             ...flatFromRoomConfig(room.config),
           },
         },
@@ -312,6 +335,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
           },
           fields: [
             {
@@ -336,6 +360,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
           },
         },
         {
@@ -354,6 +379,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
             ...(room.topic ? { topic: room.topic } : {}),
             ...(room.projectId ? { projectId: room.projectId } : {}),
             ...(room.coding ? { coding: room.coding } : {}),
+            ...groundingFlat,
           },
           fields: [
             {

@@ -204,6 +204,32 @@ describe("buildRoomBoard", () => {
     }
   });
 
+  test("a grounded room's restart actions all round-trip the brief (flat groundingUrl + criteria)", () => {
+    const board = buildRoomBoard(
+      room({
+        status: "done",
+        grounding: { sourceUrl: "https://x/204", criteria: ["First", "Second"] },
+      }),
+      [],
+    );
+    // Every restart control keeps the brief, so "Start again" (and the mode switches)
+    // rerun grounded rather than silently dropping it. criteria ride newline-joined, the
+    // shape roomStartAction parses back.
+    for (const item of actionsSection(board).items) {
+      expect(item.payload).toMatchObject({
+        groundingUrl: "https://x/204",
+        criteria: "First\nSecond",
+      });
+    }
+  });
+
+  test("an ungrounded room's restart actions carry no grounding keys", () => {
+    for (const item of actionsSection(buildRoomBoard(room({ status: "done" }), [])).items) {
+      expect(item.payload).not.toHaveProperty("groundingUrl");
+      expect(item.payload).not.toHaveProperty("criteria");
+    }
+  });
+
   test("a coding room's restart actions all round-trip the coding tier", () => {
     const board = buildRoomBoard(room({ status: "done", projectId: "p1", coding: true }), []);
     for (const item of actionsSection(board).items) {
@@ -721,5 +747,37 @@ describe("buildRoomBoard — magentic plan + manager", () => {
     // The manager routes by the ledger, so a manual "Call on <worker>" override is
     // suppressed — only Stop remains.
     expect(actions.items.map((i) => i.type)).toEqual(["room-stop"]);
+  });
+});
+
+describe("grounding section", () => {
+  test("a grounded room's board shows the source and criteria under Grounding", () => {
+    const board = buildRoomBoard(
+      room({ grounding: { sourceUrl: "https://x/204", criteria: ["First", "Second"] } }),
+      [],
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const g = board.sections.find((s) => s.kind === "rows" && s.title === "Grounding");
+    expect(g?.kind).toBe("rows");
+    const texts = g?.kind === "rows" ? g.items.map((i) => i.text) : [];
+    expect(texts).toContain("https://x/204");
+    expect(texts).toContain("First");
+    expect(texts).toContain("Second");
+  });
+
+  test("a source-only grounded room still shows the Grounding section", () => {
+    const board = buildRoomBoard(
+      room({ grounding: { sourceUrl: "https://x/spec", criteria: [] } }),
+      [],
+    );
+    const g = board.sections.find((s) => s.kind === "rows" && s.title === "Grounding");
+    expect(g?.kind).toBe("rows");
+    const texts = g?.kind === "rows" ? g.items.map((i) => i.text) : [];
+    expect(texts).toContain("https://x/spec");
+  });
+
+  test("an ungrounded room's board has no Grounding section", () => {
+    const board = buildRoomBoard(room(), []);
+    expect(board.sections.some((s) => s.kind === "rows" && s.title === "Grounding")).toBe(false);
   });
 });

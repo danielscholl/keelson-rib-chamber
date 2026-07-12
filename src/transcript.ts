@@ -1,12 +1,33 @@
-import type { TokenUsage } from "@keelson/shared";
+import type { Brief, TokenUsage } from "@keelson/shared";
 import { stripControlJson } from "./routing.ts";
 import type { MindSlug, TaskLedger, TurnEntry } from "./types.ts";
+
+// The grounding brief rendered for a turn prompt. Undefined when the brief carries no
+// source and no criterion, so an ungrounded room adds nothing to the prompt (the
+// no-behavior-change invariant).
+export function renderGrounding(grounding: Brief | undefined): string | undefined {
+  if (!grounding) return undefined;
+  const lines: string[] = [];
+  const source = grounding.sourceUrl?.trim();
+  if (source) lines.push(`Source: ${source}`);
+  const criteria = grounding.criteria.map((c) => c.trim()).filter(Boolean);
+  if (criteria.length > 0) {
+    lines.push("Acceptance criteria:", ...criteria.map((c, i) => `${i + 1}. ${c}`));
+  }
+  return lines.length > 0 ? `Grounding brief:\n${lines.join("\n")}` : undefined;
+}
 
 // Cap on history turns carried in a prompt (and the status-tool view): unbounded
 // history grows prompt cost linearly per turn (worse under concurrent rounds, which
 // fan one transcript into N prompts). Below MAX_ROOM_TURN_BUDGET (50) so it actually
 // caps rooms that approach the budget, not just hypothetical larger ones.
 export const TRANSCRIPT_WINDOW_TURNS = 40;
+
+// Hard character cap on the discussion fed to the pre-close fidelity check. It reads the
+// whole room (not the turn window) to catch an early-resolved criterion, but director
+// injects and reply lengths are unbounded, so the render is capped to keep the paid
+// close-time prompt from exhausting context — roughly 6k tokens.
+export const MAX_FIDELITY_CONTEXT_CHARS = 24_000;
 
 // Render a transcript as the prompt context fed to the next speaker — oldest to
 // newest, one "from: text" block per turn, bounded to the last TRANSCRIPT_WINDOW_TURNS
@@ -15,10 +36,13 @@ export const TRANSCRIPT_WINDOW_TURNS = 40;
 // leaks into the next speaker's context and gets mimicked; the on-disk entry is
 // untouched (the driver re-parses the raw text for routing). Also backs the
 // chamber_room_status tool's body. Pure.
-export function renderTranscript(transcript: readonly TurnEntry[]): string {
-  const omitted = Math.max(0, transcript.length - TRANSCRIPT_WINDOW_TURNS);
+export function renderTranscript(
+  transcript: readonly TurnEntry[],
+  limit: number = TRANSCRIPT_WINDOW_TURNS,
+): string {
+  const omitted = Math.max(0, transcript.length - limit);
   const rendered = transcript
-    .slice(-TRANSCRIPT_WINDOW_TURNS)
+    .slice(-limit)
     .map((entry) => `${entry.from}: ${stripControlJson(entry.parts.map((p) => p.text).join("\n"))}`)
     .join("\n\n");
   if (omitted === 0) return rendered;
@@ -27,10 +51,12 @@ export function renderTranscript(transcript: readonly TurnEntry[]): string {
 }
 
 // The shared head of every speaker/moderator/synthesis prompt: the room topic (if
-// any), then the rendered (windowed) discussion so far, or `emptyContext` when there
-// is no history yet — omit `emptyContext` (synthesis) to push nothing. Pure.
+// any), the grounding brief (if any), then the rendered (windowed) discussion so far,
+// or `emptyContext` when there is no history yet — omit `emptyContext` (synthesis) to
+// push nothing. Pure.
 function promptPreamble(input: {
   topic?: string;
+  grounding?: Brief;
   projectContext?: string;
   transcript: readonly TurnEntry[];
   emptyContext?: string;
@@ -38,6 +64,8 @@ function promptPreamble(input: {
   const parts: string[] = [];
   const topic = input.topic?.trim();
   if (topic) parts.push(`Room topic: ${topic}`);
+  const grounding = renderGrounding(input.grounding);
+  if (grounding) parts.push(grounding);
   const projectContext = input.projectContext?.trim();
   if (projectContext) parts.push(projectContext);
   const context = renderTranscript(input.transcript);
@@ -53,12 +81,14 @@ function promptPreamble(input: {
 // CLI errors on that). Pure.
 export function buildTurnPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   projectContext?: string;
   transcript: readonly TurnEntry[];
   directionInjection?: string;
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     ...(input.projectContext ? { projectContext: input.projectContext } : {}),
     transcript: input.transcript,
     emptyContext: "You are the first to speak — open the discussion.",
@@ -78,12 +108,14 @@ export function buildTurnPrompt(input: {
 // trailing JSON is stripped from the next speaker's context. Always non-empty.
 export function buildModeratorPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   transcript: readonly TurnEntry[];
   participants: readonly MindSlug[];
   directionInjection?: string;
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     transcript: input.transcript,
     emptyContext: "The discussion has not started yet — open it by directing the first speaker.",
   });
@@ -104,12 +136,14 @@ export function buildModeratorPrompt(input: {
 // prompt, parser, and stripper never drift. Always non-empty.
 export function buildOpenFloorPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   transcript: readonly TurnEntry[];
   participants: readonly MindSlug[];
   directionInjection?: string;
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     transcript: input.transcript,
     emptyContext: "You are the first to speak — open the discussion.",
   });
@@ -125,14 +159,68 @@ export function buildOpenFloorPrompt(input: {
 }
 
 // The closing synthesis prompt: the discussion so far plus an instruction to sum
-// up. No routing JSON — synthesis is the room's last act. Always non-empty.
+// up. No routing JSON — synthesis is the room's last act. With grounding criteria the
+// synthesizer is told to write an `### Acceptance criteria` section (one Markdown
+// bullet per criterion, so the outcome receipt's bullet count matches); when a
+// cross-vendor fidelity check actually ran (`fidelityChecked`), it also folds the
+// check's divergences into a document-only `### Fidelity` section. Always non-empty.
 export function buildSynthesisPrompt(input: {
   topic?: string;
+  grounding?: Brief;
+  fidelityChecked?: boolean;
   transcript: readonly TurnEntry[];
 }): string {
-  const parts = promptPreamble({ topic: input.topic, transcript: input.transcript });
+  const parts = promptPreamble({
+    topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
+    transcript: input.transcript,
+  });
+  const hasCriteria = input.grounding?.criteria.some((c) => c.trim().length > 0) ?? false;
+  const base =
+    "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation.";
+  const criteriaSection =
+    " Include an `### Acceptance criteria` section with exactly one Markdown bullet (`- `) per criterion, in the brief's order, each restating the criterion and whether the outcome met, partially met, or diverged from it.";
+  const foldFidelity =
+    " An independent cross-vendor fidelity check against those criteria is in the discussion above — fold its findings in, and add an `### Fidelity` section listing any divergences the outcome does not yet resolve (or “No divergences — all criteria met”).";
+  const tail = " Speak in your own voice. Do not emit any routing JSON.";
   parts.push(
-    "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation. Speak in your own voice. Do not emit any routing JSON.",
+    hasCriteria
+      ? base + criteriaSection + (input.fidelityChecked ? foldFidelity : "") + tail
+      : base + tail,
+  );
+  return parts.join("\n\n");
+}
+
+// The pre-close fidelity check: an independent, cross-vendor Mind diffs the emerging
+// outcome against the grounding brief's acceptance criteria — per criterion — so the
+// closing synthesis can fold the divergences in. Reuses the review idiom (a
+// different-vendor auditor) but reads the whole discussion, not one artifact. The
+// driver only runs it when the brief carries criteria, so `criteria` is non-empty here.
+export function buildFidelityPrompt(input: {
+  grounding: Brief;
+  transcript: readonly TurnEntry[];
+}): string {
+  const parts: string[] = [];
+  const source = input.grounding.sourceUrl?.trim();
+  const criteria = input.grounding.criteria.map((c) => c.trim()).filter(Boolean);
+  parts.push(
+    source
+      ? `The room was convened to satisfy this brief (source: ${source}):`
+      : "The room was convened to satisfy this brief:",
+  );
+  parts.push(criteria.map((c, i) => `${i + 1}. ${c}`).join("\n"));
+  // The whole room, not the windowed view every other prompt uses, so a criterion
+  // resolved in an early turn does not read as a divergence — but hard-capped by
+  // characters (director injects and reply lengths are unbounded, so a turn count would
+  // not bound the prompt), keeping the most recent text behind an elision marker.
+  const full = renderTranscript(input.transcript, input.transcript.length);
+  const context =
+    full.length > MAX_FIDELITY_CONTEXT_CHARS
+      ? `…(earlier turns omitted)\n\n${full.slice(-MAX_FIDELITY_CONTEXT_CHARS)}`
+      : full;
+  if (context.length > 0) parts.push(`The discussion so far:\n\n${context}`);
+  parts.push(
+    "You are the fidelity checker for this room, running on a different vendor than the Mind that will write the closing summary. For EACH acceptance criterion above, judge whether the emerging outcome MEETS, PARTIALLY meets, or DIVERGES from it — one line per criterion, quoting the criterion. Then, under a final `Divergences:` line, list every gap the closing summary must resolve (or “None — all criteria met”). Be concise and concrete; do not rewrite the outcome or emit any routing JSON.",
   );
   return parts.join("\n\n");
 }
@@ -147,6 +235,7 @@ export function buildSynthesisPrompt(input: {
 // the files the author changed — read/run the real change, don't grade the prose.
 export function buildReviewPrompt(input: {
   contract?: string;
+  grounding?: Brief;
   artifact: string;
   author?: MindSlug;
   directionInjection?: string;
@@ -155,6 +244,8 @@ export function buildReviewPrompt(input: {
   const parts: string[] = [];
   const contract = input.contract?.trim();
   if (contract) parts.push(`Contract / acceptance criteria:\n\n${contract}`);
+  const grounding = renderGrounding(input.grounding);
+  if (grounding) parts.push(grounding);
   const who = input.author ? ` from ${input.author}` : "";
   const artifact = input.artifact.trim();
   if (input.coding) {
@@ -201,6 +292,7 @@ function renderLedger(ledger: TaskLedger | undefined): string {
 // only the trailing JSON is stripped from the next prompt's context. Always non-empty.
 export function buildManagerPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   ledger?: TaskLedger;
   transcript: readonly TurnEntry[];
   workers: readonly MindSlug[];
@@ -209,6 +301,8 @@ export function buildManagerPrompt(input: {
   const parts: string[] = [];
   const topic = input.topic?.trim();
   if (topic) parts.push(`Goal: ${topic}`);
+  const grounding = renderGrounding(input.grounding);
+  if (grounding) parts.push(grounding);
   parts.push(`Plan so far:\n\n${renderLedger(input.ledger)}`);
   const context = renderTranscript(input.transcript);
   if (context.length > 0) parts.push(`Workers' progress so far:\n\n${context}`);
@@ -228,6 +322,7 @@ export function buildManagerPrompt(input: {
 // plan. Always non-empty.
 export function buildWorkerPrompt(input: {
   topic?: string;
+  grounding?: Brief;
   task: string;
   transcript: readonly TurnEntry[];
   directionInjection?: string;
@@ -235,6 +330,7 @@ export function buildWorkerPrompt(input: {
 }): string {
   const parts = promptPreamble({
     topic: input.topic,
+    ...(input.grounding ? { grounding: input.grounding } : {}),
     transcript: input.transcript,
     emptyContext: "No work has been done yet — you are starting.",
   });

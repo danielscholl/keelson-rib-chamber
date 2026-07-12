@@ -1,4 +1,4 @@
-import type { TokenUsage } from "@keelson/shared";
+import type { Brief, TokenUsage } from "@keelson/shared";
 import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
 import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
@@ -21,7 +21,9 @@ import {
 import { getStrategy } from "./strategies/index.ts";
 import { magentic } from "./strategies/magentic.ts";
 import { openFloor } from "./strategies/open-floor.ts";
+import { exhaustedSynthesis } from "./strategies/synthesis.ts";
 import {
+  buildFidelityPrompt,
   buildManagerPrompt,
   buildModeratorPrompt,
   buildOpenFloorPrompt,
@@ -110,6 +112,7 @@ export interface RoomStartConfig {
   participants: readonly MindSlug[];
   turnBudget: number;
   topic?: string;
+  grounding?: Brief;
   config?: RoomConfig;
   projectId?: string;
   coding?: boolean;
@@ -145,6 +148,44 @@ export interface RoomDriver {
   stop(slug: MindSlug): Promise<void>;
   dispose(): Promise<void>;
   isDisposed(): boolean;
+}
+
+// Pick the pre-close fidelity checker: a participant Mind on a genuinely DIFFERENT,
+// pinned provider than the synthesizer (the cross-vendor check is the point, as in the
+// review strategy). A real cross-vendor read needs BOTH providers pinned and differing —
+// so an unpinned synthesizer, or no differing-provider participant, yields undefined and
+// the driver skips the check rather than run a same-vendor (or unconfirmable) auditor
+// whose prompt would falsely claim a second vendor. Pure — the driver resolves the slug.
+export function pickFidelityChecker(
+  room: Room,
+  synthSlug: MindSlug | undefined,
+  roster: readonly Mind[],
+): MindSlug | undefined {
+  const bySlug = new Map(roster.map((m) => [m.slug, m]));
+  const synthProvider = synthSlug ? bySlug.get(synthSlug)?.provider : undefined;
+  if (!synthProvider) return undefined;
+  return room.participants.find((p) => {
+    if (p === synthSlug) return false;
+    const provider = bySlug.get(p)?.provider;
+    return provider !== undefined && provider !== synthProvider;
+  });
+}
+
+// The synthesizer for a grounded design-bearing room's NATURAL close (an open-floor
+// end-vote, a magentic ledger completing) — so a grounded room always closes with a
+// fidelity-checked synthesis, not only on budget exhaustion. Reuses exhaustedSynthesis'
+// precedence (config.synthesizer → facilitator → last participant). Undefined for review
+// (its cross-vendor pass is its own close) and for an ungrounded room, which ends direct.
+export function groundedCloseSynthesizer(
+  room: Room,
+  transcript: readonly TurnEntry[],
+): MindSlug | undefined {
+  if (room.strategy === "review") return undefined;
+  const hasCriteria = room.grounding?.criteria.some((c) => c.trim().length > 0) ?? false;
+  if (!hasCriteria) return undefined;
+  const facilitator = room.config?.manager ?? room.config?.moderator;
+  const decision = exhaustedSynthesis(room, transcript, facilitator);
+  return decision.kind === "synthesize" ? decision.mind : undefined;
 }
 
 export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
@@ -384,6 +425,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         turnIndex: 0,
         round: 0,
         ...(config.topic ? { topic: config.topic } : {}),
+        ...(config.grounding ? { grounding: config.grounding } : {}),
         ...(config.config ? { config: config.config } : {}),
         ...(config.projectId ? { projectId: config.projectId } : {}),
         ...(config.coding ? { coding: config.coding } : {}),
@@ -471,6 +513,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       // (3) execute. commitTerminal / runSpeakTurn report "is the room still
       // active" as a boolean; map that to the StepOutcome the loop drives on.
       if (decision.kind === "end") {
+        // A grounded design-bearing room routes even a natural close (an open-floor
+        // end-vote, a magentic ledger completing before budget) through the fidelity +
+        // synthesis path, so its criteria are checked and folded into a closing document
+        // however the room reaches its end. Ungrounded rooms and review end directly.
+        const groundedSynth = groundedCloseSynthesizer(room, await loadCachedTranscript(slug));
+        if (groundedSynth) {
+          const active = await runCloseSynthesis(room, controller, gen, groundedSynth);
+          return active ? "advanced" : "ended";
+        }
         await commitTerminal(slug, gen, { ...room, status: "done" });
         return "ended";
       }
@@ -791,6 +842,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     if (room.strategy === "open-floor") {
       return buildOpenFloorPrompt({
         ...(room.topic ? { topic: room.topic } : {}),
+        ...(room.grounding ? { grounding: room.grounding } : {}),
         transcript,
         participants: room.participants,
         ...(directionInjection ? { directionInjection } : {}),
@@ -808,6 +860,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       const artifact = authorEntry?.parts.map((p) => p.text).join("\n") ?? "";
       return buildReviewPrompt({
         ...(room.topic ? { contract: room.topic } : {}),
+        ...(room.grounding ? { grounding: room.grounding } : {}),
         artifact,
         ...(authorSlug ? { author: authorSlug } : {}),
         ...(directionInjection ? { directionInjection } : {}),
@@ -817,6 +870,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const projectContext = projectContextFor(room);
     return buildTurnPrompt({
       ...(room.topic ? { topic: room.topic } : {}),
+      ...(room.grounding ? { grounding: room.grounding } : {}),
       ...(projectContext ? { projectContext } : {}),
       transcript,
       ...(directionInjection ? { directionInjection } : {}),
@@ -958,6 +1012,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     if (!moderator) return false;
     const modPrompt = buildModeratorPrompt({
       ...(room.topic ? { topic: room.topic } : {}),
+      ...(room.grounding ? { grounding: room.grounding } : {}),
       transcript: await loadCachedTranscript(room.slug),
       participants: room.participants,
       // A director steer is guidance for the routing decision, so it goes to the
@@ -990,7 +1045,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const minRounds = afterMod.config?.minRounds ?? DEFAULT_MIN_ROUNDS;
 
     if (decision?.action === "close" && allHeardInCycle(afterMod.participants, counts, minRounds)) {
-      return await runCloseSynthesis(afterMod, controller, gen);
+      // A grounded Debate closes through fidelity + synthesis too, with the moderator as
+      // the fallback synthesizer (the Convene Debate form configures none). An ungrounded
+      // close passes no fallback, so it ends without an extra turn, exactly as before.
+      return await runCloseSynthesis(
+        afterMod,
+        controller,
+        gen,
+        groundedCloseSynthesizer(afterMod, postMod),
+      );
     }
 
     const speaker = pickGroupChatSpeaker(decision, afterMod, counts);
@@ -1010,6 +1073,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
     const spkPrompt = buildTurnPrompt({
       ...(afterMod.topic ? { topic: afterMod.topic } : {}),
+      ...(afterMod.grounding ? { grounding: afterMod.grounding } : {}),
       transcript: postMod,
       // The moderator's `direction` is guidance for the Mind it nominated, so
       // surface it only when that nominee actually got the turn — a cap-redirect or
@@ -1114,9 +1178,88 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return await withLock(slug, () => commitTerminal(slug, gen, { ...room, status: "done" }));
   }
 
+  // The pre-close fidelity check. When the room carries grounding criteria, an
+  // independent cross-vendor Mind (pickFidelityChecker) diffs the emerging outcome
+  // against them and its reply is appended before synthesis — so the synthesizer can
+  // fold the divergences in and the operator can read the check in the transcript.
+  // Best-effort: a room without grounding, or one with no eligible checker, runs no
+  // turn (turns: 0) — the close is byte-for-byte unchanged. An operator stop DURING the
+  // check is recorded and closes the room without a synthesis turn (closed: true).
+  async function runFidelityCheck(
+    room: Room,
+    synthSlug: MindSlug,
+    roster: readonly Mind[],
+    controller: AbortController,
+    gen: number,
+  ): Promise<"disposed" | { turns: number; closed: boolean; active: boolean; checked: boolean }> {
+    const criteria = room.grounding?.criteria.filter((c) => c.trim().length > 0) ?? [];
+    if (!room.grounding || criteria.length === 0)
+      return { turns: 0, closed: false, active: true, checked: false };
+    const checkerSlug = pickFidelityChecker(room, synthSlug, roster);
+    const checker = checkerSlug ? roster.find((m) => m.slug === checkerSlug) : undefined;
+    if (!checker) return { turns: 0, closed: false, active: true, checked: false };
+    // Load the transcript, THEN re-check abort/generation immediately before the paid
+    // turn (mirrors the synthesis guard) so a stop in the load gap skips the check rather
+    // than appending an empty, never-run fidelity entry.
+    const fidTranscript = await loadCachedTranscript(room.slug);
+    if (controller.signal.aborted || generationOf(room.slug) !== gen)
+      return { turns: 0, closed: false, active: true, checked: false };
+    const prompt = buildFidelityPrompt({ grounding: room.grounding, transcript: fidTranscript });
+    const turn = await runOneTurn(room, checker, prompt, controller);
+    if (turn === "disposed") return "disposed";
+    await appendEntry(
+      room.slug,
+      gen,
+      buildAgentEntry(
+        room.slug,
+        room.turnIndex,
+        checker.slug,
+        { text: turn.text, aborted: turn.aborted, usage: turn.usage },
+        room.round,
+      ),
+    );
+    if (turn.aborted || generationOf(room.slug) !== gen) {
+      const active = await withLock(room.slug, async () => {
+        const current = (await deps.store.loadRoom(room.slug)) ?? room;
+        return await commitTerminal(room.slug, gen, {
+          ...current,
+          turnIndex: current.turnIndex + 1,
+          round: await roundAfter(room.slug, current),
+          status: turn.aborted ? "stopped" : "done",
+        });
+      });
+      return { turns: 1, closed: true, active, checked: false };
+    }
+    // Persist the completed fidelity turn (advance the cursor, keep the room active)
+    // BEFORE the riskier synthesis turn — the speaker path commits each turn the same
+    // way, so a synthesis failure can't drop this paid entry or leave turnIndex/round
+    // stale from the pre-fidelity room.json.
+    await withLock(room.slug, async () => {
+      if (generationOf(room.slug) !== gen) return;
+      const current = (await deps.store.loadRoom(room.slug)) ?? room;
+      await commitActive(room.slug, gen, {
+        ...current,
+        turnIndex: current.turnIndex + 1,
+        round: await roundAfter(room.slug, current),
+      });
+    });
+    // `turns` counts the appended turn (cursor + billing); `checked` is whether it
+    // produced real findings — an errored/timed-out OR empty check leaves no usable
+    // findings in the transcript, so the synthesizer must NOT be told a valid check is
+    // there to fold in.
+    return {
+      turns: 1,
+      closed: false,
+      active: true,
+      checked: !turn.errored && turn.text.trim().length > 0,
+    };
+  }
+
   // The closing act: a configured synthesizer, or a strategy-chosen fallback,
   // authors one summary turn, then the room ends (done). Synthesis always closes —
-  // even an errored turn — and a disposed turn drops cleanly.
+  // even an errored turn — and a disposed turn drops cleanly. When the room carries
+  // grounding criteria, one extra cross-vendor fidelity turn runs FIRST (see
+  // runFidelityCheck) so the synthesizer can fold its divergences into the document.
   async function runCloseSynthesis(
     room: Room,
     controller: AbortController,
@@ -1125,15 +1268,35 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   ): Promise<boolean> {
     const synthSlug = room.config?.synthesizer ?? fallbackSynthSlug;
     if (synthSlug) {
-      const synth = await resolveMindOrFailClosed(room, synthSlug, gen);
+      const roster = await fetchMinds();
+      const synth = await resolveMindOrFailClosed(room, synthSlug, gen, roster);
       if (synth) {
         // Skip only if a stop superseded before synthesis starts (no phantom entry
         // for a turn that never ran); a stop during it is recorded, as on the
         // speaker path.
         if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
+        // The next turnIndex to assign: a grounded design-bearing close runs a
+        // fidelity turn before synthesis, so the two entries take consecutive indices.
+        const fidelity = await runFidelityCheck(room, synthSlug, roster, controller, gen);
+        if (fidelity === "disposed") return false;
+        // An operator stop landed during the check — it is recorded; close now without
+        // burning a second paid turn on synthesis.
+        if (fidelity.closed) return fidelity.active;
+        const cursor = room.turnIndex + fidelity.turns;
+        // Load the transcript, THEN re-check abort/generation immediately before the paid
+        // turn — a stop landing in the fidelity or transcript-load gap must skip synthesis
+        // rather than append a phantom, never-run entry. The stop path already closed.
+        const synthTranscript = await loadCachedTranscript(room.slug);
+        if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
+        // Round at synthesis time, folded over the post-fidelity transcript: a fidelity
+        // turn can complete an all-heard cycle, so the closing entry must not carry the
+        // stale pre-fidelity round (the board groups the outcome by it).
+        const synthRound = roundOf(room.participants, synthTranscript);
         const prompt = buildSynthesisPrompt({
           ...(room.topic ? { topic: room.topic } : {}),
-          transcript: await loadCachedTranscript(room.slug),
+          ...(room.grounding ? { grounding: room.grounding } : {}),
+          fidelityChecked: fidelity.checked,
+          transcript: synthTranscript,
         });
         const turn = await runOneTurn(room, synth, prompt, controller);
         if (turn === "disposed") return false;
@@ -1142,14 +1305,16 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           gen,
           buildAgentEntry(
             room.slug,
-            room.turnIndex,
+            cursor,
             synth.slug,
             { text: turn.text, aborted: turn.aborted, usage: turn.usage },
-            room.round,
+            synthRound,
           ),
         );
         return await withLock(room.slug, async () => {
           const current = (await deps.store.loadRoom(room.slug)) ?? room;
+          // The fidelity turn (if any) already advanced the cursor via its own commit, so
+          // the terminal commit adds only the synthesis turn.
           return await commitTerminal(room.slug, gen, {
             ...current,
             turnIndex: current.turnIndex + 1,
@@ -1186,6 +1351,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const ledger = failStuckTasks(loaded, { now });
     const prompt = buildManagerPrompt({
       ...(room.topic ? { topic: room.topic } : {}),
+      ...(room.grounding ? { grounding: room.grounding } : {}),
       ledger,
       transcript: await loadCachedTranscript(room.slug),
       workers: room.participants,
@@ -1240,6 +1406,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     });
     const prompt = buildWorkerPrompt({
       ...(room.topic ? { topic: room.topic } : {}),
+      ...(room.grounding ? { grounding: room.grounding } : {}),
       task: task?.description ?? "Complete the next step toward the goal.",
       transcript: await loadCachedTranscript(room.slug),
       ...(directionInjection ? { directionInjection } : {}),
