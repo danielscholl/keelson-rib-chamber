@@ -1,5 +1,5 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
-import type { LensRecord } from "../lens-store.ts";
+import { isExhibit, type LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import type { Room } from "../types.ts";
 
@@ -88,6 +88,14 @@ function collectEvents(
   }
   for (const l of lenses) {
     const title = l.board.title || l.id;
+    if (isExhibit(l)) {
+      push(events, l.updatedAt, {
+        icon: "▣",
+        glyph: "accent",
+        text: `Exhibit "${title}" · tabled`,
+      });
+      continue;
+    }
     push(events, l.updatedAt, {
       icon: "❖",
       glyph: "accent",

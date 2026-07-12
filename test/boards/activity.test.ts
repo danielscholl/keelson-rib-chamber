@@ -104,6 +104,16 @@ describe("recordSection feed", () => {
     expect(section.items[0]?.text).toBe('Lens "Release Risks" · timeline');
   });
 
+  test("an exhibit record reads as tabled, not as a lens", () => {
+    const section = recordSection([], [], [lens({ kind: "exhibit" })], NOW);
+    expect(canvasViewSchema.safeParse(wrap(section)).success).toBe(true);
+    expect(section.items[0]).toMatchObject({
+      icon: "▣",
+      glyph: "accent",
+      text: 'Exhibit "Release Risks" · tabled',
+    });
+  });
+
   test("an entry with an unparseable timestamp is dropped from the feed", () => {
     const section = recordSection(
       [mind({ name: "Ghost", createdAt: "" })],
