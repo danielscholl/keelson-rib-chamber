@@ -86,7 +86,7 @@ export function buildRoomBoard(
 
   const debateColumn = {
     kind: "rows" as const,
-    title: debateColumnTitle(transcript),
+    title: debateColumnTitle(room, transcript),
     items: buildDebateItems(room, transcript, textFor, mindBySlug, roundDecisions, decisions),
   };
   const voicesSection = buildVoicesSection(room, mindBySlug, counts);
@@ -457,11 +457,29 @@ function groupByRound(decisions: readonly RailEntry[]): Map<number, number[]> {
   return new Map([...map].map(([round, set]) => [round, [...set]]));
 }
 
-function debateColumnTitle(transcript: readonly TurnEntry[]): string {
+function debateColumnTitle(room: Room, transcript: readonly TurnEntry[]): string {
   const rounds = transcript.map((e) => e.round).filter((r): r is number => r !== undefined);
-  if (rounds.length === 0) return "Debate";
+  const shape = strategyShapeLabel(room.strategy);
+  if (rounds.length === 0) return shape;
   const roundCount = Math.max(...rounds) + 1;
-  return roundCount > 1 ? `Debate · ${roundCount} rounds` : "Debate";
+  return roundCount > 1 ? `${shape} · ${roundCount} rounds` : shape;
+}
+
+function strategyShapeLabel(strategy: string): string {
+  switch (strategy) {
+    case "sequential":
+      return "Discussion";
+    case "group-chat":
+      return "Debate";
+    case "open-floor":
+      return "Open floor";
+    case "review":
+      return "Review";
+    case "magentic":
+      return "Delegate";
+    default:
+      return `${strategy.charAt(0).toUpperCase()}${strategy.slice(1)}`;
+  }
 }
 
 // The debate feed: a row per turn, with a round-head divider wherever the round

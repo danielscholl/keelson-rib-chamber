@@ -371,14 +371,18 @@ describe("buildRoomBoard", () => {
       "Round 2",
     ]);
     expect(items).toHaveLength(6); // 4 turns + 2 dividers
-    expect(debateTitle(board)).toBe("Debate · 2 rounds");
+    expect(debateTitle(board)).toBe("Discussion · 2 rounds");
   });
 
-  test("the debate title omits the round count for a single round or no round data", () => {
+  test("the debate title uses the room shape and omits the count without multiple rounds", () => {
     const oneRound = buildRoomBoard(room(), [entry({ round: 0 }), entry({ round: 0 })]);
-    expect(debateTitle(oneRound)).toBe("Debate");
+    expect(debateTitle(oneRound)).toBe("Discussion");
     const noRounds = buildRoomBoard(room(), [entry({ round: undefined })]);
-    expect(debateTitle(noRounds)).toBe("Debate");
+    expect(debateTitle(noRounds)).toBe("Discussion");
+    const debate = buildRoomBoard(room({ strategy: "group-chat" }), [entry({ round: 0 })]);
+    expect(debateTitle(debate)).toBe("Debate");
+    const delegate = buildRoomBoard(room({ strategy: "magentic" }), [entry({ round: 0 })]);
+    expect(debateTitle(delegate)).toBe("Delegate");
   });
 
   test("a round head names the questions decided within it", () => {
