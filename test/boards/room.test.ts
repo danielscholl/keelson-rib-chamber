@@ -428,9 +428,9 @@ describe("buildRoomBoard", () => {
     });
   });
 
-  test("the Start group-chat action collects a moderator via a field form", () => {
+  test("the Start Debate action collects a moderator via a field form", () => {
     const board = buildRoomBoard(room({ status: "done", participants: ["a", "b"] }), []);
-    const gc = actionsSection(board).items.find((i) => i.label === "Start group-chat");
+    const gc = actionsSection(board).items.find((i) => i.label === "Start Debate");
     expect(gc?.payload).toMatchObject({ strategy: "group-chat", participants: ["a", "b"] });
     expect(gc?.fields).toEqual([
       {
@@ -442,9 +442,9 @@ describe("buildRoomBoard", () => {
     ]);
   });
 
-  test("the Start open-floor action carries the strategy with no required fields", () => {
+  test("the Start Open floor action carries the strategy with no required fields", () => {
     const board = buildRoomBoard(room({ status: "done", participants: ["a", "b"] }), []);
-    const of = actionsSection(board).items.find((i) => i.label === "Start open-floor");
+    const of = actionsSection(board).items.find((i) => i.label === "Start Open floor");
     expect(of?.payload).toMatchObject({ strategy: "open-floor", participants: ["a", "b"] });
     expect(of?.fields).toBeUndefined();
   });
