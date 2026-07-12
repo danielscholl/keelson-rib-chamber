@@ -1,4 +1,4 @@
-import type { Brief, CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
 import {
   clockTime,
@@ -82,6 +82,7 @@ export function buildRoomBoard(
   const topicSection = buildTopicSection(room.topic, distinctQuestionCount(decisions));
   const groundingSection = buildGroundingSection(room.grounding);
   const vitalsSection = buildVitalsSection(transcript, projectLabel);
+  const journeySection = buildJourneySection(room, transcript, decisions, outcome?.body);
   const planSection = buildPlanSection(ledger);
 
   const debateColumn = {
@@ -120,12 +121,14 @@ export function buildRoomBoard(
       status: { label: room.status, tone: statusTone(room.status) },
       chip: `${room.turnIndex}/${room.turnBudget}`,
     },
-    // Vitals, then the topic brief, the magentic plan (when applicable), the
-    // debate+rail columns, the outcome document (when the room produced one),
-    // then board-baked controls. Each control carries the room slug as payload
-    // (a static actions[] button can't), so onAction routes to the right room.
+    // Vitals, the room's backed journey, then the topic brief, the magentic plan
+    // (when applicable), the debate+rail columns, the outcome document (when the
+    // room produced one), then board-baked controls. Each control carries the
+    // room slug as payload (a static actions[] button can't), so onAction routes
+    // to the right room.
     sections: [
       ...vitalsSection,
+      ...journeySection,
       ...topicSection,
       ...groundingSection,
       ...planSection,
@@ -192,6 +195,41 @@ function buildVitalsSection(
       ],
     },
   ];
+}
+
+function buildJourneySection(
+  room: Room,
+  transcript: readonly TurnEntry[],
+  decisions: readonly RailEntry[],
+  outcome: string | undefined,
+): CanvasBoardView["sections"] {
+  const items: CanvasJourneySection["items"] = [];
+  const hasFrame = transcript.length > 0;
+  const hasExplore = hasFrame && (room.round >= 1 || transcript.length > 1);
+  const hasDecide = hasFrame && (decisions.length > 0 || (!!outcome && room.status === "active"));
+  const hasRecord = hasFrame && (!!outcome || room.status === "done");
+
+  if (hasFrame) {
+    items.push({ title: "Frame", text: `Round ${room.round + 1} opened` });
+  }
+  if (hasExplore) {
+    items.push({
+      title: "Explore",
+      text: `${transcript.length} turn${transcript.length === 1 ? "" : "s"} recorded`,
+    });
+  }
+  if (hasDecide) {
+    const count = distinctQuestionCount(decisions);
+    items.push({
+      title: "Decide",
+      text: count > 0 ? `${count} decided` : "Synthesis pending",
+    });
+  }
+  if (hasRecord) {
+    items.push({ title: "Record", text: outcome ? "Outcome tabled" : "Room done" });
+  }
+
+  return items.length > 0 ? [{ kind: "journey", title: "Journey", items }] : [];
 }
 
 // The topic as a brief: the gist collapsed with its contract tail (what the room
