@@ -1276,10 +1276,11 @@ Compose:
     ## Persona  — who this Mind is, grounded in the role
     ## Mission  — what it exists to do
     ## Voice    — how it speaks (tone, length, habits)
+- mission: 2 to 4 short declarative sentences for the Mind's seat card, under 200 characters total — verb-led behaviors in the Mind's own voice, never a role restatement (e.g. "Reads the telemetry. Names tradeoffs. Pushes back with evidence."). No Markdown.
 - tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
 - tools: an OPTIONAL array of capability slugs the Mind may use inside a room — choose ONLY from this set: ${capabilityVocabulary()}. Include a slug only when the role genuinely calls for it; omit it (or use []) for a conversation-only Mind, and never invent a slug outside this set.
 
-Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, tagline, tools, model?, provider? } to persist the Mind (include model/provider only when provided) — do NOT print the JSON as your reply. After the tool returns, reply with EXACTLY one line: "Authored <name> (<slug>)", using the name you authored and the tool-returned slug verbatim.`;
+Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, mission, tagline, tools, model?, provider? } to persist the Mind (include model/provider only when provided) — do NOT print the JSON as your reply. After the tool returns, reply with EXACTLY one line: "Authored <name> (<slug>)", using the name you authored and the tool-returned slug verbatim.`;
 
 // The lens authoring prompt: one agent turn composes a canvas board on a subject and
 // calls chamber_emit_lens to publish it. It is not pinned to one key — the tool routes
@@ -3728,6 +3729,10 @@ const genesisEmitSchema = z.object({
   role: z.string().min(1),
   voice: z.string().min(1),
   soul: z.string().min(1),
+  // Seat-card stanza (2-4 verb-led sentences). Lenient on purpose: blank is
+  // omitted at persist and the card render truncates at 200, so an empty or
+  // overlong stanza degrades rather than failing the one paid authoring turn.
+  mission: z.string().max(500).optional(),
   tagline: z.string().min(1),
   model: z.string().optional(),
   provider: z.string().optional(),
@@ -3740,7 +3745,7 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
   return {
     name: "chamber_emit_genesis",
     description:
-      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, tagline, optional model/provider pin, optional capability tools }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
+      "Internal write-seam for the chamber-genesis workflow: persist an authored Mind (SOUL.md + record) under minds/<slug>. The workflow's prompt turn authors { soul, mission, tagline, optional model/provider pin, optional capability tools }; this tool only writes, failing closed on a slug collision. To create an agent, run the chamber-genesis workflow (e.g. /workflow run chamber-genesis <brief>) rather than calling this directly.",
     inputSchema: genesisEmitSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -3754,6 +3759,7 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         role,
         voice,
         soul,
+        mission,
         tagline,
         tools,
         model: rawModel,
@@ -3780,6 +3786,7 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
           // The roster card truncates for display (with an ellipsis); store the
           // authored tagline trimmed, not hard-cut.
           persona: tagline.trim(),
+          ...(mission?.trim() ? { mission: mission.trim() } : {}),
           createdAt: new Date().toISOString(),
           // Omit the slot past the ramp (a sixth Mind) so identityToneForSlot folds
           // it to neutral rather than persisting an out-of-range index.

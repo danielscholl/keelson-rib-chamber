@@ -68,6 +68,10 @@ export interface Mind {
   // empty fallback for a drifted record so the board can render a placeholder.
   role: string;
   persona: string;
+  // Short authored stanza for the seat card — verb-led behaviors, distinct from
+  // the roster tagline (`persona`). Absent on Minds authored before the field
+  // existed; the seat card falls back to `persona`.
+  mission?: string;
   model?: string;
   // The provider that serves `model`. Pin it alongside `model` so entering the
   // Mind sends a coherent provider/model pair (a model from one provider can't

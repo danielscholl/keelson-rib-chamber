@@ -87,7 +87,7 @@ describe("buildChamberBoard seated", () => {
     expect(board.header?.status?.label).toBe("2 minds convene here");
     expect(board.header?.chip).toBe("bench at rest");
     const items = cards(board);
-    expect(items.map((c) => c.title)).toEqual(["Jarvis", "Mycroft"]);
+    expect(items.map((c) => c.title)).toEqual(["Jarvis", "Mycroft", "Open seat"]);
     expect(items[0]?.dot).toBe(IDENTITY_SLOT_TONES[0]);
     expect(items[0]?.pill?.tone).toBe(IDENTITY_SLOT_TONES[0]);
     expect(items[1]?.pill?.label).toBe("Research Partner");
@@ -113,16 +113,29 @@ describe("buildChamberBoard seated", () => {
     expect(rows?.kind === "rows" && rows.items[0]?.text).toContain("Seat a second Mind");
   });
 
-  test("the authoring row is a wrap strip: closed brief first, free starters after", () => {
+  test("the bench is a grid whose last card is the ghost open seat", () => {
     const board = buildChamberBoard([mind({ slug: "jarvis", identitySlot: 2 })], []);
-    const author = actionsSection(board);
-    expect(author.wrap).toBe(true);
-    expect(author.items[0]?.type).toBe("describe-own");
-    expect(author.items[0]?.expanded).toBeUndefined();
+    const section = board.sections.find((s) => s.kind === "cards");
+    expect(section?.kind === "cards" && section.grid).toBe(true);
+    const seat = cards(board).at(-1);
+    expect(seat?.ghost).toBe(true);
+    expect(seat?.title).toBe("Open seat");
+    // Closed brief first (click opens its form), free starters after.
+    expect(seat?.actions?.[0]?.type).toBe("describe-own");
+    expect(seat?.actions?.[0]?.expanded).toBeUndefined();
     // Jarvis is seated; the other starters remain, previewing their free hues.
-    const labels = author.items.slice(1).map((i) => i.label);
+    const labels = (seat?.actions ?? []).slice(1).map((i) => i.label);
     expect(labels.some((l) => l.includes("Jarvis"))).toBe(false);
     expect(labels.length).toBeGreaterThan(0);
+  });
+
+  test("an authored mission outranks the tagline; absent falls back to it", () => {
+    const withMission = cards(
+      buildChamberBoard([mind({ mission: "Reads the telemetry. Names tradeoffs." })], []),
+    );
+    expect(withMission[0]?.fields?.[0]?.value).toBe("Reads the telemetry. Names tradeoffs.");
+    const fallback = cards(buildChamberBoard([mind()], []));
+    expect(fallback[0]?.fields?.[0]?.value).toBe("You are Jarvis.");
   });
 });
 
