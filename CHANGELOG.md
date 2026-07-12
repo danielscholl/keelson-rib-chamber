@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.30.0...v0.31.0) (2026-07-12)
+
+
+### Added
+
+* **grounding:** room brief + pre-synthesis fidelity check ([#212](https://github.com/danielscholl/keelson-rib-chamber/issues/212)) ([c45b37a](https://github.com/danielscholl/keelson-rib-chamber/commit/c45b37a58e3b280f492f5c7307079f45e903bc7b))
+
 ## [0.30.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.29.0...v0.30.0) (2026-07-11)
 
 
