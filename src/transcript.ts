@@ -30,10 +30,13 @@ export const TRANSCRIPT_WINDOW_TURNS = 40;
 // leaks into the next speaker's context and gets mimicked; the on-disk entry is
 // untouched (the driver re-parses the raw text for routing). Also backs the
 // chamber_room_status tool's body. Pure.
-export function renderTranscript(transcript: readonly TurnEntry[]): string {
-  const omitted = Math.max(0, transcript.length - TRANSCRIPT_WINDOW_TURNS);
+export function renderTranscript(
+  transcript: readonly TurnEntry[],
+  limit: number = TRANSCRIPT_WINDOW_TURNS,
+): string {
+  const omitted = Math.max(0, transcript.length - limit);
   const rendered = transcript
-    .slice(-TRANSCRIPT_WINDOW_TURNS)
+    .slice(-limit)
     .map((entry) => `${entry.from}: ${stripControlJson(entry.parts.map((p) => p.text).join("\n"))}`)
     .join("\n\n");
   if (omitted === 0) return rendered;
@@ -200,7 +203,10 @@ export function buildFidelityPrompt(input: {
       : "The room was convened to satisfy this brief:",
   );
   parts.push(criteria.map((c, i) => `${i + 1}. ${c}`).join("\n"));
-  const context = renderTranscript(input.transcript);
+  // The whole room, not the windowed view every other prompt uses: a criterion resolved
+  // in an early turn (beyond the last window) must not read as a divergence. Bounded by
+  // MAX_ROOM_TURN_BUDGET, so this stays a single close-time turn.
+  const context = renderTranscript(input.transcript, input.transcript.length);
   if (context.length > 0) parts.push(`The discussion so far:\n\n${context}`);
   parts.push(
     "You are the fidelity checker for this room, running on a different vendor than the Mind that will write the closing summary. For EACH acceptance criterion above, judge whether the emerging outcome MEETS, PARTIALLY meets, or DIVERGES from it — one line per criterion, quoting the criterion. Then, under a final `Divergences:` line, list every gap the closing summary must resolve (or “None — all criteria met”). Be concise and concrete; do not rewrite the outcome or emit any routing JSON.",

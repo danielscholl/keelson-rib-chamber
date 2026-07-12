@@ -1282,6 +1282,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         // rather than append a phantom, never-run entry. The stop path already closed.
         const synthTranscript = await loadCachedTranscript(room.slug);
         if (controller.signal.aborted || generationOf(room.slug) !== gen) return false;
+        // Round at synthesis time, folded over the post-fidelity transcript: a fidelity
+        // turn can complete an all-heard cycle, so the closing entry must not carry the
+        // stale pre-fidelity round (the board groups the outcome by it).
+        const synthRound = roundOf(room.participants, synthTranscript);
         const prompt = buildSynthesisPrompt({
           ...(room.topic ? { topic: room.topic } : {}),
           ...(room.grounding ? { grounding: room.grounding } : {}),
@@ -1298,7 +1302,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
             cursor,
             synth.slug,
             { text: turn.text, aborted: turn.aborted, usage: turn.usage },
-            room.round,
+            synthRound,
           ),
         );
         return await withLock(room.slug, async () => {
