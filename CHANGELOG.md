@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.32.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.31.0...v0.32.0) (2026-07-12)
+
+
+### Added
+
+* **chamber:** merge the Roster into the Chamber panel ([#218](https://github.com/danielscholl/keelson-rib-chamber/issues/218)) ([27eea35](https://github.com/danielscholl/keelson-rib-chamber/commit/27eea354069cbc0a16150196aa688d685476f3fd))
+* **lenses:** teach empty state with starter lens chips ([#222](https://github.com/danielscholl/keelson-rib-chamber/issues/222)) ([c67680b](https://github.com/danielscholl/keelson-rib-chamber/commit/c67680b11527d8908d676927cd66f29366fa8174))
+* **room:** add journey timeline to live room panel ([#223](https://github.com/danielscholl/keelson-rib-chamber/issues/223)) ([046d6a3](https://github.com/danielscholl/keelson-rib-chamber/commit/046d6a3592a908245a2698ae0b602b99e0572a3d))
+
+
+### Fixed
+
+* **boards:** polish live-review defect batch ([#221](https://github.com/danielscholl/keelson-rib-chamber/issues/221)) ([c835de7](https://github.com/danielscholl/keelson-rib-chamber/commit/c835de7b8762484beeb41346f5a027f0916d94a8))
+
 ## [0.31.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.30.0...v0.31.0) (2026-07-12)
 
 
