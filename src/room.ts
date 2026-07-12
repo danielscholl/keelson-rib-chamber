@@ -1230,6 +1230,19 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       });
       return { turns: 1, closed: true, active, checked: false };
     }
+    // Persist the completed fidelity turn (advance the cursor, keep the room active)
+    // BEFORE the riskier synthesis turn — the speaker path commits each turn the same
+    // way, so a synthesis failure can't drop this paid entry or leave turnIndex/round
+    // stale from the pre-fidelity room.json.
+    await withLock(room.slug, async () => {
+      if (generationOf(room.slug) !== gen) return;
+      const current = (await deps.store.loadRoom(room.slug)) ?? room;
+      await commitActive(room.slug, gen, {
+        ...current,
+        turnIndex: current.turnIndex + 1,
+        round: await roundAfter(room.slug, current),
+      });
+    });
     // `turns` counts the appended turn (cursor + billing); `checked` is whether it
     // produced real findings — an errored/timed-out check leaves an error string in the
     // transcript, so the synthesizer must NOT be told a valid check is there to fold in.
@@ -1290,9 +1303,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         );
         return await withLock(room.slug, async () => {
           const current = (await deps.store.loadRoom(room.slug)) ?? room;
+          // The fidelity turn (if any) already advanced the cursor via its own commit, so
+          // the terminal commit adds only the synthesis turn.
           return await commitTerminal(room.slug, gen, {
             ...current,
-            turnIndex: current.turnIndex + fidelity.turns + 1,
+            turnIndex: current.turnIndex + 1,
             round: await roundAfter(room.slug, current),
             status: "done",
           });
