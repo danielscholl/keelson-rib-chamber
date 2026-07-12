@@ -86,6 +86,10 @@ function outcomeCard(board: Board) {
   if (s?.kind !== "cards") return undefined;
   return s.items[0];
 }
+function journeyItems(board: Board) {
+  const s = board.sections.find((x) => x.kind === "journey");
+  return s?.kind === "journey" ? s.items : undefined;
+}
 
 describe("buildRoomBoard", () => {
   test("empty transcript is valid; no vitals stats (no turns, no scope)", () => {
@@ -94,6 +98,85 @@ describe("buildRoomBoard", () => {
     expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
     // The header carries no per-mind segments anymore — Voices covers that.
     expect(board.header?.segments).toBeUndefined();
+  });
+
+  test("empty transcript has no journey section", () => {
+    const board = buildRoomBoard(room(), []);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(journeyItems(board)).toBeUndefined();
+  });
+
+  test("an active early room shows Frame and Explore but not Record", () => {
+    const board = buildRoomBoard(room({ status: "active", round: 0 }), [
+      entry({ from: "a", turnIndex: 0 }),
+      entry({ from: "b", turnIndex: 1 }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(journeyItems(board)?.map((item) => item.title)).toEqual(["Frame", "Explore"]);
+  });
+
+  test("a done room with an outcome shows the full journey", () => {
+    const board = buildRoomBoard(room({ status: "done", round: 1 }), [
+      entry({
+        from: "a",
+        turnIndex: 0,
+        round: 0,
+        parts: [{ text: "**Q1 — Ship it. Pinned.**\n\nYes." }],
+      }),
+      entry({
+        from: "b",
+        turnIndex: 1,
+        round: 1,
+        parts: [
+          {
+            text: [
+              "**Q2 — Name it. Pinned.**",
+              "",
+              "Done.",
+              "",
+              "---",
+              "",
+              "## Outcome",
+              "",
+              "**Q1 — Ship it.** Yes.",
+              "",
+              "**Q2 — Name it.** Done.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(journeyItems(board)?.map((item) => item.title)).toEqual([
+      "Frame",
+      "Explore",
+      "Decide",
+      "Record",
+    ]);
+  });
+
+  test("an active room with decisions reaches Decide but not Record", () => {
+    const board = buildRoomBoard(room({ status: "active", round: 1 }), [
+      entry({ from: "a", round: 0, parts: [{ text: "**Q1 — Ship it. Pinned.**\n\nYes." }] }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(journeyItems(board)?.map((item) => item.title)).toEqual([
+      "Frame",
+      "Explore",
+      "Decide",
+    ]);
+  });
+
+  test("a stopped room with decisions but no outcome does not reach Record", () => {
+    const board = buildRoomBoard(room({ status: "stopped", round: 1 }), [
+      entry({ from: "a", round: 0, parts: [{ text: "**Q1 — Ship it. Pinned.**\n\nYes." }] }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(journeyItems(board)?.map((item) => item.title)).toEqual([
+      "Frame",
+      "Explore",
+      "Decide",
+    ]);
   });
 
   test("one row per entry in the debate column; Voices carries the turn counts", () => {
