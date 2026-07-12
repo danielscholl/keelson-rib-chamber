@@ -252,7 +252,10 @@ function stopRoomsTick(): void {
   roomsTicker = undefined;
 }
 
-function startGenesisTick(): void {
+// `deadlineMs` bounds the tick to the stall budget REMAINING — a fresh genesis gets
+// the full window; the boot reconcile passes what's left on the marker's own clock so
+// a near-stalled marker doesn't earn three extra minutes of pulsing.
+function startGenesisTick(deadlineMs: number = GENESIS_STALL_MS): void {
   stopGenesisTick();
   tickChamber(); // show the boot card at once
   genesisTicker = setInterval(tickChamber, GENESIS_TICK_MS);
@@ -261,7 +264,7 @@ function startGenesisTick(): void {
     tickChamber(); // one last frame flips the card to its stalled state
     if (genesisTicker) clearInterval(genesisTicker);
     genesisTicker = undefined;
-  }, GENESIS_STALL_MS);
+  }, deadlineMs);
   genesisTickerDeadline.unref?.();
 }
 
@@ -2013,13 +2016,18 @@ const rib: Rib = {
       void sm.recompose(PRESENCE_KEY);
       // A crash can orphan a pending-genesis marker (only graceful dispose clears it),
       // and no cadence re-reads the in-process panel — the boot card would freeze short
-      // of its stalled Dismiss. Restart the tick; the card advances and flips to
-      // stalled by its own startedAt clock. The epoch check guards the async gap: an
+      // of its stalled Dismiss. Restart the tick for the stall budget REMAINING on the
+      // marker's own clock (an already-stalled or unparseable marker gets one frame —
+      // it composes straight to Dismiss). The epoch check guards the async gap: an
       // emit / dismiss / dispose landing between the read and this callback bumps it,
       // so a settled genesis can never resurrect the ticker.
       const epoch = genesisTickEpoch;
       void readPendingGenesis().then((marker) => {
-        if (marker && epoch === genesisTickEpoch) startGenesisTick();
+        if (!marker || epoch !== genesisTickEpoch) return;
+        const started = Date.parse(marker.startedAt);
+        const elapsed = Number.isFinite(started) ? Date.now() - started : GENESIS_STALL_MS;
+        if (elapsed >= GENESIS_STALL_MS) refreshPresence();
+        else startGenesisTick(GENESIS_STALL_MS - elapsed);
       });
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
