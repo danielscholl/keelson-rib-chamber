@@ -14,6 +14,7 @@ import {
   sumTurnUsage,
   topicContractTail,
   topicGist,
+  turnsLabel,
 } from "../room-text.ts";
 import { speakerCounts, stripControlJson } from "../routing.ts";
 import {
@@ -119,7 +120,7 @@ export function buildRoomBoard(
     title: room.name,
     header: {
       status: { label: room.status, tone: statusTone(room.status) },
-      chip: `${room.turnIndex}/${room.turnBudget}`,
+      chip: turnsLabel(room.turnIndex, room.turnBudget),
     },
     // Vitals, the room's backed journey, then the topic brief, the magentic plan
     // (when applicable), the debate+rail columns, the outcome document (when the
@@ -397,7 +398,7 @@ function roomControls(
           // moderator must be a Mind NOT among participants — start validation
           // rejects otherwise.
           type: "room-start",
-          label: "Start group-chat",
+          label: `Start ${strategyShapeLabel("group-chat")}`,
           glyph: "◇",
           payload: {
             name: room.name,
@@ -422,7 +423,7 @@ function roomControls(
           // Re-open as an unmoderated open-floor: speakers nominate the next and
           // vote to close. No fields — the end-vote threshold has a default.
           type: "room-start",
-          label: "Start open-floor",
+          label: `Start ${strategyShapeLabel("open-floor")}`,
           glyph: "◎",
           payload: {
             name: room.name,
@@ -441,7 +442,7 @@ function roomControls(
           // and delegates), merged flat into the payload. Start validation rejects a
           // manager that is also a participant.
           type: "room-start",
-          label: "Start magentic",
+          label: `Start ${strategyShapeLabel("magentic")}`,
           glyph: "❖",
           payload: {
             name: room.name,

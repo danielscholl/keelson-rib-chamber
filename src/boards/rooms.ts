@@ -1,6 +1,7 @@
 import type { CanvasBoardView, CanvasPerson, CanvasTone } from "@keelson/shared";
 import { isExhibit, type LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
+import { turnsLabel } from "../room-text.ts";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 
 // Pure: the persisted rooms -> a canvas `board`. Active rooms come first (most
@@ -80,20 +81,13 @@ function personFor(slug: string, bySlug: ReadonlyMap<string, Mind>): CanvasPerso
 function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly LensRecord[]) {
   const tone = statusTone(room.status);
   const cappedTurnIndex = Math.min(room.turnIndex, room.turnBudget);
-  // Overflow means closing turns ran past the budget (synthesis and/or the
-  // grounding fidelity pass — a stop mid-fidelity persists overflow with no
-  // synthesis), so the label stays generic rather than naming synthesis.
-  const turnsLabel =
-    room.turnIndex > room.turnBudget
-      ? `${room.turnBudget}/${room.turnBudget} + closing`
-      : `${room.turnIndex}/${room.turnBudget}`;
   const card = {
     title: room.name,
     dot: tone,
     pill: { label: room.status, tone },
     bar: { value: cappedTurnIndex, total: room.turnBudget },
     fields: [
-      { label: "turns", value: turnsLabel },
+      { label: "turns", value: turnsLabel(room.turnIndex, room.turnBudget) },
       // The round cursor is meaningful only for round-based strategies (it stays 0
       // for a plain sequential room), so surface it only once it has advanced.
       ...(room.round > 0 ? [{ label: "round", value: String(room.round) }] : []),
