@@ -1183,12 +1183,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     roster: readonly Mind[],
     controller: AbortController,
     gen: number,
-  ): Promise<"disposed" | { turns: number; closed: boolean; active: boolean }> {
+  ): Promise<"disposed" | { turns: number; closed: boolean; active: boolean; checked: boolean }> {
     const criteria = room.grounding?.criteria.filter((c) => c.trim().length > 0) ?? [];
-    if (!room.grounding || criteria.length === 0) return { turns: 0, closed: false, active: true };
+    if (!room.grounding || criteria.length === 0)
+      return { turns: 0, closed: false, active: true, checked: false };
     const checkerSlug = pickFidelityChecker(room, synthSlug, roster);
     const checker = checkerSlug ? roster.find((m) => m.slug === checkerSlug) : undefined;
-    if (!checker) return { turns: 0, closed: false, active: true };
+    if (!checker) return { turns: 0, closed: false, active: true, checked: false };
     const prompt = buildFidelityPrompt({
       grounding: room.grounding,
       transcript: await loadCachedTranscript(room.slug),
@@ -1216,9 +1217,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           status: turn.aborted ? "stopped" : "done",
         });
       });
-      return { turns: 1, closed: true, active };
+      return { turns: 1, closed: true, active, checked: false };
     }
-    return { turns: 1, closed: false, active: true };
+    // `turns` counts the appended turn (cursor + billing); `checked` is whether it
+    // produced real findings — an errored/timed-out check leaves an error string in the
+    // transcript, so the synthesizer must NOT be told a valid check is there to fold in.
+    return { turns: 1, closed: false, active: true, checked: !turn.errored };
   }
 
   // The closing act: a configured synthesizer, or a strategy-chosen fallback,
@@ -1257,7 +1261,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         const prompt = buildSynthesisPrompt({
           ...(room.topic ? { topic: room.topic } : {}),
           ...(room.grounding ? { grounding: room.grounding } : {}),
-          fidelityChecked: fidelity.turns > 0,
+          fidelityChecked: fidelity.checked,
           transcript: await loadCachedTranscript(room.slug),
         });
         const turn = await runOneTurn(room, synth, prompt, controller);

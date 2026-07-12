@@ -226,10 +226,11 @@ function buildTopicSection(
 // distinct from the topic (issue #204's "visible in the transcript"). Empty (no section)
 // for a room without grounding criteria.
 function buildGroundingSection(grounding: Brief | undefined): CanvasBoardView["sections"] {
-  const criteria = grounding?.criteria.map((c) => c.trim()).filter(Boolean) ?? [];
-  if (!grounding || criteria.length === 0) return [];
-  const items: FeedItem[] = [];
+  if (!grounding) return [];
   const source = grounding.sourceUrl?.trim();
+  const criteria = grounding.criteria.map((c) => c.trim()).filter(Boolean);
+  if (!source && criteria.length === 0) return [];
+  const items: FeedItem[] = [];
   if (source) items.push({ glyph: "neutral", text: source });
   for (const c of criteria) items.push({ glyph: "brand", text: c });
   return [{ kind: "rows", title: "Grounding", items }];

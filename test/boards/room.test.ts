@@ -739,6 +739,17 @@ describe("grounding section", () => {
     expect(texts).toContain("Second");
   });
 
+  test("a source-only grounded room still shows the Grounding section", () => {
+    const board = buildRoomBoard(
+      room({ grounding: { sourceUrl: "https://x/spec", criteria: [] } }),
+      [],
+    );
+    const g = board.sections.find((s) => s.kind === "rows" && s.title === "Grounding");
+    expect(g?.kind).toBe("rows");
+    const texts = g?.kind === "rows" ? g.items.map((i) => i.text) : [];
+    expect(texts).toContain("https://x/spec");
+  });
+
   test("an ungrounded room's board has no Grounding section", () => {
     const board = buildRoomBoard(room(), []);
     expect(board.sections.some((s) => s.kind === "rows" && s.title === "Grounding")).toBe(false);

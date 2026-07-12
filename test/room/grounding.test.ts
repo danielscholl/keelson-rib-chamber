@@ -8,6 +8,7 @@ import {
   scriptedRunAgentTurn,
   scriptedThenAbortable,
   seqIds,
+  type TurnScript,
 } from "../helpers/fakes.ts";
 
 // Two providers so the fidelity checker can be picked cross-vendor: `a`/`c` share one,
@@ -25,7 +26,7 @@ const GROUNDING = {
   criteria: ["The design carries grounding", "The fidelity check runs before close"],
 };
 
-function harness(scripts: { text: string }[]) {
+function harness(scripts: TurnScript[]) {
   const { store } = makeFakeStore();
   const pub = makeFakePublisher();
   const turns = scriptedRunAgentTurn(scripts);
@@ -174,6 +175,32 @@ describe("room driver — grounding + pre-close fidelity check", () => {
     expect(transcript.map((e) => e.from)).toEqual(["mgr", "b", "mgr"]); // manage → fidelity → synthesis
     expect((await h.store.loadRoom("mg"))?.status).toBe("done");
     expect(h.turns.requests[1]?.prompt).toContain("fidelity checker for this room");
+  });
+
+  test("an errored fidelity turn is not reported to the synthesizer as a valid check", async () => {
+    // The checker's turn errors (a provider failure); the attempt is still recorded, but
+    // the synthesizer must not be told a valid cross-vendor check is above to fold in.
+    const h = harness([
+      { text: "a-opens" },
+      { text: "boom", status: "error" },
+      { text: "closing" },
+    ]);
+    await h.driver.start({
+      slug: "err",
+      name: "err",
+      strategy: "sequential" as RoomStrategyName,
+      participants: ["a", "b"],
+      turnBudget: 1,
+      grounding: GROUNDING,
+    });
+
+    await drain(h.driver, "err");
+
+    const transcript = await h.store.loadTranscript("err");
+    expect(transcript.map((e) => e.from)).toEqual(["a", "b", "a"]); // the failed attempt is recorded
+    const synthReq = h.turns.requests.at(-1);
+    expect(synthReq?.prompt).not.toContain("cross-vendor fidelity check");
+    expect(synthReq?.prompt).toContain("### Acceptance criteria"); // status still requested
   });
 
   test("an operator stop during the fidelity check closes the room without a synthesis turn", async () => {
