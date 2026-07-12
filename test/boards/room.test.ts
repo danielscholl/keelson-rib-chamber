@@ -171,6 +171,54 @@ describe("buildRoomBoard", () => {
     expect(journeyItems(board)?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide"]);
   });
 
+  test("an exhausted budget on a decision-free active room reads as synthesis pending", () => {
+    const board = buildRoomBoard(room({ status: "active", round: 1, turnIndex: 6 }), [
+      entry({ from: "a", turnIndex: 0 }),
+      entry({ from: "b", turnIndex: 1 }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const items = journeyItems(board);
+    expect(items?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide"]);
+    expect(items?.find((item) => item.title === "Decide")?.text).toBe("Synthesis pending");
+  });
+
+  test("a magentic ledger past planning backs Decide without pinned decisions", () => {
+    const settled: LedgerTask = {
+      id: "t1",
+      description: "build it",
+      status: "completed",
+      createdAt: "t",
+      updatedAt: "t",
+    };
+    const open: LedgerTask = { ...settled, id: "t2", status: "pending" };
+    const board = buildRoomBoard(
+      room({ strategy: "magentic", status: "active", config: { manager: "mgr" } }),
+      [entry({ from: "a", turnIndex: 0 }), entry({ from: "b", turnIndex: 1 })],
+      {
+        roomSlug: "r",
+        goal: "g",
+        manager: "mgr",
+        status: "executing",
+        tasks: [settled, open],
+        updatedAt: "t",
+      },
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const items = journeyItems(board);
+    expect(items?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide"]);
+    expect(items?.find((item) => item.title === "Decide")?.text).toBe("Plan executing · 1/2 tasks");
+  });
+
+  test("a planning ledger with no landed plan does not back Decide", () => {
+    const board = buildRoomBoard(
+      room({ strategy: "magentic", status: "active", config: { manager: "mgr" } }),
+      [entry({ from: "a", turnIndex: 0 }), entry({ from: "b", turnIndex: 1 })],
+      { roomSlug: "r", goal: "g", manager: "mgr", status: "planning", tasks: [], updatedAt: "t" },
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(journeyItems(board)?.map((item) => item.title)).toEqual(["Frame", "Explore"]);
+  });
+
   test("one row per entry in the debate column; Voices carries the turn counts", () => {
     const board = buildRoomBoard(room(), [
       entry({ from: "a" }),

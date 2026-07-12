@@ -82,7 +82,7 @@ export function buildRoomBoard(
   const topicSection = buildTopicSection(room.topic, distinctQuestionCount(decisions));
   const groundingSection = buildGroundingSection(room.grounding);
   const vitalsSection = buildVitalsSection(transcript, projectLabel);
-  const journeySection = buildJourneySection(room, transcript, decisions, outcome?.body);
+  const journeySection = buildJourneySection(room, transcript, decisions, outcome?.body, ledger);
   const planSection = buildPlanSection(ledger);
 
   const debateColumn = {
@@ -202,11 +202,20 @@ function buildJourneySection(
   transcript: readonly TurnEntry[],
   decisions: readonly RailEntry[],
   outcome: string | undefined,
+  ledger: TaskLedger | undefined,
 ): CanvasBoardView["sections"] {
   const items: CanvasJourneySection["items"] = [];
   const hasFrame = transcript.length > 0;
   const hasExplore = hasFrame && (room.round >= 1 || transcript.length > 1);
-  const hasDecide = hasFrame && (decisions.length > 0 || (!!outcome && room.status === "active"));
+  // A magentic manager's landed plan IS the room's decision; a planning ledger
+  // (no tasks yet) hasn't decided anything.
+  const ledgerDecided = !!ledger && ledger.status !== "planning";
+  // The driver starts close synthesis once the budget is exhausted while the room
+  // is still active (room.ts runBudgetSynthesisIfExhausted) — that window is the
+  // honest "synthesis pending" signal; outcomes only persist as the room closes.
+  const synthesisPending =
+    room.status === "active" && (room.turnIndex >= room.turnBudget || !!outcome);
+  const hasDecide = hasFrame && (decisions.length > 0 || ledgerDecided || synthesisPending);
   const hasRecord = hasFrame && (!!outcome || room.status === "done");
 
   if (hasFrame) {
@@ -220,17 +229,31 @@ function buildJourneySection(
     });
   }
   if (hasDecide) {
-    const count = distinctQuestionCount(decisions);
-    items.push({
-      title: "Decide",
-      text: count > 0 ? `${count} decided` : "Synthesis pending",
-    });
+    items.push({ title: "Decide", text: decideText(decisions, ledger, ledgerDecided) });
   }
   if (hasRecord) {
     items.push({ title: "Record", text: outcome ? "Outcome tabled" : "Room done" });
   }
 
   return items.length > 0 ? [{ kind: "journey", title: "Journey", items }] : [];
+}
+
+function decideText(
+  decisions: readonly RailEntry[],
+  ledger: TaskLedger | undefined,
+  ledgerDecided: boolean,
+): string {
+  const count = distinctQuestionCount(decisions);
+  if (count > 0) return `${count} decided`;
+  if (ledgerDecided && ledger) {
+    const verb = ledger.status === "done" ? "Plan complete" : "Plan executing";
+    if (ledger.tasks.length === 0) return verb;
+    const settled = ledger.tasks.filter(
+      (t) => t.status === "completed" || t.status === "failed",
+    ).length;
+    return `${verb} · ${settled}/${ledger.tasks.length} tasks`;
+  }
+  return "Synthesis pending";
 }
 
 // The topic as a brief: the gist collapsed with its contract tail (what the room
