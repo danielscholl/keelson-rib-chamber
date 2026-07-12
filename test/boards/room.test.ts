@@ -322,8 +322,6 @@ describe("buildRoomBoard", () => {
         "room-start",
         "room-start",
       ]);
-      // The chips wear the composer's shape words (Debate / Open floor / Delegate),
-      // never the raw strategy ids.
       expect(actions.items.map((i) => i.label)).toEqual([
         "Start again",
         "Start Debate",
