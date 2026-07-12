@@ -391,10 +391,17 @@ describe("deriveRoomName", () => {
     expect(deriveRoomName("Q3 priorities", ["Alice", "Bob"])).toBe("Q3 priorities");
   });
 
-  it("trims the topic and caps it at 60 chars", () => {
+  it("trims the topic and truncates long topics at a word boundary", () => {
     expect(deriveRoomName("  spaced  ", [])).toBe("spaced");
+    const long = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda";
+    expect(deriveRoomName(long, [])).toBe(
+      "alpha beta gamma delta epsilon zeta eta theta iota kappa…",
+    );
+  });
+
+  it("hard-truncates a single unbroken topic token", () => {
     const long = "x".repeat(80);
-    expect(deriveRoomName(long, [])).toBe("x".repeat(60));
+    expect(deriveRoomName(long, [])).toBe(`${"x".repeat(60)}…`);
   });
 
   it("falls back to participants when there is no topic", () => {

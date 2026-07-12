@@ -25,13 +25,21 @@ const ROOM_NAME_TOPIC_CAP = 60;
 // slugs — the helper doesn't care which.
 export function deriveRoomName(topic: string | undefined, participants: readonly string[]): string {
   const trimmedTopic = (topic ?? "").trim();
-  if (trimmedTopic) return trimmedTopic.slice(0, ROOM_NAME_TOPIC_CAP);
+  if (trimmedTopic) return truncateRoomTopic(trimmedTopic);
 
   const names = participants.map((p) => p.trim()).filter((p) => p.length > 0);
   if (names.length === 0) return "Room";
   if (names.length === 1) return names[0] as string;
   if (names.length === 2) return `${names[0]} & ${names[1]}`;
   return `${names[0]}, ${names[1]} +${names.length - 2}`;
+}
+
+function truncateRoomTopic(topic: string): string {
+  if (topic.length <= ROOM_NAME_TOPIC_CAP) return topic;
+  const capped = topic.slice(0, ROOM_NAME_TOPIC_CAP).trimEnd();
+  const wordBoundary = capped.search(/\s+\S*$/);
+  if (wordBoundary > 0) return `${capped.slice(0, wordBoundary)}…`;
+  return `${capped}…`;
 }
 
 export interface SweepClosedRoomsOptions {
