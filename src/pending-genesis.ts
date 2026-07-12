@@ -50,7 +50,7 @@ export async function readPendingGenesis(
 // startedAt (a clock rollback mid-genesis) is treated as wedged too — a clock we
 // can't count forward from must present the Dismiss, not tick indefinitely.
 export const GENESIS_STALL_MS = 180_000;
-const FUTURE_SKEW_MS = 30_000;
+export const FUTURE_SKEW_MS = 30_000;
 
 // The one elapsed rule the boot card and the boot-time tick reconcile both read, so
 // the card's stalled flip and the ticker's budget can never disagree: unparseable or

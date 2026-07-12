@@ -301,8 +301,7 @@ function seatedSections(
   pending: PendingGenesis | null | undefined,
   now: number,
 ): CanvasBoardView["sections"] {
-  const open = freeSlots(minds);
-  // The boot card takes the first free slot (or folds to neutral past the ramp).
+  // The boot card takes the seat the genesis will land on (see bootSlotFor).
   const bootItems = pending ? [bootCard(pending, bootSlotFor(pending, minds), now)] : [];
 
   const sections: CanvasBoardView["sections"] = [

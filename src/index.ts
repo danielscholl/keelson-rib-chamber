@@ -106,6 +106,7 @@ import {
 } from "./paths.ts";
 import {
   clearPendingGenesis,
+  FUTURE_SKEW_MS,
   GENESIS_STALL_MS,
   type PendingGenesis,
   pendingElapsedMs,
@@ -2027,7 +2028,11 @@ const rib: Rib = {
         if (!marker || epoch !== genesisTickEpoch) return;
         const elapsed = pendingElapsedMs(marker, Date.now());
         if (elapsed >= GENESIS_STALL_MS) refreshPresence();
-        else startGenesisTick(GENESIS_STALL_MS - elapsed);
+        // + FUTURE_SKEW_MS: a marker up to the skew tolerance in the future clamps
+        // elapsed to 0, so the deadline must outlast the card's own clock reaching
+        // the stall — the final tick has to compose the stalled card, never stop
+        // one frame short of its Dismiss.
+        else startGenesisTick(GENESIS_STALL_MS - elapsed + FUTURE_SKEW_MS);
       });
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
