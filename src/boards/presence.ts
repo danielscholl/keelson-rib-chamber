@@ -34,7 +34,7 @@ export function buildChamberBoard(
           tone: (pending ? "brand" : "neutral") as CanvasTone,
         }
       : {
-          label: `${minds.length} ${minds.length === 1 ? "mind" : "minds"} convene here`,
+          label: minds.length === 1 ? "1 mind convenes here" : `${minds.length} minds convene here`,
           tone: "brand" as CanvasTone,
         };
 

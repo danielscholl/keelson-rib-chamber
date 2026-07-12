@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   clearPendingGenesis,
+  GENESIS_STALL_MS,
+  pendingElapsedMs,
   pendingGenesisFile,
   readPendingGenesis,
   writePendingGenesis,
@@ -53,5 +55,37 @@ describe("pending-genesis store", () => {
     expect(await readPendingGenesis(home)).toBeNull();
     await writeFile(pendingGenesisFile(home), JSON.stringify({ name: "Ghost" }));
     expect(await readPendingGenesis(home)).toBeNull();
+  });
+});
+
+// The one elapsed rule the boot card and the boot-time reconcile both read — its
+// branches decide whether an orphaned marker ticks, for how long, or presents the
+// Dismiss immediately, so each arm is pinned here.
+describe("pendingElapsedMs", () => {
+  const NOW = Date.parse("2026-07-12T12:00:00.000Z");
+  const at = (offsetMs: number) => ({
+    startedAt: new Date(NOW + offsetMs).toISOString(),
+  });
+
+  test("a past marker reports its real elapsed", () => {
+    expect(pendingElapsedMs(at(-45_000), NOW)).toBe(45_000);
+  });
+
+  test("a marker inside the future skew clamps to zero (still authoring)", () => {
+    expect(pendingElapsedMs(at(10_000), NOW)).toBe(0);
+  });
+
+  test("a marker beyond the future skew counts as fully stalled", () => {
+    expect(pendingElapsedMs(at(120_000), NOW)).toBe(GENESIS_STALL_MS);
+  });
+
+  test("an unparseable startedAt counts as fully stalled", () => {
+    expect(pendingElapsedMs({ startedAt: "not-a-date" }, NOW)).toBe(GENESIS_STALL_MS);
+  });
+
+  test("a marker past the stall window reports at least the window", () => {
+    expect(pendingElapsedMs(at(-GENESIS_STALL_MS - 60_000), NOW)).toBeGreaterThanOrEqual(
+      GENESIS_STALL_MS,
+    );
   });
 });
