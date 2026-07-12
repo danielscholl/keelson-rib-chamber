@@ -1198,10 +1198,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const checkerSlug = pickFidelityChecker(room, synthSlug, roster);
     const checker = checkerSlug ? roster.find((m) => m.slug === checkerSlug) : undefined;
     if (!checker) return { turns: 0, closed: false, active: true, checked: false };
-    const prompt = buildFidelityPrompt({
-      grounding: room.grounding,
-      transcript: await loadCachedTranscript(room.slug),
-    });
+    // Load the transcript, THEN re-check abort/generation immediately before the paid
+    // turn (mirrors the synthesis guard) so a stop in the load gap skips the check rather
+    // than appending an empty, never-run fidelity entry.
+    const fidTranscript = await loadCachedTranscript(room.slug);
+    if (controller.signal.aborted || generationOf(room.slug) !== gen)
+      return { turns: 0, closed: false, active: true, checked: false };
+    const prompt = buildFidelityPrompt({ grounding: room.grounding, transcript: fidTranscript });
     const turn = await runOneTurn(room, checker, prompt, controller);
     if (turn === "disposed") return "disposed";
     await appendEntry(
