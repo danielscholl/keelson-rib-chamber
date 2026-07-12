@@ -205,8 +205,11 @@ function buildJourneySection(
   ledger: TaskLedger | undefined,
 ): CanvasBoardView["sections"] {
   const items: CanvasJourneySection["items"] = [];
-  const hasFrame = transcript.length > 0;
-  const hasExplore = hasFrame && (room.round >= 1 || transcript.length > 1);
+  // Director/system records ride the transcript without advancing the room turn
+  // (inject()), so phases count only agent turns — same rule as speakerCounts.
+  const agentTurns = transcript.reduce((n, e) => n + (e.role === "agent" ? 1 : 0), 0);
+  const hasFrame = agentTurns > 0;
+  const hasExplore = hasFrame && (room.round >= 1 || agentTurns > 1);
   // A magentic manager's landed plan IS the room's decision; a planning ledger
   // (no tasks yet) hasn't decided anything.
   const ledgerDecided = !!ledger && ledger.status !== "planning";
@@ -227,7 +230,7 @@ function buildJourneySection(
   if (hasExplore) {
     items.push({
       title: "Explore",
-      text: `${transcript.length} turn${transcript.length === 1 ? "" : "s"} recorded`,
+      text: `${agentTurns} turn${agentTurns === 1 ? "" : "s"} recorded`,
     });
   }
   if (hasDecide) {

@@ -171,6 +171,25 @@ describe("buildRoomBoard", () => {
     expect(journeyItems(board)?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide"]);
   });
 
+  test("director injections alone never open the journey; agent turns drive the count", () => {
+    const injected = buildRoomBoard(room(), [
+      entry({ from: "director", role: "director", parts: [{ text: "steer" }] }),
+      entry({ from: "director", role: "director", parts: [{ text: "steer again" }] }),
+    ]);
+    expect(canvasViewSchema.safeParse(injected).success).toBe(true);
+    expect(journeyItems(injected)).toBeUndefined();
+
+    const mixed = buildRoomBoard(room(), [
+      entry({ from: "a", turnIndex: 0 }),
+      entry({ from: "director", role: "director", parts: [{ text: "steer" }] }),
+      entry({ from: "b", turnIndex: 1 }),
+    ]);
+    expect(canvasViewSchema.safeParse(mixed).success).toBe(true);
+    const items = journeyItems(mixed);
+    expect(items?.map((item) => item.title)).toEqual(["Frame", "Explore"]);
+    expect(items?.find((item) => item.title === "Explore")?.text).toBe("2 turns recorded");
+  });
+
   test("a marker-free done room with an outcome still reaches Decide, synthesis complete", () => {
     const board = buildRoomBoard(room({ status: "done", round: 1 }), [
       entry({ from: "a", turnIndex: 0, round: 0 }),
