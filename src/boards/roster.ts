@@ -1,5 +1,5 @@
 import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
-import type { PendingGenesis } from "../pending-genesis.ts";
+import { GENESIS_STALL_MS, type PendingGenesis, pendingElapsedMs } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, identityToneForSlot, isValidSlot, type Mind } from "../types.ts";
 
@@ -240,25 +240,16 @@ export function launchpadSections(
   return sections;
 }
 
-// The genesis stall window (seconds): past it, a pending genesis is presumed wedged
-// (the workflow failed without clearing the marker), so the boot card offers a Dismiss.
-const GENESIS_STALL_S = 180;
-
 // The seat being taken while a genesis runs — the original Chamber's boot screen quoted
 // in keelson's own ink: stacked mono lines (the card's `stacked` presentation), each a
 // dim `>` prompt label with the readout riding the green `ok` field tone. The liturgy
 // lines are honest: identity/purpose are known at action time for a starter (else
 // "calibrating…"), and "voice: calibrating…" holds with a real elapsed count that each
-// roster re-publish advances. Past the stall window it flips to a warn card with a
-// Dismiss.
+// re-publish advances. Past the stall window — including an unparseable or future
+// startedAt, per pendingElapsedMs — it flips to a warn card with a Dismiss.
 export function bootCard(pending: PendingGenesis, slot: number, now: number) {
-  const started = Date.parse(pending.startedAt);
-  // An unparseable startedAt (a hand-edited marker) has no honest elapsed — present it
-  // as stalled so it always carries a Dismiss, never a stuck "NaNs" card.
-  const elapsedS = Number.isFinite(started)
-    ? Math.max(0, Math.floor((now - started) / 1000))
-    : GENESIS_STALL_S;
-  if (elapsedS >= GENESIS_STALL_S) {
+  const elapsedS = Math.floor(pendingElapsedMs(pending, now) / 1000);
+  if (elapsedS >= GENESIS_STALL_MS / 1000) {
     return {
       title: pending.name ?? "Genesis",
       dot: "warn" as CanvasTone,

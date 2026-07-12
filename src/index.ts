@@ -106,7 +106,9 @@ import {
 } from "./paths.ts";
 import {
   clearPendingGenesis,
+  GENESIS_STALL_MS,
   type PendingGenesis,
+  pendingElapsedMs,
   readPendingGenesis,
   writePendingGenesis,
 } from "./pending-genesis.ts";
@@ -217,7 +219,6 @@ async function refreshStandingPanels(): Promise<void> {
 // panel shows the stalled card + Dismiss. All timers unref so they never hold the process
 // open, and stopGenesisTick clears them on emit / dismiss / dispose.
 const GENESIS_TICK_MS = 2_500;
-const GENESIS_STALL_MS = 180_000;
 let genesisTicker: ReturnType<typeof setInterval> | undefined;
 let genesisTickerDeadline: ReturnType<typeof setTimeout> | undefined;
 // Bumped by every stopGenesisTick (emit / dismiss / dispose / a fresh start), so an
@@ -2024,8 +2025,7 @@ const rib: Rib = {
       const epoch = genesisTickEpoch;
       void readPendingGenesis().then((marker) => {
         if (!marker || epoch !== genesisTickEpoch) return;
-        const started = Date.parse(marker.startedAt);
-        const elapsed = Number.isFinite(started) ? Date.now() - started : GENESIS_STALL_MS;
+        const elapsed = pendingElapsedMs(marker, Date.now());
         if (elapsed >= GENESIS_STALL_MS) refreshPresence();
         else startGenesisTick(GENESIS_STALL_MS - elapsed);
       });
