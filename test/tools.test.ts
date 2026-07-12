@@ -595,10 +595,11 @@ describe("chamber room-control chat tools", () => {
     );
     expect(t.errored()).toBe(false);
     expect(t.out()).toContain("Would open a room with alice, bob");
-    // The confirm gate must disclose the cross-vendor fidelity + synthesis turns so the
-    // approver sees the true ceiling, not just the base budget.
+    // The confirm gate must disclose the cross-vendor fidelity + synthesis room turns and
+    // note the separate per-speaker reflection pass, so the approver isn't told a false total.
     expect(t.out()).toContain("cross-vendor fidelity turn");
-    expect(t.out()).toContain("up to 4 total");
+    expect(t.out()).toContain("up to 4");
+    expect(t.out()).toContain("reflection pass");
   });
 
   it("rejects an over-limit grounding brief instead of silently truncating it", async () => {
