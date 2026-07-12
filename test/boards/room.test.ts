@@ -171,6 +171,22 @@ describe("buildRoomBoard", () => {
     expect(journeyItems(board)?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide"]);
   });
 
+  test("a marker-free done room with an outcome still reaches Decide, synthesis complete", () => {
+    const board = buildRoomBoard(room({ status: "done", round: 1 }), [
+      entry({ from: "a", turnIndex: 0, round: 0 }),
+      entry({
+        from: "b",
+        turnIndex: 1,
+        round: 1,
+        parts: [{ text: "Closing thoughts.\n\n---\n\n## Outcome\n\nWe ship it." }],
+      }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const items = journeyItems(board);
+    expect(items?.map((item) => item.title)).toEqual(["Frame", "Explore", "Decide", "Record"]);
+    expect(items?.find((item) => item.title === "Decide")?.text).toBe("Synthesis complete");
+  });
+
   test("an exhausted budget on a decision-free active room reads as synthesis pending", () => {
     const board = buildRoomBoard(room({ status: "active", round: 1, turnIndex: 6 }), [
       entry({ from: "a", turnIndex: 0 }),

@@ -212,10 +212,12 @@ function buildJourneySection(
   const ledgerDecided = !!ledger && ledger.status !== "planning";
   // The driver starts close synthesis once the budget is exhausted while the room
   // is still active (room.ts runBudgetSynthesisIfExhausted) — that window is the
-  // honest "synthesis pending" signal; outcomes only persist as the room closes.
+  // honest "synthesis pending" signal. A persisted outcome is itself evidence
+  // Decide completed, whatever the room's status.
   const synthesisPending =
-    room.status === "active" && (room.turnIndex >= room.turnBudget || !!outcome);
-  const hasDecide = hasFrame && (decisions.length > 0 || ledgerDecided || synthesisPending);
+    room.status === "active" && room.turnIndex >= room.turnBudget && !outcome;
+  const hasDecide =
+    hasFrame && (decisions.length > 0 || ledgerDecided || synthesisPending || !!outcome);
   const hasRecord = hasFrame && (!!outcome || room.status === "done");
 
   if (hasFrame) {
@@ -229,7 +231,7 @@ function buildJourneySection(
     });
   }
   if (hasDecide) {
-    items.push({ title: "Decide", text: decideText(decisions, ledger, ledgerDecided) });
+    items.push({ title: "Decide", text: decideText(decisions, ledger, ledgerDecided, outcome) });
   }
   if (hasRecord) {
     items.push({ title: "Record", text: outcome ? "Outcome tabled" : "Room done" });
@@ -242,6 +244,7 @@ function decideText(
   decisions: readonly RailEntry[],
   ledger: TaskLedger | undefined,
   ledgerDecided: boolean,
+  outcome: string | undefined,
 ): string {
   const count = distinctQuestionCount(decisions);
   if (count > 0) return `${count} decided`;
@@ -253,7 +256,7 @@ function decideText(
     ).length;
     return `${verb} · ${settled}/${ledger.tasks.length} tasks`;
   }
-  return "Synthesis pending";
+  return outcome ? "Synthesis complete" : "Synthesis pending";
 }
 
 // The topic as a brief: the gist collapsed with its contract tail (what the room
