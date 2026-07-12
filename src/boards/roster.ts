@@ -24,6 +24,7 @@ export function describeOwnAction(): CanvasActionItem {
     glyph: "✦",
     tone: "brand" as CanvasTone,
     expanded: true,
+    submitLabel: "Author",
     fields: [
       {
         name: "brief",
