@@ -204,6 +204,32 @@ describe("buildRoomBoard", () => {
     }
   });
 
+  test("a grounded room's restart actions all round-trip the brief (flat groundingUrl + criteria)", () => {
+    const board = buildRoomBoard(
+      room({
+        status: "done",
+        grounding: { sourceUrl: "https://x/204", criteria: ["First", "Second"] },
+      }),
+      [],
+    );
+    // Every restart control keeps the brief, so "Start again" (and the mode switches)
+    // rerun grounded rather than silently dropping it. criteria ride newline-joined, the
+    // shape roomStartAction parses back.
+    for (const item of actionsSection(board).items) {
+      expect(item.payload).toMatchObject({
+        groundingUrl: "https://x/204",
+        criteria: "First\nSecond",
+      });
+    }
+  });
+
+  test("an ungrounded room's restart actions carry no grounding keys", () => {
+    for (const item of actionsSection(buildRoomBoard(room({ status: "done" }), [])).items) {
+      expect(item.payload).not.toHaveProperty("groundingUrl");
+      expect(item.payload).not.toHaveProperty("criteria");
+    }
+  });
+
   test("a coding room's restart actions all round-trip the coding tier", () => {
     const board = buildRoomBoard(room({ status: "done", projectId: "p1", coding: true }), []);
     for (const item of actionsSection(board).items) {

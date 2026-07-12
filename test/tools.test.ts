@@ -550,7 +550,7 @@ describe("chamber room-control chat tools", () => {
     expect(s.out()).toContain("No Chamber room yet");
   });
 
-  it("accepts a grounding brief in the input schema and dry-runs cleanly", async () => {
+  it("accepts a grounding brief and discloses the extra paid turns in the dry-run", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute(
       {
@@ -562,6 +562,10 @@ describe("chamber room-control chat tools", () => {
     );
     expect(t.errored()).toBe(false);
     expect(t.out()).toContain("Would open a room with alice, bob");
+    // The confirm gate must disclose the cross-vendor fidelity + synthesis turns so the
+    // approver sees the true ceiling, not just the base budget.
+    expect(t.out()).toContain("cross-vendor fidelity turn");
+    expect(t.out()).toContain("up to 4 total");
   });
 
   it("rejects a start with fewer than two participants", async () => {

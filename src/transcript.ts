@@ -2,10 +2,9 @@ import type { Brief, TokenUsage } from "@keelson/shared";
 import { stripControlJson } from "./routing.ts";
 import type { MindSlug, TaskLedger, TurnEntry } from "./types.ts";
 
-// The grounding brief rendered for a turn prompt: the source (if any) and the numbered
-// acceptance criteria the room is convened to satisfy, so every speaker sees the
-// contract distinct from the free-text topic. Undefined when the brief carries no
-// source and no criterion, so a room without grounding adds nothing to the prompt.
+// The grounding brief rendered for a turn prompt. Undefined when the brief carries no
+// source and no criterion, so an ungrounded room adds nothing to the prompt (the
+// no-behavior-change invariant).
 export function renderGrounding(grounding: Brief | undefined): string | undefined {
   if (!grounding) return undefined;
   const lines: string[] = [];
