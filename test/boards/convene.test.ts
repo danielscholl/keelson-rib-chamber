@@ -72,22 +72,27 @@ describe("buildConveneBoard cast + shapes", () => {
     expect(shapes(board)).toHaveLength(0);
   });
 
-  test("every shape carries a purpose hint — enabled and gated alike", () => {
+  test("every shape carries a purpose subtitle — enabled and gated alike", () => {
     // Three Minds all in: Discussion, Debate, and Delegate enabled (three selected —
     // two run, one facilitates), Review gated (not a pair). A gated tab must still
-    // carry its hint so the hover reminder survives the disable, joined with the
-    // reason by the host.
+    // carry its subtitle so the inline reminder survives the disable.
     const board = buildConveneBoard([A, B, C]);
     const bs = byStrategy(board);
     for (const item of shapes(board)) {
+      expect(typeof item.subtitle).toBe("string");
+      expect(item.subtitle?.length ?? 0).toBeGreaterThan(0);
+      expect(item.subtitle?.length ?? 0).toBeLessThan(200);
       expect(typeof item.hint).toBe("string");
       expect(item.hint?.length ?? 0).toBeGreaterThan(0);
+      expect(item.submitLabel).toBe("Convene");
     }
     expect(bs.get("review")?.disabled).toBe(true);
+    expect(bs.get("review")?.subtitle).toContain("cross-vendor");
     expect(bs.get("review")?.hint).toContain("cross-vendor");
     expect(bs.get("group-chat")?.disabled ?? false).toBe(false);
     expect(bs.get("magentic")?.disabled ?? false).toBe(false);
     expect(bs.get("sequential")?.disabled ?? false).toBe(false);
+    expect(bs.get("sequential")?.subtitle).toBe("Round-robin — each Mind builds on the last.");
     expect(bs.get("sequential")?.hint).toContain("Round-robin");
   });
 });

@@ -75,6 +75,7 @@ describe("buildRosterBoard cold start", () => {
     expect(hero?.tone).toBe("brand");
     // The brief field is open inline — no disclosure step on the authored path.
     expect(hero?.expanded).toBe(true);
+    expect(hero?.submitLabel).toBe("Author");
   });
 
   test('the starters are a compact "Or seat a starter voice" actions chip row', () => {
@@ -103,6 +104,7 @@ describe("buildRosterBoard cold start", () => {
     const own = actionItems(board).find((i) => i.type === "describe-own");
     expect(own?.label).toBe("Author");
     expect(own?.glyph).toBe("✦");
+    expect(own?.submitLabel).toBe("Author");
     expect(own?.fields).toEqual([
       {
         name: "brief",
@@ -418,6 +420,7 @@ describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => 
     expect(own?.glyph).toBe("✦");
     expect(own?.tone).toBe("brand");
     expect(own?.expanded).toBe(true);
+    expect(own?.submitLabel).toBe("Author");
   });
 
   test("the launchpad's starters are a compact 'Or seat a starter voice' chip row", () => {
