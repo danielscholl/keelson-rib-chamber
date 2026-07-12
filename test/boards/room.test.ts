@@ -310,7 +310,7 @@ describe("buildRoomBoard", () => {
     expect(byType("room-inject").map((i) => i.label)).toEqual(["Call on Ada", "Call on b"]);
   });
 
-  test("a closed room offers Start-again + Start group-chat + open-floor + magentic", () => {
+  test("a closed room offers Start-again + the alternate shapes by their shape words", () => {
     for (const status of ["stopped", "done"] as const) {
       const board = buildRoomBoard(room({ status, participants: ["a", "b"], turnBudget: 6 }), []);
       expect(canvasViewSchema.safeParse(board).success).toBe(true);
@@ -324,17 +324,24 @@ describe("buildRoomBoard", () => {
       ]);
       expect(actions.items.map((i) => i.label)).toEqual([
         "Start again",
-        "Start group-chat",
-        "Start open-floor",
-        "Start magentic",
+        "Start Debate",
+        "Start Open floor",
+        "Start Delegate",
       ]);
-      // Start magentic collects the manager via a field (a Mind not in the room).
-      const magentic = actions.items.find((i) => i.label === "Start magentic");
+      const magentic = actions.items.find((i) => i.label === "Start Delegate");
       expect(magentic?.fields?.map((f) => f.name)).toEqual(["manager"]);
       expect(magentic?.payload).toMatchObject({ strategy: "magentic" });
       // Start again — no slug (the server assigns a fresh one per start).
       expect(actions.items[0]?.payload).toMatchObject({ turnBudget: 6, participants: ["a", "b"] });
     }
+  });
+
+  test("the header turns chip clamps closing-turn overflow like the index card", () => {
+    const overflowed = buildRoomBoard(room({ status: "done", turnIndex: 9, turnBudget: 8 }), []);
+    expect(canvasViewSchema.safeParse(overflowed).success).toBe(true);
+    expect(overflowed.header?.chip).toBe("8/8 + closing");
+    const normal = buildRoomBoard(room({ turnIndex: 3, turnBudget: 8 }), []);
+    expect(normal.header?.chip).toBe("3/8");
   });
 
   test("a finished group-chat's Start-again round-trips the moderator config", () => {
@@ -418,9 +425,9 @@ describe("buildRoomBoard", () => {
     });
   });
 
-  test("the Start group-chat action collects a moderator via a field form", () => {
+  test("the Start Debate action collects a moderator via a field form", () => {
     const board = buildRoomBoard(room({ status: "done", participants: ["a", "b"] }), []);
-    const gc = actionsSection(board).items.find((i) => i.label === "Start group-chat");
+    const gc = actionsSection(board).items.find((i) => i.label === "Start Debate");
     expect(gc?.payload).toMatchObject({ strategy: "group-chat", participants: ["a", "b"] });
     expect(gc?.fields).toEqual([
       {
@@ -432,9 +439,9 @@ describe("buildRoomBoard", () => {
     ]);
   });
 
-  test("the Start open-floor action carries the strategy with no required fields", () => {
+  test("the Start Open floor action carries the strategy with no required fields", () => {
     const board = buildRoomBoard(room({ status: "done", participants: ["a", "b"] }), []);
-    const of = actionsSection(board).items.find((i) => i.label === "Start open-floor");
+    const of = actionsSection(board).items.find((i) => i.label === "Start Open floor");
     expect(of?.payload).toMatchObject({ strategy: "open-floor", participants: ["a", "b"] });
     expect(of?.fields).toBeUndefined();
   });

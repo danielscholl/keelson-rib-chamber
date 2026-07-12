@@ -16,6 +16,17 @@ const HHMM = new Intl.DateTimeFormat(undefined, {
   hour12: false,
 });
 
+// The turns fraction shared by the rooms index card and the room panel's header
+// chip so the two can't drift. Overflow means closing turns ran past the budget
+// (synthesis and/or the grounding fidelity pass — a stop mid-fidelity persists
+// overflow with no synthesis), so the label stays generic rather than naming
+// synthesis.
+export function turnsLabel(turnIndex: number, turnBudget: number): string {
+  return turnIndex > turnBudget
+    ? `${turnBudget}/${turnBudget} + closing`
+    : `${turnIndex}/${turnBudget}`;
+}
+
 // "HH:MM" in the operator's local time zone — replaces the machine ISO stamp on
 // the debate feed (receipt: a full ISO stamp for a six-minute conversation that
 // happened an hour ago).
