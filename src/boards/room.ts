@@ -1,4 +1,4 @@
-import type { Brief, CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
 import { flatFromRoomConfig } from "../room-config.ts";
 import {
   clockTime,
@@ -82,6 +82,7 @@ export function buildRoomBoard(
   const topicSection = buildTopicSection(room.topic, distinctQuestionCount(decisions));
   const groundingSection = buildGroundingSection(room.grounding);
   const vitalsSection = buildVitalsSection(transcript, projectLabel);
+  const journeySection = buildJourneySection(room, transcript, decisions, outcome?.body, ledger);
   const planSection = buildPlanSection(ledger);
 
   const debateColumn = {
@@ -120,12 +121,14 @@ export function buildRoomBoard(
       status: { label: room.status, tone: statusTone(room.status) },
       chip: `${room.turnIndex}/${room.turnBudget}`,
     },
-    // Vitals, then the topic brief, the magentic plan (when applicable), the
-    // debate+rail columns, the outcome document (when the room produced one),
-    // then board-baked controls. Each control carries the room slug as payload
-    // (a static actions[] button can't), so onAction routes to the right room.
+    // Vitals, the room's backed journey, then the topic brief, the magentic plan
+    // (when applicable), the debate+rail columns, the outcome document (when the
+    // room produced one), then board-baked controls. Each control carries the
+    // room slug as payload (a static actions[] button can't), so onAction routes
+    // to the right room.
     sections: [
       ...vitalsSection,
+      ...journeySection,
       ...topicSection,
       ...groundingSection,
       ...planSection,
@@ -192,6 +195,71 @@ function buildVitalsSection(
       ],
     },
   ];
+}
+
+function buildJourneySection(
+  room: Room,
+  transcript: readonly TurnEntry[],
+  decisions: readonly RailEntry[],
+  outcome: string | undefined,
+  ledger: TaskLedger | undefined,
+): CanvasBoardView["sections"] {
+  const items: CanvasJourneySection["items"] = [];
+  // Director/system records ride the transcript without advancing the room turn
+  // (inject()), so phases count only agent turns — same rule as speakerCounts.
+  const agentTurns = transcript.reduce((n, e) => n + (e.role === "agent" ? 1 : 0), 0);
+  const hasFrame = agentTurns > 0;
+  const hasExplore = hasFrame && (room.round >= 1 || agentTurns > 1);
+  // A magentic manager's landed plan IS the room's decision; a planning ledger
+  // (no tasks yet) hasn't decided anything.
+  const ledgerDecided = !!ledger && ledger.status !== "planning";
+  // The driver starts close synthesis once the budget is exhausted while the room
+  // is still active (room.ts runBudgetSynthesisIfExhausted) — that window is the
+  // honest "synthesis pending" signal. A persisted outcome is itself evidence
+  // Decide completed, whatever the room's status.
+  const synthesisPending =
+    room.status === "active" && room.turnIndex >= room.turnBudget && !outcome;
+  const hasDecide =
+    hasFrame && (decisions.length > 0 || ledgerDecided || synthesisPending || !!outcome);
+  const hasRecord = hasFrame && (!!outcome || room.status === "done");
+
+  if (hasFrame) {
+    // The framing moment is static — progression belongs to Explore's turn count.
+    items.push({ title: "Frame", text: "Round 1 opened" });
+  }
+  if (hasExplore) {
+    items.push({
+      title: "Explore",
+      text: `${agentTurns} turn${agentTurns === 1 ? "" : "s"} recorded`,
+    });
+  }
+  if (hasDecide) {
+    items.push({ title: "Decide", text: decideText(decisions, ledger, ledgerDecided, outcome) });
+  }
+  if (hasRecord) {
+    items.push({ title: "Record", text: outcome ? "Outcome tabled" : "Room done" });
+  }
+
+  return items.length > 0 ? [{ kind: "journey", title: "Journey", items }] : [];
+}
+
+function decideText(
+  decisions: readonly RailEntry[],
+  ledger: TaskLedger | undefined,
+  ledgerDecided: boolean,
+  outcome: string | undefined,
+): string {
+  const count = distinctQuestionCount(decisions);
+  if (count > 0) return `${count} decided`;
+  if (ledgerDecided && ledger) {
+    const verb = ledger.status === "done" ? "Plan complete" : "Plan executing";
+    if (ledger.tasks.length === 0) return verb;
+    const settled = ledger.tasks.filter(
+      (t) => t.status === "completed" || t.status === "failed",
+    ).length;
+    return `${verb} · ${settled}/${ledger.tasks.length} tasks`;
+  }
+  return outcome ? "Synthesis complete" : "Synthesis pending";
 }
 
 // The topic as a brief: the gist collapsed with its contract tail (what the room
