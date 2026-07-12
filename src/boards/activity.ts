@@ -1,13 +1,14 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
-import type { LensRecord } from "../lens-store.ts";
+import { isExhibit, type LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
-import type { Room } from "../types.ts";
+import { identityToneForSlot, type Room } from "../types.ts";
 
 // The minimal Mind shape the feed reads: listMindRecords supplies it (the
 // room-facing Mind drops createdAt). Structural, so a test passes a plain literal.
 export interface MindActivity {
   name: string;
   createdAt: string;
+  identitySlot?: number;
 }
 
 // One feed row reduced to what it renders. `atMs` is the sort key; `at` is the
@@ -76,7 +77,11 @@ function collectEvents(
 ): ActivityEvent[] {
   const events: ActivityEvent[] = [];
   for (const m of minds) {
-    push(events, m.createdAt, { icon: "✦", glyph: "brand", text: `New Mind · ${m.name}` });
+    push(events, m.createdAt, {
+      icon: "✦",
+      glyph: identityToneForSlot(m.identitySlot),
+      text: `New Mind · ${m.name}`,
+    });
   }
   for (const r of rooms) {
     const title = r.name || r.slug;
@@ -88,6 +93,14 @@ function collectEvents(
   }
   for (const l of lenses) {
     const title = l.board.title || l.id;
+    if (isExhibit(l)) {
+      push(events, l.updatedAt, {
+        icon: "▣",
+        glyph: "accent",
+        text: `Exhibit "${title}" · tabled`,
+      });
+      continue;
+    }
     push(events, l.updatedAt, {
       icon: "❖",
       glyph: "accent",

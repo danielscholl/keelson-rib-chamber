@@ -74,7 +74,7 @@ describe("recordSection feed", () => {
       "New Mind · Ada",
     ]);
     expect(section.items.map((i) => i.icon)).toEqual(["❖", "▦", "✦"]);
-    expect(section.items.map((i) => i.glyph)).toEqual(["accent", "info", "brand"]);
+    expect(section.items.map((i) => i.glyph)).toEqual(["accent", "info", "neutral"]);
     expect(section.items.map((i) => i.trailing)).toEqual([
       "30 minutes ago",
       "2 hours ago",
@@ -91,6 +91,15 @@ describe("recordSection feed", () => {
     expect(stopped?.text).toContain("· stopped");
   });
 
+  test("a genesis row follows the Mind identity slot", () => {
+    const section = recordSection([mind({ identitySlot: 2 })], [], [], NOW);
+    expect(canvasViewSchema.safeParse(wrap(section)).success).toBe(true);
+    expect(section.items[0]).toMatchObject({
+      glyph: "id-teal",
+      text: "New Mind · Ada",
+    });
+  });
+
   test("a fresh event reads 'just now', not 'just now ago'", () => {
     const section = recordSection([], [], [lens({ updatedAt: at(0) })], NOW);
     expect(section.items[0]?.trailing).toBe("just now");
@@ -102,6 +111,16 @@ describe("recordSection feed", () => {
   test("a lens scope is appended to its feed text", () => {
     const section = recordSection([], [], [lens({ scope: "timeline" })], NOW);
     expect(section.items[0]?.text).toBe('Lens "Release Risks" · timeline');
+  });
+
+  test("an exhibit record reads as tabled, not as a lens", () => {
+    const section = recordSection([], [], [lens({ kind: "exhibit" })], NOW);
+    expect(canvasViewSchema.safeParse(wrap(section)).success).toBe(true);
+    expect(section.items[0]).toMatchObject({
+      icon: "▣",
+      glyph: "accent",
+      text: 'Exhibit "Release Risks" · tabled',
+    });
   });
 
   test("an entry with an unparseable timestamp is dropped from the feed", () => {

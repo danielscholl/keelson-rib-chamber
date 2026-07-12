@@ -86,7 +86,7 @@ export function buildRoomBoard(
 
   const debateColumn = {
     kind: "rows" as const,
-    title: debateColumnTitle(transcript),
+    title: debateColumnTitle(room, transcript),
     items: buildDebateItems(room, transcript, textFor, mindBySlug, roundDecisions, decisions),
   };
   const voicesSection = buildVoicesSection(room, mindBySlug, counts);
@@ -131,7 +131,7 @@ export function buildRoomBoard(
       ...planSection,
       columnsSection,
       ...outcomeSection,
-      roomControls(room),
+      roomControls(room, mindBySlug),
     ],
   };
 }
@@ -285,7 +285,10 @@ function taskTone(status: LedgerTask["status"]): CanvasTone {
 // <slug>" (a one-shot nextSpeaker override) and Stop (turns advance on their
 // own); once it ends, a single "Start again" that re-runs the same config under
 // a fresh room. Each control carries the room slug so onAction targets it.
-function roomControls(room: Room): CanvasBoardView["sections"][number] {
+function roomControls(
+  room: Room,
+  mindBySlug: Map<string, Mind>,
+): CanvasBoardView["sections"][number] {
   if (room.status !== "active") {
     // Carry the grounding brief (flat, the shape roomStartAction parses) so every
     // restart reruns with the same acceptance criteria rather than an ungrounded room.
@@ -297,6 +300,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
     return {
       kind: "actions",
       title: "Controls",
+      wrap: true,
       items: [
         {
           type: "room-start",
@@ -396,6 +400,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
   return {
     kind: "actions",
     title: "Controls",
+    wrap: true,
     items: [
       // "Call on <slug>" is a one-shot nextSpeaker override — meaningful for the
       // discussion strategies, but magentic routes by the manager's ledger, so a
@@ -405,7 +410,7 @@ function roomControls(room: Room): CanvasBoardView["sections"][number] {
         ? []
         : room.participants.map((p) => ({
             type: "room-inject",
-            label: `Call on ${p}`,
+            label: `Call on ${mindBySlug.get(p)?.name ?? p}`,
             glyph: "↳",
             payload: { slug: room.slug, nextSpeaker: p },
           }))),
@@ -457,11 +462,29 @@ function groupByRound(decisions: readonly RailEntry[]): Map<number, number[]> {
   return new Map([...map].map(([round, set]) => [round, [...set]]));
 }
 
-function debateColumnTitle(transcript: readonly TurnEntry[]): string {
+function debateColumnTitle(room: Room, transcript: readonly TurnEntry[]): string {
   const rounds = transcript.map((e) => e.round).filter((r): r is number => r !== undefined);
-  if (rounds.length === 0) return "Debate";
+  const shape = strategyShapeLabel(room.strategy);
+  if (rounds.length === 0) return shape;
   const roundCount = Math.max(...rounds) + 1;
-  return roundCount > 1 ? `Debate · ${roundCount} rounds` : "Debate";
+  return roundCount > 1 ? `${shape} · ${roundCount} rounds` : shape;
+}
+
+function strategyShapeLabel(strategy: string): string {
+  switch (strategy) {
+    case "sequential":
+      return "Discussion";
+    case "group-chat":
+      return "Debate";
+    case "open-floor":
+      return "Open floor";
+    case "review":
+      return "Review";
+    case "magentic":
+      return "Delegate";
+    default:
+      return `${strategy.charAt(0).toUpperCase()}${strategy.slice(1)}`;
+  }
 }
 
 // The debate feed: a row per turn, with a round-head divider wherever the round

@@ -79,13 +79,21 @@ function personFor(slug: string, bySlug: ReadonlyMap<string, Mind>): CanvasPerso
 // room anyway).
 function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly LensRecord[]) {
   const tone = statusTone(room.status);
+  const cappedTurnIndex = Math.min(room.turnIndex, room.turnBudget);
+  // Overflow means closing turns ran past the budget (synthesis and/or the
+  // grounding fidelity pass — a stop mid-fidelity persists overflow with no
+  // synthesis), so the label stays generic rather than naming synthesis.
+  const turnsLabel =
+    room.turnIndex > room.turnBudget
+      ? `${room.turnBudget}/${room.turnBudget} + closing`
+      : `${room.turnIndex}/${room.turnBudget}`;
   const card = {
     title: room.name,
     dot: tone,
     pill: { label: room.status, tone },
-    bar: { value: room.turnIndex, total: room.turnBudget },
+    bar: { value: cappedTurnIndex, total: room.turnBudget },
     fields: [
-      { label: "turns", value: `${room.turnIndex}/${room.turnBudget}` },
+      { label: "turns", value: turnsLabel },
       // The round cursor is meaningful only for round-based strategies (it stays 0
       // for a plain sequential room), so surface it only once it has advanced.
       ...(room.round > 0 ? [{ label: "round", value: String(room.round) }] : []),

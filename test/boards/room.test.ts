@@ -133,9 +133,12 @@ describe("buildRoomBoard", () => {
   });
 
   test("an active room bakes Call-on-<participant> + Stop controls carrying the slug", () => {
-    const board = buildRoomBoard(room({ slug: "r", participants: ["a", "b"] }), []);
+    const board = buildRoomBoard(room({ slug: "r", participants: ["a", "b"] }), [], undefined, [
+      mind({ slug: "a", name: "Ada" }),
+    ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const actions = actionsSection(board);
+    expect(actions.wrap).toBe(true);
     const byType = (t: string) => actions.items.filter((i) => i.type === t);
     // No manual "Next": turns auto-advance, so a manual stepper would only race
     // the loop.
@@ -146,6 +149,7 @@ describe("buildRoomBoard", () => {
       { slug: "r", nextSpeaker: "a" },
       { slug: "r", nextSpeaker: "b" },
     ]);
+    expect(byType("room-inject").map((i) => i.label)).toEqual(["Call on Ada", "Call on b"]);
   });
 
   test("a closed room offers Start-again + Start group-chat + open-floor + magentic", () => {
@@ -153,6 +157,7 @@ describe("buildRoomBoard", () => {
       const board = buildRoomBoard(room({ status, participants: ["a", "b"], turnBudget: 6 }), []);
       expect(canvasViewSchema.safeParse(board).success).toBe(true);
       const actions = actionsSection(board);
+      expect(actions.wrap).toBe(true);
       expect(actions.items.map((i) => i.type)).toEqual([
         "room-start",
         "room-start",
@@ -371,14 +376,18 @@ describe("buildRoomBoard", () => {
       "Round 2",
     ]);
     expect(items).toHaveLength(6); // 4 turns + 2 dividers
-    expect(debateTitle(board)).toBe("Debate · 2 rounds");
+    expect(debateTitle(board)).toBe("Discussion · 2 rounds");
   });
 
-  test("the debate title omits the round count for a single round or no round data", () => {
+  test("the debate title uses the room shape and omits the count without multiple rounds", () => {
     const oneRound = buildRoomBoard(room(), [entry({ round: 0 }), entry({ round: 0 })]);
-    expect(debateTitle(oneRound)).toBe("Debate");
+    expect(debateTitle(oneRound)).toBe("Discussion");
     const noRounds = buildRoomBoard(room(), [entry({ round: undefined })]);
-    expect(debateTitle(noRounds)).toBe("Debate");
+    expect(debateTitle(noRounds)).toBe("Discussion");
+    const debate = buildRoomBoard(room({ strategy: "group-chat" }), [entry({ round: 0 })]);
+    expect(debateTitle(debate)).toBe("Debate");
+    const delegate = buildRoomBoard(room({ strategy: "magentic" }), [entry({ round: 0 })]);
+    expect(debateTitle(delegate)).toBe("Delegate");
   });
 
   test("a round head names the questions decided within it", () => {
