@@ -3536,7 +3536,14 @@ async function authorLensAction(action: RibAction): Promise<RibActionResult> {
   if (!subject) return { ok: false, error: "author-lens requires payload { subject }" };
   return {
     ok: true,
-    data: { effect: "run-workflow", workflow: "chamber-lens", stay: true, args: subject },
+    // ribClientEffectSchema wants args as a string map (the slash-command path
+    // takes a bare string — different schema); ARGUMENTS is the $ARGUMENTS binding.
+    data: {
+      effect: "run-workflow",
+      workflow: "chamber-lens",
+      stay: true,
+      args: { ARGUMENTS: subject },
+    },
   };
 }
 

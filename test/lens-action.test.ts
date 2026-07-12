@@ -66,7 +66,7 @@ describe("author-lens onAction", () => {
       effect: "run-workflow",
       workflow: "chamber-lens",
       stay: true,
-      args: "Architecture",
+      args: { ARGUMENTS: "Architecture" },
     });
   });
 
