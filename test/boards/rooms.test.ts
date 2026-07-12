@@ -137,8 +137,10 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     const [card] = cards(
       buildRoomsIndexBoard([room({ status: "done", turnIndex: 9, turnBudget: 8 })]),
     );
-    expect(canvasViewSchema.safeParse(buildRoomsIndexBoard([room({ turnIndex: 9, turnBudget: 8 })]))
-      .success).toBe(true);
+    expect(
+      canvasViewSchema.safeParse(buildRoomsIndexBoard([room({ turnIndex: 9, turnBudget: 8 })]))
+        .success,
+    ).toBe(true);
     expect(card?.bar).toEqual({ value: 8, total: 8 });
     expect(card?.fields?.find((f) => f.label === "turns")?.value).toBe("8/8 + synthesis");
   });

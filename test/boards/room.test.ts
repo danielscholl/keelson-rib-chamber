@@ -133,12 +133,9 @@ describe("buildRoomBoard", () => {
   });
 
   test("an active room bakes Call-on-<participant> + Stop controls carrying the slug", () => {
-    const board = buildRoomBoard(
-      room({ slug: "r", participants: ["a", "b"] }),
-      [],
-      undefined,
-      [mind({ slug: "a", name: "Ada" })],
-    );
+    const board = buildRoomBoard(room({ slug: "r", participants: ["a", "b"] }), [], undefined, [
+      mind({ slug: "a", name: "Ada" }),
+    ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const actions = actionsSection(board);
     expect(actions.wrap).toBe(true);
