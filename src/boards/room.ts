@@ -300,6 +300,7 @@ function roomControls(
     return {
       kind: "actions",
       title: "Controls",
+      wrap: true,
       items: [
         {
           type: "room-start",
@@ -399,6 +400,7 @@ function roomControls(
   return {
     kind: "actions",
     title: "Controls",
+    wrap: true,
     items: [
       // "Call on <slug>" is a one-shot nextSpeaker override — meaningful for the
       // discussion strategies, but magentic routes by the manager's ledger, so a

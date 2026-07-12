@@ -141,6 +141,7 @@ describe("buildRoomBoard", () => {
     );
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const actions = actionsSection(board);
+    expect(actions.wrap).toBe(true);
     const byType = (t: string) => actions.items.filter((i) => i.type === t);
     // No manual "Next": turns auto-advance, so a manual stepper would only race
     // the loop.
@@ -159,6 +160,7 @@ describe("buildRoomBoard", () => {
       const board = buildRoomBoard(room({ status, participants: ["a", "b"], turnBudget: 6 }), []);
       expect(canvasViewSchema.safeParse(board).success).toBe(true);
       const actions = actionsSection(board);
+      expect(actions.wrap).toBe(true);
       expect(actions.items.map((i) => i.type)).toEqual([
         "room-start",
         "room-start",
