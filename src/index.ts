@@ -3729,10 +3729,10 @@ const genesisEmitSchema = z.object({
   role: z.string().min(1),
   voice: z.string().min(1),
   soul: z.string().min(1),
-  // Seat-card stanza (2-4 verb-led sentences). Lenient cap: the card render
-  // truncates at 200, so an overlong stanza degrades rather than failing the
-  // one paid authoring turn on a validation retry.
-  mission: z.string().min(1).max(500).optional(),
+  // Seat-card stanza (2-4 verb-led sentences). Lenient on purpose: blank is
+  // omitted at persist and the card render truncates at 200, so an empty or
+  // overlong stanza degrades rather than failing the one paid authoring turn.
+  mission: z.string().max(500).optional(),
   tagline: z.string().min(1),
   model: z.string().optional(),
   provider: z.string().optional(),

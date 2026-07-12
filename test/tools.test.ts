@@ -983,6 +983,24 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     expect(t2.errored()).toBe(false);
     const quiet = (await readMinds(mindsDir())).find((m) => m.slug === "quiet");
     expect(quiet?.mission).toBeUndefined();
+
+    // The empty string an authoring model commonly emits for an optional field
+    // must not abort the paid turn — it validates and is omitted like blank.
+    const t3 = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "Terse",
+        role: "editor",
+        voice: "clipped",
+        soul: "# Terse\n## Persona\nAn editor.",
+        mission: "",
+        tagline: "Edits ruthlessly.",
+      },
+      t3.ctx,
+    );
+    expect(t3.errored()).toBe(false);
+    const terse = (await readMinds(mindsDir())).find((m) => m.slug === "terse");
+    expect(terse?.mission).toBeUndefined();
   });
 
   it("persists declared capability slugs, dropping unknown ones", async () => {
