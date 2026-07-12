@@ -31,8 +31,8 @@ keelson workflow run chamber-genesis --arguments "a meticulous release manager w
 The turn reads your brief, decides the Mind's name, a short role title, and its
 voice, composes the founding document and a one-line roster tagline, then persists
 the Mind through a single write seam. It ends with `Authored {name} ({slug})`,
-using the slug value the tool returned. When it lands, the roster reflects it as
-a card.
+using the slug value the tool returned. When it lands, the Chamber panel seats it
+as a card.
 
 :::note
 Genesis composes the identity; a small write tool persists it. You never call that
@@ -72,7 +72,7 @@ guarded against traversal before it ever touches the filesystem).
 
 :::note
 Genesis can pin `model` and `provider` when you pass them as workflow inputs.
-You can also change or clear the pin later from the roster card's model control,
+You can also change or clear the pin later from the seat card's model control,
 an at-rest indicator whose dropdown re-pins the model (its blank option clears the
 pin). `provider` is only kept when `model` is set.
 :::
@@ -91,8 +91,8 @@ Use the slash command:
 /mind release-manager
 ```
 
-The command type-aheads slugs from the roster. The roster Enter action does the
-same thing. Both produce one seed: the Mind's `SOUL.md` (falling back to its
+The command type-aheads slugs from the roster. The seat card's Enter action does
+the same thing. Both produce one seed: the Mind's `SOUL.md` (falling back to its
 tagline if the soul is empty), then any real durable memory, rules, and recent
 log, then a short set of direct-chat rules, all clamped to the harness seed budget.
 A brand-new Mind whose memory and rules are still empty contributes none of those
@@ -137,8 +137,8 @@ rail is scoped.
 
 ## Retire a Mind
 
-The roster Retire action removes the Mind's directory and every file in it, then
-drops it from the roster. It is the one destructive action on the roster, and the
+The seat card's Retire action removes the Mind's directory and every file in it,
+then drops it from the bench. It is the one destructive action on the bench, and the
 inverse of genesis. There is no slash command for it, by design: retiring is a
 deliberate click, not a typed command.
 

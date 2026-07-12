@@ -220,6 +220,10 @@ const GENESIS_TICK_MS = 2_500;
 const GENESIS_STALL_MS = 180_000;
 let genesisTicker: ReturnType<typeof setInterval> | undefined;
 let genesisTickerDeadline: ReturnType<typeof setTimeout> | undefined;
+// Bumped by every stopGenesisTick (emit / dismiss / dispose / a fresh start), so an
+// async continuation that read the marker before the stop can prove its read is
+// still current before starting the ticker.
+let genesisTickEpoch = 0;
 
 function tickChamber(): void {
   refreshPresence();
@@ -262,6 +266,7 @@ function startGenesisTick(): void {
 }
 
 function stopGenesisTick(): void {
+  genesisTickEpoch++;
   if (genesisTicker) clearInterval(genesisTicker);
   if (genesisTickerDeadline) clearTimeout(genesisTickerDeadline);
   genesisTicker = undefined;
@@ -2009,9 +2014,12 @@ const rib: Rib = {
       // A crash can orphan a pending-genesis marker (only graceful dispose clears it),
       // and no cadence re-reads the in-process panel — the boot card would freeze short
       // of its stalled Dismiss. Restart the tick; the card advances and flips to
-      // stalled by its own startedAt clock, and stopGenesisTick keeps this idempotent.
+      // stalled by its own startedAt clock. The epoch check guards the async gap: an
+      // emit / dismiss / dispose landing between the read and this callback bumps it,
+      // so a settled genesis can never resurrect the ticker.
+      const epoch = genesisTickEpoch;
       void readPendingGenesis().then((marker) => {
-        if (marker) startGenesisTick();
+        if (marker && epoch === genesisTickEpoch) startGenesisTick();
       });
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool

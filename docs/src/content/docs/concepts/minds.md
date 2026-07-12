@@ -154,7 +154,7 @@ the filesystem).
 ## Entering and retiring a Mind
 
 Entering a Mind opens it as a direct one-to-one chat, seeded with its soul as the
-system prompt. Use `/mind {slug}`, or the Enter action on the roster. The seed stacks
+system prompt. Use `/mind {slug}`, or the Enter action on its seat card. The seed stacks
 the Mind's identity (its `SOUL.md`, falling back to the tagline), then any real durable
 memory, rules, and recent log, then a short set of direct-chat rules, all clamped to
 the harness seed budget. If the Mind pins a model or provider, the seeded chat runs on
@@ -163,8 +163,8 @@ it.
 A direct chat is one Mind with no peer. That is a turn, not a room. Minds talking to
 each other only happens inside a [room](../rooms/).
 
-Retiring a Mind removes its directory and drops it from the roster. It is the inverse
-of genesis, and the one destructive action on the roster.
+Retiring a Mind removes its directory and drops it from the bench. It is the inverse
+of genesis, and the one destructive action on the bench.
 
 ## Related
 

@@ -15,9 +15,8 @@ type Section = CanvasBoardView["sections"][number];
 
 // The Chamber panel — the surface's one focal panel: the bench itself (a seat card
 // per Mind), the boot card while a genesis runs, and the authoring launchpad. The
-// former Roster region folded into the presence header region (rib#214); the
-// standalone roster board (boards/roster.ts) stays for the chamber-roster workflow
-// and canvas view, sharing this file's card verbs and launchpad builders so the two
+// standalone roster board (boards/roster.ts) backs the chamber-roster workflow and
+// canvas view, sharing this file's card verbs and launchpad builders so the two
 // benches can't drift.
 export function buildChamberBoard(
   minds: readonly Mind[],
