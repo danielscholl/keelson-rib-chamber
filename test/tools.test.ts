@@ -951,6 +951,40 @@ describe("chamber_emit_genesis (genesis write seam)", () => {
     expect(soul).toContain("## Persona");
   });
 
+  it("persists the authored mission trimmed, and omits a blank one", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "Voiced",
+        role: "engineer",
+        voice: "dry",
+        soul: "# Voiced\n## Persona\nAn engineer.",
+        mission: " Reads the telemetry. Names tradeoffs. ",
+        tagline: "Engineering partner.",
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const voiced = (await readMinds(mindsDir())).find((m) => m.slug === "voiced");
+    expect(voiced?.mission).toBe("Reads the telemetry. Names tradeoffs.");
+
+    const t2 = makeToolCtx();
+    await tool("chamber_emit_genesis").execute(
+      {
+        name: "Quiet",
+        role: "writer",
+        voice: "plain",
+        soul: "# Quiet\n## Persona\nA writer.",
+        mission: "  ",
+        tagline: "Writes plainly.",
+      },
+      t2.ctx,
+    );
+    expect(t2.errored()).toBe(false);
+    const quiet = (await readMinds(mindsDir())).find((m) => m.slug === "quiet");
+    expect(quiet?.mission).toBeUndefined();
+  });
+
   it("persists declared capability slugs, dropping unknown ones", async () => {
     const t = makeToolCtx();
     await tool("chamber_emit_genesis").execute(

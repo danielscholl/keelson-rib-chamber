@@ -60,9 +60,9 @@ export function buildChamberBoard(
   };
 }
 
-// >=1 Mind (or a genesis in flight): seat cards, a boot card in the seat being
-// taken, the lone-Mind nudge, and the compact authoring row. The launchpad is
-// withheld while a genesis runs — the boot card carries that moment.
+// >=1 Mind (or a genesis in flight): a grid of seat cards, a boot card in the
+// seat being taken, the lone-Mind nudge, and the open author seat. The open seat
+// is withheld while a genesis runs — the boot card carries that moment.
 function seatedSections(
   minds: readonly Mind[],
   rooms: readonly Room[],
@@ -72,9 +72,10 @@ function seatedSections(
   const sections: Section[] = [
     {
       kind: "cards",
+      grid: true,
       items: [
         ...minds.map((m) => seatCard(m, rooms)),
-        ...(pending ? [bootCard(pending, bootSlotFor(pending, minds), now)] : []),
+        ...(pending ? [bootCard(pending, bootSlotFor(pending, minds), now)] : [openSeat(minds)]),
       ],
     },
   ];
@@ -86,13 +87,12 @@ function seatedSections(
       ],
     });
   }
-  if (!pending) sections.push(authorRow(minds));
   return sections;
 }
 
 // One Mind -> one seat card: identity dot, the role pill wearing the same hue,
-// the mission line (persona until an authored mission field lands),
-// a room-scoped status footer, and the shared management verbs.
+// the mission stanza (authored at genesis; pre-mission Minds fall back to the
+// roster tagline), a room-scoped status footer, and the shared management verbs.
 function seatCard(mind: Mind, rooms: readonly Room[]) {
   const active = rooms.filter((r) => r.status === "active" && seatsMind(r, mind.slug));
   const status =
@@ -112,7 +112,7 @@ function seatCard(mind: Mind, rooms: readonly Room[]) {
     // Stacked: the mission reads as its own line with the status as a quiet
     // footer beneath it, not an inline `·`-joined meta row.
     stacked: true,
-    fields: [{ value: mission(mind.persona) }, status],
+    fields: [{ value: mission(mind.mission?.trim() || mind.persona) }, status],
     actions: mindCardActions(mind),
   };
 }
@@ -136,10 +136,11 @@ function mission(persona: string): string {
   return trimmed.length > 200 ? `${trimmed.slice(0, 199)}…` : trimmed;
 }
 
-// The seated bench's authoring path: one wrap row — the freeform brief closed at
-// rest (click opens its form; the cold-start hero stays expanded) plus the free
-// starter voices, mirroring the standalone roster's launchpad rules.
-function authorRow(minds: readonly Mind[]): Section {
+// The seated bench's authoring path, folded into the grid as its open seat: the
+// freeform brief closed at rest (click opens its form; the cold-start hero stays
+// expanded) plus the free starter voices — the same items the wrap row carried,
+// now living in the ghost seat they would fill.
+function openSeat(minds: readonly Mind[]) {
   const seated = new Set(minds.map((m) => m.slug));
   const free = new Set(freeSlots(minds));
   const { expanded: _alwaysOpen, ...brief } = describeOwnAction();
@@ -148,9 +149,9 @@ function authorRow(minds: readonly Mind[]): Section {
       ? GENESIS_STARTERS.filter((s) => !seated.has(s.slug)).map((s) => starterAction(s, free))
       : [];
   return {
-    kind: "actions",
-    title: "Author another Mind",
-    wrap: true,
-    items: [{ ...brief, label: "Author a Mind", glyph: "＋" }, ...starters],
+    title: "Open seat",
+    ghost: true,
+    footnote: "author a Mind, or seat a starter",
+    actions: [{ ...brief, label: "Author a Mind", glyph: "＋" }, ...starters],
   };
 }

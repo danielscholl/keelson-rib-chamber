@@ -17,6 +17,9 @@ export interface MindRecord {
   role: string;
   voice: string;
   persona: string;
+  // Authored seat-card stanza (see types.ts's Mind.mission). Absent on records
+  // written before the field existed.
+  mission?: string;
   model?: string;
   provider?: string;
   tools?: readonly string[];
@@ -89,6 +92,7 @@ export async function listMindRecords(
         role: typeof rec.role === "string" && rec.role ? rec.role : "",
         persona: rec.persona,
         createdAt: typeof rec.createdAt === "string" ? rec.createdAt : "",
+        ...(typeof rec.mission === "string" && rec.mission ? { mission: rec.mission } : {}),
         ...(typeof rec.model === "string" && rec.model ? { model: rec.model } : {}),
         ...(typeof rec.provider === "string" && rec.provider ? { provider: rec.provider } : {}),
         ...(Array.isArray(rec.tools) && rec.tools.length > 0
@@ -114,6 +118,7 @@ export async function readMinds(mindsRoot: string): Promise<Mind[]> {
     name: r.name,
     role: r.role,
     persona: r.persona,
+    ...(r.mission ? { mission: r.mission } : {}),
     ...(r.model ? { model: r.model } : {}),
     ...(r.provider ? { provider: r.provider } : {}),
     ...(r.tools && r.tools.length > 0 ? { tools: r.tools } : {}),

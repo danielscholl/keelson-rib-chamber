@@ -91,10 +91,11 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     // The merged Chamber panel renders the bench as seat cards (rib#214).
     const cardsSection = board.sections.find((s) => s.kind === "cards");
-    // readMinds order is disk-dependent, so compare the bench as a set.
+    // readMinds order is disk-dependent, so compare the bench as a set. The
+    // ghost open seat rides the same grid after the Minds.
     const labels =
       cardsSection?.kind === "cards" ? cardsSection.items.map((i) => i.title).sort() : [];
-    expect(labels).toEqual(["Jarvis", "Mycroft"]);
+    expect(labels).toEqual(["Jarvis", "Mycroft", "Open seat"]);
   });
 
   it("a roster mutation locally recomposes Presence without a host refresh seam", async () => {
