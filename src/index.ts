@@ -57,7 +57,6 @@ import {
 import {
   CHAMBER_SURFACE_ID,
   canonicalLensId,
-  createLensRegistry,
   EXHIBIT_TOOL_NAME,
   LENS_TOOL_NAME,
   type LensRegistry,
@@ -66,7 +65,6 @@ import {
   MIN_REFRESH_CADENCE_MS,
 } from "./lens.ts";
 import {
-  createHtmlLensRegistry,
   declaredHtmlPalettes,
   HTML_LENS_KEY,
   HTML_LENS_TOOL_NAME,
@@ -74,11 +72,22 @@ import {
   htmlLensKey,
   htmlLensStructuralError,
 } from "./lens-html.ts";
-import { createFileHtmlLensStore, listHtmlLenses } from "./lens-html-store.ts";
+import { createFileHtmlLensStore } from "./lens-html-store.ts";
+import {
+  awaitHtmlLensReconcile,
+  awaitLensReconcile,
+  bindLensRuntime,
+  deleteRecordOfKind,
+  disposeLensRuntime,
+  enqueueLensWrite,
+  getHtmlLensRegistry,
+  getLensRegistry,
+  refreshExhibitIndexes,
+  stampExhibitSources,
+} from "./lens-runtime.ts";
 import {
   createFileLensStore,
   isExhibit,
-  type LensKind,
   type LensRefresh,
   type LensStore,
   lensProvenance,
@@ -173,18 +182,6 @@ const DEFAULT_ROOM_TURN_BUDGET = 8;
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
 // stays undefined when either seam is absent, and room actions then fail closed.
 let driver: RoomDriver | undefined;
-// The lens registry is a boot-time singleton too: it owns the per-subject snapshot
-// registrations and surface regions, created once in registerTools and disposed in
-// dispose() so a re-register doesn't duplicate-register. lensSm tracks the manager it
-// was built against, so a re-bootstrap with a different one rebinds it.
-let lensRegistry: LensRegistry | undefined;
-let lensSm: SnapshotManager | undefined;
-let htmlLensRegistry: HtmlLensRegistry | undefined;
-let htmlLensSm: SnapshotManager | undefined;
-// Tracked alongside htmlLensSm because createHtmlLensRegistry captures registerRegion:
-// a re-bootstrap that reuses the same manager but hands a fresh seam must rebuild, or
-// the registry would publish/register through the stale registerRegion.
-let htmlLensRegisterRegion: NonNullable<RibContext["registerRegion"]> | undefined;
 // The room region registry is a boot-time singleton like the lens one: it owns the
 // per-slug room snapshot keys + surface regions, built once in registerTools and
 // disposed in dispose(). roomSm tracks the manager it was built against so a
@@ -280,80 +277,6 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
 // skipped so it can't block boot. Re-registers via reregister (the live half of
 // publish) WITHOUT re-saving, so a lens's authored updatedAt is preserved — a
 // restart must not reset every lens's freshness.
-// In flight while boot re-registration runs. retire awaits it so a retire landing
-// mid-reconcile can't race a reregister into resurrecting the just-deleted lens (a
-// live key/panel with no on-disk record).
-let lensReconcileInFlight: Promise<void> | undefined;
-
-// Serializes lens write-backs (the lens-note action's load-append-publish) so two
-// concurrent appends to the same board can't lose-update each other. Mirrors
-// briefInFlight: a global chain, reset on dispose so a re-boot starts fresh.
-let lensWriteInFlight: Promise<unknown> = Promise.resolve();
-
-// Enqueue one record-file mutation behind every prior one. Chains on settle
-// (never letting a rejected tail poison the queue) and returns this mutation's
-// own completion for callers that await it — the one idiom behind the emit,
-// table, stamp, and note write paths.
-function enqueueLensWrite<T>(apply: () => Promise<T>): Promise<T> {
-  const run = lensWriteInFlight.then(apply, apply);
-  lensWriteInFlight = run.catch(() => {});
-  return run;
-}
-
-function reconcileLensPanels(registry: LensRegistry): void {
-  lensReconcileInFlight = (async () => {
-    let records: Awaited<ReturnType<typeof listLenses>>;
-    try {
-      records = await listLenses(lensesDir());
-    } catch (e) {
-      console.error(`[rib-chamber] lens re-registration failed: ${errText(e)}`);
-      return;
-    }
-    for (const rec of records) {
-      try {
-        // Kind and refresh ride through so an exhibit's panel comes back on its
-        // own shelf and a living lens comes back with its re-compose wiring.
-        await registry.reregister(
-          rec.id,
-          rec.board,
-          isExhibit(rec) ? "exhibit" : "lens",
-          rec.refresh,
-        );
-      } catch (e) {
-        console.error(`[rib-chamber] lens '${rec.id}' re-registration failed: ${errText(e)}`);
-      }
-    }
-  })();
-  void lensReconcileInFlight;
-}
-
-// The HTML twin of reconcileLensPanels: re-publish every persisted HTML lens on
-// boot so its key, region, and views entry come back after a restart, via
-// reregister (no re-save, authored updatedAt preserved), fail-soft per entry.
-// Tracked in flight for the same reason as lensReconcileInFlight: the retire
-// verb awaits it so a retire landing mid-reconcile can't race a reregister into
-// resurrecting the just-deleted lens.
-let htmlLensReconcileInFlight: Promise<void> | undefined;
-
-function reconcileHtmlLensPanels(registry: HtmlLensRegistry): void {
-  htmlLensReconcileInFlight = (async () => {
-    let records: Awaited<ReturnType<typeof listHtmlLenses>>;
-    try {
-      records = await listHtmlLenses(htmlLensesDir());
-    } catch (e) {
-      console.error(`[rib-chamber] html lens re-registration failed: ${errText(e)}`);
-      return;
-    }
-    for (const rec of records) {
-      try {
-        await registry.reregister(rec.id, rec.html, rec.title);
-      } catch (e) {
-        console.error(`[rib-chamber] html lens '${rec.id}' re-registration failed: ${errText(e)}`);
-      }
-    }
-  })();
-}
-
 // The room surface shows a panel for every active room plus the most-recent room's,
 // so a just-finished room's final board lingers until a newer room supersedes it.
 // Recomputed after any room lifecycle change; retainOnly drops the panels of rooms
@@ -619,59 +542,23 @@ const rib: Rib = {
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —
     // independent of the room's C1 agent-turn seam (the room tools below additionally
-    // require runAgentTurn). Without registerRegion the tool is withheld (fail closed)
-    // rather than publishing invisible, unbounded keys that never render. Created once
-    // (a module singleton, like the room driver) and reused on a later registerTools so
-    // its keys aren't registered twice. If a different manager arrives (a re-bootstrap
-    // without an intervening dispose), rebuild against it rather than publishing through
-    // the stale manager. Build the replacement BEFORE disposing the old one, so a failed
-    // rebuild leaves the existing registry and lensSm consistent.
-    const lensStore = createFileLensStore(lensesDir());
-    if (!sm || !registerRegion) {
-      htmlLensRegistry?.dispose();
-      htmlLensRegistry = undefined;
-      htmlLensSm = undefined;
-      htmlLensRegisterRegion = undefined;
-    } else if (
-      !htmlLensRegistry ||
-      sm !== htmlLensSm ||
-      registerRegion !== htmlLensRegisterRegion
-    ) {
-      const next = createHtmlLensRegistry(
-        sm,
-        registerRegion,
-        createFileHtmlLensStore(htmlLensesDir()),
-        declareHtmlLensView,
-      );
-      htmlLensRegistry?.dispose();
-      htmlLensRegistry = next;
-      htmlLensSm = sm;
-      htmlLensRegisterRegion = registerRegion;
-      // Re-register every persisted HTML lens so it survives a restart (key +
-      // region + views entry back live). Fail-soft per entry, like board lenses.
-      reconcileHtmlLensPanels(next);
-    }
-    if (sm && registerRegion && sm !== lensSm) {
-      const next = createLensRegistry(sm, registerRegion, lensStore);
-      lensRegistry?.dispose();
-      lensRegistry = next;
-      lensSm = sm;
-      // Re-register every persisted lens so it survives a restart: each becomes a
-      // live region again (its snapshot key present for the index/open path).
-      // Fail-soft per entry — one bad lens can't break boot.
-      reconcileLensPanels(next);
-    }
+    // require runAgentTurn). bindLensRuntime owns the singleton discipline (build once,
+    // reuse, rebuild against a new manager) and reconciles persisted lenses; declareView
+    // is injected so it never touches this rib's view array. See src/lens-runtime.ts.
+    const { lensStore } = bindLensRuntime({ sm, registerRegion, declareView: declareHtmlLensView });
+    const lensReg = getLensRegistry();
+    const htmlLensReg = getHtmlLensRegistry();
     const lensTools =
-      sm && registerRegion && lensRegistry
+      sm && registerRegion && lensReg
         ? [
-            makeLensTool(lensStore, lensRegistry),
+            makeLensTool(lensStore, lensReg),
             makeRetireLensTool(),
-            makeTableExhibitTool(lensStore, lensRegistry),
+            makeTableExhibitTool(lensStore, lensReg),
             makeDeleteExhibitTool(),
           ]
         : [];
     const htmlLensTools =
-      sm && registerRegion && htmlLensRegistry ? [makeEmitLensHtmlTool(htmlLensRegistry)] : [];
+      sm && registerRegion && htmlLensReg ? [makeEmitLensHtmlTool(htmlLensReg)] : [];
     // The room publisher routes each room's board to a per-slug key + dynamic surface
     // region, so it requires registerRegion. Rebuilt against a new manager on a
     // re-bootstrap, reused otherwise; built before the old one is disposed so a failed
@@ -705,7 +592,7 @@ const rib: Rib = {
         // plus external read-only names that resolve only for declaring Minds. Rooms
         // table EXHIBITS (deliverables), not lenses — authoring a standing lens
         // stays the operator's /lens act, so the two shelves can't re-cross.
-        turnTools: [...(lensRegistry ? [{ name: EXHIBIT_TOOL_NAME }] : []), ...externalToolPool()],
+        turnTools: [...(lensReg ? [{ name: EXHIBIT_TOOL_NAME }] : []), ...externalToolPool()],
         // The witnessed-provenance stamp: the driver saw the table-exhibit tool run
         // in this room's turn, so record the room as the exhibit's source.
         onExhibitsTabled: (ids, room) => stampExhibitSources(ids, room),
@@ -864,18 +751,10 @@ const rib: Rib = {
     // Abort in-flight reflection and drain its writes so a late memory write can't
     // land after teardown; reset the per-Mind write chains for the next boot.
     await disposeReflectionGate();
-    // Drain any in-flight lens write-back before tearing down the registry, so a
+    // Drain any in-flight lens write-back before tearing down the registries, so a
     // late load-append-publish can't publish to a disposed registry or interleave
-    // with a re-boot's writes.
-    await lensWriteInFlight.catch(() => {});
-    lensWriteInFlight = Promise.resolve();
-    htmlLensRegistry?.dispose();
-    htmlLensRegistry = undefined;
-    htmlLensSm = undefined;
-    htmlLensRegisterRegion = undefined;
-    lensRegistry?.dispose();
-    lensRegistry = undefined;
-    lensSm = undefined;
+    // with a re-boot's writes. See src/lens-runtime.ts.
+    await disposeLensRuntime();
     roomRegistry?.dispose();
     roomRegistry = undefined;
     roomSm = undefined;
@@ -1660,98 +1539,6 @@ async function outcomeExploreAction(action: RibAction): Promise<RibActionResult>
   }
 }
 
-// Both indexes that render an exhibit — its own shelf card and the producing
-// room's tabled link — refreshed together (concurrently; the collectors are
-// independent and each fail-soft) so neither goes stale after a mutation.
-async function refreshExhibitIndexes(): Promise<void> {
-  await Promise.all([
-    refreshWorkflow("chamber-exhibits").catch(() => {}),
-    refreshWorkflow("chamber-rooms").catch(() => {}),
-  ]);
-}
-
-// The witnessed-provenance stamp: the room driver saw the table-exhibit tool fire
-// in a turn it ran, so record the room as each exhibit's source — serialized on
-// lensWriteInFlight with the other record writers, fail-soft per id, and
-// preserving updatedAt (a provenance stamp is not a re-tabling). The stamp is
-// the room's SLUG (the stable identifier room cards and open links join on);
-// display sites resolve it to the room's name, falling back to the raw value.
-function stampExhibitSources(rawIds: readonly string[], room: Room): void {
-  const source = room.slug;
-  const apply = async (): Promise<void> => {
-    await lensReconcileInFlight?.catch(() => {});
-    const store = createFileLensStore(lensesDir());
-    let stamped = false;
-    for (const rawId of rawIds) {
-      const id = canonicalLensId(rawId);
-      if (!id) continue;
-      try {
-        const record = await store.loadLens(id);
-        if (!record || !isExhibit(record) || record.sourceRoom === source) continue;
-        await store.saveLens({ ...record, sourceRoom: source });
-        stamped = true;
-      } catch (e) {
-        console.error(`[rib-chamber] exhibit '${id}' source stamp failed: ${errText(e)}`);
-      }
-    }
-    // One refresh per index for the batch — the exhibit card's "from" field and
-    // the room card's "tabled" link both just appeared.
-    if (stamped) await refreshExhibitIndexes();
-  };
-  void enqueueLensWrite(apply);
-}
-
-// One kind-checked delete backs all four delete verbs (two board actions, two
-// tools): serialize behind boot re-registration (a delete must not race a
-// reregister into resurrecting the record), verify the record's species, delete,
-// release the live panel, then refresh that shelf's index. `crossKind` supplies
-// the surface-appropriate steering message (board verbs name the sibling index,
-// tools name the sibling tool).
-async function deleteRecordOfKind(
-  rawId: string,
-  expected: LensKind,
-  crossKind: (id: string) => string,
-): Promise<{ ok: true; id: string; key: string } | { ok: false; error: string }> {
-  const noun = expected === "exhibit" ? "exhibit" : "lens";
-  const id = canonicalLensId(rawId);
-  if (!id) return { ok: false, error: `unsafe ${noun} id: ${JSON.stringify(rawId)}` };
-  try {
-    await lensReconcileInFlight?.catch(() => {});
-    const store = createFileLensStore(lensesDir());
-    const record = await store.loadLens(id);
-    if (record && isExhibit(record) !== (expected === "exhibit")) {
-      return { ok: false, error: crossKind(id) };
-    }
-    if (!record && expected === "exhibit") {
-      return { ok: false, error: `exhibit '${id}' not found` };
-    }
-    try {
-      await store.deleteLens(id);
-    } catch (e) {
-      // The store's not-found message says "lens"; keep the verb's noun honest
-      // when a concurrent delete wins the race.
-      if (expected === "exhibit" && /not found/.test(errText(e))) {
-        return { ok: false, error: `exhibit '${id}' not found` };
-      }
-      throw e;
-    }
-    lensRegistry?.remove(id);
-    if (expected === "exhibit") {
-      // A room card listing this exhibit as tabled must drop the dead link.
-      await refreshExhibitIndexes();
-    } else {
-      await refreshWorkflow("chamber-lenses").catch(() => {});
-      // The retired lens drops from the roster pulse's "Live views" count too —
-      // refresh it so the count matches the just-updated index.
-      await refreshWorkflow("chamber-roster").catch(() => {});
-    }
-    await refreshStandingPanels();
-    return { ok: true, id, key: lensKey(id) };
-  } catch (e) {
-    return { ok: false, error: errText(e) };
-  }
-}
-
 async function retireLensAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const raw = asNonEmptyString(payload.id);
@@ -1796,22 +1583,22 @@ async function retireHtmlLensAction(action: RibAction): Promise<RibActionResult>
   const { id } = got;
   try {
     // Let any in-flight boot re-registration finish first (mirrors
-    // deleteRecordOfKind awaiting lensReconcileInFlight): a retire landing
+    // deleteRecordOfKind awaiting the lens reconcile): a retire landing
     // mid-reconcile must not race a reregister into resurrecting the panel.
-    await htmlLensReconcileInFlight?.catch(() => {});
+    await awaitHtmlLensReconcile();
     try {
       await createFileHtmlLensStore(htmlLensesDir()).delete(id);
     } catch (e) {
       // The record is already gone but a panel may still be live (external
       // tamper): releasing it lets the verb converge instead of stranding a
       // ghost panel no second retire could ever remove.
-      if (/not found/.test(errText(e)) && htmlLensRegistry?.remove(id)) {
+      if (/not found/.test(errText(e)) && getHtmlLensRegistry()?.remove(id)) {
         await refreshStandingPanels();
         return { ok: true, data: { id, key: htmlLensKey(id) } };
       }
       throw e;
     }
-    htmlLensRegistry?.remove(id);
+    getHtmlLensRegistry()?.remove(id);
     await refreshStandingPanels();
     return { ok: true, data: { id, key: htmlLensKey(id) } };
   } catch (e) {
@@ -1915,9 +1702,8 @@ async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
   }
   // The write-back republishes through the registry to update the live panel, so the
   // region seam must be wired (it always is when a lens exists — fail closed if not).
-  if (!lensRegistry)
-    return { ok: false, error: "lens write-back unavailable (region seam absent)" };
-  const registry = lensRegistry;
+  const registry = getLensRegistry();
+  if (!registry) return { ok: false, error: "lens write-back unavailable (region seam absent)" };
   // Serialize the load-append-publish: it is a read-modify-write, so two concurrent
   // appends to the same board would lose-update (the store's atomic rename guards a
   // torn file, not a stale read). Note appends are rare operator actions, so one
@@ -1926,7 +1712,7 @@ async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
     try {
       // Let any in-flight boot re-registration finish first, so the write can't race a
       // reregister republishing the pre-edit board over the live key.
-      await lensReconcileInFlight?.catch(() => {});
+      await awaitLensReconcile();
       const record = await createFileLensStore(lensesDir()).loadLens(id);
       if (!record) return { ok: false, error: `lens '${id}' not found` };
       // Round-trip the provenance, the kind, and the refresh backing (lensProvenance
@@ -2389,9 +2175,9 @@ function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefinition 
     inputSchema: lensEmitSchema,
     state_changing: true,
     execute(input, ctx) {
-      // Serialized on lensWriteInFlight (like the exhibit tool): the refresh
-      // preserve-vs-clear resolution is a read-modify-write of the record, and
-      // an unserialized publish could land inside a note write-back or stamp.
+      // Serialized on the lens write chain (enqueueLensWrite, like the exhibit
+      // tool): the refresh preserve-vs-clear resolution is a read-modify-write of
+      // the record, and an unserialized publish could land inside a note write-back or stamp.
       const apply = async (): Promise<void> => {
         const parsed = lensEmitSchema.safeParse(input);
         if (!parsed.success) {
@@ -2409,7 +2195,7 @@ function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefinition 
         }
         const { scope, maintainingMind, reason } = parsed.data;
         try {
-          await lensReconcileInFlight?.catch(() => {});
+          await awaitLensReconcile();
           // The two species share one id space, so the LENS verb must not overwrite
           // an exhibit (it would flip the record's kind and drop its witnessed
           // sourceRoom). Best-effort guard — the publish itself stays last-writer-wins.
@@ -2666,9 +2452,9 @@ function makeTableExhibitTool(store: LensStore, registry: LensRegistry): ToolDef
     inputSchema: exhibitEmitSchema,
     state_changing: true,
     execute(input, ctx) {
-      // Serialized on lensWriteInFlight: the tool's load-check-publish, the witness
-      // stamp, and the note write-back all touch the same record files, and an
-      // unserialized publish could land inside a stamp's read-modify-write.
+      // Serialized on the lens write chain (enqueueLensWrite): the tool's load-check-
+      // publish, the witness stamp, and the note write-back all touch the same record
+      // files, and an unserialized publish could land inside a stamp's read-modify-write.
       const apply = async (): Promise<void> => {
         const parsed = exhibitEmitSchema.safeParse(input);
         if (!parsed.success) {
@@ -2681,7 +2467,7 @@ function makeTableExhibitTool(store: LensStore, registry: LensRegistry): ToolDef
           return;
         }
         try {
-          await lensReconcileInFlight?.catch(() => {});
+          await awaitLensReconcile();
           const existing = await store.loadLens(id);
           // The two species share one id space, so the EXHIBIT verb must not
           // overwrite a standing lens (it would flip the record's kind and drop
