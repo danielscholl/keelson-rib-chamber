@@ -41,7 +41,7 @@ describe("chamber-roster producer (Phase 1)", () => {
       (c) => (c.definition as { name?: string }).name === "chamber-roster",
     );
     expect(roster?.bindSnapshotKey).toBe(ROSTER_KEY);
-    const node = (roster?.definition as { nodes?: Array<Record<string, unknown>> }).nodes?.[0];
+    const node = (roster?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes?.[0];
     expect(typeof node?.bash).toBe("string");
     expect(node?.prompt).toBeUndefined();
     expect(node?.output_schema).toEqual({ type: "object", required: ["view", "sections"] });
@@ -50,7 +50,7 @@ describe("chamber-roster producer (Phase 1)", () => {
   test("validate accepts a board and rejects a non-board fail-closed", () => {
     const roster = contributions().find((c) => c.bindSnapshotKey === ROSTER_KEY);
     const board = { view: "board", title: "Roster", sections: [{ kind: "cards", items: [] }] };
-    expect((roster?.validate?.(board) as { view?: string }).view).toBe("board");
+    expect((roster?.validate?.(board) as { view?: string })?.view).toBe("board");
     expect(() =>
       roster?.validate?.({ view: "table", columns: [{ key: "a" }], rows: [] }),
     ).toThrow();

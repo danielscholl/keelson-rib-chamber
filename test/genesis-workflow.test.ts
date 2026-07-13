@@ -25,11 +25,12 @@ describe("chamber-genesis workflow", () => {
   });
 
   test("is a single prompt node scoped to the chamber_emit_genesis tool", () => {
-    const nodes = (genesis()?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
+    const nodes =
+      (genesis()?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes ?? [];
     expect(nodes).toHaveLength(1);
     const node = nodes[0];
     expect(typeof node?.prompt).toBe("string");
-    expect((node?.prompt as string).length).toBeGreaterThan(0);
+    expect((node?.prompt as string)?.length).toBeGreaterThan(0);
     // Rib tools are default-off in workflow prompt nodes; the node opts in to the
     // single write seam by name (and nothing else).
     expect(node?.allowed_tools).toEqual(["chamber_emit_genesis"]);
@@ -38,7 +39,7 @@ describe("chamber-genesis workflow", () => {
   });
 
   test("fails closed on a tool error so a collision can't report SUCCEEDED (#18)", () => {
-    const node = ((genesis()?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ??
+    const node = ((genesis()?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes ??
       [])[0];
     // The Mind is written inside chamber_emit_genesis, which fails closed on a
     // slug collision; fail_on_tool_error makes the keelson executor fail the run
@@ -47,7 +48,7 @@ describe("chamber-genesis workflow", () => {
   });
 
   test("the genesis prompt drives the brief through the emit tool", () => {
-    const node = ((genesis()?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ??
+    const node = ((genesis()?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes ??
       [])[0];
     const prompt = node?.prompt as string;
     expect(prompt).toContain("$ARGUMENTS");

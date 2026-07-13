@@ -18,7 +18,7 @@ function htmlLens() {
 }
 
 function node(): Record<string, unknown> | undefined {
-  const nodes = (htmlLens()?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
+  const nodes = (htmlLens()?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes ?? [];
   return nodes[0];
 }
 
@@ -32,7 +32,7 @@ describe("chamber-lens-html workflow", () => {
 
   test("is a single prompt node scoped to chamber_emit_lens_html", () => {
     const nodes =
-      (htmlLens()?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
+      (htmlLens()?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes ?? [];
     expect(nodes).toHaveLength(1);
     const n = node();
     expect(typeof n?.prompt).toBe("string");

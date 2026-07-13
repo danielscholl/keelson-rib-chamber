@@ -17,7 +17,7 @@ function digest() {
 }
 
 function nodes(): Array<Record<string, unknown>> {
-  return (digest()?.definition as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
+  return (digest()?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes ?? [];
 }
 
 function node(id: string): Record<string, unknown> | undefined {

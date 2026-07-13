@@ -147,7 +147,7 @@ describe("rib-chamber", () => {
     expect(lenses?.bindSnapshotKey).toBe("rib:chamber:lenses");
     // A deterministic bash collector (not an agent turn), guarded by an output_schema
     // requiring a view + sections — the same shape as the rooms collector.
-    const node = (lenses?.definition as { nodes?: { bash?: string }[] }).nodes?.[0];
+    const node = (lenses?.definition as { nodes?: { bash?: string }[] })?.nodes?.[0];
     expect(node?.bash).toContain("collect-lenses.ts");
   });
 
