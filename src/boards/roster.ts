@@ -48,7 +48,8 @@ export function starterAction(
   const seatFree = !free || free.has(starter.seat);
   return {
     type: "author-archetype",
-    label: `${starter.name} — ${starter.role}`,
+    label: starter.name,
+    hint: `${starter.role} · ${starter.blurb}`,
     glyph: "✦",
     ...(seatFree ? { tone: identityToneForSlot(starter.seat) } : {}),
     payload: { slug: starter.slug },
