@@ -91,44 +91,70 @@ async function writePendingGeneses(
   await rename(tmp, file);
 }
 
-// Append a marker for a genesis the caller is about to launch. Read-modify-write —
-// author actions arrive one at a time through the rib's action path, so this needs
-// atomicity against crashes (the rename), not against itself. startedAt doubles as
-// the boot card's dismiss identity, so a same-millisecond stamp nudges forward
-// until unique — two rapid authors must never share one.
+// Serialize every marker read-modify-write for a data home. A genesis landing, an
+// append, and a dismiss each read the list and write it back; run in parallel (the
+// point of concurrent genesis) they would last-writer-win — resurrecting a settled
+// boot card or dropping a live marker. The temp+rename only guards torn files, so
+// order the whole read-modify-write behind one chain per home.
+const markerWrites = new Map<string, Promise<unknown>>();
+function enqueueMarkerWrite<T>(dataHome: string, apply: () => Promise<T>): Promise<T> {
+  const prev = markerWrites.get(dataHome) ?? Promise.resolve();
+  const run = prev.then(apply, apply);
+  markerWrites.set(
+    dataHome,
+    run.catch(() => {}),
+  );
+  return run;
+}
+
+// Remove the marker file directly (no rename). Called from inside an already-queued
+// mutation, so it must not re-enter enqueueMarkerWrite (that would deadlock).
+async function unlinkPendingGenesisFile(dataHome: string): Promise<void> {
+  await rm(pendingGenesisFile(dataHome), { force: true });
+}
+
+// Append a marker for a genesis the caller is about to launch. startedAt doubles as
+// the boot card's dismiss identity, so a same-millisecond stamp nudges forward until
+// unique — two rapid authors must never share one.
 export async function appendPendingGenesis(
   marker: PendingGenesis,
   dataHome: string = chamberDataHome(),
 ): Promise<PendingGenesis[]> {
-  const existing = await readPendingGeneses(dataHome);
-  let stamp = marker.startedAt;
-  while (existing.some((m) => m.startedAt === stamp)) {
-    const t = Date.parse(stamp);
-    if (!Number.isFinite(t)) break;
-    stamp = new Date(t + 1).toISOString();
-  }
-  const markers = [...existing, { ...marker, startedAt: stamp }];
-  await writePendingGeneses(markers, dataHome);
-  return markers;
+  return enqueueMarkerWrite(dataHome, async () => {
+    const existing = await readPendingGeneses(dataHome);
+    let stamp = marker.startedAt;
+    while (existing.some((m) => m.startedAt === stamp)) {
+      const t = Date.parse(stamp);
+      if (!Number.isFinite(t)) break;
+      stamp = new Date(t + 1).toISOString();
+    }
+    const markers = [...existing, { ...marker, startedAt: stamp }];
+    await writePendingGeneses(markers, dataHome);
+    return markers;
+  });
 }
 
 // Settle the marker a landed genesis belongs to, returning what remains. A starter
 // landed under its pinned name; a freeform brief's authored name matches no marker,
 // so it settles the OLDEST unnamed marker — and if none, the oldest marker outright,
-// so a stray can never pin a boot card forever after every run has finished.
+// so a stray can never pin a boot card forever after every run has finished. Two
+// freeform landings out of order can settle each other's marker (both clear once all
+// land); a run-scoped identity would remove that ambiguity — tracked as follow-up.
 export async function removeLandedGenesis(
   name: string,
   dataHome: string = chamberDataHome(),
 ): Promise<PendingGenesis[]> {
-  const markers = await readPendingGeneses(dataHome);
-  if (markers.length === 0) return markers;
-  const byName = markers.findIndex((m) => m.name === name);
-  const oldestUnnamed = markers.findIndex((m) => m.name === undefined);
-  const drop = byName !== -1 ? byName : oldestUnnamed !== -1 ? oldestUnnamed : 0;
-  const remaining = markers.filter((_, i) => i !== drop);
-  if (remaining.length === 0) await clearPendingGenesis(dataHome);
-  else await writePendingGeneses(remaining, dataHome);
-  return remaining;
+  return enqueueMarkerWrite(dataHome, async () => {
+    const markers = await readPendingGeneses(dataHome);
+    if (markers.length === 0) return markers;
+    const byName = markers.findIndex((m) => m.name === name);
+    const oldestUnnamed = markers.findIndex((m) => m.name === undefined);
+    const drop = byName !== -1 ? byName : oldestUnnamed !== -1 ? oldestUnnamed : 0;
+    const remaining = markers.filter((_, i) => i !== drop);
+    if (remaining.length === 0) await unlinkPendingGenesisFile(dataHome);
+    else await writePendingGeneses(remaining, dataHome);
+    return remaining;
+  });
 }
 
 // Dismiss one marker by its startedAt stamp (the boot card's identity — carried on
@@ -137,16 +163,19 @@ export async function removePendingGenesisAt(
   startedAt: string,
   dataHome: string = chamberDataHome(),
 ): Promise<PendingGenesis[]> {
-  const markers = await readPendingGeneses(dataHome);
-  const remaining = markers.filter((m) => m.startedAt !== startedAt);
-  if (remaining.length === markers.length) return remaining;
-  if (remaining.length === 0) await clearPendingGenesis(dataHome);
-  else await writePendingGeneses(remaining, dataHome);
-  return remaining;
+  return enqueueMarkerWrite(dataHome, async () => {
+    const markers = await readPendingGeneses(dataHome);
+    const remaining = markers.filter((m) => m.startedAt !== startedAt);
+    if (remaining.length === markers.length) return remaining;
+    if (remaining.length === 0) await unlinkPendingGenesisFile(dataHome);
+    else await writePendingGeneses(remaining, dataHome);
+    return remaining;
+  });
 }
 
 // Clear every marker by removing the file (an absent file IS "no pending"). Fail-soft
-// on a missing file so a double-clear (emit + dismiss racing) never throws.
+// on a missing file so a double-clear (emit + dismiss racing) never throws. Queued so
+// a clear can't interleave a concurrent append's read-modify-write.
 export async function clearPendingGenesis(dataHome: string = chamberDataHome()): Promise<void> {
-  await rm(pendingGenesisFile(dataHome), { force: true });
+  await enqueueMarkerWrite(dataHome, () => unlinkPendingGenesisFile(dataHome));
 }

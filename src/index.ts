@@ -305,6 +305,12 @@ async function settleGenesis(name: string): Promise<void> {
   const remaining = await removeLandedGenesis(name).catch(() => [] as PendingGenesis[]);
   if (remaining.length === 0) stopGenesisTick();
 }
+
+// Serialize genesis slot allocation + scaffold across parallel landings. nextFreeSlot
+// reads the roster snapshot, so two emits that read the same free slot before either
+// scaffolds would persist a duplicate hue. Each scaffold invalidates the roster, so
+// the next serialized landing re-reads and takes the next free slot.
+let genesisScaffoldInFlight: Promise<unknown> = Promise.resolve();
 // The host projects lookup, captured in registerTools and cleared in dispose (like
 // refreshWorkflow). Undefined on a harness that predates RibContext.getProjects,
 // where a projectId is rejected at start (fail closed) rather than targeting nothing.
@@ -1873,6 +1879,7 @@ const rib: Rib = {
       // and the region-declared /refresh gate admits unbound workflows.
       definition: {
         name: LENS_REFRESH_WORKFLOW,
+        mutates_checkout: false,
         description:
           'Use when: re-compose a LIVING lens so its content is current — the refresh backing behind a lens authored with refresh set. Triggers: a lens panel\'s cadence or Refresh action (input `lens` = the lens id); "/workflow run chamber-lens-refresh" with inputs lens=<id>. Does: one agent turn re-reads the persisted lens and re-emits a fresh board under the same id via chamber_emit_lens. NOT for: authoring a new lens (chamber-lens), exhibits (a tabled deliverable never refreshes), or the standing Chamber Briefing.',
         inputs: { lens: { description: "the lens id to re-compose", required: true } },
@@ -3806,27 +3813,35 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         // preferring its starter's own hue when that slug matches a starter and the
         // hue is free — so the cold-start card previews what actually gets seated,
         // and a churned roster never double-seats a hue (next-free, not count-based).
-        const preferred = GENESIS_STARTERS.find((s) => s.slug === slug)?.seat;
-        const slot = nextFreeSlot(await resolveMinds(), preferred);
-        const record: MindRecord = {
-          slug,
-          name,
-          role,
-          voice,
-          // The roster card truncates for display (with an ellipsis); store the
-          // authored tagline trimmed, not hard-cut.
-          persona: tagline.trim(),
-          ...(mission?.trim() ? { mission: mission.trim() } : {}),
-          createdAt: new Date().toISOString(),
-          // Omit the slot past the ramp (a sixth Mind) so identityToneForSlot folds
-          // it to neutral rather than persisting an out-of-range index.
-          ...(slot < IDENTITY_SLOT_COUNT ? { identitySlot: slot } : {}),
-          ...(model ? { model } : {}),
-          ...(model && provider ? { provider } : {}),
-          ...(knownTools.length > 0 ? { tools: knownTools } : {}),
+        // Slot pick + scaffold run behind genesisScaffoldInFlight so two parallel
+        // landings can't read the same free slot and persist a duplicate hue.
+        const buildAndScaffold = async (): Promise<MindRecord> => {
+          const preferred = GENESIS_STARTERS.find((s) => s.slug === slug)?.seat;
+          const slot = nextFreeSlot(await resolveMinds(), preferred);
+          const built: MindRecord = {
+            slug,
+            name,
+            role,
+            voice,
+            // The roster card truncates for display (with an ellipsis); store the
+            // authored tagline trimmed, not hard-cut.
+            persona: tagline.trim(),
+            ...(mission?.trim() ? { mission: mission.trim() } : {}),
+            createdAt: new Date().toISOString(),
+            // Omit the slot past the ramp (a sixth Mind) so identityToneForSlot folds
+            // it to neutral rather than persisting an out-of-range index.
+            ...(slot < IDENTITY_SLOT_COUNT ? { identitySlot: slot } : {}),
+            ...(model ? { model } : {}),
+            ...(model && provider ? { provider } : {}),
+            ...(knownTools.length > 0 ? { tools: knownTools } : {}),
+          };
+          await scaffoldMind(mindsDir(), built, soul);
+          invalidateRoster();
+          return built;
         };
-        await scaffoldMind(mindsDir(), record, soul);
-        invalidateRoster();
+        const scaffoldRun = genesisScaffoldInFlight.then(buildAndScaffold, buildAndScaffold);
+        genesisScaffoldInFlight = scaffoldRun.catch(() => {});
+        const record = await scaffoldRun;
         // The genesis landed — settle its own boot-card marker (siblings keep theirs)
         // so the next roster frame shows the real seat instead of the boot card.
         await settleGenesis(record.name);

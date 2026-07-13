@@ -103,6 +103,26 @@ describe("pending-genesis store", () => {
     );
     expect(await readPendingGeneses(home)).toEqual([{ startedAt: "2026-07-05T18:00:00.000Z" }]);
   });
+
+  test("concurrent landings settle each marker exactly once (no resurrection)", async () => {
+    // Two geneses landing in parallel each read-modify-write the one marker file;
+    // unserialized, the later write clobbers the earlier and resurrects a settled
+    // boot card. Serialized, both clear.
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "Ada" }, home);
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:05.000Z", name: "Bo" }, home);
+    await Promise.all([removeLandedGenesis("Ada", home), removeLandedGenesis("Bo", home)]);
+    expect(await readPendingGeneses(home)).toEqual([]);
+  });
+
+  test("concurrent appends keep every marker (none lost to a clobbering write)", async () => {
+    await Promise.all([
+      appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "A" }, home),
+      appendPendingGenesis({ startedAt: "2026-07-05T18:00:01.000Z", name: "B" }, home),
+      appendPendingGenesis({ startedAt: "2026-07-05T18:00:02.000Z", name: "C" }, home),
+    ]);
+    const names = (await readPendingGeneses(home)).map((m) => m.name).sort();
+    expect(names).toEqual(["A", "B", "C"]);
+  });
 });
 
 // The one elapsed rule the boot card and the boot-time reconcile both read — its

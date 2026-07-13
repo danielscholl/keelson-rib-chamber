@@ -74,9 +74,11 @@ function benchSections(
   now: number,
 ): Section[] {
   // readMinds is newest-first; the bench seats in arrival order — a Mind boots
-  // into the leftmost open seat and stays there, so a new genesis never
-  // reshuffles the seated cards. Concurrent geneses each hold a boot card, in
-  // the order they were authored (see bootSlotsFor for the hue claims).
+  // into the leftmost open seat and stays there. Landed Minds group before pending
+  // boot cards, so a genesis that lands out of authoring order can take an earlier
+  // cell than a still-booting sibling; a shared reservation key would pin the cell
+  // across the pending->landed hop — tracked as follow-up. Concurrent geneses each
+  // hold a boot card, in the order they were authored (see bootSlotsFor for hues).
   const slots = bootSlotsFor(pending, minds);
   const seats = [
     ...[...minds].reverse().map((m) => seatCard(m, rooms)),
