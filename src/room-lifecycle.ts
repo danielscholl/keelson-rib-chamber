@@ -41,6 +41,11 @@ import type { RoomConfig, RoomStrategyName } from "./types.ts";
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
 export const MAX_ROOM_TURN_BUDGET = 50;
 
+// Default room length when a chat tool omits turnBudget. Applied after parse (not
+// z.default()) because z.toJSONSchema — which the Copilot provider feeds the model
+// — lists defaulted fields as `required`, forcing the model to supply them.
+export const DEFAULT_ROOM_TURN_BUDGET = 8;
+
 // The room driver is a boot-time singleton: it holds in-flight turn state across
 // onAction calls, so it is built once in registerTools (the only hook that runs
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
