@@ -72,11 +72,7 @@ describe("buildLensesIndexBoard empty", () => {
       }
     }
 
-    const caption = board.sections.find((s) => s.kind === "rows");
-    expect(caption?.kind).toBe("rows");
-    if (caption?.kind !== "rows") throw new Error("no caption section");
-    expect(caption.items).toHaveLength(1);
-    expect(caption.items[0]?.text).toContain("standing way of seeing");
+    expect(board.sections.some((s) => s.kind === "rows")).toBe(false);
     expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
   });
 });

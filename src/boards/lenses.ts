@@ -157,9 +157,5 @@ function emptySections(): CanvasBoardView["sections"] {
       wrap: true,
       items: STARTER_LENSES.map(starterLensAction),
     },
-    {
-      kind: "rows",
-      items: [{ glyph: "neutral", text: "a standing way of seeing — a Mind keeps it fresh." }],
-    },
   ];
 }

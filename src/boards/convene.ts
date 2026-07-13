@@ -132,13 +132,12 @@ function shapeActions(
   projects: readonly ConveneProject[],
 ): CanvasActionItem[] {
   const proj = projectField(projects);
-  // `subtitle` carries the visible tab purpose; `hint` is hover-only elaboration.
-  // On a gated tab the host joins `hint` with the disabled `reason`.
+  // Each shape shows only its name inline (the `tabs` layout); `hint` is the hover
+  // description, which the host joins with the disabled `reason` on a gated tab.
   const defs: {
     strategy: string;
     label: string;
     glyph: string;
-    subtitle: string;
     hint: string;
     fields: (CanvasActionField | null)[];
   }[] = [
@@ -146,7 +145,6 @@ function shapeActions(
       strategy: "sequential",
       label: "Discussion",
       glyph: "▸",
-      subtitle: "Round-robin — each Mind builds on the last.",
       hint: "Round-robin — each Mind speaks in turn, building on the last. The default shape.",
       fields: [topicField, proj, groundingUrlField, criteriaField],
     },
@@ -154,7 +152,6 @@ function shapeActions(
       strategy: "group-chat",
       label: "Debate",
       glyph: "◆",
-      subtitle: "A chaired panel driving toward one decision.",
       hint: "A chaired panel — a Mind you name chairs the others toward one decision.",
       fields: [
         topicField,
@@ -168,7 +165,6 @@ function shapeActions(
       strategy: "open-floor",
       label: "Open floor",
       glyph: "⊙",
-      subtitle: "Unchaired brainstorm; ends on a vote.",
       hint: "Unchaired brainstorm — the Minds route themselves and stop when enough vote to end.",
       fields: [topicField, turnsField, groundingUrlField, criteriaField],
     },
@@ -176,7 +172,6 @@ function shapeActions(
       strategy: "review",
       label: "Review",
       glyph: "✓",
-      subtitle: "Two-Mind cross-vendor pass — an independent second opinion.",
       hint: "A two-Mind cross-vendor pass — one authors, a different provider reviews for an independent second opinion.",
       fields: [topicField],
     },
@@ -184,7 +179,6 @@ function shapeActions(
       strategy: "magentic",
       label: "Delegate",
       glyph: "⚑",
-      subtitle: "A named manager splits the goal and delegates.",
       hint: "A manager you name splits the goal into tasks and delegates to the others until it's done. Magentic-style orchestration.",
       fields: [
         topicField,
@@ -202,7 +196,6 @@ function shapeActions(
       type: "convene",
       label: s.label,
       glyph: s.glyph,
-      subtitle: s.subtitle,
       hint: s.hint,
       submitLabel: "Convene",
       payload: { strategy: s.strategy },
