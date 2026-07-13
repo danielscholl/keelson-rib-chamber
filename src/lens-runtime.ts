@@ -10,10 +10,13 @@ import type { Room } from "./types.ts";
 
 // The lens registry is a boot-time singleton: it owns the per-subject snapshot
 // registrations and surface regions, created once in registerTools and disposed in
-// dispose() so a re-register doesn't duplicate-register. lensSm tracks the manager it
-// was built against, so a re-bootstrap with a different one rebinds it.
+// dispose() so a re-register doesn't duplicate-register. lensSm + lensRegisterRegion
+// track the seams it was built against — createLensRegistry captures BOTH, so a
+// re-bootstrap that swaps either must rebuild (or the registry would publish/register
+// through a stale seam), mirroring the HTML registry below.
 let lensRegistry: LensRegistry | undefined;
 let lensSm: SnapshotManager | undefined;
+let lensRegisterRegion: NonNullable<RibContext["registerRegion"]> | undefined;
 let htmlLensRegistry: HtmlLensRegistry | undefined;
 let htmlLensSm: SnapshotManager | undefined;
 // Tracked alongside htmlLensSm because createHtmlLensRegistry captures registerRegion:
@@ -243,11 +246,17 @@ export function bindLensRuntime(seams: {
     // region + views entry back live). Fail-soft per entry, like board lenses.
     reconcileHtmlLensPanels(next);
   }
-  if (sm && registerRegion && sm !== lensSm) {
+  if (!sm || !registerRegion) {
+    lensRegistry?.dispose();
+    lensRegistry = undefined;
+    lensSm = undefined;
+    lensRegisterRegion = undefined;
+  } else if (!lensRegistry || sm !== lensSm || registerRegion !== lensRegisterRegion) {
     const next = createLensRegistry(sm, registerRegion, lensStore);
     lensRegistry?.dispose();
     lensRegistry = next;
     lensSm = sm;
+    lensRegisterRegion = registerRegion;
     // Re-register every persisted lens so it survives a restart: each becomes a
     // live region again (its snapshot key present for the index/open path).
     // Fail-soft per entry — one bad lens can't break boot.
@@ -256,13 +265,18 @@ export function bindLensRuntime(seams: {
   return { lensStore };
 }
 
-// Tear down the lens runtime: drain any in-flight lens write-back BEFORE tearing down
-// the registries, so a late load-append-publish can't publish to a disposed registry
-// or interleave with a re-boot's writes; then dispose both registries and drop their
-// sm markers so a re-boot rebuilds cleanly.
+// Tear down the lens runtime: drain any in-flight lens write-back AND both boot
+// reconcile loops BEFORE tearing down the registries, so neither a late load-append-
+// publish nor a still-looping reregister can publish to a disposed registry (or
+// interleave with a re-boot's writes); then dispose both registries and drop their
+// seam markers so a re-boot rebuilds cleanly.
 export async function disposeLensRuntime(): Promise<void> {
   await lensWriteInFlight.catch(() => {});
   lensWriteInFlight = Promise.resolve();
+  await lensReconcileInFlight?.catch(() => {});
+  await htmlLensReconcileInFlight?.catch(() => {});
+  lensReconcileInFlight = undefined;
+  htmlLensReconcileInFlight = undefined;
   htmlLensRegistry?.dispose();
   htmlLensRegistry = undefined;
   htmlLensSm = undefined;
@@ -270,4 +284,5 @@ export async function disposeLensRuntime(): Promise<void> {
   lensRegistry?.dispose();
   lensRegistry = undefined;
   lensSm = undefined;
+  lensRegisterRegion = undefined;
 }
