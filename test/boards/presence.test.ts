@@ -38,23 +38,40 @@ function cards(board: Board) {
   return section.items;
 }
 
-function actionsSection(board: Board) {
-  const section = board.sections.find((s) => s.kind === "actions");
-  if (section?.kind !== "actions") throw new Error("no actions section");
-  return section;
+// The open seat is permanent furniture: it rides the next free seat, directly
+// after the seated Minds (and the boot card, while a genesis runs).
+function openSeat(board: Board) {
+  const seat = cards(board).find((c) => c.title === "Open seat");
+  if (!seat) throw new Error("no open seat");
+  return seat;
+}
+
+function padSeats(board: Board) {
+  return cards(board).filter((c) => c.title === "Empty seat");
 }
 
 describe("buildChamberBoard cold start", () => {
-  test("0 minds renders the genesis launchpad, no cards, no pulse chip", () => {
+  test("0 minds renders the four-seat bench: pads plus the open seat, brief open", () => {
     const board = buildChamberBoard([]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.header?.status?.label).toBe("No minds yet");
-    expect(board.header?.chip).toBeUndefined();
-    expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
-    // The freeform hero stays expanded at cold start — the launchpad IS the panel.
-    const hero = actionsSection(board).items[0];
+    expect(board.header?.chip).toBe("awaiting genesis");
+    expect(cards(board).map((c) => c.title)).toEqual([
+      "Open seat",
+      "Empty seat",
+      "Empty seat",
+      "Empty seat",
+    ]);
+    // Pads are decorative: ghosts with no affordances.
+    for (const pad of padSeats(board)) {
+      expect(pad.ghost).toBe(true);
+      expect(pad.actions).toBeUndefined();
+    }
+    // The freeform hero stays expanded at cold start — the seat IS the genesis form.
+    const hero = openSeat(board).actions?.[0];
     expect(hero?.type).toBe("describe-own");
     expect(hero?.expanded).toBe(true);
+    expect(board.sections.some((s) => s.kind === "actions")).toBe(false);
   });
 
   test("an empty bench still shows the live pulse when a room is active", () => {
@@ -63,10 +80,9 @@ describe("buildChamberBoard cold start", () => {
     const board = buildChamberBoard([], [room({ status: "active" })]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.header?.chip).toBe("1 room · in session");
-    // The genesis launchpad still renders alongside the pulse — the emptied
-    // bench must stay authorable.
-    const hero = actionsSection(board).items[0];
-    expect(hero?.type).toBe("describe-own");
+    // The open seat still renders alongside the pulse — the emptied bench must
+    // stay authorable.
+    expect(openSeat(board).actions?.[0]?.type).toBe("describe-own");
   });
 
   test("a stopped room is not in session — no pulse chip, footer on the bench", () => {
@@ -78,16 +94,18 @@ describe("buildChamberBoard cold start", () => {
 
 describe("buildChamberBoard seated", () => {
   test("one seat card per Mind — identity dot, hue-matched role pill, mission, verbs", () => {
+    // readMinds hands the bench newest-first; seats render in arrival order, so
+    // the elder Jarvis holds seat 1 and the newer Mycroft seats after him.
     const minds = [
-      mind({ slug: "jarvis", name: "Jarvis", identitySlot: 0 }),
       mind({ slug: "mycroft", name: "Mycroft", identitySlot: 1, role: "Research Partner" }),
+      mind({ slug: "jarvis", name: "Jarvis", identitySlot: 0 }),
     ];
     const board = buildChamberBoard(minds, []);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.header?.status?.label).toBe("2 minds convene here");
     expect(board.header?.chip).toBe("bench at rest");
     const items = cards(board);
-    expect(items.map((c) => c.title)).toEqual(["Jarvis", "Mycroft", "Open seat"]);
+    expect(items.map((c) => c.title)).toEqual(["Jarvis", "Mycroft", "Open seat", "Empty seat"]);
     expect(items[0]?.dot).toBe(IDENTITY_SLOT_TONES[0]);
     expect(items[0]?.pill?.tone).toBe(IDENTITY_SLOT_TONES[0]);
     expect(items[1]?.pill?.label).toBe("Research Partner");
@@ -99,9 +117,10 @@ describe("buildChamberBoard seated", () => {
   });
 
   test("a Mind past the ramp folds to neutral — and the pill stays untoned", () => {
+    // Newest-first input (readMinds order); the sixth-authored M5 seats last.
     const minds = Array.from({ length: 6 }, (_, i) =>
       mind({ slug: `m${i}`, name: `M${i}`, identitySlot: i }),
-    );
+    ).reverse();
     const items = cards(buildChamberBoard(minds, []));
     expect(items[5]?.dot).toBe("neutral");
     expect(items[5]?.pill?.tone).toBeUndefined();
@@ -113,20 +132,63 @@ describe("buildChamberBoard seated", () => {
     expect(rows?.kind === "rows" && rows.items[0]?.text).toContain("Seat a second Mind");
   });
 
-  test("the bench is a grid whose last card is the ghost open seat", () => {
+  test("the bench is a declared-capacity grid carrying the ghost open seat", () => {
     const board = buildChamberBoard([mind({ slug: "jarvis", identitySlot: 2 })], []);
     const section = board.sections.find((s) => s.kind === "cards");
-    expect(section?.kind === "cards" && section.grid).toBe(true);
-    const seat = cards(board).at(-1);
-    expect(seat?.ghost).toBe(true);
-    expect(seat?.title).toBe("Open seat");
-    // Closed brief first (click opens its form), free starters after.
-    expect(seat?.actions?.[0]?.type).toBe("describe-own");
-    expect(seat?.actions?.[0]?.expanded).toBeUndefined();
+    if (section?.kind !== "cards") throw new Error("no cards section");
+    expect(section.grid).toBe(true);
+    expect(section.columns).toBe(4);
+    const seat = openSeat(board);
+    expect(seat.ghost).toBe(true);
+    // The brief keeps its open form in every state (the seat never shape-shifts),
+    // free starters after.
+    expect(seat.actions?.[0]?.type).toBe("describe-own");
+    expect(seat.actions?.[0]?.expanded).toBe(true);
     // Jarvis is seated; the other starters remain, previewing their free hues.
-    const labels = (seat?.actions ?? []).slice(1).map((i) => i.label);
+    const labels = (seat.actions ?? []).slice(1).map((i) => i.label);
     expect(labels.some((l) => l.includes("Jarvis"))).toBe(false);
     expect(labels.length).toBeGreaterThan(0);
+  });
+
+  test("the bench law: the open seat rides the next free seat, pads round the row", () => {
+    // Newest-first input (readMinds order); the bench re-seats it arrival-first.
+    const bench = (n: number) =>
+      cards(
+        buildChamberBoard(
+          Array.from({ length: n }, (_, i) => mind({ slug: `m${i}`, name: `M${i}` })).reverse(),
+          [],
+        ),
+      );
+    // The seat directly follows the roster; trailing pads round up to capacity.
+    expect(bench(0).map((c) => c.title)).toEqual([
+      "Open seat",
+      "Empty seat",
+      "Empty seat",
+      "Empty seat",
+    ]);
+    expect(bench(3).map((c) => c.title)).toEqual(["M0", "M1", "M2", "Open seat"]);
+    // A full mind row rolls the seat onto the next row, leading it.
+    expect(bench(4).map((c) => c.title)).toEqual([
+      "M0",
+      "M1",
+      "M2",
+      "M3",
+      "Open seat",
+      "Empty seat",
+      "Empty seat",
+      "Empty seat",
+    ]);
+    // Row two hosts four across; the seat trails the roster.
+    expect(bench(7).map((c) => c.title)).toEqual([
+      "M0",
+      "M1",
+      "M2",
+      "M3",
+      "M4",
+      "M5",
+      "M6",
+      "Open seat",
+    ]);
   });
 
   test("an authored mission outranks the tagline; absent falls back to it", () => {
@@ -174,47 +236,84 @@ describe("buildChamberBoard status footer", () => {
 });
 
 describe("buildChamberBoard pending genesis", () => {
-  test("the boot card takes the next free seat and the launchpad is withheld", () => {
+  test("the boot card takes the next free seat; the open seat rests just after it", () => {
     const board = buildChamberBoard(
       [mind({ slug: "jarvis", identitySlot: 0 })],
       [],
-      pending({ name: "Mycroft", role: "Research Partner" }),
+      [pending({ name: "Mycroft", role: "Research Partner" })],
       Date.parse("2026-07-12T09:00:05.000Z"),
     );
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const items = cards(board);
-    expect(items.at(-1)?.pill?.label).toBe("authoring");
-    expect(items.at(-1)?.dot).toBe(IDENTITY_SLOT_TONES[1]);
+    expect(items.map((c) => c.title)).toEqual(["Jarvis", "Mycroft", "Open seat", "Empty seat"]);
+    expect(items[1]?.pill?.label).toBe("authoring");
+    expect(items[1]?.dot).toBe(IDENTITY_SLOT_TONES[1]);
+    // The seat keeps its open form while the genesis runs, and the booting
+    // starter is withheld so it can't be authored twice.
+    const seat = openSeat(board);
+    expect(seat.actions?.[0]?.expanded).toBe(true);
+    expect((seat.actions ?? []).map((a) => a.label).some((l) => l.includes("Mycroft"))).toBe(false);
     expect(board.sections.some((s) => s.kind === "actions")).toBe(false);
   });
 
-  test("a pending genesis on a cold bench shows the boot card, not the launchpad", () => {
-    const board = buildChamberBoard([], [], pending(), Date.parse("2026-07-12T09:00:05.000Z"));
+  test("a pending genesis on a cold bench boots into the first seat, launchpad folded", () => {
+    const board = buildChamberBoard([], [], [pending()], Date.parse("2026-07-12T09:00:05.000Z"));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.header?.status?.label).toBe("genesis under way");
-    expect(cards(board)).toHaveLength(1);
+    const items = cards(board);
+    expect(items).toHaveLength(4);
+    expect(items[0]?.pill?.label).toBe("authoring");
+    expect(openSeat(board).actions?.[0]?.expanded).toBe(true);
     expect(board.sections.some((s) => s.kind === "actions")).toBe(false);
+  });
+
+  test("two concurrent geneses hold a boot card each; the seat withholds both voices", () => {
+    const board = buildChamberBoard(
+      [],
+      [],
+      [
+        pending({ name: "Moneypenny", role: "Chief of Staff" }),
+        pending({
+          startedAt: "2026-07-12T09:00:02.000Z",
+          name: "Mycroft",
+          role: "Research Partner",
+        }),
+      ],
+      Date.parse("2026-07-12T09:00:05.000Z"),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const items = cards(board);
+    expect(items.map((c) => c.title)).toEqual(["Moneypenny", "Mycroft", "Open seat", "Empty seat"]);
+    // Each boot card previews its starter's reserved hue — never the same one twice.
+    expect(items[0]?.dot).toBe(IDENTITY_SLOT_TONES[0]);
+    expect(items[1]?.dot).toBe(IDENTITY_SLOT_TONES[1]);
+    // Both booting voices are withheld from the seat; Jarvis stays offered.
+    const labels = (openSeat(board).actions ?? []).map((a) => a.label);
+    expect(labels.some((l) => l.includes("Moneypenny"))).toBe(false);
+    expect(labels.some((l) => l.includes("Mycroft"))).toBe(false);
+    expect(labels.some((l) => l.includes("Jarvis"))).toBe(true);
   });
 
   test("a genesis past the full ramp boots into the neutral fold", () => {
     const minds = Array.from({ length: 5 }, (_, i) =>
       mind({ slug: `m${i}`, name: `M${i}`, identitySlot: i }),
     );
-    const board = buildChamberBoard(minds, [], pending(), Date.parse("2026-07-12T09:00:05.000Z"));
+    const board = buildChamberBoard(minds, [], [pending()], Date.parse("2026-07-12T09:00:05.000Z"));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    expect(cards(board).at(-1)?.dot).toBe("neutral");
+    const boot = cards(board).find((c) => c.pill?.label === "authoring");
+    expect(boot?.dot).toBe("neutral");
   });
 
   test("a cold-bench genesis beside a live room keeps both signals", () => {
     const board = buildChamberBoard(
       [],
       [room({ status: "active" })],
-      pending(),
+      [pending()],
       Date.parse("2026-07-12T09:00:05.000Z"),
     );
     expect(board.header?.status?.label).toBe("genesis under way");
     expect(board.header?.chip).toBe("1 room · in session");
-    expect(cards(board)).toHaveLength(1);
+    expect(cards(board)[0]?.pill?.label).toBe("authoring");
   });
 });
 

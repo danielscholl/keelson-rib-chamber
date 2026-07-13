@@ -7,7 +7,7 @@ import { canvasViewSchema } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, setChamberDataHome } from "../src/paths.ts";
-import { writePendingGenesis } from "../src/pending-genesis.ts";
+import { appendPendingGenesis } from "../src/pending-genesis.ts";
 
 const PRESENCE_KEY = "rib:chamber:presence";
 
@@ -92,10 +92,11 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     // The merged Chamber panel renders the bench as seat cards (rib#214).
     const cardsSection = board.sections.find((s) => s.kind === "cards");
     // readMinds order is disk-dependent, so compare the bench as a set. The
-    // ghost open seat rides the same grid after the Minds.
+    // pad ghost and the open seat ride the same grid after the Minds (the
+    // bench law: minds → pads → open seat, padded to the four-seat capacity).
     const labels =
       cardsSection?.kind === "cards" ? cardsSection.items.map((i) => i.title).sort() : [];
-    expect(labels).toEqual(["Jarvis", "Mycroft", "Open seat"]);
+    expect(labels).toEqual(["Empty seat", "Jarvis", "Mycroft", "Open seat"]);
   });
 
   it("a roster mutation locally recomposes Presence without a host refresh seam", async () => {
@@ -139,7 +140,7 @@ describe("boot reconcile — crash-orphaned pending-genesis marker", () => {
     home = await mkdtemp(join(tmpdir(), "chamber-orphan-"));
     setChamberDataHome(home);
     await scaffoldMind(mindsDir(), record("jarvis", "Jarvis", 0), "soul");
-    await writePendingGenesis(
+    await appendPendingGenesis(
       { startedAt: new Date(Date.now() - 10 * 60_000).toISOString(), name: "Athena" },
       home,
     );

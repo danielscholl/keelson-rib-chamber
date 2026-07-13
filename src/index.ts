@@ -105,13 +105,15 @@ import {
   setChamberDataHome,
 } from "./paths.ts";
 import {
+  appendPendingGenesis,
   clearPendingGenesis,
   FUTURE_SKEW_MS,
   GENESIS_STALL_MS,
   type PendingGenesis,
   pendingElapsedMs,
-  readPendingGenesis,
-  writePendingGenesis,
+  readPendingGeneses,
+  removeLandedGenesis,
+  removePendingGenesisAt,
 } from "./pending-genesis.ts";
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
@@ -278,9 +280,10 @@ function stopGenesisTick(): void {
   genesisTickerDeadline = undefined;
 }
 
-// Begin a genesis: persist the pending marker (name/role known for a starter, absent for
-// a freeform brief) and start the boot-card tick. Fail-soft — a marker write failure just
-// skips the boot card, never blocks the genesis workflow the caller is about to launch.
+// Begin a genesis: append a pending marker (name/role known for a starter, absent for
+// a freeform brief) and (re)start the boot-card tick — markers are a list, so parallel
+// geneses each keep their own boot card. Fail-soft — a marker write failure just skips
+// the boot card, never blocks the genesis workflow the caller is about to launch.
 async function beginGenesis(info: { name?: string; role?: string }): Promise<void> {
   try {
     const marker: PendingGenesis = {
@@ -288,18 +291,19 @@ async function beginGenesis(info: { name?: string; role?: string }): Promise<voi
       ...(info.name ? { name: info.name } : {}),
       ...(info.role ? { role: info.role } : {}),
     };
-    await writePendingGenesis(marker);
+    await appendPendingGenesis(marker);
     startGenesisTick();
   } catch (e) {
     console.error(`[rib-chamber] pending-genesis write failed: ${errText(e)}`);
   }
 }
 
-// End the boot card: stop the tick and clear the marker so the next roster frame shows
-// the real seat (a completed genesis) or drops the card (a dismissed one). Fail-soft.
-async function endGenesis(): Promise<void> {
-  stopGenesisTick();
-  await clearPendingGenesis().catch(() => {});
+// A genesis landed: settle ITS marker (matched by authored name, else the oldest
+// freeform marker — see removeLandedGenesis) and stop the tick only when no other
+// genesis is still in flight, so a sibling's boot card keeps pulsing. Fail-soft.
+async function settleGenesis(name: string): Promise<void> {
+  const remaining = await removeLandedGenesis(name).catch(() => [] as PendingGenesis[]);
+  if (remaining.length === 0) stopGenesisTick();
 }
 // The host projects lookup, captured in registerTools and cleared in dispose (like
 // refreshWorkflow). Undefined on a harness that predates RibContext.getProjects,
@@ -398,7 +402,7 @@ async function composePresenceBoard(): Promise<CanvasView> {
   const [minds, rooms, pending] = await Promise.all([
     readMinds(mindsDir()).catch(() => [] as Mind[]),
     listRooms(roomsDir()).catch(() => [] as Room[]),
-    readPendingGenesis(),
+    readPendingGeneses(),
   ]);
   return buildChamberBoard(minds, rooms, pending);
 }
@@ -1642,6 +1646,10 @@ const rib: Rib = {
   // which the executor promotes to structured output and the rib binding
   // publishes fail-closed via `validate`. This is the "an agent authors a lens"
   // proof — zero React, no hand-coded route.
+  // Every contributed workflow declares mutates_checkout: false — chamber
+  // workflows write the rib data home and publish snapshots, never a project
+  // checkout, so the host's per-project mutation lock must not serialize them
+  // (it 409'd the second of two parallel geneses).
   contributeWorkflows: () => [
     {
       // The roster producer: a deterministic collector that reads the
@@ -1649,6 +1657,7 @@ const rib: Rib = {
       // Genesis mutates the data home via onAction; this refresh reflects it.
       definition: {
         name: "chamber-roster",
+        mutates_checkout: false,
         description:
           'Use when: you want to see the agents (Minds) that have been created. Triggers: "show the roster", "list agents", "what minds exist". Does: reads the genesis-authored Minds from the Chamber data home and publishes a roster board (one card per Mind) to the Chamber Roster canvas. NOT for: creating or retiring agents (genesis is the chamber-genesis workflow; retire is a roster board action).',
         nodes: [
@@ -1675,6 +1684,7 @@ const rib: Rib = {
       // it; an active room ALSO renders as its own live per-slug panel.
       definition: {
         name: "chamber-rooms",
+        mutates_checkout: false,
         description:
           'Use when: you want to see Chamber sessions — active rooms and ended history. Triggers: "show rooms", "list sessions", "room history". Does: reads the persisted rooms from the Chamber data home and publishes a sessions index (active rooms first as status-only cards, then ended rooms each with Open + a Delete control) to the Chamber Rooms canvas. NOT for: starting a room (the Convene composer) or stopping a live room (its inline controls).',
         nodes: [
@@ -1701,6 +1711,7 @@ const rib: Rib = {
       // panel, so this index sits alongside those, not in place of them.
       definition: {
         name: "chamber-lenses",
+        mutates_checkout: false,
         description:
           'Use when: you want a single index of the living lenses Minds have authored. Triggers: "show the lenses", "list lenses", "what lenses exist". Does: reads the persisted lenses from the Chamber data home and publishes a living-views index (one card per lens, each with Open and a Retire control) to the Chamber Lenses canvas. NOT for: authoring a lens (the chamber-lens workflow) or viewing one (each lens has its own live panel; Open focuses it).',
         nodes: [
@@ -1726,6 +1737,7 @@ const rib: Rib = {
       // as its own live per-id panel on the Exhibits shelf.
       definition: {
         name: "chamber-exhibits",
+        mutates_checkout: false,
         description:
           'Use when: you want a single index of the exhibits rooms have tabled — the deliverables discussions produced. Triggers: "show the exhibits", "list exhibits", "what did the room produce". Does: reads the persisted exhibits from the Chamber data home and publishes a tabled-deliverables index (one card per exhibit, each with Open and a Delete control) to the Chamber Exhibits canvas. NOT for: living lenses (the chamber-lenses index), tabling an exhibit (a room turn calls chamber_table_exhibit), or viewing one (each exhibit has its own live panel; Open focuses it).',
         nodes: [
@@ -1759,6 +1771,7 @@ const rib: Rib = {
       // staleness after a rare failed turn is acceptable).
       definition: {
         name: "chamber-digest",
+        mutates_checkout: false,
         description:
           'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it to the store the Briefing banner\'s Digest register reads. Nudged by the rib on each Chamber mutation, but spends a turn only when the Chamber changed. NOT for: the deterministic record feed, the delta Briefing, or authoring a Mind/room/lens.',
         nodes: [
@@ -1814,6 +1827,7 @@ const rib: Rib = {
       // default-off in workflow prompt nodes, so it must opt in by name.
       definition: {
         name: "chamber-genesis",
+        mutates_checkout: false,
         description:
           'Use when: create a new agent (Mind). Triggers: "create an agent", "new mind", "/workflow run chamber-genesis <brief>". Does: one agent turn reads a brief, authors a SOUL.md + roster tagline, and persists the Mind via chamber_emit_genesis. NOT for: retiring a Mind or running a room.',
         nodes: [
@@ -1835,6 +1849,7 @@ const rib: Rib = {
       // chosen at run time by the tool, not pinned to one static key.
       definition: {
         name: "chamber-lens",
+        mutates_checkout: false,
         description:
           'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber Briefing (the rib-driven banner), genesis-ing agents, or running a room.',
         nodes: [
@@ -1880,6 +1895,7 @@ const rib: Rib = {
       // at run time by the tool.
       definition: {
         name: "chamber-lens-html",
+        mutates_checkout: false,
         description:
           'Use when: have an agent author a designed HTML LENS — a self-contained, token-themed page on a subject — rendered in a sandboxed iframe on the Chamber surface. Triggers: "author an html lens", "design a page on X", "/workflow run chamber-lens-html <subject>". Does: one agent turn composes a self-contained HTML page for the subject (keelson design tokens, validated palette) and publishes it as its own Chamber lens panel via chamber_emit_lens_html. NOT for: structured canvas boards (the chamber-lens workflow), the standing Chamber Briefing, genesis-ing agents, or running a room.',
         nodes: [
@@ -2025,15 +2041,20 @@ const rib: Rib = {
       // emit / dismiss / dispose landing between the read and this callback bumps it,
       // so a settled genesis can never resurrect the ticker.
       const epoch = genesisTickEpoch;
-      void readPendingGenesis().then((marker) => {
-        if (!marker || epoch !== genesisTickEpoch) return;
-        const elapsed = pendingElapsedMs(marker, Date.now());
-        if (elapsed >= GENESIS_STALL_MS) refreshPresence();
+      void readPendingGeneses().then((markers) => {
+        if (markers.length === 0 || epoch !== genesisTickEpoch) return;
+        const now = Date.now();
+        // The freshest marker's remaining budget bounds the tick — older siblings
+        // flip to their stalled card mid-tick on their own clocks.
+        const freshest = Math.max(
+          ...markers.map((m) => GENESIS_STALL_MS - pendingElapsedMs(m, now)),
+        );
+        if (freshest <= 0) refreshPresence();
         // + FUTURE_SKEW_MS: a marker up to the skew tolerance in the future clamps
         // elapsed to 0, so the deadline must outlast the card's own clock reaching
         // the stall — the final tick has to compose the stalled card, never stop
         // one frame short of its Dismiss.
-        else startGenesisTick(GENESIS_STALL_MS - elapsed + FUTURE_SKEW_MS);
+        else startGenesisTick(freshest + FUTURE_SKEW_MS);
       });
     }
     // Lenses render via the registerRegion seam, so the registry and its emit tool
@@ -2178,7 +2199,7 @@ const rib: Rib = {
       case "describe-own":
         return describeOwnAction(action);
       case "dismiss-genesis":
-        return dismissGenesisAction();
+        return dismissGenesisAction(action);
       case "retire":
         return retireAction(action);
       case "set-model":
@@ -3573,11 +3594,20 @@ async function describeOwnAction(action: RibAction): Promise<RibActionResult> {
   };
 }
 
-// Dismiss a stalled (or unwanted) genesis boot card: stop the tick, clear the marker,
-// and refresh the roster so the seat frees back to the launchpad. A deterministic, free
-// state clear — not paid, not a workflow.
-async function dismissGenesisAction(): Promise<RibActionResult> {
-  await endGenesis();
+// Dismiss a stalled (or unwanted) genesis boot card: settle the one marker the card's
+// payload names (its startedAt stamp), falling back to clearing them all for a legacy
+// dispatch without one; stop the tick when nothing is left in flight; refresh the
+// roster so the seat frees back to the launchpad. Deterministic and free — not paid.
+async function dismissGenesisAction(action?: RibAction): Promise<RibActionResult> {
+  const payload = (action?.payload ?? {}) as Record<string, unknown>;
+  const startedAt = asNonEmptyString(payload.startedAt);
+  let remaining: PendingGenesis[] = [];
+  if (startedAt) {
+    remaining = await removePendingGenesisAt(startedAt).catch(() => [] as PendingGenesis[]);
+  } else {
+    await clearPendingGenesis().catch(() => {});
+  }
+  if (remaining.length === 0) stopGenesisTick();
   await refreshWorkflow?.("chamber-roster")?.catch(() => {});
   return { ok: true };
 }
@@ -3797,9 +3827,9 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         };
         await scaffoldMind(mindsDir(), record, soul);
         invalidateRoster();
-        // The genesis landed — clear the boot-card marker and stop its tick so the next
-        // roster frame shows the real seat instead of the boot card.
-        await endGenesis();
+        // The genesis landed — settle its own boot-card marker (siblings keep theirs)
+        // so the next roster frame shows the real seat instead of the boot card.
+        await settleGenesis(record.name);
         // Re-run the bound chamber-roster collector so the new Mind appears
         // promptly instead of waiting on the 120s cadence. Fail-soft (the seam
         // resolves on error and is absent on an older harness) — never throw.

@@ -6,7 +6,7 @@ import type { RibContext, ToolContext } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { readMinds } from "../src/minds-store.ts";
 import { mindsDir, setChamberDataHome } from "../src/paths.ts";
-import { readPendingGenesis } from "../src/pending-genesis.ts";
+import { readPendingGeneses } from "../src/pending-genesis.ts";
 
 const onAction = rib.onAction;
 const registerTools = rib.registerTools;
@@ -66,9 +66,10 @@ describe("genesis boot-card lifecycle", () => {
       expect(data.stay).toBe(true);
     }
     // The pending marker knows the starter's identity up front (it was pinned).
-    const marker = await readPendingGenesis();
-    expect(marker).toMatchObject({ name: "Moneypenny", role: "Chief of Staff" });
-    expect(typeof marker?.startedAt).toBe("string");
+    const markers = await readPendingGeneses();
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({ name: "Moneypenny", role: "Chief of Staff" });
+    expect(typeof markers[0]?.startedAt).toBe("string");
   });
 
   test("describe-own writes a marker with no name/role (the workflow authors them)", async () => {
@@ -78,16 +79,17 @@ describe("genesis boot-card lifecycle", () => {
       payload: { brief: "A skeptical staff engineer" },
     });
     expect(res.ok).toBe(true);
-    const marker = await readPendingGenesis();
-    expect(marker?.name).toBeUndefined();
-    expect(marker?.role).toBeUndefined();
-    expect(typeof marker?.startedAt).toBe("string");
+    const markers = await readPendingGeneses();
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.name).toBeUndefined();
+    expect(markers[0]?.role).toBeUndefined();
+    expect(typeof markers[0]?.startedAt).toBe("string");
   });
 
   test("a successful chamber_emit_genesis clears the boot-card marker", async () => {
     const tools = registerTools(makeCtx([]));
     await dispatch({ type: "author-archetype", payload: { slug: "mycroft" } });
-    expect(await readPendingGenesis()).not.toBeNull();
+    expect(await readPendingGeneses()).toHaveLength(1);
 
     const emit = tools.find((t) => t.name === "chamber_emit_genesis");
     if (!emit) throw new Error("genesis emit tool not found");
@@ -102,7 +104,7 @@ describe("genesis boot-card lifecycle", () => {
       toolCtx,
     );
     // The seat filled — the marker is gone so the next roster frame shows the real card.
-    expect(await readPendingGenesis()).toBeNull();
+    expect(await readPendingGeneses()).toHaveLength(0);
     const minds = await readMinds(mindsDir());
     expect(minds.some((m) => m.slug === "mycroft")).toBe(true);
   });
@@ -111,20 +113,81 @@ describe("genesis boot-card lifecycle", () => {
     const refreshed: string[] = [];
     registerTools(makeCtx(refreshed));
     await dispatch({ type: "describe-own", payload: { brief: "someone" } });
-    expect(await readPendingGenesis()).not.toBeNull();
+    expect(await readPendingGeneses()).toHaveLength(1);
 
     refreshed.length = 0;
     const res = await dispatch({ type: "dismiss-genesis" });
     expect(res.ok).toBe(true);
-    expect(await readPendingGenesis()).toBeNull();
+    expect(await readPendingGeneses()).toHaveLength(0);
     expect(refreshed).toContain("chamber-roster");
   });
 
   test("dispose clears a stale marker (a genesis can't survive the process)", async () => {
     registerTools(makeCtx([]));
     await dispatch({ type: "author-archetype", payload: { slug: "jarvis" } });
-    expect(await readPendingGenesis()).not.toBeNull();
+    expect(await readPendingGeneses()).toHaveLength(1);
     await rib.dispose?.();
-    expect(await readPendingGenesis()).toBeNull();
+    expect(await readPendingGeneses()).toHaveLength(0);
+  });
+
+  test("parallel geneses hold one marker each; a landing settles only its own", async () => {
+    const tools = registerTools(makeCtx([]));
+    await dispatch({ type: "author-archetype", payload: { slug: "moneypenny" } });
+    await dispatch({ type: "author-archetype", payload: { slug: "mycroft" } });
+    expect((await readPendingGeneses()).map((m) => m.name)).toEqual(["Moneypenny", "Mycroft"]);
+
+    const emit = tools.find((t) => t.name === "chamber_emit_genesis");
+    if (!emit) throw new Error("genesis emit tool not found");
+    await emit.execute(
+      {
+        name: "Moneypenny",
+        role: "Chief of Staff",
+        voice: "crisp",
+        soul: "# Moneypenny\n## Persona\nChief of staff.",
+        tagline: "Closes loops.",
+      },
+      toolCtx,
+    );
+    // Moneypenny's marker settled; Mycroft's boot card keeps running.
+    expect((await readPendingGeneses()).map((m) => m.name)).toEqual(["Mycroft"]);
+  });
+
+  test("a freeform landing settles the oldest unnamed marker, not a starter's", async () => {
+    const tools = registerTools(makeCtx([]));
+    await dispatch({ type: "author-archetype", payload: { slug: "jarvis" } });
+    await dispatch({ type: "describe-own", payload: { brief: "a skeptical architect" } });
+    expect(await readPendingGeneses()).toHaveLength(2);
+
+    const emit = tools.find((t) => t.name === "chamber_emit_genesis");
+    if (!emit) throw new Error("genesis emit tool not found");
+    await emit.execute(
+      {
+        name: "Athena",
+        role: "Staff Engineer",
+        voice: "wry",
+        soul: "# Athena\n## Persona\nGuards the architecture.",
+        tagline: "Asks what breaks at 10x.",
+      },
+      toolCtx,
+    );
+    // Athena matches no marker by name — the unnamed freeform marker settles;
+    // Jarvis's pinned marker survives for his still-running genesis.
+    expect((await readPendingGeneses()).map((m) => m.name)).toEqual(["Jarvis"]);
+  });
+
+  test("dismiss-genesis with a startedAt settles exactly that boot card", async () => {
+    const refreshed: string[] = [];
+    registerTools(makeCtx(refreshed));
+    await dispatch({ type: "author-archetype", payload: { slug: "moneypenny" } });
+    await dispatch({ type: "author-archetype", payload: { slug: "mycroft" } });
+    const [first] = await readPendingGeneses();
+    if (!first) throw new Error("no marker");
+
+    const res = await dispatch({
+      type: "dismiss-genesis",
+      payload: { startedAt: first.startedAt },
+    });
+    expect(res.ok).toBe(true);
+    expect((await readPendingGeneses()).map((m) => m.name)).toEqual(["Mycroft"]);
   });
 });

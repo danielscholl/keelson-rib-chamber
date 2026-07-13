@@ -68,22 +68,24 @@ export function starterAction(
 export function buildRosterBoard(
   minds: readonly Mind[],
   pulse?: RosterPulse,
-  pending?: PendingGenesis | null,
+  pending: readonly PendingGenesis[] = [],
   now: number = Date.now(),
 ): CanvasBoardView {
-  // A genesis in flight takes the next free seat as a boot card (a nod to the original
-  // Chamber's genesis screen); the seated cards compose around it. Cold start (no Mind,
-  // no pending) leads with the launchpad; a seated roster gets it appended below (the
-  // minds.length >= 1 block). While a genesis is pending neither shows it — the boot
-  // card carries the moment.
+  // Each genesis in flight takes the next free seat as a boot card (a nod to the
+  // original Chamber's genesis screen); the seated cards compose around them. Cold
+  // start (no Mind, nothing pending) leads with the launchpad; a seated roster gets
+  // it appended below (the minds.length >= 1 block). While geneses are pending
+  // neither shows it — the boot cards carry the moment.
   const sections: CanvasBoardView["sections"] =
-    minds.length === 0 && !pending ? coldStartSections() : seatedSections(minds, pending, now);
+    minds.length === 0 && pending.length === 0
+      ? coldStartSections()
+      : seatedSections(minds, pending, now);
 
   // Authoring stays reachable in the seated state via the reused genesis launchpad,
   // appended below the cards + composer and withheld while a genesis is already in
-  // flight (the boot card carries that moment). Cold start has its own launchpad, so
+  // flight (the boot cards carry that moment). Cold start has its own launchpad, so
   // this only fires once >=1 Mind is seated.
-  if (minds.length >= 1 && !pending) {
+  if (minds.length >= 1 && pending.length === 0) {
     sections.push(...launchpadSections(minds, { title: "Author another Mind" }));
   }
 
@@ -242,16 +244,29 @@ export function launchpadSections(
   return sections;
 }
 
-// The seat a pending genesis will land on: a starter's reserved seat when free
-// (chamber_emit_genesis honors it — the marker carries a name ONLY for a starter,
-// so the match can't misfire on a freeform brief), else the lowest free slot,
-// mirroring nextFreeSlot's allocator. Shared by both benches so the boot card's
-// hue always predicts the seat the Mind actually takes.
-export function bootSlotFor(pending: PendingGenesis, minds: readonly Mind[]): number {
-  const open = freeSlots(minds);
-  const starter = pending.name ? GENESIS_STARTERS.find((s) => s.name === pending.name) : undefined;
-  if (starter && open.includes(starter.seat)) return starter.seat;
-  return open[0] ?? IDENTITY_SLOT_COUNT;
+// The seats a list of pending geneses will land on, in marker (arrival) order: a
+// starter's reserved seat when free and unclaimed (chamber_emit_genesis honors it —
+// a marker carries a name ONLY for a starter, so the match can't misfire on a
+// freeform brief), else the lowest unclaimed free slot, mirroring nextFreeSlot's
+// allocator. Earlier markers claim their slots before later ones are placed, so two
+// concurrent boot cards never preview the same hue. Shared by both benches so a
+// boot card's hue always predicts the seat the Mind actually takes.
+export function bootSlotsFor(
+  pendings: readonly PendingGenesis[],
+  minds: readonly Mind[],
+): number[] {
+  const open = new Set(freeSlots(minds));
+  return pendings.map((pending) => {
+    const starter = pending.name
+      ? GENESIS_STARTERS.find((s) => s.name === pending.name)
+      : undefined;
+    const slot =
+      starter && open.has(starter.seat)
+        ? starter.seat
+        : ([...open].sort((a, b) => a - b)[0] ?? IDENTITY_SLOT_COUNT);
+    open.delete(slot);
+    return slot;
+  });
 }
 
 // The seat being taken while a genesis runs — the original Chamber's boot screen quoted
@@ -274,7 +289,15 @@ export function bootCard(pending: PendingGenesis, slot: number, now: number) {
         },
       ],
       actions: [
-        { type: "dismiss-genesis", label: "Dismiss", glyph: "✕", tone: "warn" as CanvasTone },
+        {
+          type: "dismiss-genesis",
+          label: "Dismiss",
+          glyph: "✕",
+          tone: "warn" as CanvasTone,
+          // The marker's startedAt is the boot card's identity: dismiss settles
+          // exactly this genesis, never a sibling still authoring beside it.
+          payload: { startedAt: pending.startedAt },
+        },
       ],
     };
   }
@@ -293,25 +316,26 @@ export function bootCard(pending: PendingGenesis, slot: number, now: number) {
   };
 }
 
-// >=1 Mind (or a genesis in flight): the seated cards, plus a boot card in the seat
-// being taken when a genesis is pending. Authoring is no longer a dashed open-seat
-// grid — buildRosterBoard appends the reused launchpad below (withheld while a genesis
-// is pending, since the boot card carries that moment). The lone-Mind nudge names the
-// one act that unlocks the composer, and is likewise withheld while a genesis runs.
+// >=1 Mind (or geneses in flight): the seated cards, plus a boot card in each seat
+// being taken. Authoring is no longer a dashed open-seat grid — buildRosterBoard
+// appends the reused launchpad below (withheld while a genesis is pending, since the
+// boot cards carry that moment). The lone-Mind nudge names the one act that unlocks
+// the composer, and is likewise withheld while a genesis runs.
 function seatedSections(
   minds: readonly Mind[],
-  pending: PendingGenesis | null | undefined,
+  pending: readonly PendingGenesis[],
   now: number,
 ): CanvasBoardView["sections"] {
-  // The boot card takes the seat the genesis will land on (see bootSlotFor).
-  const bootItems = pending ? [bootCard(pending, bootSlotFor(pending, minds), now)] : [];
+  // Each boot card takes the seat its genesis will land on (see bootSlotsFor).
+  const slots = bootSlotsFor(pending, minds);
+  const bootItems = pending.map((p, i) => bootCard(p, slots[i] ?? IDENTITY_SLOT_COUNT, now));
 
   const sections: CanvasBoardView["sections"] = [
     { kind: "cards", items: [...minds.map(cardFor), ...bootItems] },
   ];
   // With one Mind seated the composer hasn't appeared yet (it needs two). Name the
   // one act that unlocks it, so the lone-Mind roster still points forward.
-  if (minds.length === 1 && !pending) {
+  if (minds.length === 1 && pending.length === 0) {
     sections.push({
       kind: "rows",
       items: [
