@@ -2365,7 +2365,9 @@ async function setModelAction(action: RibAction): Promise<RibActionResult> {
   try {
     await setMindModel(mindsDir(), slug, { model, provider });
     invalidateRoster();
-    await refreshWorkflow("chamber-roster");
+    // The model is already persisted; a host refresh reject must not turn a
+    // committed set-model into a false failure (mirrors retire/dismiss siblings).
+    await refreshWorkflow("chamber-roster")?.catch(() => {});
     return { ok: true, data: { slug, ...(model ? { model } : {}) } };
   } catch (e) {
     return { ok: false, error: errText(e) };
