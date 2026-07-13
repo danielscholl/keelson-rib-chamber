@@ -159,7 +159,7 @@ describe("buildRosterBoard genesis boot card", () => {
     const board = buildRosterBoard(
       [mind({ slug: "a", identitySlot: 0 })],
       undefined,
-      pending({ name: "Mycroft", role: "Research Partner" }),
+      [pending({ name: "Mycroft", role: "Research Partner" })],
       START + 38_000,
     );
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
@@ -180,7 +180,7 @@ describe("buildRosterBoard genesis boot card", () => {
   });
 
   test("a freeform brief (no name/role) holds 'calibrating…' and titles the seat Genesis", () => {
-    const board = buildRosterBoard([], undefined, pending(), START + 4_000);
+    const board = buildRosterBoard([], undefined, [pending()], START + 4_000);
     const boot = cards(board).find((c) => c.title === "Genesis");
     expect(boot).toBeDefined();
     const values = boot?.fields?.map((f) => String(f.value)) ?? [];
@@ -192,7 +192,7 @@ describe("buildRosterBoard genesis boot card", () => {
     const board = buildRosterBoard(
       [],
       undefined,
-      pending({ name: "Mycroft" }),
+      [pending({ name: "Mycroft" })],
       START + 200_000, // > 180s stall window
     );
     const boot = cards(board).find((c) => c.title === "Mycroft");
@@ -205,7 +205,7 @@ describe("buildRosterBoard genesis boot card", () => {
     const board = buildRosterBoard(
       [],
       undefined,
-      { startedAt: "not-a-date", name: "Mycroft" },
+      [{ startedAt: "not-a-date", name: "Mycroft" }],
       START,
     );
     const boot = cards(board).find((c) => c.title === "Mycroft");
@@ -220,7 +220,7 @@ describe("buildRosterBoard genesis boot card", () => {
     const board = buildRosterBoard(
       [],
       undefined,
-      { startedAt: new Date(START + 120_000).toISOString(), name: "Mycroft" },
+      [{ startedAt: new Date(START + 120_000).toISOString(), name: "Mycroft" }],
       START,
     );
     const boot = cards(board).find((c) => c.title === "Mycroft");
@@ -229,7 +229,7 @@ describe("buildRosterBoard genesis boot card", () => {
   });
 
   test("the quiet Author action and lone-Mind nudge are withheld while a genesis is pending", () => {
-    const one = buildRosterBoard([mind({ slug: "a" })], undefined, pending(), START);
+    const one = buildRosterBoard([mind({ slug: "a" })], undefined, [pending()], START);
     expect(
       one.sections
         .flatMap((s) => (s.kind === "rows" ? s.items : []))
@@ -503,7 +503,7 @@ describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => 
     const board = buildRosterBoard(
       [mind({ slug: "a", identitySlot: 0 })],
       undefined,
-      { startedAt: new Date(START).toISOString() },
+      [{ startedAt: new Date(START).toISOString() }],
       START,
     );
     expect(actionsSection(board, "Author another Mind")).toBeUndefined();

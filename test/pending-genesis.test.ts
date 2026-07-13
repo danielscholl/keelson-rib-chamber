@@ -3,12 +3,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  appendPendingGenesis,
   clearPendingGenesis,
   GENESIS_STALL_MS,
   pendingElapsedMs,
   pendingGenesisFile,
-  readPendingGenesis,
-  writePendingGenesis,
+  readPendingGeneses,
+  removeLandedGenesis,
+  removePendingGenesisAt,
 } from "../src/pending-genesis.ts";
 
 describe("pending-genesis store", () => {
@@ -20,41 +22,106 @@ describe("pending-genesis store", () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  test("a missing marker reads as null (no pending genesis)", async () => {
-    expect(await readPendingGenesis(home)).toBeNull();
+  test("a missing marker file reads as an empty list (no pending geneses)", async () => {
+    expect(await readPendingGeneses(home)).toEqual([]);
   });
 
-  test("round-trips startedAt + optional name/role", async () => {
-    await writePendingGenesis(
+  test("round-trips markers with optional name/role, in arrival order", async () => {
+    await appendPendingGenesis(
       { startedAt: "2026-07-05T18:00:00.000Z", name: "Mycroft", role: "Research Partner" },
       home,
     );
-    expect(await readPendingGenesis(home)).toEqual({
-      startedAt: "2026-07-05T18:00:00.000Z",
-      name: "Mycroft",
-      role: "Research Partner",
-    });
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:05.000Z" }, home);
+    expect(await readPendingGeneses(home)).toEqual([
+      { startedAt: "2026-07-05T18:00:00.000Z", name: "Mycroft", role: "Research Partner" },
+      { startedAt: "2026-07-05T18:00:05.000Z" },
+    ]);
   });
 
-  test("a freeform marker keeps only startedAt (name/role absent)", async () => {
-    await writePendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z" }, home);
-    expect(await readPendingGenesis(home)).toEqual({ startedAt: "2026-07-05T18:00:00.000Z" });
+  test("a same-stamp append nudges startedAt so dismiss identity stays unique", async () => {
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "A" }, home);
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "B" }, home);
+    const stamps = (await readPendingGeneses(home)).map((m) => m.startedAt);
+    expect(new Set(stamps).size).toBe(2);
   });
 
-  test("clear removes the marker (an absent file is a safe double-clear)", async () => {
-    await writePendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z" }, home);
+  test("a legacy single-object file reads as a one-marker list", async () => {
+    await writeFile(
+      pendingGenesisFile(home),
+      JSON.stringify({ startedAt: "2026-07-05T18:00:00.000Z", name: "Mycroft" }),
+    );
+    expect(await readPendingGeneses(home)).toEqual([
+      { startedAt: "2026-07-05T18:00:00.000Z", name: "Mycroft" },
+    ]);
+  });
+
+  test("a landing settles its own marker by name; a freeform landing settles the oldest unnamed", async () => {
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "Jarvis" }, home);
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:01.000Z" }, home);
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:02.000Z", name: "Mycroft" }, home);
+    // Named landing: exactly Mycroft's marker settles.
+    expect((await removeLandedGenesis("Mycroft", home)).map((m) => m.name)).toEqual([
+      "Jarvis",
+      undefined,
+    ]);
+    // Freeform landing (authored name matches nothing): the unnamed marker settles.
+    expect((await removeLandedGenesis("Athena", home)).map((m) => m.name)).toEqual(["Jarvis"]);
+    // No unnamed marker left: the oldest settles outright so nothing pins forever.
+    expect(await removeLandedGenesis("Vesper", home)).toEqual([]);
+    expect(await readPendingGeneses(home)).toEqual([]);
+  });
+
+  test("removePendingGenesisAt settles exactly the stamped marker", async () => {
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "A" }, home);
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:01.000Z", name: "B" }, home);
+    expect(
+      (await removePendingGenesisAt("2026-07-05T18:00:00.000Z", home)).map((m) => m.name),
+    ).toEqual(["B"]);
+    // An unknown stamp removes nothing.
+    expect(
+      (await removePendingGenesisAt("2026-01-01T00:00:00.000Z", home)).map((m) => m.name),
+    ).toEqual(["B"]);
+  });
+
+  test("clear removes every marker (an absent file is a safe double-clear)", async () => {
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z" }, home);
     await clearPendingGenesis(home);
-    expect(await readPendingGenesis(home)).toBeNull();
+    expect(await readPendingGeneses(home)).toEqual([]);
     // A second clear on the now-absent file must not throw.
     await clearPendingGenesis(home);
-    expect(await readPendingGenesis(home)).toBeNull();
+    expect(await readPendingGeneses(home)).toEqual([]);
   });
 
-  test("a torn/invalid file, or one without startedAt, degrades to null", async () => {
+  test("a torn/invalid file, or entries without startedAt, degrade to fewer markers", async () => {
     await writeFile(pendingGenesisFile(home), "{ not json");
-    expect(await readPendingGenesis(home)).toBeNull();
+    expect(await readPendingGeneses(home)).toEqual([]);
     await writeFile(pendingGenesisFile(home), JSON.stringify({ name: "Ghost" }));
-    expect(await readPendingGenesis(home)).toBeNull();
+    expect(await readPendingGeneses(home)).toEqual([]);
+    await writeFile(
+      pendingGenesisFile(home),
+      JSON.stringify([{ name: "Ghost" }, { startedAt: "2026-07-05T18:00:00.000Z" }]),
+    );
+    expect(await readPendingGeneses(home)).toEqual([{ startedAt: "2026-07-05T18:00:00.000Z" }]);
+  });
+
+  test("concurrent landings settle each marker exactly once (no resurrection)", async () => {
+    // Two geneses landing in parallel each read-modify-write the one marker file;
+    // unserialized, the later write clobbers the earlier and resurrects a settled
+    // boot card. Serialized, both clear.
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "Ada" }, home);
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:05.000Z", name: "Bo" }, home);
+    await Promise.all([removeLandedGenesis("Ada", home), removeLandedGenesis("Bo", home)]);
+    expect(await readPendingGeneses(home)).toEqual([]);
+  });
+
+  test("concurrent appends keep every marker (none lost to a clobbering write)", async () => {
+    await Promise.all([
+      appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "A" }, home),
+      appendPendingGenesis({ startedAt: "2026-07-05T18:00:01.000Z", name: "B" }, home),
+      appendPendingGenesis({ startedAt: "2026-07-05T18:00:02.000Z", name: "C" }, home),
+    ]);
+    const names = (await readPendingGeneses(home)).map((m) => m.name).sort();
+    expect(names).toEqual(["A", "B", "C"]);
   });
 });
 
