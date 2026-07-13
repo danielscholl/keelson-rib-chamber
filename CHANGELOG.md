@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.34.0...v0.35.0) (2026-07-13)
+
+
+### Added
+
+* **roster:** starter chips wear the name; role and blurb ride the hover ([#230](https://github.com/danielscholl/keelson-rib-chamber/issues/230)) ([943f75c](https://github.com/danielscholl/keelson-rib-chamber/commit/943f75cf410c3cd6d15040c27e2dc1232af1e085))
+
 ## [0.34.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.33.0...v0.34.0) (2026-07-12)
 
 
