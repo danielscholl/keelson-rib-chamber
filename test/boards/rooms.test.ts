@@ -42,13 +42,13 @@ function cards(board: ReturnType<typeof buildRoomsIndexBoard>) {
 }
 
 describe("buildRoomsIndexBoard empty", () => {
-  test("no rooms → a valid board with the sessions header and no cards section", () => {
+  test("no rooms → a valid header-only board with the sessions header and no body", () => {
     const board = buildRoomsIndexBoard([]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.view).toBe("board");
     expect(board.header?.chip).toBe("sessions");
     expect(board.header?.status?.label).toBe("0 sessions");
-    expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
+    expect(board.sections).toHaveLength(0);
   });
 
   test("only-active rooms → indexed as status cards (NOT the empty state), counted", () => {

@@ -74,8 +74,8 @@ describe("buildConveneBoard cast + shapes", () => {
 
   test("every shape shows only its name — the description rides the hover hint", () => {
     // Three Minds all in: Discussion, Debate, and Delegate enabled (three selected —
-    // two run, one facilitates), Review gated (not a pair). No inline subtitle now —
-    // a gated tab still carries its hover hint so the description survives the disable.
+    // two run, one facilitates), Review gated (not a pair). A gated tab still carries
+    // its hover hint so the description survives the disable.
     const board = buildConveneBoard([A, B, C]);
     const bs = byStrategy(board);
     for (const item of shapes(board)) {
