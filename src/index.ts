@@ -212,7 +212,7 @@ let roomsTicker: ReturnType<typeof setInterval> | undefined;
 function startRoomsTick(): void {
   if (roomsTicker) return;
   roomsTicker = setInterval(() => {
-    void refreshWorkflow("chamber-rooms")?.catch(() => {});
+    void refreshWorkflow("chamber-rooms").catch(() => {});
   }, ROOMS_TICK_MS);
   roomsTicker.unref?.();
 }
@@ -273,7 +273,7 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
     // standing panels (like the user-initiated room-delete) so an evicted room stops
     // showing instead of lingering until the 120s cadence.
     if (removed.length > 0) {
-      await refreshWorkflow("chamber-rooms")?.catch(() => {});
+      await refreshWorkflow("chamber-rooms").catch(() => {});
       await refreshStandingPanels();
     }
   } catch (e) {
@@ -810,11 +810,9 @@ const rib: Rib = {
     // The genesis write seam is always available: genesis is a workflow whose
     // prompt node calls chamber_emit_genesis, and the write needs no room driver.
     // The room-control tools (and the driver) require the C1 agent-turn + snapshot
-    // seams, so they only appear when those are present.
-    // Pass the refresh seam so a genesis write re-runs the bound chamber-roster
-    // collector (republishing the roster), not just the 120s cadence. Optional and
-    // fail-soft: undefined on an older harness, where genesis falls back to cadence.
-    const genesisTool = makeGenesisTool(refreshWorkflow);
+    // seams, so they only appear when those are present. The tool re-runs the bound
+    // chamber-roster collector via the module-level refreshWorkflow (fail-soft).
+    const genesisTool = makeGenesisTool();
     // The digest write seam is always available, like genesis: it only writes the
     // digest store (no snapshot/turn seam needed), and the chamber-digest workflow's
     // author node opts in to it by name.
@@ -1158,12 +1156,12 @@ function ensureLoop(slug: string): void {
       // The room just became a closed session — refresh the index so its card
       // appears promptly instead of on the next cadence. Fail-soft, never thrown
       // into the detached loop.
-      void refreshWorkflow("chamber-rooms")?.catch(() => {});
+      void refreshWorkflow("chamber-rooms").catch(() => {});
       // A newly-ended room is briefing substance: evaluate the gate (it runs a turn
       // only if the watermark hasn't seen this room) and refresh the roster so its
       // pulse counts/for-you update promptly. Both fire-and-forget — never thrown.
       void evaluateBriefGate().catch(() => {});
-      void refreshWorkflow("chamber-roster")?.catch(() => {});
+      void refreshWorkflow("chamber-roster").catch(() => {});
       void refreshStandingPanels();
     }
   })();
@@ -1519,7 +1517,7 @@ async function startRoom(
     // The sessions index is a separate snapshot from the room's own panel — refresh
     // it so the new active session appears promptly instead of on the next cadence
     // (mirrors the end-of-room refresh). Fail-soft, never thrown.
-    void refreshWorkflow("chamber-rooms")?.catch(() => {});
+    void refreshWorkflow("chamber-rooms").catch(() => {});
     void refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -1565,7 +1563,7 @@ async function stopRoom(slug: string): Promise<RibActionResult> {
     reconcileRoomPanels();
     // The room is now a closed session — refresh the index so it appears as a card
     // (fail-soft; cadence covers an older harness without the seam).
-    await refreshWorkflow("chamber-rooms")?.catch(() => {});
+    await refreshWorkflow("chamber-rooms").catch(() => {});
     await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -1751,7 +1749,7 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
     // older harness, where the 120s cadence drops the card).
     if (lastSlug === slug) lastSlug = undefined;
     reconcileRoomPanels();
-    await refreshWorkflow("chamber-rooms")?.catch(() => {});
+    await refreshWorkflow("chamber-rooms").catch(() => {});
     await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -1893,8 +1891,8 @@ async function outcomeExploreAction(action: RibAction): Promise<RibActionResult>
 // independent and each fail-soft) so neither goes stale after a mutation.
 async function refreshExhibitIndexes(): Promise<void> {
   await Promise.all([
-    refreshWorkflow("chamber-exhibits")?.catch(() => {}),
-    refreshWorkflow("chamber-rooms")?.catch(() => {}),
+    refreshWorkflow("chamber-exhibits").catch(() => {}),
+    refreshWorkflow("chamber-rooms").catch(() => {}),
   ]);
 }
 
@@ -1968,10 +1966,10 @@ async function deleteRecordOfKind(
       // A room card listing this exhibit as tabled must drop the dead link.
       await refreshExhibitIndexes();
     } else {
-      await refreshWorkflow("chamber-lenses")?.catch(() => {});
+      await refreshWorkflow("chamber-lenses").catch(() => {});
       // The retired lens drops from the roster pulse's "Live views" count too —
       // refresh it so the count matches the just-updated index.
-      await refreshWorkflow("chamber-roster")?.catch(() => {});
+      await refreshWorkflow("chamber-roster").catch(() => {});
     }
     await refreshStandingPanels();
     return { ok: true, id, key: lensKey(id) };
@@ -2171,10 +2169,10 @@ async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
       // lens, the roster pulse; exhibits don't ride the "Live views" count), cheap
       // deterministic collectors, fail-soft like the emit/retire paths.
       if (isExhibit(record)) {
-        await refreshWorkflow("chamber-exhibits")?.catch(() => {});
+        await refreshWorkflow("chamber-exhibits").catch(() => {});
       } else {
-        await refreshWorkflow("chamber-lenses")?.catch(() => {});
-        await refreshWorkflow("chamber-roster")?.catch(() => {});
+        await refreshWorkflow("chamber-lenses").catch(() => {});
+        await refreshWorkflow("chamber-roster").catch(() => {});
       }
       await refreshStandingPanels();
       return { ok: true, data: { id, key } };
@@ -2337,7 +2335,7 @@ async function dismissGenesisAction(action?: RibAction): Promise<RibActionResult
   } catch {
     // leave the ticker running; a still-present marker keeps ticking to Dismiss
   }
-  await refreshWorkflow("chamber-roster")?.catch(() => {});
+  await refreshWorkflow("chamber-roster").catch(() => {});
   return { ok: true };
 }
 
@@ -2348,7 +2346,7 @@ async function retireAction(action: RibAction): Promise<RibActionResult> {
   try {
     await retireMind(mindsDir(), slug);
     invalidateRoster(); // a Mind is gone — drop it from the cached roster
-    await refreshWorkflow("chamber-roster")?.catch(() => {});
+    await refreshWorkflow("chamber-roster").catch(() => {});
     await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -2367,7 +2365,7 @@ async function setModelAction(action: RibAction): Promise<RibActionResult> {
     invalidateRoster();
     // The model is already persisted; a host refresh reject must not turn a
     // committed set-model into a false failure (mirrors retire/dismiss siblings).
-    await refreshWorkflow("chamber-roster")?.catch(() => {});
+    await refreshWorkflow("chamber-roster").catch(() => {});
     return { ok: true, data: { slug, ...(model ? { model } : {}) } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2502,7 +2500,7 @@ const genesisEmitSchema = z.object({
   tools: z.array(z.string()).optional(),
 });
 
-function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolDefinition {
+function makeGenesisTool(): ToolDefinition {
   return {
     name: "chamber_emit_genesis",
     description:
@@ -2570,9 +2568,9 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         // so the next roster frame shows the real seat instead of the boot card.
         await settleGenesis(record.name);
         // Re-run the bound chamber-roster collector so the new Mind appears
-        // promptly instead of waiting on the 120s cadence. Fail-soft (the seam
-        // resolves on error and is absent on an older harness) — never throw.
-        await refreshWorkflow?.("chamber-roster");
+        // promptly instead of waiting on the 120s cadence. Fail-soft — the Mind is
+        // already scaffolded, so a host-refresh reject must not fail the emit.
+        await refreshWorkflow("chamber-roster").catch(() => {});
         // A new Mind is additive — route Activity through the seam (no digest turn).
         await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug, name: record.name }));
@@ -2669,12 +2667,12 @@ function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefinition 
           // in the index promptly instead of waiting on cadence (mirrors genesis
           // refreshing the roster). Fail-soft: the seam resolves on error / is absent
           // on an older harness — never throw past a successful publish.
-          await refreshWorkflow("chamber-lenses")?.catch(() => {});
+          await refreshWorkflow("chamber-lenses").catch(() => {});
           // A changed/new lens is briefing substance: evaluate the gate (it runs a turn
           // only if the watermark hasn't seen this fingerprint) and refresh the roster
           // so its pulse updates. Both fire-and-forget — never thrown past the publish.
           void evaluateBriefGate().catch(() => {});
-          void refreshWorkflow("chamber-roster")?.catch(() => {});
+          void refreshWorkflow("chamber-roster").catch(() => {});
           await refreshStandingPanels();
           emitResult(
             ctx,
@@ -3171,7 +3169,7 @@ function makeRetireMindTool(): ToolDefinition {
       try {
         await retireMind(mindsDir(), slug);
         invalidateRoster();
-        await refreshWorkflow("chamber-roster")?.catch(() => {});
+        await refreshWorkflow("chamber-roster").catch(() => {});
         await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug }));
       } catch (e) {
@@ -3268,7 +3266,7 @@ function makeRoomDeleteTool(): ToolDefinition {
         // board action), then refresh the index card away — fail-soft on the seam.
         if (lastSlug === slug) lastSlug = undefined;
         reconcileRoomPanels();
-        await refreshWorkflow("chamber-rooms")?.catch(() => {});
+        await refreshWorkflow("chamber-rooms").catch(() => {});
         await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug }));
       } catch (e) {

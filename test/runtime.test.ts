@@ -19,6 +19,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await disposeRuntime();
+  // Reset the module-global data home so the temp path can't leak into a later
+  // test file (mirrors test/paths.test.ts and test/rib.test.ts teardown).
+  setChamberDataHome(undefined);
   await rm(home, { recursive: true, force: true });
 });
 

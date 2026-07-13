@@ -63,7 +63,7 @@ export function getHostRefreshWorkflow(): RibContext["refreshWorkflow"] {
 // re-publish the banner so its record + digest registers reflect the change. The delta
 // register rides its own attention gate (evaluateBriefGate).
 export async function refreshStandingPanels(): Promise<void> {
-  await refreshWorkflow("chamber-digest")?.catch(() => {});
+  await refreshWorkflow("chamber-digest").catch(() => {});
   await publishBriefing();
 }
 
