@@ -87,9 +87,10 @@ describe("buildRosterBoard cold start", () => {
     expect(section.items.map((i) => i.type)).toEqual(
       GENESIS_STARTERS.map(() => "author-archetype"),
     );
-    // Compact label: name + role (not the fuller tagline an open-seat action carries).
-    expect(section.items.map((i) => i.label)).toEqual(
-      GENESIS_STARTERS.map((s) => `${s.name} — ${s.role}`),
+    // Name-only chip; the role + blurb dossier rides the hover hint.
+    expect(section.items.map((i) => i.label)).toEqual(GENESIS_STARTERS.map((s) => s.name));
+    expect(section.items.map((i) => i.hint)).toEqual(
+      GENESIS_STARTERS.map((s) => `${s.role} · ${s.blurb}`),
     );
     // Seats 0/1/2 preview blue/amber/teal — every seat is free at cold start.
     expect(section.items.map((i) => i.tone)).toEqual(["id-blue", "id-amber", "id-teal"]);
@@ -428,10 +429,8 @@ describe("buildRosterBoard seated launchpad (authoring stays reachable)", () => 
     const section = actionsSection(board, "Or seat a starter voice");
     if (section?.kind !== "actions") throw new Error("no starter row");
     expect(section.wrap).toBe(true);
-    // "a" is not a starter → all three starters offered, compact "name — role".
-    expect(section.items.map((i) => i.label)).toEqual(
-      GENESIS_STARTERS.map((s) => `${s.name} — ${s.role}`),
-    );
+    // "a" is not a starter → all three starters offered, name-only chips.
+    expect(section.items.map((i) => i.label)).toEqual(GENESIS_STARTERS.map((s) => s.name));
     expect(starterSlugs(board)).toEqual(GENESIS_STARTERS.map((s) => s.slug));
   });
 
