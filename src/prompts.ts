@@ -73,7 +73,6 @@ Supply scope/reason only when you can name them truthfully; never invent provena
 // region runs this with input `lens` = the record id; the turn reads the
 // current record and re-emits fresh content under the same id. A lens whose
 // re-composition needs specific data-gathering names its own workflow instead.
-export const LENS_REFRESH_WORKFLOW = "chamber-lens-refresh";
 export const LENS_REFRESH_WF_PROMPT = `You are REFRESHING an existing LENS for Keelson's Chamber — re-composing a standing canvas \`board\` view so its content is current.
 
 Lens id: $inputs.lens
