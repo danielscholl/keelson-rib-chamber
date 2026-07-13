@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.36.0...v0.36.1) (2026-07-13)
+
+
+### Fixed
+
+* **index:** move action handlers to src/actions and wire via dispatch ([#250](https://github.com/danielscholl/keelson-rib-chamber/issues/250)) ([a8f81d3](https://github.com/danielscholl/keelson-rib-chamber/commit/a8f81d37b11d321e7f9a3ad2ce7373b8254b4d5a))
+
 ## [0.36.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.35.0...v0.36.0) (2026-07-13)
 
 
