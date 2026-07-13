@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.33.0...v0.34.0) (2026-07-12)
+
+
+### Added
+
+* **bench:** authored mission stanza and grid bench with ghost open seat ([#228](https://github.com/danielscholl/keelson-rib-chamber/issues/228)) ([47f916a](https://github.com/danielscholl/keelson-rib-chamber/commit/47f916ab239a0390f70bd50e0667c2121ab9f6de))
+
 ## [0.33.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.32.0...v0.33.0) (2026-07-12)
 
 
