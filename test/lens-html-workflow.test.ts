@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import rib from "../src/index.ts";
+
+const sharedPath = fileURLToPath(new URL("../node_modules/@keelson/shared", import.meta.url));
 
 // contributeWorkflows takes a ctx the html-lens workflow definition never reads,
 // so an empty cast satisfies the type (mirrors genesis-workflow.test.ts).
@@ -59,31 +62,34 @@ describe("chamber-lens-html workflow", () => {
     expect(prompt).toMatch(/fix the markup or colors/);
   });
 
-  test("every contributed chamber workflow validates against the real keelson loader", async () => {
-    // Resolve the loader through the @keelson/shared symlink's realpath: its
-    // sibling packages/workflows is the exact schema + invariant gate
-    // prepareRibWorkflows runs on a rib contribution at server boot.
-    const sharedDir = await realpath(
-      fileURLToPath(new URL("../node_modules/@keelson/shared", import.meta.url)),
-    );
-    const loader = (await import(join(sharedDir, "..", "workflows", "src", "index.ts"))) as {
-      workflowDefinitionSchema: {
-        safeParse(value: unknown): {
-          success: boolean;
-          data?: unknown;
-          error?: { message: string };
+  test.skipIf(!existsSync(sharedPath))(
+    "every contributed chamber workflow validates against the real keelson loader",
+    async () => {
+      // Resolve the loader through the @keelson/shared symlink's realpath: its
+      // sibling packages/workflows is the exact schema + invariant gate
+      // prepareRibWorkflows runs on a rib contribution at server boot.
+      const sharedDir = await realpath(sharedPath);
+      const loader = (await import(join(sharedDir, "..", "workflows", "src", "index.ts"))) as {
+        workflowDefinitionSchema: {
+          safeParse(value: unknown): {
+            success: boolean;
+            data?: unknown;
+            error?: { message: string };
+          };
         };
+        validateWorkflowInvariants(workflow: never): string | null;
       };
-      validateWorkflowInvariants(workflow: never): string | null;
-    };
-    const all = contributions();
-    expect(all.map((c) => (c.definition as { name?: string }).name)).toContain("chamber-lens-html");
-    for (const contribution of all) {
-      const name = (contribution.definition as { name?: string }).name ?? "<unnamed>";
-      const parsed = loader.workflowDefinitionSchema.safeParse(contribution.definition);
-      expect(`${name}: ${parsed.success ? "ok" : parsed.error?.message}`).toBe(`${name}: ok`);
-      const invariantError = loader.validateWorkflowInvariants(parsed.data as never);
-      expect(`${name}: ${invariantError ?? "ok"}`).toBe(`${name}: ok`);
-    }
-  });
+      const all = contributions();
+      expect(all.map((c) => (c.definition as { name?: string }).name)).toContain(
+        "chamber-lens-html",
+      );
+      for (const contribution of all) {
+        const name = (contribution.definition as { name?: string }).name ?? "<unnamed>";
+        const parsed = loader.workflowDefinitionSchema.safeParse(contribution.definition);
+        expect(`${name}: ${parsed.success ? "ok" : parsed.error?.message}`).toBe(`${name}: ok`);
+        const invariantError = loader.validateWorkflowInvariants(parsed.data as never);
+        expect(`${name}: ${invariantError ?? "ok"}`).toBe(`${name}: ok`);
+      }
+    },
+  );
 });
