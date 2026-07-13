@@ -302,8 +302,15 @@ async function beginGenesis(info: { name?: string; role?: string }): Promise<voi
 // freeform marker — see removeLandedGenesis) and stop the tick only when no other
 // genesis is still in flight, so a sibling's boot card keeps pulsing. Fail-soft.
 async function settleGenesis(name: string): Promise<void> {
-  const remaining = await removeLandedGenesis(name).catch(() => [] as PendingGenesis[]);
-  if (remaining.length === 0) stopGenesisTick();
+  // A marker-store failure must not be read as "nothing left" — that stops the
+  // ticker while sibling boot cards are still pending and never lets them reach the
+  // stalled/Dismiss state. Stop only after a real removal reports none remain.
+  try {
+    const remaining = await removeLandedGenesis(name);
+    if (remaining.length === 0) stopGenesisTick();
+  } catch {
+    // leave the ticker running; siblings may still be in flight
+  }
 }
 
 // Serialize genesis slot allocation + scaffold across parallel landings. nextFreeSlot
@@ -1654,8 +1661,7 @@ const rib: Rib = {
   // proof — zero React, no hand-coded route.
   // Every contributed workflow declares mutates_checkout: false — chamber
   // workflows write the rib data home and publish snapshots, never a project
-  // checkout, so the host's per-project mutation lock must not serialize them
-  // (it 409'd the second of two parallel geneses).
+  // checkout, so the host's per-project mutation lock must not serialize them.
   contributeWorkflows: () => [
     {
       // The roster producer: a deterministic collector that reads the
@@ -3608,13 +3614,20 @@ async function describeOwnAction(action: RibAction): Promise<RibActionResult> {
 async function dismissGenesisAction(action?: RibAction): Promise<RibActionResult> {
   const payload = (action?.payload ?? {}) as Record<string, unknown>;
   const startedAt = asNonEmptyString(payload.startedAt);
-  let remaining: PendingGenesis[] = [];
-  if (startedAt) {
-    remaining = await removePendingGenesisAt(startedAt).catch(() => [] as PendingGenesis[]);
-  } else {
-    await clearPendingGenesis().catch(() => {});
+  // Stop the tick only after a real removal reports nothing left. A failed remove
+  // must not be read as "none remain" — that freezes still-pending sibling cards
+  // before they reach the stalled/Dismiss state.
+  try {
+    if (startedAt) {
+      const remaining = await removePendingGenesisAt(startedAt);
+      if (remaining.length === 0) stopGenesisTick();
+    } else {
+      await clearPendingGenesis();
+      stopGenesisTick();
+    }
+  } catch {
+    // leave the ticker running; a still-present marker keeps ticking to Dismiss
   }
-  if (remaining.length === 0) stopGenesisTick();
   await refreshWorkflow?.("chamber-roster")?.catch(() => {});
   return { ok: true };
 }
