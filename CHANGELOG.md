@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.35.0...v0.36.0) (2026-07-13)
+
+
+### Added
+
+* **bench:** four-seat bench law with parallel genesis ([#232](https://github.com/danielscholl/keelson-rib-chamber/issues/232)) ([09f3cad](https://github.com/danielscholl/keelson-rib-chamber/commit/09f3cad15ce711c89d4980a51f42d098c0c984f8))
+
 ## [0.35.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.34.0...v0.35.0) (2026-07-13)
 
 
