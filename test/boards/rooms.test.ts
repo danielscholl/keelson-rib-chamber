@@ -236,7 +236,7 @@ describe("buildRoomsIndexBoard closed sessions", () => {
   test("the card's Open is a room-open carrying the slug; the board itself names no effect", () => {
     const board = buildRoomsIndexBoard([room({ slug: "room-xyz" })]);
     const open = cards(board)[0]?.actions?.find((a) => a.type === "room-open");
-    expect((open?.payload as { slug: string }).slug).toBe("room-xyz");
+    expect((open?.payload as { slug: string })?.slug).toBe("room-xyz");
     // The open-canvas EFFECT is returned by onAction (server-side), never baked into
     // the board — mirrors the lens card's lens-open.
     expect(JSON.stringify(board)).not.toContain("open-canvas");
@@ -246,7 +246,7 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     const board = buildRoomsIndexBoard([room({ slug: "room-xyz" })]);
     expect(JSON.stringify(board)).toContain("room-xyz");
     const del = cards(board)[0]?.actions?.find((a) => a.type === "room-delete");
-    expect((del?.payload as { slug: string }).slug).toBe("room-xyz");
+    expect((del?.payload as { slug: string })?.slug).toBe("room-xyz");
   });
 });
 
