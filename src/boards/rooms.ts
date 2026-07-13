@@ -37,7 +37,7 @@ export function buildRoomsIndexBoard(
 
   const sections: CanvasBoardView["sections"] =
     ordered.length === 0
-      ? emptySections()
+      ? []
       : [
           {
             kind: "cards",
@@ -171,22 +171,6 @@ function deleteAction(room: Room) {
       cancelLabel: "Cancel",
     },
   };
-}
-
-// The empty/cold state: a single rows hint, so the region is a valid board even
-// with no rooms yet (a fresh Chamber).
-function emptySections(): CanvasBoardView["sections"] {
-  return [
-    {
-      kind: "rows",
-      items: [
-        {
-          glyph: "neutral",
-          text: "No sessions yet. Convene a Room above; it appears here while live, and stays as history once it ends.",
-        },
-      ],
-    },
-  ];
 }
 
 // active reads info (live), stopped warn, done ok — matching boards/room.ts.
