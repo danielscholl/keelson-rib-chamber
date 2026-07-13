@@ -75,6 +75,14 @@ The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
   `/genesis` authors a new Mind from a brief, and `/lens <subject>` authors a
   canvas lens board on a subject.
 
+`src/index.ts` is only the **composition root** — the `Rib` literal, `registerTools`
+as assembly, `onAction` delegating to `dispatchChamberAction`, and `dispose` composing
+the module teardowns. Each subsystem lives in its own module: the briefing gate
+(`brief-gate.ts`), reflection gate (`reflection-gate.ts`), host-seam + standing-panel
+runtime (`runtime.ts`), lens registries (`lens-runtime.ts`), and room lifecycle + driver
+wiring (`room-lifecycle.ts`) each expose a `bindX(seams)` / `disposeX()` pair; the MCP
+tools live under `src/tools/` and the board action handlers under `src/actions/`.
+
 Orchestration **strategies** (`src/strategies/`: `sequential`, `group-chat`,
 `open-floor`, `concurrent`, `review`, `magentic`, registered in `index.ts`) are **pure** — they read
 room state and return the next turn decision (`speak` / `end`). They do no I/O
@@ -83,6 +91,10 @@ owns turns, persistence, and publishing.
 
 ### Invariants worth protecting
 
+- **`index.ts` stays a composition root.** It declares the `Rib` and wires modules —
+  it does not grow implementations back. A new subsystem (state + functions) gets its
+  own module with a `bindX(seams)` / `disposeX()` pair built in `registerTools` and torn
+  down in `dispose()`; `index.ts` gains wiring lines, not logic.
 - **Zero React into the trusted SPA.** Surfaces render through the canvas `board`
   contract, never hand-coded UI shipped from the rib.
 - **Attach only through the `Rib` contract** (`@keelson/shared`). Don't reach
