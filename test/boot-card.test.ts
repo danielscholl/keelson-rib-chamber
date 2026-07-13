@@ -152,6 +152,43 @@ describe("genesis boot-card lifecycle", () => {
     expect((await readPendingGeneses()).map((m) => m.name)).toEqual(["Mycroft"]);
   });
 
+  test("concurrent chamber_emit_genesis calls persist distinct identity slots", async () => {
+    const tools = registerTools(makeCtx([]));
+    const emit = tools.find((t) => t.name === "chamber_emit_genesis");
+    if (!emit) throw new Error("genesis emit tool not found");
+    // Two geneses landing at once each read the roster to take the lowest free slot;
+    // unserialized, both observe the same snapshot and persist the same hue. The
+    // scaffold chain makes the second re-read and take the next slot.
+    await Promise.all([
+      emit.execute(
+        {
+          name: "Ada",
+          role: "Engineer",
+          voice: "precise",
+          soul: "# Ada\n## Persona\nBuilds.",
+          tagline: "Ships.",
+        },
+        toolCtx,
+      ),
+      emit.execute(
+        {
+          name: "Bo",
+          role: "Analyst",
+          voice: "wry",
+          soul: "# Bo\n## Persona\nReads.",
+          tagline: "Sees.",
+        },
+        toolCtx,
+      ),
+    ]);
+    const minds = await readMinds(mindsDir());
+    const ada = minds.find((m) => m.slug === "ada");
+    const bo = minds.find((m) => m.slug === "bo");
+    expect(ada?.identitySlot).toBeGreaterThanOrEqual(0);
+    expect(bo?.identitySlot).toBeGreaterThanOrEqual(0);
+    expect(ada?.identitySlot).not.toBe(bo?.identitySlot);
+  });
+
   test("a freeform landing settles the oldest unnamed marker, not a starter's", async () => {
     const tools = registerTools(makeCtx([]));
     await dispatch({ type: "author-archetype", payload: { slug: "jarvis" } });
