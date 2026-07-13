@@ -1,4 +1,4 @@
-import { asNonEmptyString } from "@keelson/shared";
+import { asNonEmptyString, type Brief } from "@keelson/shared";
 import type { RoomConfig } from "./types.ts";
 
 // The flat room-config contract, owned in ONE place so the chat tool, the board
@@ -45,4 +45,41 @@ export function flatFromRoomConfig(
       ? { endVoteThreshold: config.endVoteThreshold }
       : {}),
   };
+}
+
+// The convene form's free-text criteria (one per line) split into a trimmed list.
+export function parseCriteriaLines(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+// Bounds on a grounding brief. It is re-serialized into every turn, fidelity, and
+// synthesis prompt, so an unbounded brief would multiply billed input and can exhaust
+// context — cap the count and lengths at the normalization choke point (both entry
+// points pass through here) rather than trust the caller.
+export const MAX_GROUNDING_CRITERIA = 20;
+export const MAX_CRITERION_LEN = 500;
+export const MAX_GROUNDING_URL_LEN = 500;
+
+// Normalize a room grounding brief from either entry point (the chamber_room_start
+// tool's structured input or the convene form's parsed fields) into the shared Brief
+// shape, or undefined when it carries neither a source nor any criterion — so a room
+// convened without grounding is byte-for-byte unchanged.
+export function normalizeGrounding(
+  input: { sourceUrl?: string; criteria?: readonly string[] } | undefined,
+): Brief | undefined {
+  if (!input) return undefined;
+  const sourceUrl = input.sourceUrl?.trim().slice(0, MAX_GROUNDING_URL_LEN) || undefined;
+  // Collapse internal whitespace so each criterion is a single line: the convene form is
+  // one-per-line and the restart payload rejoins with newlines, so an embedded newline
+  // would otherwise split one criterion into two on the round trip.
+  const criteria = (input.criteria ?? [])
+    .map((c) => c.trim().replace(/\s+/g, " ").slice(0, MAX_CRITERION_LEN))
+    .filter(Boolean)
+    .slice(0, MAX_GROUNDING_CRITERIA);
+  if (!sourceUrl && criteria.length === 0) return undefined;
+  return { ...(sourceUrl ? { sourceUrl } : {}), criteria };
 }

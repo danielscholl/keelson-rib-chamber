@@ -1,16 +1,12 @@
-import { fileURLToPath } from "node:url";
 import type {
   Brief,
   CanvasBoardView,
   CanvasView,
-  CommandCompletion,
-  CommandInvokeResult,
   Project,
   Rib,
   RibAction,
   RibActionResult,
   RibAuthStatus,
-  RibCommandDescriptor,
   RibContext,
   RibViewDescriptor,
   SnapshotManager,
@@ -20,7 +16,6 @@ import type {
 import {
   asNonEmptyString,
   asStringArray,
-  buildCanvasArtifactGuidance,
   CANVAS_PUBLISH_CONTRACT,
   canvasBoardViewSchema,
   errText,
@@ -35,7 +30,6 @@ import { buildConveneBoard, type ConveneProject } from "./boards/convene.ts";
 import { buildChamberBoard } from "./boards/presence.ts";
 import { buildRoomBoard } from "./boards/room.ts";
 import {
-  capabilityVocabulary,
   codingReviewCapabilityError,
   codingToolPool,
   externalToolPool,
@@ -49,9 +43,21 @@ import {
   diffAgainstWatermark,
   readChamberRecords,
 } from "./chamber-state.ts";
+import { CHAMBER_COMMANDS, completeChamberCommand, invokeChamberCommand } from "./commands.ts";
 import { buildSeedFor, composeRoomSystemPrompt } from "./compose.ts";
 import { readDigest, writeDigest } from "./digest-store.ts";
 import { assertSafeSlug, slugify } from "./genesis.ts";
+import {
+  BRIEF_KEY,
+  CONVENE_KEY,
+  DIGEST_KEY,
+  EXHIBITS_KEY,
+  LENSES_KEY,
+  PRESENCE_KEY,
+  ROOMS_KEY,
+  ROSTER_KEY,
+  roomViewKey,
+} from "./keys.ts";
 import {
   CHAMBER_SURFACE_ID,
   canonicalLensId,
@@ -116,8 +122,17 @@ import {
   removePendingGenesisAt,
 } from "./pending-genesis.ts";
 import type { RoomStore } from "./ports.ts";
+import { BRIEF_PROMPT } from "./prompts.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
-import { type RoomConfigInput, roomConfigFromFlat } from "./room-config.ts";
+import {
+  MAX_CRITERION_LEN,
+  MAX_GROUNDING_CRITERIA,
+  MAX_GROUNDING_URL_LEN,
+  normalizeGrounding,
+  parseCriteriaLines,
+  type RoomConfigInput,
+  roomConfigFromFlat,
+} from "./room-config.ts";
 import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "./room-draft.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
@@ -131,25 +146,13 @@ import { renderTranscript } from "./transcript.ts";
 import type { Mind, Room, RoomConfig, RoomStrategyName, TurnEntry } from "./types.ts";
 import { IDENTITY_SLOT_COUNT, nextFreeSlot } from "./types.ts";
 import { readWatermark, writeWatermark } from "./watermark-store.ts";
+import {
+  contributeChamberWorkflows,
+  DIGEST_TOOL_NAME,
+  LENS_REFRESH_WORKFLOW,
+} from "./workflows.ts";
 
-const BRIEF_KEY = "rib:chamber:brief";
-const ROSTER_KEY = "rib:chamber:roster";
-const CONVENE_KEY = "rib:chamber:convene";
-const PRESENCE_KEY = "rib:chamber:presence";
-const ROOMS_KEY = "rib:chamber:rooms";
-const LENSES_KEY = "rib:chamber:lenses";
-const EXHIBITS_KEY = "rib:chamber:exhibits";
-const DIGEST_KEY = "rib:chamber:digest";
-// The standing-digest write seam, referenced by both the tool registration and the
-// chamber-digest workflow's author node (allowed_tools) — one source of truth.
-const DIGEST_TOOL_NAME = "chamber_emit_digest";
-// The snapshot-only key family the Rooms index `Open` focuses (see roomOpenAction).
-// Per-slug so two clients opening two different closed rooms get independent boards
-// in their drawers instead of colliding on one shared key (active rooms / lenses use
-// the same per-id isolation).
-function roomViewKey(slug: string): string {
-  return `rib:chamber:room-view:${slug}`;
-}
+export { normalizeGrounding } from "./room-config.ts";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -1124,34 +1127,6 @@ function roomNote(slug: string): string {
   return activeRooms.size > 1 ? ` (${slug})` : "";
 }
 
-// Absolute path to the roster collector, resolved at module load so the workflow
-// node runs the right file regardless of the run's (nominal) cwd. fileURLToPath
-// (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
-// it is shell-quoted where interpolated into the bash node below.
-const ROSTER_COLLECTOR = fileURLToPath(new URL("../bin/collect-roster.ts", import.meta.url));
-// The rooms-index collector, resolved the same way (see ROSTER_COLLECTOR).
-const ROOMS_COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.meta.url));
-// The lenses-index collector, resolved the same way (see ROSTER_COLLECTOR).
-const LENSES_COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", import.meta.url));
-// The exhibits-index collector, resolved the same way (see LENSES_COLLECTOR).
-const EXHIBITS_COLLECTOR = fileURLToPath(new URL("../bin/collect-exhibits.ts", import.meta.url));
-// The standing-digest collectors, resolved the same way (see ROSTER_COLLECTOR). The
-// gate reads all three stores + the digest, so it bakes in the data home (not a single
-// store dir); the publish collector reads the digest store from the same home.
-const DIGEST_GATE_COLLECTOR = fileURLToPath(
-  new URL("../bin/collect-digest-gate.ts", import.meta.url),
-);
-const DIGEST_PUBLISH_COLLECTOR = fileURLToPath(
-  new URL("../bin/collect-digest-publish.ts", import.meta.url),
-);
-
-// POSIX single-quote: wrap a value and escape any embedded quote so a path
-// (spaces, `$`, backticks, backslashes) reaches `bash -c` literally — never
-// word-split or expanded.
-function shQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
 // The synchronous seed the banner holds for the instant between registration and the
 // first async compose (createCoalescingPublisher needs a sync default). A valid, calm
 // board; publishBriefing() replaces it with the composed three-register banner.
@@ -1255,237 +1230,6 @@ function publishBriefing(): Promise<void> {
 // The brief turn's budget. A briefing is a single composing turn (no tools), so a
 // modest ceiling bounds a wedged provider without starving a normal compose.
 const BRIEF_TURN_TIMEOUT_MS = 60_000;
-
-// The briefing turn's prompt: an agent authors a canvas `board` rendered on the
-// Chamber surface with no hand-coded UI. The gate appends a delta block (the rooms
-// that ended / lenses that changed since the last briefing) so the briefing reports
-// what is NEW — a count is not news. Tools are withheld so it composes from this.
-const BRIEF_PROMPT = `You are the editor of "Chamber" — Keelson's multi-agent operating layer (Minds you author, agent-to-agent Rooms, agent-authored Lenses). Compose a short operator BRIEFING of what is NEW since the operator last looked, and return it as a single canvas \`board\` view rendered directly on the Chamber surface with no hand-coded UI.
-
-Lead with the change: a Room that ended and what it settled, a Lens a Mind authored or updated and what it now says. Be honest — write only what the delta below names; do NOT invent clusters, users, metrics, or a room's contents you cannot see, and do NOT restate how many Minds / Rooms / Lenses exist (the surface already shows those structurally — a count is not news).
-
-Return ONE JSON object of this shape:
-  { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
-Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
-Use 1-2 Section kinds, in a sensible order:
-  - rows:  { "kind": "rows", "title"?: string, "items": [{ "text": string, "glyph"?: Tone, "trailing"?: string }] }
-  - cards: { "kind": "cards", "title"?: string, "items": [{ "title": string, "pill"?: { "label": string, "tone"?: Tone }, "fields"?: [{ "label"?: string, "value": string|number }], "footnote"?: string }] }
-
-Keep it tight: a status pill naming how much is new (e.g. "2 new"), then a short "rows" list — one line per ended Room or changed Lens, in the operator's language, with the outcome or gist. Add a card only when one change earns a sentence of interpretation. Concise, editorial copy.`;
-
-// Genesis as a workflow: one agent turn reads a freeform brief, authors the SOUL.md
-// body + a roster tagline, and persists the Mind by calling the chamber_emit_genesis
-// tool (the deterministic write seam). It publishes no snapshot — its product is files
-// on disk, which the chamber-roster collector then reflects. $ARGUMENTS carries the
-// brief (chat `/workflow run chamber-genesis <brief>`); explicit $inputs.* are honored
-// when a caller supplies them (CLI --inputs). The model is scoped to the one emit tool.
-const GENESIS_WF_PROMPT = `You are authoring the founding identity of a new persistent agent — a "Mind" — for Keelson's Chamber, a multi-agent operating layer.
-
-Brief: $ARGUMENTS
-
-(If these explicit fields are non-empty, prefer them over the brief — name: "$inputs.name", role: "$inputs.role", voice: "$inputs.voice", model: "$inputs.model", provider: "$inputs.provider". When model/provider are non-empty, pass them through verbatim — do not author or guess them.)
-
-From the brief, decide the Mind's name, a short role title (1-4 words — e.g. "Chief of Staff", "Research Partner" — a label for a roster pill, NOT a sentence or description), and voice (how it speaks). Then write an honest founding document — do NOT invent tools, credentials, or capabilities it does not have; describe who it is, what it is for, and how it speaks.
-
-Compose:
-- soul: Markdown for the Mind's SOUL.md, with these sections in order:
-    # <name>
-    ## Persona  — who this Mind is, grounded in the role
-    ## Mission  — what it exists to do
-    ## Voice    — how it speaks (tone, length, habits)
-- mission: 2 to 4 short declarative sentences for the Mind's seat card, under 200 characters total — verb-led behaviors in the Mind's own voice, never a role restatement (e.g. "Reads the telemetry. Names tradeoffs. Pushes back with evidence."). No Markdown.
-- tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
-- tools: an OPTIONAL array of capability slugs the Mind may use inside a room — choose ONLY from this set: ${capabilityVocabulary()}. Include a slug only when the role genuinely calls for it; omit it (or use []) for a conversation-only Mind, and never invent a slug outside this set.
-
-Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, mission, tagline, tools, model?, provider? } to persist the Mind (include model/provider only when provided) — do NOT print the JSON as your reply. After the tool returns, reply with EXACTLY one line: "Authored <name> (<slug>)", using the name you authored and the tool-returned slug verbatim.`;
-
-// The lens authoring prompt: one agent turn composes a canvas board on a subject and
-// calls chamber_emit_lens to publish it. It is not pinned to one key — the tool routes
-// by `id` to a per-subject key, so distinct subjects land in distinct panels and
-// re-authoring a subject updates it.
-const LENS_WF_PROMPT = `You are authoring a LENS for Keelson's Chamber — a one-screen canvas \`board\` view on a subject, rendered live on the Chamber surface with no hand-coded UI.
-
-Subject: $ARGUMENTS
-
-Compose ONE canvas board about the subject. Be honest — do NOT invent data you cannot see; if the subject is abstract, lay out its structure, parts, or status rather than fabricating metrics.
-
-The board shape:
-  { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
-Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
-Use 2-4 Section kinds, in a sensible order:
-  - stats: { "kind":"stats", "title"?:string, "items":[{ "label":string, "value":string|number, "sub"?:string, "tone"?:Tone }] }
-  - rows:  { "kind":"rows", "title"?:string, "items":[{ "text":string, "glyph"?:Tone, "trailing"?:string }] }
-  - cards: { "kind":"cards", "title"?:string, "items":[{ "title":string, "pill"?:{ "label":string, "tone"?:Tone }, "fields"?:[{ "label"?:string, "value":string|number }], "footnote"?:string }] }
-
-Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, reason? }:
-  - id: a short, stable, kebab-case identifier for this subject (e.g. "release-risks") — re-authoring the same subject reuses its panel.
-  - board: the canvas board object above.
-  - scope (optional): the board's kind in a word or two — e.g. "status board", "timeline", "checklist".
-  - reason (optional): a short note on what this authoring changed (e.g. "added two new risks") — omit it on a first author.
-Supply scope/reason only when you can name them truthfully; never invent provenance. Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
-
-// The generic re-author behind a living lens's refresh cadence: the panel's
-// region runs this with input `lens` = the record id; the turn reads the
-// current record and re-emits fresh content under the same id. A lens whose
-// re-composition needs specific data-gathering names its own workflow instead.
-const LENS_REFRESH_WORKFLOW = "chamber-lens-refresh";
-const LENS_REFRESH_WF_PROMPT = `You are REFRESHING an existing LENS for Keelson's Chamber — re-composing a standing canvas \`board\` view so its content is current.
-
-Lens id: $inputs.lens
-
-First call chamber_list_lenses with { "id": "$inputs.lens" } — the matching record carries the prior board (the composition you are refreshing) and its scope/reason/maintainingMind provenance. If no such lens exists, reply with one short line saying so and STOP; do not author a new lens.
-
-Re-compose the SAME subject with fresh eyes: keep the board's shape and intent, update what changed, drop what no longer holds. Be honest — do NOT invent data you cannot see; if nothing changed, re-emit the board as it stands.
-
-Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, maintainingMind?, reason? }:
-  - id: the SAME id — this updates the existing panel.
-  - carry the prior scope/maintainingMind through unchanged; set reason to a short note on what this refresh changed (e.g. "no change" or "two loops closed").
-  - do NOT pass refresh — omitting it keeps the lens's existing backing.
-Do NOT print the JSON as your reply. After the tool returns, reply with one short line on what the refresh changed.`;
-
-// The HTML lens authoring prompt: one agent turn composes a designed,
-// self-contained HTML page on a subject and emits it via chamber_emit_lens_html.
-// The design contract is the shared canvas guidance (tokens, frame rules, chart
-// rules) rather than chamber-local prose, so the page reads as part of keelson.
-const HTML_LENS_WF_PROMPT = `You are authoring an HTML LENS for Keelson's Chamber — ONE designed, self-contained HTML page on a subject, rendered live in a sandboxed iframe on the Chamber surface with no hand-coded UI.
-
-Subject: $ARGUMENTS
-
-${buildCanvasArtifactGuidance()}
-
-(In this run canvas_publish and canvas_design_guide are NOT available — the guidance above is the full contract; publish with the chamber_emit_lens_html tool instead.)
-
-Compose ONE page about the subject. Be honest — do NOT invent data you cannot see; if the subject is abstract, lay out its structure, parts, or status rather than fabricating metrics.
-
-Then call the chamber_emit_lens_html tool with { html, id, title? }:
-  - html: the complete self-contained page markup (inline all CSS/JS; theme through the token block above; the host supplies the document shell).
-  - id: a short, stable, kebab-case identifier for this subject (e.g. "release-risks") — re-emitting the same id updates the same panel.
-  - title (optional): a short human title for the panel head.
-If the tool rejects the emit (a failing palette report or a blocked external script/stylesheet), fix the markup or colors it names and call the tool again — do not drop the palette declaration to dodge the check. Do NOT print the HTML as your reply. After the tool returns, reply with one short line naming the lens you authored.`;
-
-// The standing-digest authoring prompt: one agent turn synthesizes the Chamber's
-// current shape into a canvas board and calls chamber_emit_digest to persist it. No
-// $ARGUMENTS — the digest is scheduler-driven, so the gate hands it the live state via
-// $gate.output.summary. Distinct from the Briefing (the delta banner): this is a
-// standing synthesis of what IS, not what just changed.
-const DIGEST_WF_PROMPT = `You are authoring the standing DIGEST for Keelson's Chamber — a multi-agent operating layer (Minds you author, agent-to-agent Rooms, agent-authored Lenses). The digest is a one-screen canvas \`board\` view that tells an operator what the bench's work ADDS UP TO, rendered live on the Chamber surface with no hand-coded UI. It re-composes only when the Chamber changes, so write an honest SYNTHESIS of the state below — NOT a changelog of what just happened (the Briefing covers deltas), and NOT a restatement of how many Minds / Rooms / Lenses exist (the surface shows those structurally — a count is not a synthesis).
-
-Current Chamber state:
-$gate.output.summary
-
-Compose ONE canvas board that INTERPRETS this state: what is this team working on, what has it produced, what is the one thing worth noticing. Be honest: name only what is in the state above; do NOT invent Minds, rooms, lenses, users, or metrics you cannot see. If the Chamber is sparse, keep the digest to a sentence or two rather than padding it to fill sections.
-
-The board shape:
-  { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
-Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
-Use 2-4 Section kinds, in a sensible order:
-  - stats: { "kind":"stats", "title"?:string, "items":[{ "label":string, "value":string|number, "sub"?:string, "tone"?:Tone }] }
-  - rows:  { "kind":"rows", "title"?:string, "items":[{ "text":string, "glyph"?:Tone, "trailing"?:string }] }
-  - cards: { "kind":"cards", "title"?:string, "items":[{ "title":string, "pill"?:{ "label":string, "tone"?:Tone }, "fields"?:[{ "label"?:string, "value":string|number }], "footnote"?:string }] }
-
-Then call the chamber_emit_digest tool EXACTLY ONCE with { board }: the canvas board object above. Do NOT print the JSON as your reply. After the tool returns, reply with one short line naming the digest you authored.`;
-
-// The rib's slash commands for the harness command registry (GET /api/commands).
-// /mind opens a Mind as a seeded chat; /genesis authors a new Mind from a brief.
-// All chamber vocabulary lives here — the harness knows only "a rib offered a
-// command" and performs the closed effect the invoke returns.
-const CHAMBER_COMMANDS: readonly RibCommandDescriptor[] = [
-  {
-    name: "mind",
-    description: "Open a Mind as a seeded chat",
-    argument: { hint: "<slug>", completes: true },
-  },
-  {
-    name: "genesis",
-    description: "Author a new Mind from a freeform brief",
-    argument: { hint: "<brief>" },
-  },
-  {
-    name: "lens",
-    description: "Author a lens — a canvas board on a subject",
-    argument: { hint: "<subject>" },
-  },
-];
-
-// Slug type-ahead for /mind — the Minds on the roster, filtered by prefix.
-async function completeChamberCommand(
-  name: string,
-  prefix: string,
-): Promise<readonly CommandCompletion[]> {
-  if (name !== "mind") return [];
-  return (await listAgents())
-    .filter((a) => a.slug.startsWith(prefix))
-    .map((a) => ({ value: a.slug, description: a.description }));
-}
-
-// The message effect's text is capped by the shared commandEffectSchema (8000);
-// keep the inline list under it so a large roster can't 500 the invoke route.
-const MESSAGE_TEXT_BUDGET = 7000;
-function boundedLines(header: string, rows: readonly string[]): string {
-  const out = [header];
-  let used = header.length;
-  let shown = 0;
-  for (const row of rows) {
-    if (used + 1 + row.length > MESSAGE_TEXT_BUDGET) break;
-    out.push(row);
-    used += 1 + row.length;
-    shown += 1;
-  }
-  if (shown < rows.length) out.push(`  …and ${rows.length - shown} more (type a slug to filter)`);
-  return out.join("\n");
-}
-
-// Run a chamber command server-side and return the closed effect the surface
-// performs. /mind resolves to an open-agent effect (the surface resolves the seed
-// through the agents seam), or an inline list when called with no slug; /genesis
-// to a run-workflow effect (chamber-genesis, brief as $ARGUMENTS).
-async function invokeChamberCommand(name: string, arg: string): Promise<CommandInvokeResult> {
-  const value = arg.trim();
-  if (name === "mind") {
-    const agents = await listAgents();
-    if (agents.length === 0) {
-      return {
-        ok: true,
-        effect: {
-          effect: "message",
-          text: "No Minds yet — author one with /genesis <brief>.",
-        },
-      };
-    }
-    if (value.length === 0) {
-      const rows = agents.map((a) =>
-        a.description ? `  ${a.slug} — ${a.description}` : `  ${a.slug}`,
-      );
-      return {
-        ok: true,
-        effect: { effect: "message", text: boundedLines("Minds:", rows) },
-      };
-    }
-    if (!agents.some((a) => a.slug === value)) {
-      return { ok: false, error: `No Mind "${value}".` };
-    }
-    return { ok: true, effect: { effect: "open-agent", ribId: "chamber", slug: value } };
-  }
-  if (name === "genesis") {
-    if (value.length === 0) {
-      return { ok: false, error: "usage: /genesis <brief> — describe the agent to author" };
-    }
-    return {
-      ok: true,
-      effect: { effect: "run-workflow", workflow: "chamber-genesis", args: value },
-    };
-  }
-  if (name === "lens") {
-    if (value.length === 0) {
-      return { ok: false, error: "usage: /lens <subject> — describe the lens to author" };
-    }
-    return {
-      ok: true,
-      effect: { effect: "run-workflow", workflow: "chamber-lens", args: value },
-    };
-  }
-  return { ok: false, error: `unknown command: ${name}` };
-}
 
 // The only chamber verbs an untrusted HTML-lens iframe may reach (origin
 // "canvas-html"): a no-op ack (`lens-html`) and read-only navigation to a lens
@@ -1655,275 +1399,7 @@ const rib: Rib = {
     },
   ],
 
-  // The producer: an agent turn (not a deterministic collector) emits the board,
-  // which the executor promotes to structured output and the rib binding
-  // publishes fail-closed via `validate`. This is the "an agent authors a lens"
-  // proof — zero React, no hand-coded route.
-  // Every contributed workflow declares mutates_checkout: false — chamber
-  // workflows write the rib data home and publish snapshots, never a project
-  // checkout, so the host's per-project mutation lock must not serialize them.
-  contributeWorkflows: () => [
-    {
-      // The roster producer: a deterministic collector that reads the
-      // genesis-authored Minds from the data home and emits a board of cards.
-      // Genesis mutates the data home via onAction; this refresh reflects it.
-      definition: {
-        name: "chamber-roster",
-        mutates_checkout: false,
-        description:
-          'Use when: you want to see the agents (Minds) that have been created. Triggers: "show the roster", "list agents", "what minds exist". Does: reads the genesis-authored Minds from the Chamber data home and publishes a roster board (one card per Mind) to the Chamber Roster canvas. NOT for: creating or retiring agents (genesis is the chamber-genesis workflow; retire is a roster board action).',
-        nodes: [
-          {
-            id: "collect",
-            // The collector runs out-of-process (a bash node) and can't call
-            // ctx.getDataDir, so bake the resolved data home in — captured in
-            // registerTools, which runs before this. The collector derives the minds
-            // dir, the draft, and the pulse's state dirs + watermark all from it, so
-            // both sides read one path (buildChamberState backs the pulse here too).
-            bash: `bun ${shQuote(ROSTER_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-            output_schema: { type: "object", required: ["view", "sections"] },
-          },
-        ],
-      },
-      bindSnapshotKey: ROSTER_KEY,
-      validate: expectView(ROSTER_KEY, "board"),
-    },
-    {
-      // The rooms-index producer (the chamber-roster sibling): a deterministic
-      // collector that reads the persisted rooms from the data home and emits the
-      // sessions index — active rooms first (status-only cards), then ended sessions
-      // (each with Open + Delete). A room starting/ending or a room-delete refreshes
-      // it; an active room ALSO renders as its own live per-slug panel.
-      definition: {
-        name: "chamber-rooms",
-        mutates_checkout: false,
-        description:
-          'Use when: you want to see Chamber sessions — active rooms and ended history. Triggers: "show rooms", "list sessions", "room history". Does: reads the persisted rooms from the Chamber data home and publishes a sessions index (active rooms first as status-only cards, then ended rooms each with Open + a Delete control) to the Chamber Rooms canvas. NOT for: starting a room (the Convene composer) or stopping a live room (its inline controls).',
-        nodes: [
-          {
-            id: "collect",
-            // Out-of-process (a bash node), so bake the resolved data home in —
-            // captured in registerTools, which runs before this. The collector reads
-            // both the rooms and the minds (to tone each cast name by its Mind's
-            // identity), so it bakes the home, not a single store dir (see the
-            // lenses collector).
-            bash: `bun ${shQuote(ROOMS_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-            output_schema: { type: "object", required: ["view", "sections"] },
-          },
-        ],
-      },
-      bindSnapshotKey: ROOMS_KEY,
-      validate: expectView(ROOMS_KEY, "board"),
-    },
-    {
-      // The lenses-index producer (the chamber-rooms sibling): a deterministic
-      // collector that reads the persisted lenses from the data home and emits the
-      // living-views index (one card per lens, each with Open + Retire). An author
-      // or a retire refreshes it; each lens also renders as its own live per-id
-      // panel, so this index sits alongside those, not in place of them.
-      definition: {
-        name: "chamber-lenses",
-        mutates_checkout: false,
-        description:
-          'Use when: you want a single index of the living lenses Minds have authored. Triggers: "show the lenses", "list lenses", "what lenses exist". Does: reads the persisted lenses from the Chamber data home and publishes a living-views index (one card per lens, each with Open and a Retire control) to the Chamber Lenses canvas. NOT for: authoring a lens (the chamber-lens workflow) or viewing one (each lens has its own live panel; Open focuses it).',
-        nodes: [
-          {
-            id: "collect",
-            // Out-of-process (a bash node), so bake the resolved data home in —
-            // captured in registerTools, which runs before this. The collector reads
-            // both the lenses and the minds (to tone each lens's dot by its
-            // maintaining Mind's identity), so it bakes the home, not a single store dir.
-            bash: `bun ${shQuote(LENSES_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-            output_schema: { type: "object", required: ["view", "sections"] },
-          },
-        ],
-      },
-      bindSnapshotKey: LENSES_KEY,
-      validate: expectView(LENSES_KEY, "board"),
-    },
-    {
-      // The exhibits-index producer (the chamber-lenses sibling): a deterministic
-      // collector that reads the persisted exhibit-kind records from the data home
-      // and emits the tabled-deliverables index (one card per exhibit, each with
-      // Open + Delete). A table or a delete refreshes it; each exhibit also renders
-      // as its own live per-id panel on the Exhibits shelf.
-      definition: {
-        name: "chamber-exhibits",
-        mutates_checkout: false,
-        description:
-          'Use when: you want a single index of the exhibits rooms have tabled — the deliverables discussions produced. Triggers: "show the exhibits", "list exhibits", "what did the room produce". Does: reads the persisted exhibits from the Chamber data home and publishes a tabled-deliverables index (one card per exhibit, each with Open and a Delete control) to the Chamber Exhibits canvas. NOT for: living lenses (the chamber-lenses index), tabling an exhibit (a room turn calls chamber_table_exhibit), or viewing one (each exhibit has its own live panel; Open focuses it).',
-        nodes: [
-          {
-            id: "collect",
-            // Out-of-process (a bash node), so bake the resolved data home in —
-            // captured in registerTools, which runs before this (see the lenses
-            // collector).
-            bash: `bun ${shQuote(EXHIBITS_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-            output_schema: { type: "object", required: ["view", "sections"] },
-          },
-        ],
-      },
-      bindSnapshotKey: EXHIBITS_KEY,
-      validate: expectView(EXHIBITS_KEY, "board"),
-    },
-    {
-      // The digest producer (agent-turn arm of the standing-lens cost guard): a
-      // SELF-GATING bound workflow that re-authors a standing digest board with an
-      // agent turn, but spends that turn only when the Chamber changed. `gate` (a cheap
-      // bash read) emits { dirty, summary }; `author` runs ONLY when dirty (its `when:`),
-      // composing the board from the gate's summary and persisting it via
-      // chamber_emit_digest (which advances the fingerprint); `publish` always runs
-      // (trigger_rule all_done) and re-reads the store to drive the key. The store it
-      // writes (digest.json) is what the Briefing banner's Digest register reads — the
-      // digest no longer has a standing surface region of its own. It is MUTATION-DRIVEN,
-      // not polled: refreshStandingPanels nudges it on every Chamber mutation (exactly
-      // when the fingerprint can have changed), and the fingerprint gate keeps a no-op
-      // nudge free. Trade-off vs the old 120s poll: a failed authoring self-heals on the
-      // NEXT mutation rather than the next tick (a standing synthesis, so a brief
-      // staleness after a rare failed turn is acceptable).
-      definition: {
-        name: "chamber-digest",
-        mutates_checkout: false,
-        description:
-          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it to the store the Briefing banner\'s Digest register reads. Nudged by the rib on each Chamber mutation, but spends a turn only when the Chamber changed. NOT for: the deterministic record feed, the delta Briefing, or authoring a Mind/room/lens.',
-        nodes: [
-          {
-            id: "gate",
-            // Out-of-process (a bash node), so bake the resolved data home in —
-            // captured in registerTools, which runs before this (see the roster
-            // collector). Emits { dirty, summary }; NO output_schema, so it stays text
-            // output and never republishes to the key — it only drives `when:` and feeds
-            // the author its source via $gate.output.summary.
-            bash: `bun ${shQuote(DIGEST_GATE_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-          },
-          {
-            id: "author",
-            depends_on: ["gate"],
-            // The cost guard: the paid turn runs ONLY when the gate saw a change. A
-            // false/absent dirty (a quiet tick, or a failed gate) skips this node — no
-            // turn — so a quiet Chamber never spends one.
-            when: "$gate.output.dirty == 'true'",
-            prompt: DIGEST_WF_PROMPT,
-            // chamber_emit_digest validates the board fail-closed; fail_on_tool_error
-            // surfaces a bad authoring as a FAILED author node (visible in the run's
-            // node rows) rather than a SUCCEEDED turn that wrote nothing. The run itself
-            // is not failed — the always-on publish below rescues it (trigger_rule
-            // all_done), so a transient bad turn never errors the nudged run, and the
-            // un-advanced fingerprint drives a re-author on the next mutation-nudge.
-            fail_on_tool_error: true,
-            // Rib tools are default-off in workflow prompt nodes; opt in to the single
-            // write seam by name (and nothing else).
-            allowed_tools: [DIGEST_TOOL_NAME],
-          },
-          {
-            id: "publish",
-            depends_on: ["author"],
-            // all_done, not the default all_success: publish must run whether author ran
-            // (dirty), was skipped (quiet), or failed — so the key re-publishes the
-            // cached board and a failed authoring self-heals (the fingerprint stays
-            // un-advanced, so the next mutation-nudge re-authors).
-            trigger_rule: "all_done",
-            bash: `bun ${shQuote(DIGEST_PUBLISH_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-            output_schema: { type: "object", required: ["view", "sections"] },
-          },
-        ],
-      },
-      bindSnapshotKey: DIGEST_KEY,
-      validate: expectView(DIGEST_KEY, "board"),
-    },
-    {
-      // Genesis as a workflow: one prompt turn authors the soul and calls
-      // chamber_emit_genesis to persist it. No bindSnapshotKey/validate — genesis
-      // writes files (the roster collector reflects them), it does not publish a
-      // board. allowed_tools scopes the turn to the single write seam: rib tools are
-      // default-off in workflow prompt nodes, so it must opt in by name.
-      definition: {
-        name: "chamber-genesis",
-        mutates_checkout: false,
-        description:
-          'Use when: create a new agent (Mind). Triggers: "create an agent", "new mind", "/workflow run chamber-genesis <brief>". Does: one agent turn reads a brief, authors a SOUL.md + roster tagline, and persists the Mind via chamber_emit_genesis. NOT for: retiring a Mind or running a room.',
-        nodes: [
-          {
-            id: "genesis",
-            prompt: GENESIS_WF_PROMPT,
-            // Fail closed: chamber_emit_genesis writes the Mind and fails closed
-            // on a slug collision; fail_on_tool_error makes that tool error fail
-            // the run instead of reporting SUCCEEDED with no Mind written (#18).
-            fail_on_tool_error: true,
-            allowed_tools: ["chamber_emit_genesis"],
-          },
-        ],
-      },
-    },
-    {
-      // The lens producer: one agent turn composes a board for the subject and calls
-      // chamber_emit_lens to publish it. No bindSnapshotKey — the per-subject key is
-      // chosen at run time by the tool, not pinned to one static key.
-      definition: {
-        name: "chamber-lens",
-        mutates_checkout: false,
-        description:
-          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber Briefing (the rib-driven banner), genesis-ing agents, or running a room.',
-        nodes: [
-          {
-            id: "compose",
-            prompt: LENS_WF_PROMPT,
-            // Fail closed: chamber_emit_lens validates the board and the workflow
-            // should fail loudly if the publish errors, not report SUCCEEDED with
-            // no lens rendered.
-            fail_on_tool_error: true,
-            allowed_tools: [LENS_TOOL_NAME],
-          },
-        ],
-      },
-    },
-    {
-      // The generic living-lens re-author: the refresh backing a lens gets when
-      // its emit names no workflow of its own. Runs with input `lens` (the record
-      // id); the turn re-reads the record and re-emits under the same id. No
-      // bindSnapshotKey — the emit tool republishes the per-subject key itself,
-      // and the region-declared /refresh gate admits unbound workflows.
-      definition: {
-        name: LENS_REFRESH_WORKFLOW,
-        mutates_checkout: false,
-        description:
-          'Use when: re-compose a LIVING lens so its content is current — the refresh backing behind a lens authored with refresh set. Triggers: a lens panel\'s cadence or Refresh action (input `lens` = the lens id); "/workflow run chamber-lens-refresh" with inputs lens=<id>. Does: one agent turn re-reads the persisted lens and re-emits a fresh board under the same id via chamber_emit_lens. NOT for: authoring a new lens (chamber-lens), exhibits (a tabled deliverable never refreshes), or the standing Chamber Briefing.',
-        inputs: { lens: { description: "the lens id to re-compose", required: true } },
-        nodes: [
-          {
-            id: "refresh",
-            prompt: LENS_REFRESH_WF_PROMPT,
-            // Fail closed like chamber-lens: a rejected emit must fail the run,
-            // not report SUCCEEDED with a stale panel.
-            fail_on_tool_error: true,
-            allowed_tools: ["chamber_list_lenses", LENS_TOOL_NAME],
-          },
-        ],
-      },
-    },
-    {
-      // The HTML lens producer (the chamber-lens sibling): one agent turn composes
-      // a designed, self-contained HTML page for the subject and emits it via
-      // chamber_emit_lens_html. No bindSnapshotKey — the per-subject key is chosen
-      // at run time by the tool.
-      definition: {
-        name: "chamber-lens-html",
-        mutates_checkout: false,
-        description:
-          'Use when: have an agent author a designed HTML LENS — a self-contained, token-themed page on a subject — rendered in a sandboxed iframe on the Chamber surface. Triggers: "author an html lens", "design a page on X", "/workflow run chamber-lens-html <subject>". Does: one agent turn composes a self-contained HTML page for the subject (keelson design tokens, validated palette) and publishes it as its own Chamber lens panel via chamber_emit_lens_html. NOT for: structured canvas boards (the chamber-lens workflow), the standing Chamber Briefing, genesis-ing agents, or running a room.',
-        nodes: [
-          {
-            id: "compose",
-            prompt: HTML_LENS_WF_PROMPT,
-            // Deliberately NO fail_on_tool_error: a rejected palette or blocked
-            // external resource is the retry signal — the turn reads the isError
-            // report, fixes the markup, and emits again within the same node.
-            allowed_tools: [HTML_LENS_TOOL_NAME],
-          },
-        ],
-      },
-    },
-  ],
+  contributeWorkflows: contributeChamberWorkflows,
 
   // Boot-time wiring of the room loop. Builds the driver against the real seams:
   // runAgentTurn (C1) for the turns, the per-slug room region registry as the
@@ -2693,43 +2169,6 @@ async function validateStart(
   }
   if (managerConfigErrors.length > 0) return validationFailure(managerConfigErrors);
   return { ok: true, participants: deduped };
-}
-
-// The convene form's free-text criteria (one per line) split into a trimmed list.
-function parseCriteriaLines(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-// Bounds on a grounding brief. It is re-serialized into every turn, fidelity, and
-// synthesis prompt, so an unbounded brief would multiply billed input and can exhaust
-// context — cap the count and lengths at the normalization choke point (both entry
-// points pass through here) rather than trust the caller.
-const MAX_GROUNDING_CRITERIA = 20;
-const MAX_CRITERION_LEN = 500;
-const MAX_GROUNDING_URL_LEN = 500;
-
-// Normalize a room grounding brief from either entry point (the chamber_room_start
-// tool's structured input or the convene form's parsed fields) into the shared Brief
-// shape, or undefined when it carries neither a source nor any criterion — so a room
-// convened without grounding is byte-for-byte unchanged.
-export function normalizeGrounding(
-  input: { sourceUrl?: string; criteria?: readonly string[] } | undefined,
-): Brief | undefined {
-  if (!input) return undefined;
-  const sourceUrl = input.sourceUrl?.trim().slice(0, MAX_GROUNDING_URL_LEN) || undefined;
-  // Collapse internal whitespace so each criterion is a single line: the convene form is
-  // one-per-line and the restart payload rejoins with newlines, so an embedded newline
-  // would otherwise split one criterion into two on the round trip.
-  const criteria = (input.criteria ?? [])
-    .map((c) => c.trim().replace(/\s+/g, " ").slice(0, MAX_CRITERION_LEN))
-    .filter(Boolean)
-    .slice(0, MAX_GROUNDING_CRITERIA);
-  if (!sourceUrl && criteria.length === 0) return undefined;
-  return { ...(sourceUrl ? { sourceUrl } : {}), criteria };
 }
 
 // Open a fresh-slug room and kick its auto-advance loop. The shared core behind
