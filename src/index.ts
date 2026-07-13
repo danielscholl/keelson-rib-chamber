@@ -2,7 +2,6 @@ import type {
   Brief,
   CanvasBoardView,
   CanvasView,
-  Project,
   Rib,
   RibAction,
   RibActionResult,
@@ -25,8 +24,6 @@ import {
   z,
 } from "@keelson/shared";
 import { listAgents, resolveAgent } from "./agents.ts";
-import { buildConveneBoard, type ConveneProject } from "./boards/convene.ts";
-import { buildChamberBoard } from "./boards/presence.ts";
 import { buildRoomBoard } from "./boards/room.ts";
 import {
   bindBriefGate,
@@ -109,17 +106,7 @@ import {
   roomsDir,
   setChamberDataHome,
 } from "./paths.ts";
-import {
-  appendPendingGenesis,
-  clearPendingGenesis,
-  FUTURE_SKEW_MS,
-  GENESIS_STALL_MS,
-  type PendingGenesis,
-  pendingElapsedMs,
-  readPendingGeneses,
-  removeLandedGenesis,
-  removePendingGenesisAt,
-} from "./pending-genesis.ts";
+import { clearPendingGenesis, removePendingGenesisAt } from "./pending-genesis.ts";
 import type { RoomStore } from "./ports.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import {
@@ -138,6 +125,24 @@ import { createFileRoomStore, deriveRoomName, listRooms, sweepClosedRooms } from
 import type { OutcomeSplit } from "./room-text.ts";
 import { splitOutcome } from "./room-text.ts";
 import { DEFAULT_END_VOTE_THRESHOLD, stripControlJson } from "./routing.ts";
+import {
+  beginGenesis,
+  bindRuntime,
+  disposeRuntime,
+  getHostRefreshWorkflow,
+  invalidateRoster,
+  refreshConvene,
+  refreshStandingPanels,
+  refreshWorkflow,
+  resolveMindByNameOrId,
+  resolveMinds,
+  resolveProject,
+  resolveProjectInput,
+  resolveProjectName,
+  resolveProjectRoot,
+  settleGenesis,
+  stopGenesisTick,
+} from "./runtime.ts";
 import { GENESIS_STARTERS } from "./starters.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { renderTranscript } from "./transcript.ts";
@@ -194,48 +199,6 @@ const roomViewEntries = new Map<
   string,
   { publisher: { publish(view: CanvasView): Promise<void> }; unregister: () => void }
 >();
-// The refresh seam, captured in registerTools (the only hook with the full ctx) so
-// onAction handlers can re-run a bound collector on demand instead of waiting on
-// cadence — room-delete uses it to drop a deleted session's card. Optional and
-// fail-soft: undefined on an older harness, where the index falls back to cadence.
-let refreshWorkflow: RibContext["refreshWorkflow"];
-// The genuine host refresh seam (undefined on a harness without it), kept apart from
-// the always-defined `refreshWorkflow` fan-out above so a capability check — can the
-// host run a workflow at all? (the lens Refresh verb) — still reads true host support,
-// not the fan-out that always exists once registerTools has run.
-let hostRefreshWorkflow: RibContext["refreshWorkflow"];
-
-// Fan a Chamber mutation out to the one narrator (the Briefing banner). Nudge the
-// standing-digest gate — mutation-driven now, not a 120s poll, since every Chamber
-// mutation flows through the rib, so the gate re-evaluates exactly when the fingerprint
-// can have changed (and still spends a paid turn ONLY when it actually did) — then
-// re-publish the banner so its record + digest registers reflect the change. The delta
-// register rides its own attention gate (evaluateBriefGate).
-async function refreshStandingPanels(): Promise<void> {
-  await refreshWorkflow?.("chamber-digest")?.catch(() => {});
-  await publishBriefing();
-}
-
-// The genesis boot-card ticker. While a genesis runs (a pending-genesis marker on disk),
-// the rib recomposes the Chamber panel every GENESIS_TICK_MS so the boot card's elapsed
-// count advances and the live head dot pulses (keelson#353 — streaming is derived from
-// frame cadence). An in-process recompose, not a chamber-roster workflow run — the panel
-// reads the marker itself, so ticking must not spawn a collector subprocess ~72 times per
-// genesis. Ticking is bounded to the stall window: a wedged genesis stops ticking and the
-// panel shows the stalled card + Dismiss. All timers unref so they never hold the process
-// open, and stopGenesisTick clears them on emit / dismiss / dispose.
-const GENESIS_TICK_MS = 2_500;
-let genesisTicker: ReturnType<typeof setInterval> | undefined;
-let genesisTickerDeadline: ReturnType<typeof setTimeout> | undefined;
-// Bumped by every stopGenesisTick (emit / dismiss / dispose / a fresh start), so an
-// async continuation that read the marker before the stop can prove its read is
-// still current before starting the ticker.
-let genesisTickEpoch = 0;
-
-function tickChamber(): void {
-  refreshPresence();
-}
-
 // The rooms-index ticker. The index card's bar reads room.turnIndex/turnBudget,
 // which commitActive persists every turn — but the index is a bound collector that
 // only recomposes on a room lifecycle change (start/end/delete), so a live room's
@@ -249,7 +212,7 @@ let roomsTicker: ReturnType<typeof setInterval> | undefined;
 function startRoomsTick(): void {
   if (roomsTicker) return;
   roomsTicker = setInterval(() => {
-    void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    void refreshWorkflow("chamber-rooms").catch(() => {});
   }, ROOMS_TICK_MS);
   roomsTicker.unref?.();
 }
@@ -259,174 +222,11 @@ function stopRoomsTick(): void {
   roomsTicker = undefined;
 }
 
-// `deadlineMs` bounds the tick to the stall budget REMAINING — a fresh genesis gets
-// the full window; the boot reconcile passes what's left on the marker's own clock so
-// a near-stalled marker doesn't earn three extra minutes of pulsing.
-function startGenesisTick(deadlineMs: number = GENESIS_STALL_MS): void {
-  stopGenesisTick();
-  tickChamber(); // show the boot card at once
-  genesisTicker = setInterval(tickChamber, GENESIS_TICK_MS);
-  genesisTicker.unref?.();
-  genesisTickerDeadline = setTimeout(() => {
-    tickChamber(); // one last frame flips the card to its stalled state
-    if (genesisTicker) clearInterval(genesisTicker);
-    genesisTicker = undefined;
-  }, deadlineMs);
-  genesisTickerDeadline.unref?.();
-}
-
-function stopGenesisTick(): void {
-  genesisTickEpoch++;
-  if (genesisTicker) clearInterval(genesisTicker);
-  if (genesisTickerDeadline) clearTimeout(genesisTickerDeadline);
-  genesisTicker = undefined;
-  genesisTickerDeadline = undefined;
-}
-
-// Begin a genesis: append a pending marker (name/role known for a starter, absent for
-// a freeform brief) and (re)start the boot-card tick — markers are a list, so parallel
-// geneses each keep their own boot card. Fail-soft — a marker write failure just skips
-// the boot card, never blocks the genesis workflow the caller is about to launch.
-async function beginGenesis(info: { name?: string; role?: string }): Promise<void> {
-  try {
-    const marker: PendingGenesis = {
-      startedAt: new Date().toISOString(),
-      ...(info.name ? { name: info.name } : {}),
-      ...(info.role ? { role: info.role } : {}),
-    };
-    await appendPendingGenesis(marker);
-    startGenesisTick();
-  } catch (e) {
-    console.error(`[rib-chamber] pending-genesis write failed: ${errText(e)}`);
-  }
-}
-
-// A genesis landed: settle ITS marker (matched by authored name, else the oldest
-// freeform marker — see removeLandedGenesis) and stop the tick only when no other
-// genesis is still in flight, so a sibling's boot card keeps pulsing. Fail-soft.
-async function settleGenesis(name: string): Promise<void> {
-  // A marker-store failure must not be read as "nothing left" — that stops the
-  // ticker while sibling boot cards are still pending and never lets them reach the
-  // stalled/Dismiss state. Stop only after a real removal reports none remain.
-  try {
-    const remaining = await removeLandedGenesis(name);
-    if (remaining.length === 0) stopGenesisTick();
-  } catch {
-    // leave the ticker running; siblings may still be in flight
-  }
-}
-
 // Serialize genesis slot allocation + scaffold across parallel landings. nextFreeSlot
 // reads the roster snapshot, so two emits that read the same free slot before either
 // scaffolds would persist a duplicate hue. Each scaffold invalidates the roster, so
 // the next serialized landing re-reads and takes the next free slot.
 let genesisScaffoldInFlight: Promise<unknown> = Promise.resolve();
-// The host projects lookup, captured in registerTools and cleared in dispose (like
-// refreshWorkflow). Undefined on a harness that predates RibContext.getProjects,
-// where a projectId is rejected at start (fail closed) rather than targeting nothing.
-let getProjects: RibContext["getProjects"];
-
-// The one place a projectId is matched against the host list, so start-time
-// validation and the driver's per-turn cwd agree on what an id means.
-function resolveProject(projectId: string): Project | undefined {
-  return getProjects?.().find((p) => p.id === projectId);
-}
-function resolveProjectRoot(projectId: string): string | undefined {
-  return resolveProject(projectId)?.rootPath;
-}
-function resolveProjectName(projectId: string): string | undefined {
-  return resolveProject(projectId)?.name;
-}
-// A free-text project reference (id or name, case-insensitive) resolved against
-// the host's project list — the same "id or name" convention squad's tools use
-// for project selection, since a board action field is free text, not a picker.
-function resolveProjectByNameOrId(input: string): Project | undefined {
-  const projects = getProjects?.() ?? [];
-  const trimmed = input.trim();
-  return (
-    projects.find((p) => p.id === trimmed) ??
-    projects.find((p) => p.name.toLowerCase() === trimmed.toLowerCase())
-  );
-}
-
-// Resolve a free-text project reference (id or name) to its canonical Project, or a
-// uniform "unknown project" error that names where a valid id comes from. The two
-// free-text entry points — the Convene board field and the chamber_room_start tool arg —
-// resolve through here rather than accepting an id alone (the room-start action forwards
-// an existing room's already-canonical id, so it skips this).
-function resolveProjectInput(
-  input: string,
-): { ok: true; project: Project } | { ok: false; error: string } {
-  const project = resolveProjectByNameOrId(input);
-  if (!project) {
-    return {
-      ok: false,
-      error: `unknown project "${input}" — pass a project id or name from the host's project list (run \`keelson project list\`)`,
-    };
-  }
-  return { ok: true, project };
-}
-
-// Resolve a Convene composer's moderator/manager field (free text, id or name,
-// case-insensitive) to a Mind slug — the same convention the project field uses,
-// since a board action field is free text, not a picker. Returns the slug or
-// undefined; the caller surfaces an unresolvable value rather than dropping it.
-function resolveMindByNameOrId(minds: readonly Mind[], input: string): string | undefined {
-  const trimmed = input.trim();
-  return (
-    minds.find((m) => m.slug === trimmed)?.slug ??
-    minds.find((m) => m.name.toLowerCase() === trimmed.toLowerCase())?.slug
-  );
-}
-
-// The Convene composer is an in-process snapshot (like the Briefing banner, not a
-// bound collector) because its shape gating and project picker need the host's live
-// project list — an out-of-process collector can't reach ctx.getProjects. Registered
-// in registerTools and recomposed whenever the Minds it draws chips + capability
-// gating from change (the refreshWorkflow wrapper below) or on a draft/convene mutation.
-let conveneSm: SnapshotManager | undefined;
-let conveneUnregister: (() => void) | undefined;
-
-async function composeConveneBoard(): Promise<CanvasView> {
-  const [minds, excluded, rooms] = await Promise.all([
-    readMinds(mindsDir()).catch(() => [] as Mind[]),
-    readDraftExclusion().catch(() => new Set<string>()),
-    listRooms(roomsDir()).catch(() => [] as Room[]),
-  ]);
-  const projects: ConveneProject[] = (getProjects?.() ?? []).map((p) => ({
-    id: p.id,
-    name: p.name,
-  }));
-  return buildConveneBoard(minds, excluded, projects, rooms.length);
-}
-
-// Fire-and-forget recompose of the Convene board. No-op until registerTools has bound
-// it to a snapshot manager (fail closed on an older harness).
-function refreshConvene(): void {
-  void conveneSm?.recompose(CONVENE_KEY).catch(() => {});
-}
-
-// The Chamber panel leads the surface: an in-process board (like Convene) reading the
-// bench + rooms + the pending-genesis marker, so seats, status footers, the live pulse,
-// and the boot card all track mutations. Recomposed whenever a roster or rooms refresh
-// fires (the refreshWorkflow wrapper) — which is also how the genesis/rooms tickers
-// advance it. Fail closed on an older harness (no snapshot manager).
-let presenceSm: SnapshotManager | undefined;
-let presenceUnregister: (() => void) | undefined;
-
-async function composePresenceBoard(): Promise<CanvasView> {
-  const [minds, rooms, pending] = await Promise.all([
-    readMinds(mindsDir()).catch(() => [] as Mind[]),
-    listRooms(roomsDir()).catch(() => [] as Room[]),
-    readPendingGeneses(),
-  ]);
-  return buildChamberBoard(minds, rooms, pending);
-}
-
-function refreshPresence(): void {
-  void presenceSm?.recompose(PRESENCE_KEY).catch(() => {});
-}
-
 // The reflection gate's seams + state, captured in registerTools alongside the brief
 // gate's. reflectRunAgentTurn is the (paid) turn each participating Mind runs at a
 // room's close to curate its own memory.md; undefined when the agent-turn seam is
@@ -458,27 +258,6 @@ let lastSlug: string | undefined;
 export const MAX_ACTIVE_ROOMS = 6;
 let roomRetentionSweep = Promise.resolve();
 
-// The roster the driver resolves a speaker's persona from each turn. Cached
-// because it only changes when a Mind is created (the genesis tool) or retired
-// (onAction); re-reading every mind dir per turn is avoidable disk I/O.
-// invalidateRoster() clears it on any mutation and dispose() resets it, so a fresh
-// boot re-reads. Assumes a fixed workspace per process — the cache is not keyed on
-// KEELSON_WORKSPACE.
-let roster: readonly Mind[] | undefined;
-async function resolveMinds(): Promise<readonly Mind[]> {
-  if (roster) return roster;
-  const minds = await readMinds(mindsDir());
-  // Only memoize a non-empty read: readMinds returns [] both for "no minds yet"
-  // and for a transient readdir error, so caching [] would stick an empty roster
-  // (every speaker -> "unknown mind", ending each room) until the next mutation.
-  // Re-reading an empty dir each turn is cheap and self-heals once minds appear.
-  if (minds.length > 0) roster = minds;
-  return minds;
-}
-function invalidateRoster(): void {
-  roster = undefined;
-}
-
 function queueRoomRetentionSweep(): void {
   const root = roomsDir();
   roomRetentionSweep = roomRetentionSweep.then(
@@ -494,7 +273,7 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
     // standing panels (like the user-initiated room-delete) so an evicted room stops
     // showing instead of lingering until the 120s cadence.
     if (removed.length > 0) {
-      await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+      await refreshWorkflow("chamber-rooms").catch(() => {});
       await refreshStandingPanels();
     }
   } catch (e) {
@@ -1025,38 +804,15 @@ const rib: Rib = {
     // leave it uncaptured: chamberDataHome() lazily resolves ribDataDir("chamber").
     const dataDir = ctx.getDataDir?.();
     if (dataDir) setChamberDataHome(dataDir);
-    // Capture the refresh seam for onAction handlers (room-delete refreshes the
-    // sessions index). dispose() clears it so a re-boot recaptures the new ctx's.
-    // Wrapped so any roster refresh (genesis, retire, set-model — a Mind or its
-    // provider changed) also recomposes the in-process Convene board, whose chips +
-    // capability gating draw from the same Minds; draft-set / convene call
-    // refreshConvene directly. The Presence ribbon draws from both the bench and the
-    // rooms, so recompose it on either a roster or a rooms refresh.
-    const rawRefresh = ctx.refreshWorkflow;
-    hostRefreshWorkflow = rawRefresh;
-    // Always defined, even when the host has no refresh seam: Convene and Presence are
-    // cadence-free in-process boards, so their local recompose must fire on a
-    // roster/rooms mutation regardless — else they would freeze at their first snapshot
-    // on a host that provides a snapshot manager but no refreshWorkflow.
-    refreshWorkflow = (name, inputs) => {
-      if (name === "chamber-roster") refreshConvene();
-      if (name === "chamber-roster" || name === "chamber-rooms") refreshPresence();
-      return rawRefresh?.(name, inputs) ?? Promise.resolve();
-    };
-    // Capture the host projects lookup so a room can be targeted at a project
-    // (per-room turn cwd = project.rootPath). dispose() clears it like the above.
-    getProjects = ctx.getProjects;
     // Same for the reflection gate: a fresh controller so a re-boot's reflection
     // turns aren't pre-aborted, while any orphaned pre-dispose turn stays gated out.
     reflectAbort = new AbortController();
     // The genesis write seam is always available: genesis is a workflow whose
     // prompt node calls chamber_emit_genesis, and the write needs no room driver.
     // The room-control tools (and the driver) require the C1 agent-turn + snapshot
-    // seams, so they only appear when those are present.
-    // Pass the refresh seam so a genesis write re-runs the bound chamber-roster
-    // collector (republishing the roster), not just the 120s cadence. Optional and
-    // fail-soft: undefined on an older harness, where genesis falls back to cadence.
-    const genesisTool = makeGenesisTool(refreshWorkflow);
+    // seams, so they only appear when those are present. The tool re-runs the bound
+    // chamber-roster collector via the module-level refreshWorkflow (fail-soft).
+    const genesisTool = makeGenesisTool();
     // The digest write seam is always available, like genesis: it only writes the
     // digest store (no snapshot/turn seam needed), and the chamber-digest workflow's
     // author node opts in to it by name.
@@ -1079,50 +835,10 @@ const rib: Rib = {
     // (unconditional) and, when the snapshot + agent-turn seams are present, wires the
     // coalescing BRIEF_KEY publisher and seeds the banner. See bindBriefGate.
     bindBriefGate({ sm, runAgentTurn: run });
-    // The Convene composer: an in-process board (needs getProjects) registered on the
-    // snapshot manager and primed once; rebound onto a new manager on a re-bootstrap.
-    if (sm && sm !== conveneSm) {
-      conveneUnregister?.();
-      conveneUnregister = sm.register(CONVENE_KEY, composeConveneBoard, {
-        validate: expectView(CONVENE_KEY, "board"),
-      });
-      conveneSm = sm;
-      void sm.recompose(CONVENE_KEY);
-    }
-    // The Chamber panel: an in-process board (reads the bench + rooms + the pending
-    // marker) registered on the snapshot manager and primed once; rebound onto a new
-    // manager on a re-boot, like Convene.
-    if (sm && sm !== presenceSm) {
-      presenceUnregister?.();
-      presenceUnregister = sm.register(PRESENCE_KEY, composePresenceBoard, {
-        validate: expectView(PRESENCE_KEY, "board"),
-      });
-      presenceSm = sm;
-      void sm.recompose(PRESENCE_KEY);
-      // A crash can orphan a pending-genesis marker (only graceful dispose clears it),
-      // and no cadence re-reads the in-process panel — the boot card would freeze short
-      // of its stalled Dismiss. Restart the tick for the stall budget REMAINING on the
-      // marker's own clock (an already-stalled or unparseable marker gets one frame —
-      // it composes straight to Dismiss). The epoch check guards the async gap: an
-      // emit / dismiss / dispose landing between the read and this callback bumps it,
-      // so a settled genesis can never resurrect the ticker.
-      const epoch = genesisTickEpoch;
-      void readPendingGeneses().then((markers) => {
-        if (markers.length === 0 || epoch !== genesisTickEpoch) return;
-        const now = Date.now();
-        // The freshest marker's remaining budget bounds the tick — older siblings
-        // flip to their stalled card mid-tick on their own clocks.
-        const freshest = Math.max(
-          ...markers.map((m) => GENESIS_STALL_MS - pendingElapsedMs(m, now)),
-        );
-        if (freshest <= 0) refreshPresence();
-        // + FUTURE_SKEW_MS: a marker up to the skew tolerance in the future clamps
-        // elapsed to 0, so the deadline must outlast the card's own clock reaching
-        // the stall — the final tick has to compose the stalled card, never stop
-        // one frame short of its Dismiss.
-        else startGenesisTick(freshest + FUTURE_SKEW_MS);
-      });
-    }
+    // The cross-cutting host seams (refresh fan-out + projects lookup) and the in-process
+    // Convene + Chamber panels: bindRuntime captures the seams, registers the panels on
+    // the snapshot manager, and reconciles a crashed genesis's boot card. See src/runtime.ts.
+    bindRuntime({ refreshWorkflow: ctx.refreshWorkflow, getProjects: ctx.getProjects, sm });
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —
     // independent of the room's C1 agent-turn seam (the room tools below additionally
@@ -1363,19 +1079,10 @@ const rib: Rib = {
     activeRooms.clear();
     lastSlug = undefined;
     stopRoomsTick();
-    // A genesis can't survive the process — stop its tick and clear the marker so a
-    // re-boot doesn't render a boot card for a workflow that died with the old process.
-    stopGenesisTick();
-    await clearPendingGenesis().catch(() => {});
-    refreshWorkflow = undefined;
-    hostRefreshWorkflow = undefined;
-    getProjects = undefined;
-    conveneUnregister?.();
-    conveneUnregister = undefined;
-    conveneSm = undefined;
-    presenceUnregister?.();
-    presenceUnregister = undefined;
-    presenceSm = undefined;
+    // The runtime cluster (genesis tick + marker, host seams, Convene/Chamber panels,
+    // roster cache): stop its tick, clear the marker, drop the seams so a post-dispose
+    // refresh no-ops, unregister the panels, and reset the roster cache. See src/runtime.ts.
+    await disposeRuntime();
     disposeBriefGate();
     // Abort in-flight reflection and drain its writes so a late memory write can't
     // land after teardown; reset the per-Mind write chains for the next boot.
@@ -1383,7 +1090,6 @@ const rib: Rib = {
     reflectAbort.abort();
     await Promise.allSettled([...reflectWrites.values()]);
     reflectWrites.clear();
-    invalidateRoster();
     // Drain any in-flight lens write-back before tearing down the registry, so a
     // late load-append-publish can't publish to a disposed registry or interleave
     // with a re-boot's writes.
@@ -1450,12 +1156,12 @@ function ensureLoop(slug: string): void {
       // The room just became a closed session — refresh the index so its card
       // appears promptly instead of on the next cadence. Fail-soft, never thrown
       // into the detached loop.
-      void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+      void refreshWorkflow("chamber-rooms").catch(() => {});
       // A newly-ended room is briefing substance: evaluate the gate (it runs a turn
       // only if the watermark hasn't seen this room) and refresh the roster so its
       // pulse counts/for-you update promptly. Both fire-and-forget — never thrown.
       void evaluateBriefGate().catch(() => {});
-      void refreshWorkflow?.("chamber-roster")?.catch(() => {});
+      void refreshWorkflow("chamber-roster").catch(() => {});
       void refreshStandingPanels();
     }
   })();
@@ -1811,7 +1517,7 @@ async function startRoom(
     // The sessions index is a separate snapshot from the room's own panel — refresh
     // it so the new active session appears promptly instead of on the next cadence
     // (mirrors the end-of-room refresh). Fail-soft, never thrown.
-    void refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    void refreshWorkflow("chamber-rooms").catch(() => {});
     void refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -1857,7 +1563,7 @@ async function stopRoom(slug: string): Promise<RibActionResult> {
     reconcileRoomPanels();
     // The room is now a closed session — refresh the index so it appears as a card
     // (fail-soft; cadence covers an older harness without the seam).
-    await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    await refreshWorkflow("chamber-rooms").catch(() => {});
     await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -2043,7 +1749,7 @@ async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
     // older harness, where the 120s cadence drops the card).
     if (lastSlug === slug) lastSlug = undefined;
     reconcileRoomPanels();
-    await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+    await refreshWorkflow("chamber-rooms").catch(() => {});
     await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -2185,8 +1891,8 @@ async function outcomeExploreAction(action: RibAction): Promise<RibActionResult>
 // independent and each fail-soft) so neither goes stale after a mutation.
 async function refreshExhibitIndexes(): Promise<void> {
   await Promise.all([
-    refreshWorkflow?.("chamber-exhibits")?.catch(() => {}),
-    refreshWorkflow?.("chamber-rooms")?.catch(() => {}),
+    refreshWorkflow("chamber-exhibits").catch(() => {}),
+    refreshWorkflow("chamber-rooms").catch(() => {}),
   ]);
 }
 
@@ -2260,10 +1966,10 @@ async function deleteRecordOfKind(
       // A room card listing this exhibit as tabled must drop the dead link.
       await refreshExhibitIndexes();
     } else {
-      await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+      await refreshWorkflow("chamber-lenses").catch(() => {});
       // The retired lens drops from the roster pulse's "Live views" count too —
       // refresh it so the count matches the just-updated index.
-      await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+      await refreshWorkflow("chamber-roster").catch(() => {});
     }
     await refreshStandingPanels();
     return { ok: true, id, key: lensKey(id) };
@@ -2347,6 +2053,7 @@ async function refreshLensAction(action: RibAction): Promise<RibActionResult> {
   const got = lensActionId(action, "refresh-lens");
   if ("error" in got) return { ok: false, error: got.error };
   const { id } = got;
+  const hostRefreshWorkflow = getHostRefreshWorkflow();
   if (!hostRefreshWorkflow) {
     return { ok: false, error: "workflow refresh unavailable on this harness" };
   }
@@ -2462,10 +2169,10 @@ async function lensNoteAction(action: RibAction): Promise<RibActionResult> {
       // lens, the roster pulse; exhibits don't ride the "Live views" count), cheap
       // deterministic collectors, fail-soft like the emit/retire paths.
       if (isExhibit(record)) {
-        await refreshWorkflow?.("chamber-exhibits")?.catch(() => {});
+        await refreshWorkflow("chamber-exhibits").catch(() => {});
       } else {
-        await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
-        await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+        await refreshWorkflow("chamber-lenses").catch(() => {});
+        await refreshWorkflow("chamber-roster").catch(() => {});
       }
       await refreshStandingPanels();
       return { ok: true, data: { id, key } };
@@ -2628,7 +2335,7 @@ async function dismissGenesisAction(action?: RibAction): Promise<RibActionResult
   } catch {
     // leave the ticker running; a still-present marker keeps ticking to Dismiss
   }
-  await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+  await refreshWorkflow("chamber-roster").catch(() => {});
   return { ok: true };
 }
 
@@ -2639,7 +2346,7 @@ async function retireAction(action: RibAction): Promise<RibActionResult> {
   try {
     await retireMind(mindsDir(), slug);
     invalidateRoster(); // a Mind is gone — drop it from the cached roster
-    await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+    await refreshWorkflow("chamber-roster").catch(() => {});
     await refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
@@ -2656,7 +2363,9 @@ async function setModelAction(action: RibAction): Promise<RibActionResult> {
   try {
     await setMindModel(mindsDir(), slug, { model, provider });
     invalidateRoster();
-    await refreshWorkflow?.("chamber-roster");
+    // The model is already persisted; a host refresh reject must not turn a
+    // committed set-model into a false failure (mirrors retire/dismiss siblings).
+    await refreshWorkflow("chamber-roster").catch(() => {});
     return { ok: true, data: { slug, ...(model ? { model } : {}) } };
   } catch (e) {
     return { ok: false, error: errText(e) };
@@ -2791,7 +2500,7 @@ const genesisEmitSchema = z.object({
   tools: z.array(z.string()).optional(),
 });
 
-function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolDefinition {
+function makeGenesisTool(): ToolDefinition {
   return {
     name: "chamber_emit_genesis",
     description:
@@ -2859,9 +2568,9 @@ function makeGenesisTool(refreshWorkflow?: RibContext["refreshWorkflow"]): ToolD
         // so the next roster frame shows the real seat instead of the boot card.
         await settleGenesis(record.name);
         // Re-run the bound chamber-roster collector so the new Mind appears
-        // promptly instead of waiting on the 120s cadence. Fail-soft (the seam
-        // resolves on error and is absent on an older harness) — never throw.
-        await refreshWorkflow?.("chamber-roster");
+        // promptly instead of waiting on the 120s cadence. Fail-soft — the Mind is
+        // already scaffolded, so a host-refresh reject must not fail the emit.
+        await refreshWorkflow("chamber-roster").catch(() => {});
         // A new Mind is additive — route Activity through the seam (no digest turn).
         await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug: record.slug, name: record.name }));
@@ -2958,12 +2667,12 @@ function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefinition 
           // in the index promptly instead of waiting on cadence (mirrors genesis
           // refreshing the roster). Fail-soft: the seam resolves on error / is absent
           // on an older harness — never throw past a successful publish.
-          await refreshWorkflow?.("chamber-lenses")?.catch(() => {});
+          await refreshWorkflow("chamber-lenses").catch(() => {});
           // A changed/new lens is briefing substance: evaluate the gate (it runs a turn
           // only if the watermark hasn't seen this fingerprint) and refresh the roster
           // so its pulse updates. Both fire-and-forget — never thrown past the publish.
           void evaluateBriefGate().catch(() => {});
-          void refreshWorkflow?.("chamber-roster")?.catch(() => {});
+          void refreshWorkflow("chamber-roster").catch(() => {});
           await refreshStandingPanels();
           emitResult(
             ctx,
@@ -3460,7 +3169,7 @@ function makeRetireMindTool(): ToolDefinition {
       try {
         await retireMind(mindsDir(), slug);
         invalidateRoster();
-        await refreshWorkflow?.("chamber-roster")?.catch(() => {});
+        await refreshWorkflow("chamber-roster").catch(() => {});
         await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug }));
       } catch (e) {
@@ -3557,7 +3266,7 @@ function makeRoomDeleteTool(): ToolDefinition {
         // board action), then refresh the index card away — fail-soft on the seam.
         if (lastSlug === slug) lastSlug = undefined;
         reconcileRoomPanels();
-        await refreshWorkflow?.("chamber-rooms")?.catch(() => {});
+        await refreshWorkflow("chamber-rooms").catch(() => {});
         await refreshStandingPanels();
         emitResult(ctx, JSON.stringify({ ok: true, slug }));
       } catch (e) {
