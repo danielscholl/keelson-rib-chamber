@@ -14,9 +14,10 @@ import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 // muted dot, mirroring lenses.ts's maintainer fold. `lenses` may be the raw
 // store listing — the builder keeps only the exhibit kind itself (the invariant
 // lives in the mechanism, not in each caller) and joins on the driver-witnessed
-// sourceRoom SLUG: a card lists the deliverables the room tabled, and a closed
-// card links each one open. Validated against canvasViewSchema in tests; the
-// producer never parses (validation lives at the binding edge).
+// sourceRoom SLUG, so a card NAMES the deliverables the room tabled and its delete
+// dialog can count them. Reaching one is the room's own job: you open the room and
+// its board lists them. Validated against canvasViewSchema in tests; the producer
+// never parses (validation lives at the binding edge).
 export function buildRoomsIndexBoard(
   rooms: readonly Room[],
   minds: readonly Mind[] = [],
@@ -107,24 +108,7 @@ function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly
     ],
   };
   if (room.status === "active") return { ...card, actions: [openAction(room)] };
-  // Closed rooms link each tabled exhibit open ahead of the room verbs — the
-  // deliverable is usually what you came back for, the transcript second.
-  return {
-    ...card,
-    actions: [
-      ...tabled.map((e) => openExhibitAction(e)),
-      openAction(room),
-      deleteAction(room, tabled),
-    ],
-  };
-}
-
-function openExhibitAction(exhibit: LensRecord) {
-  return {
-    type: "lens-open",
-    label: `▣ ${exhibit.board.title || exhibit.id}`,
-    payload: { id: exhibit.id },
-  };
+  return { ...card, actions: [openAction(room), deleteAction(room, tabled)] };
 }
 
 // The room's shape named for the meta line: the strategy in plain words, plus the
