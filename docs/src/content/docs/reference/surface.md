@@ -41,9 +41,10 @@ Presence ribbon and the Briefing heartbeat are always on.
 | Row 3, column 2 | `rib:chamber:lenses` | `chamber-lenses` | 120000 | yes | `✦` accent |
 | Row 4 | `rib:chamber:exhibits` | `chamber-exhibits` | 120000 | yes | `▣` caution |
 
-The Exhibits row additionally sets `hideWhenEmpty`: its collector emits zero
-sections while no exhibits exist, so the shelf stays invisible until a
-discussion has tabled something.
+The Convene and Exhibits rows additionally set `hideWhenEmpty`: their producers
+emit zero sections when there is nothing to act on — Convene until a second Mind
+is seated (no room can be convened yet), Exhibits until a discussion has tabled
+something — so each region stays invisible rather than showing an empty panel.
 
 The Rooms index lists active rooms first, as status-only cards, then closed
 rooms with Open and Delete actions. A card also lists the exhibits its room
