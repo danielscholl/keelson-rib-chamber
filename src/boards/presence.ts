@@ -155,8 +155,8 @@ function benchSections(
       sections.push({ kind: "rows", items: [{ glyph: "brand", text: castLine(cast) }] });
       sections.push(conveneShapeSection(cast, convene.projects));
     } else {
-      // Brand-toned on an empty table too: this row carries the pull the retired
-      // "Convene a Room" button used to, and it is the bench's only invitation in.
+      // Brand-toned with nobody seated: this row is the bench's only invitation into
+      // convening, so it has to pull like an affordance rather than read as a note.
       sections.push({ kind: "rows", items: [{ glyph: "brand", text: assemblyHint(cast) }] });
     }
     if (cast.length > 0) sections.push({ kind: "actions", wrap: true, items: [clearAction()] });

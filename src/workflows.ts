@@ -168,7 +168,7 @@ export function contributeChamberWorkflows(): readonly RibWorkflowContribution[]
       // composing the board from the gate's summary and persisting it via
       // chamber_emit_digest (which advances the fingerprint); `publish` always runs
       // (trigger_rule all_done) and re-reads the store to drive the key. The store it
-      // writes (digest.json) is what the Briefing banner's Digest register reads — the
+      // writes (digest.json) is what the Briefing banner's "The read" register renders — the
       // digest no longer has a standing surface region of its own. It is MUTATION-DRIVEN,
       // not polled: refreshStandingPanels nudges it on every Chamber mutation (exactly
       // when the fingerprint can have changed), and the fingerprint gate keeps a no-op
@@ -179,7 +179,7 @@ export function contributeChamberWorkflows(): readonly RibWorkflowContribution[]
         name: "chamber-digest",
         mutates_checkout: false,
         description:
-          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it to the store the Briefing banner\'s Digest register reads. Nudged by the rib on each Chamber mutation, but spends a turn only when the Chamber changed. NOT for: the deterministic record feed, the delta Briefing, or authoring a Mind/room/lens.',
+          'Use when: you want a standing, agent-authored synthesis of the Chamber\'s current shape. Triggers: "show the digest", "what is the chamber like now". Does: a gate detects whether the Chamber changed; on a change, one agent turn composes a digest board and persists it to the store the Briefing banner renders as its "The read" register. Nudged by the rib on each Chamber mutation, but spends a turn only when the Chamber changed. NOT for: the deterministic record feed, the delta Briefing, or authoring a Mind/room/lens.',
         nodes: [
           {
             id: "gate",

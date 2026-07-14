@@ -169,7 +169,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(wm.lensFingerprints).toEqual({ keep: "t1" });
   });
 
-  test("the Digest register embeds digest.json's sections with any stats dropped, labelled 'The read'", async () => {
+  test("the standing-synthesis register embeds digest.json's sections with any stats dropped, labelled 'The read'", async () => {
     await seedMinds();
     // A produced artifact is what makes the chamber non-empty — Minds alone are
     // capacity, and the register's floor mirrors hasDigestContent.
@@ -193,7 +193,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const { sm, lastBoard } = fakeSnapshotManager();
     const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
     rib.registerTools?.(makeCtx(run, sm));
-    // Boot composes the footer in-process; wait for the Digest register to appear.
+    // Boot composes the footer in-process; wait for the standing-synthesis register to appear.
     await waitFor(() => (lastBoard()?.sections ?? []).some((s) => s.title === "The read"));
     const footer = lastBoard();
     const digest = footer?.sections.find((s) => s.title === "The read");
@@ -203,7 +203,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(footer?.sections.some((s) => s.kind === "stats")).toBe(false);
   });
 
-  test("the Digest register is absent on a chamber with no content (sparse = absent, not narrated)", async () => {
+  test("the standing-synthesis register is absent on a chamber with no content (sparse = absent, not narrated)", async () => {
     // A stored digest exists, but nothing is seated — hasContent is false, so the digest
     // register is withheld rather than naming gone entities.
     await writeDigest(

@@ -37,7 +37,7 @@ export function coldStartDigestBoard(): CanvasBoardView {
         kind: "rows",
         items: [
           {
-            text: "The digest composes when the chamber next changes — author a Mind, convene a Room, or keep a Lens.",
+            text: "The digest composes once the bench has produced something — convene a Room, keep a Lens, or table an Exhibit.",
             glyph: "neutral",
           },
         ],

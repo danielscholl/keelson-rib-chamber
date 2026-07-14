@@ -40,7 +40,7 @@ let getProjects: RibContext["getProjects"];
 // regardless — else it would freeze at its first snapshot on a host that provides a
 // snapshot manager but no refreshWorkflow. It draws from the bench AND the rooms (its
 // seats, status footers, and folded-in assembly composer all track both), so recompose
-// it on either a roster or a rooms refresh; draft-set / assemble / convene call
+// it on either a roster or a rooms refresh; draft-set / draft-clear / convene call
 // refreshPresence directly. Reads the module-private host seam at call time, so it no-ops
 // (returns a resolved promise) when unbound (post-dispose).
 export function refreshWorkflow(name: string, inputs?: Record<string, string>): Promise<void> {
