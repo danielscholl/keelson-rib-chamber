@@ -239,12 +239,7 @@ describe("room driver — grounding + pre-close fidelity check", () => {
   });
 
   test("an empty (non-errored) fidelity turn is not reported to the synthesizer as a valid check", async () => {
-    const h = harness([
-      { text: "a-opens" },
-      { text: "   " },
-      { text: "" },
-      { text: "closing" },
-    ]);
+    const h = harness([{ text: "a-opens" }, { text: "   " }, { text: "" }, { text: "closing" }]);
     await h.driver.start({
       slug: "empty",
       name: "empty",
