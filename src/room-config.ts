@@ -56,6 +56,14 @@ export function parseCriteriaLines(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+// Cap on concurrently-active rooms. Each runs its own loop of paid agent turns, so an
+// unbounded fan-out would burn cost without an operator noticing. A small soft cap
+// keeps "multiple rooms" useful while bounding the spend; it also sits far under the
+// harness per-surface region ceiling, so a start never fails for lack of a panel slot.
+// Lives here, not in room-lifecycle, so the pure boards can read it without importing
+// the fs-backed lifecycle (which would close a cycle back through runtime).
+export const MAX_ACTIVE_ROOMS = 6;
+
 // Bounds on a grounding brief. It is re-serialized into every turn, fidelity, and
 // synthesis prompt, so an unbounded brief would multiply billed input and can exhaust
 // context — cap the count and lengths at the normalization choke point (both entry

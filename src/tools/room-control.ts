@@ -2,6 +2,7 @@ import type { ToolDefinition } from "@keelson/shared";
 import { errText, z } from "@keelson/shared";
 import type { RoomStore } from "../ports.ts";
 import {
+  MAX_ACTIVE_ROOMS,
   MAX_CRITERION_LEN,
   MAX_GROUNDING_CRITERIA,
   MAX_GROUNDING_URL_LEN,
@@ -13,7 +14,6 @@ import {
   DEFAULT_ROOM_TURN_BUDGET,
   injectRoom,
   lastRoomSlug,
-  MAX_ACTIVE_ROOMS,
   MAX_ROOM_TURN_BUDGET,
   mostRecentActiveSlug,
   resolveSteerTarget,

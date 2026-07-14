@@ -22,7 +22,7 @@ import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomStore } from "./ports.ts";
 import { onRoomClosed } from "./reflection-gate.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
-import type { RoomConfigInput } from "./room-config.ts";
+import { MAX_ACTIVE_ROOMS, type RoomConfigInput } from "./room-config.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, deriveRoomName, sweepClosedRooms } from "./room-store.ts";
@@ -103,11 +103,6 @@ const activeRooms = new Set<string>();
 // ending, so chamber_room_status (and the surface's retained panel) can still show a
 // just-finished transcript. Cleared only on dispose.
 let lastSlug: string | undefined;
-// Cap on concurrently-active rooms. Each runs its own loop of paid agent turns, so an
-// unbounded fan-out would burn cost without an operator noticing. A small soft cap
-// keeps "multiple rooms" useful while bounding the spend; it also sits far under the
-// harness per-surface region ceiling, so a start never fails for lack of a panel slot.
-export const MAX_ACTIVE_ROOMS = 6;
 let roomRetentionSweep = Promise.resolve();
 
 function queueRoomRetentionSweep(): void {

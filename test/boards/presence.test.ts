@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildChamberBoard } from "../../src/boards/presence.ts";
 import type { PendingGenesis } from "../../src/pending-genesis.ts";
+import { MAX_ACTIVE_ROOMS } from "../../src/room-config.ts";
 import { IDENTITY_SLOT_TONES, type Mind, type Room } from "../../src/types.ts";
 
 const mind = (over: Partial<Mind> = {}): Mind => ({
@@ -337,6 +338,9 @@ describe("buildChamberBoard convene composer (folded in)", () => {
   const B = mind({ slug: "b", name: "Bo", identitySlot: 1, provider: "openai" });
   // Assembly is derived from the cast, so a draft is only ever its inclusion set.
   const draft = (selected: string[] = []) => ({ selected: new Set(selected) });
+  // A bench running n rooms, each its own — what listRooms hands the board.
+  const liveRooms = (n: number) =>
+    Array.from({ length: n }, (_, i) => room({ slug: `room-${i}`, status: "active" }));
 
   function actionSections(board: Board) {
     return board.sections.filter((s) => s.kind === "actions");
@@ -364,11 +368,11 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     ).toBe(true);
   });
 
-  test("no seat toggles with a lone Mind, a pending genesis, or a live room", () => {
+  test("no seat toggles with a lone Mind, a pending genesis, or a bench at the cap", () => {
     const lone = buildChamberBoard([mind()], []);
     const booting = buildChamberBoard([A, B], [], [pending()], NOW);
-    const live = buildChamberBoard([A, B], [room({ status: "active" })]);
-    for (const board of [lone, booting, live]) {
+    const capped = buildChamberBoard([A, B], liveRooms(MAX_ACTIVE_ROOMS));
+    for (const board of [lone, booting, capped]) {
       expect(actionSections(board)).toHaveLength(0);
       // canConvene gates the toggle itself, so a card outside the window can't seat.
       for (const card of cards(board).filter((c) => !c.ghost)) {
@@ -464,8 +468,14 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     ).toBe(true);
   });
 
-  test("assembly is suppressed by a live room or a pending genesis (never overlaps the tick)", () => {
-    // draft says assembling, but a live room forbids a second — no composer, no toggles.
+  test("assembly is suppressed by a pending genesis (never overlaps the tick)", () => {
+    // A genesis in flight hides the composer (the panel is ticking) but the draft survives.
+    const booting = buildChamberBoard([A, B], [], [pending()], NOW, draft(["a", "b"]));
+    expect(booting.sections.some((s) => s.kind === "actions")).toBe(false);
+    expect(seat(booting, "Ada")?.action).toBeUndefined();
+  });
+
+  test("a live room leaves assembly open — rooms run concurrently under the cap", () => {
     const live = buildChamberBoard(
       [A, B],
       [room({ status: "active" })],
@@ -474,10 +484,25 @@ describe("buildChamberBoard convene composer (folded in)", () => {
       draft(["a", "b"]),
     );
     expect(live.header?.chip).toBe("1 room · in session");
-    expect(live.sections.some((s) => s.kind === "actions")).toBe(false);
-    expect(seat(live, "Ada")?.action).toBeUndefined();
-    // A genesis in flight hides the composer (the panel is ticking) but the draft survives.
-    const booting = buildChamberBoard([A, B], [], [pending()], NOW, draft(["a", "b"]));
-    expect(booting.sections.some((s) => s.kind === "actions")).toBe(false);
+    expect(live.sections.some((s) => s.kind === "actions")).toBe(true);
+    expect(seat(live, "Ada")?.action).toEqual({ type: "draft-set", payload: { slug: "a" } });
+  });
+
+  test("assembly survives to one room short of the cap and closes at it", () => {
+    const cast = draft(["a", "b"]);
+    const under = buildChamberBoard([A, B], liveRooms(MAX_ACTIVE_ROOMS - 1), [], NOW, cast);
+    expect(under.sections.some((s) => s.kind === "actions")).toBe(true);
+    // At the cap the composer would only compose a start that startRoom refuses.
+    const at = buildChamberBoard([A, B], liveRooms(MAX_ACTIVE_ROOMS), [], NOW, cast);
+    expect(at.sections.some((s) => s.kind === "actions")).toBe(false);
+    expect(seat(at, "Ada")?.action).toBeUndefined();
+  });
+
+  test("a closed room is not live — it never counts against the cap", () => {
+    const closed = Array.from({ length: MAX_ACTIVE_ROOMS + 2 }, (_, i) =>
+      room({ slug: `done-${i}`, status: "done" }),
+    );
+    const board = buildChamberBoard([A, B], closed, [], NOW, draft(["a", "b"]));
+    expect(board.sections.some((s) => s.kind === "actions")).toBe(true);
   });
 });
