@@ -396,7 +396,7 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     expect(bo?.fields?.at(-1)?.value).toBe("on the bench");
   });
 
-  test("with two seated the composer unfolds the shape tabs, the named cast, and Clear", () => {
+  test("with two seated the composer unfolds the shape tabs and named cast without Clear", () => {
     const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const how = board.sections.find(
