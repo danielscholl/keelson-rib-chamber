@@ -30,6 +30,8 @@ Brief: $ARGUMENTS
 
 (If these explicit fields are non-empty, prefer them over the brief — name: "$inputs.name", role: "$inputs.role", voice: "$inputs.voice", model: "$inputs.model", provider: "$inputs.provider". When model/provider are non-empty, pass them through verbatim — do not author or guess them.)
 
+genesisId: "$inputs.genesisId" — an opaque run id, not part of the Mind's identity. When it is non-empty, pass it to the tool EXACTLY as given; never author, alter, or invent one, and omit it entirely when it is empty.
+
 From the brief, decide the Mind's name, a short role title (1-4 words — e.g. "Chief of Staff", "Research Partner" — a label for a roster pill, NOT a sentence or description), and voice (how it speaks). Then write an honest founding document — do NOT invent tools, credentials, or capabilities it does not have; describe who it is, what it is for, and how it speaks.
 
 Compose:
@@ -42,7 +44,7 @@ Compose:
 - tagline: one line, at most 120 characters, summarizing the Mind for a roster card (no Markdown).
 - tools: an OPTIONAL array of capability slugs the Mind may use inside a room — choose ONLY from this set: ${capabilityVocabulary()}. Include a slug only when the role genuinely calls for it; omit it (or use []) for a conversation-only Mind, and never invent a slug outside this set.
 
-Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, mission, tagline, tools, model?, provider? } to persist the Mind (include model/provider only when provided) — do NOT print the JSON as your reply. After the tool returns, reply with EXACTLY one line: "Authored <name> (<slug>)", using the name you authored and the tool-returned slug verbatim.`;
+Then call the chamber_emit_genesis tool EXACTLY ONCE with { name, role, voice, soul, mission, tagline, tools, model?, provider?, genesisId? } to persist the Mind (include model/provider/genesisId only when provided) — do NOT print the JSON as your reply. After the tool returns, reply with EXACTLY one line: "Authored <name> (<slug>)", using the name you authored and the tool-returned slug verbatim.`;
 
 // The lens authoring prompt: one agent turn composes a canvas board on a subject and
 // calls chamber_emit_lens to publish it. It is not pinned to one key — the tool routes

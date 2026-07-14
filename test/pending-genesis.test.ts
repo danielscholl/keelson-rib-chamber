@@ -60,15 +60,49 @@ describe("pending-genesis store", () => {
     await appendPendingGenesis({ startedAt: "2026-07-05T18:00:01.000Z" }, home);
     await appendPendingGenesis({ startedAt: "2026-07-05T18:00:02.000Z", name: "Mycroft" }, home);
     // Named landing: exactly Mycroft's marker settles.
-    expect((await removeLandedGenesis("Mycroft", home)).map((m) => m.name)).toEqual([
+    expect((await removeLandedGenesis({ name: "Mycroft" }, home)).map((m) => m.name)).toEqual([
       "Jarvis",
       undefined,
     ]);
     // Freeform landing (authored name matches nothing): the unnamed marker settles.
-    expect((await removeLandedGenesis("Athena", home)).map((m) => m.name)).toEqual(["Jarvis"]);
-    // No unnamed marker left: the oldest settles outright so nothing pins forever.
-    expect(await removeLandedGenesis("Vesper", home)).toEqual([]);
+    expect((await removeLandedGenesis({ name: "Athena" }, home)).map((m) => m.name)).toEqual([
+      "Jarvis",
+    ]);
+  });
+
+  test("a run-scoped genesisId settles that exact marker, not the oldest unnamed", async () => {
+    // Two freeform geneses in flight: both markers are unnamed, so the authored name
+    // ties neither landing to its own card — only the threaded id does.
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z" }, home);
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:01.000Z" }, home);
+    // The NEWER one lands first; without the id it would settle the older marker.
+    const remaining = await removeLandedGenesis(
+      { name: "Athena", genesisId: "2026-07-05T18:00:01.000Z" },
+      home,
+    );
+    expect(remaining.map((m) => m.startedAt)).toEqual(["2026-07-05T18:00:00.000Z"]);
+  });
+
+  test("an unmatched genesisId falls back to the name guess rather than settling nothing", async () => {
+    // A model that drops or mangles the id must not strand the boot card — the guess
+    // still settles it, exactly as before the id existed.
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "Jarvis" }, home);
+    const remaining = await removeLandedGenesis({ name: "Jarvis", genesisId: "not-a-stamp" }, home);
+    expect(remaining).toEqual([]);
     expect(await readPendingGeneses(home)).toEqual([]);
+  });
+
+  test("a landing with no marker of its own settles nothing, sparing a live boot card", async () => {
+    // `/genesis` writes no marker, so its landing matches no id and no name. Dropping
+    // an arbitrary marker would take out Jarvis's still-booting card; the stall
+    // timeout retires a stray instead.
+    await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "Jarvis" }, home);
+    expect((await removeLandedGenesis({ name: "Vesper" }, home)).map((m) => m.name)).toEqual([
+      "Jarvis",
+    ]);
+    expect(await readPendingGeneses(home)).toEqual([
+      { startedAt: "2026-07-05T18:00:00.000Z", name: "Jarvis" },
+    ]);
   });
 
   test("removePendingGenesisAt settles exactly the stamped marker", async () => {
@@ -110,7 +144,10 @@ describe("pending-genesis store", () => {
     // boot card. Serialized, both clear.
     await appendPendingGenesis({ startedAt: "2026-07-05T18:00:00.000Z", name: "Ada" }, home);
     await appendPendingGenesis({ startedAt: "2026-07-05T18:00:05.000Z", name: "Bo" }, home);
-    await Promise.all([removeLandedGenesis("Ada", home), removeLandedGenesis("Bo", home)]);
+    await Promise.all([
+      removeLandedGenesis({ name: "Ada" }, home),
+      removeLandedGenesis({ name: "Bo" }, home),
+    ]);
     expect(await readPendingGeneses(home)).toEqual([]);
   });
 

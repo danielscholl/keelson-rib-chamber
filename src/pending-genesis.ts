@@ -115,11 +115,14 @@ async function unlinkPendingGenesisFile(dataHome: string): Promise<void> {
 
 // Append a marker for a genesis the caller is about to launch. startedAt doubles as
 // the boot card's dismiss identity, so a same-millisecond stamp nudges forward until
-// unique — two rapid authors must never share one.
+// unique — two rapid authors must never share one. Returns the marker AS WRITTEN: the
+// nudge means the stamp may differ from the one passed in, and that stamp is the
+// run-scoped id a landing settles by, so a caller threading it into the run must
+// carry this one rather than the value it handed over.
 export async function appendPendingGenesis(
   marker: PendingGenesis,
   dataHome: string = chamberDataHome(),
-): Promise<PendingGenesis[]> {
+): Promise<PendingGenesis> {
   return enqueueMarkerWrite(dataHome, async () => {
     const existing = await readPendingGeneses(dataHome);
     let stamp = marker.startedAt;
@@ -128,28 +131,35 @@ export async function appendPendingGenesis(
       if (!Number.isFinite(t)) break;
       stamp = new Date(t + 1).toISOString();
     }
-    const markers = [...existing, { ...marker, startedAt: stamp }];
-    await writePendingGeneses(markers, dataHome);
-    return markers;
+    const written = { ...marker, startedAt: stamp };
+    await writePendingGeneses([...existing, written], dataHome);
+    return written;
   });
 }
 
-// Settle the marker a landed genesis belongs to, returning what remains. A starter
-// landed under its pinned name; a freeform brief's authored name matches no marker,
-// so it settles the OLDEST unnamed marker — and if none, the oldest marker outright,
-// so a stray can never pin a boot card forever after every run has finished. Two
-// freeform landings out of order can settle each other's marker (both clear once all
-// land); a run-scoped identity would remove that ambiguity — tracked as follow-up.
+// Settle the marker a landed genesis belongs to, returning what remains. `genesisId`
+// is the marker's own startedAt threaded through the run, and settles that exact
+// marker. It is absent whenever the run never wrote a marker (`/genesis`, or a
+// fail-soft marker write) or the authoring model dropped it from the tool call, so the
+// name / oldest-unnamed guess stays as the fallback: a starter landed under its pinned
+// name, and a freeform brief's authored name matches nothing, so it takes the oldest
+// unnamed marker.
+//
+// A total miss settles NOTHING. Dropping an arbitrary marker instead would take out a
+// live sibling's boot card — reachable from `/genesis`, which writes no marker of its
+// own — and the stall timeout already retires a stray card without help.
 export async function removeLandedGenesis(
-  name: string,
+  landed: { name: string; genesisId?: string },
   dataHome: string = chamberDataHome(),
 ): Promise<PendingGenesis[]> {
   return enqueueMarkerWrite(dataHome, async () => {
     const markers = await readPendingGeneses(dataHome);
     if (markers.length === 0) return markers;
-    const byName = markers.findIndex((m) => m.name === name);
+    const byId = landed.genesisId ? markers.findIndex((m) => m.startedAt === landed.genesisId) : -1;
+    const byName = markers.findIndex((m) => m.name === landed.name);
     const oldestUnnamed = markers.findIndex((m) => m.name === undefined);
-    const drop = byName !== -1 ? byName : oldestUnnamed !== -1 ? oldestUnnamed : 0;
+    const drop = byId !== -1 ? byId : byName !== -1 ? byName : oldestUnnamed;
+    if (drop === -1) return markers;
     const remaining = markers.filter((_, i) => i !== drop);
     if (remaining.length === 0) await unlinkPendingGenesisFile(dataHome);
     else await writePendingGeneses(remaining, dataHome);
