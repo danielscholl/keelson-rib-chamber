@@ -428,17 +428,24 @@ describe("room adapter — convene composer (draft-set + assemble + convene)", (
     expect(await seated()).toEqual([]);
   });
 
-  it("assemble opens the composer; Cancel leaves assembly AND drops the cast", async () => {
-    const open = await onAction({ type: "assemble", payload: { on: true } }, makeCtx());
-    expect(open.ok).toBe(true);
-    if (open.ok) expect((open.data as { assembling: boolean }).assembling).toBe(true);
-    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+  it("a seat click alone seats a Mind — no assemble step to enter first", async () => {
+    const res = await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    expect(res.ok).toBe(true);
     expect(await seated()).toEqual(["alice"]);
-    const close = await onAction({ type: "assemble", payload: { on: false } }, makeCtx());
-    expect(close.ok).toBe(true);
-    const draft = await readDraft();
-    expect(draft.assembling).toBe(false);
-    expect([...draft.selected]).toEqual([]);
+  });
+
+  it("draft-clear empties the cast", async () => {
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
+    expect((await seated()).sort()).toEqual(["alice", "bob"]);
+    const cleared = await onAction({ type: "draft-clear" }, makeCtx());
+    expect(cleared.ok).toBe(true);
+    expect([...(await readDraft()).selected]).toEqual([]);
+  });
+
+  it("the retired assemble verb is no longer dispatchable", async () => {
+    const res = await onAction({ type: "assemble", payload: { on: true } }, makeCtx());
+    expect(res.ok).toBe(false);
   });
 
   it("convene fails closed with fewer than two seated and leaves the draft intact", async () => {
@@ -466,10 +473,8 @@ describe("room adapter — convene composer (draft-set + assemble + convene)", (
       "alice",
       "bob",
     ]);
-    // A successful convene resets the draft (leaves assembly, empties the cast).
-    const draft = await readDraft();
-    expect(draft.assembling).toBe(false);
-    expect([...draft.selected]).toEqual([]);
+    // A successful convene resets the draft — emptying the cast IS leaving assembly.
+    expect([...(await readDraft()).selected]).toEqual([]);
   });
 
   it("the Debate shape starts a group-chat room, resolving the moderator by name + parsing turns", async () => {

@@ -15,9 +15,10 @@ import { hasDigestContent, readChamberRecords, reduceChamberState } from "../src
 import { readDigest, resolveDigestPublishBoard } from "../src/digest-store.ts";
 import { chamberDataHome } from "../src/paths.ts";
 
-// Whether the live chamber holds any Mind/room/lens. A store read error assumes content,
-// so a transient fault never blanks a populated digest — suppression is for a confirmed
-// empty chamber only.
+// Whether the live chamber holds any room/lens/exhibit — Minds alone are capacity, not
+// work, so a bench that has produced nothing reads as empty (see hasDigestContent). A
+// store read error assumes content, so a transient fault never blanks a populated digest
+// — suppression is for a confirmed empty chamber only.
 async function chamberHasContent(home: string): Promise<boolean> {
   try {
     const { minds, rooms, lenses } = await readChamberRecords({

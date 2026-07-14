@@ -44,7 +44,7 @@ describe("conveneShapeSection cast + shapes", () => {
   test("at two seated: a tabs strip of the five shapes", () => {
     const section = conveneShapeSection([A, B]);
     expect(valid(section)).toBe(true);
-    expect(section.kind === "actions" && section.title).toBe("…and how");
+    expect(section.kind === "actions" && section.title).toBe("How should they convene?");
     expect(section.kind === "actions" && section.tabs).toBe(true);
     expect(shapes(section).map((i) => i.label)).toEqual([
       "Discussion",

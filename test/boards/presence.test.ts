@@ -335,10 +335,8 @@ describe("buildChamberBoard convene composer (folded in)", () => {
   const NOW = Date.parse("2026-07-12T09:00:05.000Z");
   const A = mind({ slug: "a", name: "Ada", identitySlot: 0, provider: "anthropic" });
   const B = mind({ slug: "b", name: "Bo", identitySlot: 1, provider: "openai" });
-  const draft = (assembling: boolean, selected: string[] = []) => ({
-    assembling,
-    selected: new Set(selected),
-  });
+  // Assembly is derived from the cast, so a draft is only ever its inclusion set.
+  const draft = (selected: string[] = []) => ({ selected: new Set(selected) });
 
   function actionSections(board: Board) {
     return board.sections.filter((s) => s.kind === "actions");
@@ -347,25 +345,41 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     return cards(board).find((c) => c.title === title);
   }
 
-  test("a quiet bench of 2+ Minds offers the Convene launcher", () => {
+  test("a quiet bench of 2+ Minds seats on a click — no launcher to press first", () => {
     const board = buildChamberBoard([A, B], []);
     expect(board.header?.chip).toBe("bench at rest");
-    const launcher = actionSections(board)[0];
-    expect(launcher?.kind === "actions" && launcher.items[0]?.type).toBe("assemble");
-    expect(launcher?.kind === "actions" && launcher.items[0]?.payload).toEqual({ on: true });
-    // Seats stay in browse mode — no card-body toggle until assembly opens.
-    expect(seat(board, "Ada")?.action).toBeUndefined();
-    expect(seat(board, "Ada")?.selected).toBeUndefined();
+    // Assembly is not a mode: there is no button to enter it, so the bench at rest
+    // carries no actions section at all.
+    expect(actionSections(board)).toHaveLength(0);
+    // The seats are live toggles from rest — a click IS the entry.
+    expect(seat(board, "Ada")?.action).toEqual({ type: "draft-set", payload: { slug: "a" } });
+    expect(seat(board, "Ada")?.selected).toBe(false);
+    // And the invitation that teaches it renders without a button gating it.
+    expect(
+      board.sections.some(
+        (s) =>
+          s.kind === "rows" &&
+          s.items.some((i) => i.text === "Click a Mind to bring them to the table."),
+      ),
+    ).toBe(true);
   });
 
-  test("no launcher with a lone Mind, a pending genesis, or a live room", () => {
-    expect(actionSections(buildChamberBoard([mind()], []))).toHaveLength(0);
-    expect(actionSections(buildChamberBoard([A, B], [], [pending()], NOW))).toHaveLength(0);
-    expect(actionSections(buildChamberBoard([A, B], [room({ status: "active" })]))).toHaveLength(0);
+  test("no seat toggles with a lone Mind, a pending genesis, or a live room", () => {
+    const lone = buildChamberBoard([mind()], []);
+    const booting = buildChamberBoard([A, B], [], [pending()], NOW);
+    const live = buildChamberBoard([A, B], [room({ status: "active" })]);
+    for (const board of [lone, booting, live]) {
+      expect(actionSections(board)).toHaveLength(0);
+      // canConvene gates the toggle itself, so a card outside the window can't seat.
+      for (const card of cards(board).filter((c) => !c.ghost)) {
+        expect(card.action).toBeUndefined();
+        expect(card.selected).toBeUndefined();
+      }
+    }
   });
 
   test("assembling: seats become click-to-seat toggles and read 'at the table' when seated", () => {
-    const board = buildChamberBoard([A, B], [], [], NOW, draft(true, ["a"]));
+    const board = buildChamberBoard([A, B], [], [], NOW, draft(["a"]));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.header?.chip).toBe("assembling");
     const ada = seat(board, "Ada");
@@ -382,25 +396,55 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     expect(bo?.fields?.at(-1)?.value).toBe("on the bench");
   });
 
-  test("with two seated the composer unfolds the shape tabs, the count, and Cancel", () => {
-    const board = buildChamberBoard([A, B], [], [], NOW, draft(true, ["a", "b"]));
+  test("with two seated the composer unfolds the shape tabs, the named cast, and Clear", () => {
+    const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const how = board.sections.find((s) => s.kind === "actions" && s.title === "…and how");
+    const how = board.sections.find(
+      (s) => s.kind === "actions" && s.title === "How should they convene?",
+    );
     expect(how).toBeDefined();
-    const count = board.sections.find(
-      (s) => s.kind === "rows" && s.items.some((i) => i.text === "2 at the table"),
+    // Named, not counted — and in SEAT order, so the line reads left-to-right like the
+    // cards it was clicked from. [A, B] arrives newest-first, so Bo is the elder and
+    // holds the leftmost seat; the line has to agree with the bench, not with the input.
+    expect(
+      cards(board)
+        .map((c) => c.title)
+        .slice(0, 2),
+    ).toEqual(["Bo", "Ada"]);
+    const cast = board.sections.find(
+      (s) => s.kind === "rows" && s.items.some((i) => i.text === "Bo and Ada at the table"),
     );
-    expect(count).toBeDefined();
-    const cancel = board.sections.find(
-      (s) => s.kind === "actions" && s.items[0]?.label === "Cancel",
+    expect(cast).toBeDefined();
+    const clear = board.sections.find((s) => s.kind === "actions" && s.items[0]?.label === "Clear");
+    expect(clear?.kind === "actions" && clear.items[0]?.type).toBe("draft-clear");
+    // A compact chip, not the full-width bar a stacked actions section renders.
+    expect(clear?.kind === "actions" && clear.wrap).toBe(true);
+  });
+
+  test("the cast is named to three, then falls back to a count", () => {
+    const C = mind({ slug: "c", name: "Cy", identitySlot: 2 });
+    const D = mind({ slug: "d", name: "Di", identitySlot: 3 });
+    const castText = (board: Board) => {
+      const row = board.sections.find(
+        (s) => s.kind === "rows" && s.items.some((i) => i.text.endsWith("at the table")),
+      );
+      return row?.kind === "rows" ? row.items[0]?.text : undefined;
+    };
+    // Newest-first in, seat order out — the Oxford comma at three.
+    expect(castText(buildChamberBoard([C, B, A], [], [], NOW, draft(["a", "b", "c"])))).toBe(
+      "Ada, Bo, and Cy at the table",
     );
-    expect(cancel?.kind === "actions" && cancel.items[0]?.type).toBe("assemble");
-    expect(cancel?.kind === "actions" && cancel.items[0]?.payload).toEqual({ on: false });
+    // Past three, naming is the same work as counting, so it counts.
+    expect(
+      castText(buildChamberBoard([D, C, B, A], [], [], NOW, draft(["a", "b", "c", "d"]))),
+    ).toBe("4 at the table");
   });
 
   test("with fewer than two seated the composer prompts specifically to seat more", () => {
-    const none = buildChamberBoard([A, B], [], [], NOW, draft(true, []));
-    expect(none.sections.some((s) => s.kind === "actions" && s.title === "…and how")).toBe(false);
+    const howTab = (board: Board) =>
+      board.sections.some((s) => s.kind === "actions" && s.title === "How should they convene?");
+    const none = buildChamberBoard([A, B], [], [], NOW, draft([]));
+    expect(howTab(none)).toBe(false);
     expect(
       none.sections.some(
         (s) =>
@@ -408,18 +452,24 @@ describe("buildChamberBoard convene composer (folded in)", () => {
           s.items.some((i) => i.text === "Click a Mind to bring them to the table."),
       ),
     ).toBe(true);
+    // Nothing at the table — nothing to clear.
+    expect(none.sections.some((s) => s.kind === "actions" && s.items[0]?.label === "Clear")).toBe(
+      false,
+    );
     // Exactly one seated names them and asks for one more — not a generic prompt.
-    const one = buildChamberBoard([A, B], [], [], NOW, draft(true, ["a"]));
-    expect(one.sections.some((s) => s.kind === "actions" && s.title === "…and how")).toBe(false);
+    const one = buildChamberBoard([A, B], [], [], NOW, draft(["a"]));
+    expect(howTab(one)).toBe(false);
     expect(
       one.sections.some(
         (s) =>
           s.kind === "rows" &&
-          s.items.some(
-            (i) => i.text === "Ada is at the table — click another Mind to choose a room shape.",
-          ),
+          s.items.some((i) => i.text === "Ada is at the table — click another Mind to convene."),
       ),
     ).toBe(true);
+    // One seated is still a cast, so Clear is offered.
+    expect(one.sections.some((s) => s.kind === "actions" && s.items[0]?.label === "Clear")).toBe(
+      true,
+    );
   });
 
   test("assembly is suppressed by a live room or a pending genesis (never overlaps the tick)", () => {
@@ -429,13 +479,13 @@ describe("buildChamberBoard convene composer (folded in)", () => {
       [room({ status: "active" })],
       [],
       NOW,
-      draft(true, ["a", "b"]),
+      draft(["a", "b"]),
     );
     expect(live.header?.chip).toBe("1 room · in session");
     expect(live.sections.some((s) => s.kind === "actions")).toBe(false);
     expect(seat(live, "Ada")?.action).toBeUndefined();
     // A genesis in flight hides the composer (the panel is ticking) but the draft survives.
-    const booting = buildChamberBoard([A, B], [], [pending()], NOW, draft(true, ["a", "b"]));
+    const booting = buildChamberBoard([A, B], [], [pending()], NOW, draft(["a", "b"]));
     expect(booting.sections.some((s) => s.kind === "actions")).toBe(false);
   });
 });

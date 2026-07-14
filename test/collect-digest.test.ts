@@ -7,6 +7,7 @@ import type { CanvasBoardView } from "@keelson/shared";
 import { chamberFingerprint, readChamberRecords } from "../src/chamber-state.ts";
 import { writeDigest } from "../src/digest-store.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
+import { createFileRoomStore } from "../src/room-store.ts";
 
 // The out-of-process collectors the chamber-digest workflow runs. Each reads the data
 // HOME baked into its argv (the keelson-home-rooted path the rib captured in-process)
@@ -36,6 +37,22 @@ async function seedMind(home: string, slug: string, name: string): Promise<void>
   );
 }
 
+// An ended room is what makes a chamber non-empty: Minds alone are capacity, not work,
+// so every gate/publish case that needs content has to have PRODUCED something.
+async function seedRoom(home: string, slug = "room-1", name = "Release readiness"): Promise<void> {
+  await createFileRoomStore(join(home, "rooms")).saveRoom({
+    slug,
+    name,
+    strategy: "sequential",
+    participants: ["ada"],
+    status: "done",
+    turnBudget: 4,
+    turnIndex: 4,
+    round: 1,
+    createdAt: new Date().toISOString(),
+  });
+}
+
 function dirsOf(home: string) {
   return {
     mindsDir: join(home, "minds"),
@@ -49,11 +66,13 @@ describe("collect-digest-gate", () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-digest-gate-"));
     try {
       await seedMind(home, "ada", "Ada");
+      await seedRoom(home);
       const { out, code } = await run(GATE, home);
       expect(code).toBe(0);
       const { dirty, summary } = JSON.parse(out) as { dirty: boolean; summary: string };
       expect(dirty).toBe(true);
       expect(summary).toContain("Ada");
+      expect(summary).toContain("Release readiness");
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -70,10 +89,26 @@ describe("collect-digest-gate", () => {
     }
   });
 
+  test("a bench of Minds that has produced nothing → dirty:false (no paid turn)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-digest-gate-"));
+    try {
+      await seedMind(home, "ada", "Ada");
+      await seedMind(home, "bo", "Bo");
+      const { out, code } = await run(GATE, home);
+      expect(code).toBe(0);
+      // Authoring a Mind advances the fingerprint, but Minds are capacity, not work —
+      // there is no shape to synthesize, so the gate must not buy a turn for it.
+      expect((JSON.parse(out) as { dirty: boolean }).dirty).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   test("a stored fingerprint matching the live state → dirty:false (quiet)", async () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-digest-gate-"));
     try {
       await seedMind(home, "ada", "Ada");
+      await seedRoom(home);
       const { minds, rooms, lenses } = await readChamberRecords(dirsOf(home));
       const fingerprint = chamberFingerprint(minds, rooms, lenses);
       const board: CanvasBoardView = { view: "board", title: "Digest", sections: [] };
@@ -90,6 +125,7 @@ describe("collect-digest-gate", () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-digest-gate-"));
     try {
       await seedMind(home, "ada", "Ada");
+      await seedRoom(home);
       const board: CanvasBoardView = { view: "board", title: "Digest", sections: [] };
       await writeDigest({ board, fingerprint: "stale" }, home);
       const { out, code } = await run(GATE, home);
@@ -106,6 +142,7 @@ describe("collect-digest-publish", () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-digest-publish-"));
     try {
       await seedMind(home, "ada", "Ada");
+      await seedRoom(home);
       const board: CanvasBoardView = { view: "board", title: "Authored", sections: [] };
       await writeDigest({ board, fingerprint: "fp" }, home);
       const { out, code } = await run(PUBLISH, home);
@@ -120,7 +157,7 @@ describe("collect-digest-publish", () => {
   test("falls back to the cold board once the chamber empties (no stale population)", async () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-digest-publish-"));
     try {
-      // A board authored when Minds existed, persisted; the Minds are then gone (empty
+      // A board authored when rooms existed, persisted; the rooms are then gone (empty
       // store). The gate won't re-author an empty chamber, so the publish tick must not
       // keep showing the stale board that still names them.
       const board: CanvasBoardView = { view: "board", title: "Authored", sections: [] };
@@ -130,6 +167,23 @@ describe("collect-digest-publish", () => {
       const published = JSON.parse(out) as CanvasBoardView;
       expect(published.title).not.toBe("Authored");
       expect(out).toContain("Warming up");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a room deleted back to a bare bench drops the stale board, not just the gate", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-digest-publish-"));
+    try {
+      // The coupling that makes the minds-only floor safe: the gate goes quiet here
+      // (nothing produced), so if publish still counted Minds as content it would keep
+      // rendering a digest describing the deleted room forever.
+      await seedMind(home, "ada", "Ada");
+      const board: CanvasBoardView = { view: "board", title: "Authored", sections: [] };
+      await writeDigest({ board, fingerprint: "stale" }, home);
+      const { out, code } = await run(PUBLISH, home);
+      expect(code).toBe(0);
+      expect((JSON.parse(out) as CanvasBoardView).title).not.toBe("Authored");
     } finally {
       await rm(home, { recursive: true, force: true });
     }

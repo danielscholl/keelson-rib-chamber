@@ -119,11 +119,12 @@ $gate.output.summary
 
 Compose ONE canvas board that INTERPRETS this state: what is this team working on, what has it produced, what is the one thing worth noticing. Be honest: name only what is in the state above; do NOT invent Minds, rooms, lenses, users, or metrics you cannot see. If the Chamber is sparse, keep the digest to a sentence or two rather than padding it to fill sections.
 
+Report what IS, never what WILL BE. Do not write about the bench's potential or readiness, about what a future room or lens would mean, or about what is "waiting" to happen — a standing synthesis describes the state in front of you, not the one you expect next. If the state shows little, say little, plainly, in the operator's language. Plainness is correct; reaching for atmosphere when there is nothing to report is not.
+
 The board shape:
   { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
 Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
-Use 2-4 Section kinds, in a sensible order:
-  - stats: { "kind":"stats", "title"?:string, "items":[{ "label":string, "value":string|number, "sub"?:string, "tone"?:Tone }] }
+Use 1-2 Section kinds, in a sensible order:
   - rows:  { "kind":"rows", "title"?:string, "items":[{ "text":string, "glyph"?:Tone, "trailing"?:string }] }
   - cards: { "kind":"cards", "title"?:string, "items":[{ "title":string, "pill"?:{ "label":string, "tone"?:Tone }, "fields"?:[{ "label"?:string, "value":string|number }], "footnote"?:string }] }
 

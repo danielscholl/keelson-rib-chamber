@@ -56,12 +56,13 @@ let briefingPublishInFlight: Promise<void> = Promise.resolve();
 
 // The synchronous seed the banner holds for the instant between registration and the
 // first async compose (createCoalescingPublisher needs a sync default). A valid, calm
-// board; publishBriefing() replaces it with the composed three-register banner.
+// board; publishBriefing() replaces it with the composed three-register banner. It
+// carries no status pill for the same reason compose doesn't: the seed can't know the
+// promoted count, so a hardcoded one would flash a claim it hasn't checked.
 function seedBriefingBoard(): CanvasBoardView {
   return {
     view: "board",
     title: "Briefing",
-    header: { status: { label: "Up to date", tone: "neutral" } },
     sections: [{ kind: "rows", title: "The record", items: [{ glyph: "neutral", text: "…" }] }],
   };
 }
@@ -102,7 +103,7 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
         items: promotedSources.map((s) =>
           s.kind === "room"
             ? { type: "room-open", label: `${s.label} ↗`, glyph: "▦", payload: { slug: s.ref } }
-            : { type: "lens-open", label: `${s.label} ↗`, glyph: "❖", payload: { id: s.ref } },
+            : { type: "lens-open", label: `${s.label} ↗`, glyph: "✦", payload: { id: s.ref } },
         ),
       });
     }
@@ -111,28 +112,33 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
   // 2. Digest — the standing synthesis, only once the chamber has content. Drop any
   //    stats section the turn may have authored so an index count can't creep back
   //    into the one narrator; label the register on its first surviving section.
-  const hasContent = mindRecords.length > 0 || rooms.length > 0 || lenses.length > 0;
+  // Mirrors hasDigestContent's floor (rooms/lenses/exhibits — exhibits ride inside
+  // `lenses`), NOT a minds check: the gate goes quiet on a minds-only chamber and lets
+  // the last board linger on disk, so counting minds here would keep rendering a stale
+  // digest about rooms that have since been deleted.
+  const hasContent = rooms.length > 0 || lenses.length > 0;
   if (hasContent && digest?.board) {
     // readDigest only checks `board` is an object; guard `sections` so a torn digest.json
     // can't throw here and drop the WHOLE banner publish (delta + record too).
     const digestSections = Array.isArray(digest.board.sections) ? digest.board.sections : [];
     const kept = digestSections.filter((s) => s.kind !== "stats");
     const [first, ...rest] = kept;
-    if (first) sections.push({ ...first, title: "Digest" }, ...rest);
+    if (first) sections.push({ ...first, title: "The read" }, ...rest);
   }
 
   // 3. Record — always present.
   sections.push(recordSection(mindRecords, rooms, lenses, Date.now(), BANNER_RECORD_LIMIT));
 
+  // The pill is the promoted-delta signal, not a standing badge: a quiet banner carries
+  // none, which is the same structural-quiet rule the registers follow. "Up to date" as
+  // a permanent label is a pill that can never inform — it reads as dead chrome until
+  // the one moment it would have mattered.
+  const status =
+    promotedCount > 0 ? { label: `${promotedCount} new`, tone: "brand" as const } : undefined;
   return {
     view: "board",
     title: "Briefing",
-    header: {
-      status:
-        promotedCount > 0
-          ? { label: `${promotedCount} new`, tone: "brand" }
-          : { label: "Up to date", tone: "neutral" },
-    },
+    ...(status ? { header: { status } } : {}),
     sections,
   };
 }

@@ -205,7 +205,7 @@ describe("rib-chamber", () => {
     expect(names).not.toContain("chamber_room_start");
   });
 
-  it("declares the Digest standing-lens view (its store feeds the Briefing's Digest register)", () => {
+  it("declares the Digest standing-lens view (its store feeds the Briefing's read register)", () => {
     const keys = (rib.views ?? []).map((v) => v.key);
     expect(keys).toContain("rib:chamber:digest");
     // The Activity view retired with its region — the record folds into the footer.

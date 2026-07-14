@@ -20,7 +20,7 @@ gate with a conditional agent turn.
 | `chamber-rooms` | bash collector | `collect` | `ROOMS_KEY` | the Rooms index |
 | `chamber-lenses` | bash collector | `collect` | `LENSES_KEY` | the Lenses index |
 | `chamber-exhibits` | bash collector | `collect` | `EXHIBITS_KEY` | the Exhibits index |
-| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, read by the Briefing banner's Digest register |
+| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, rendered as the Briefing banner's "The read" register |
 | `chamber-genesis` | prompt turn | `genesis` | none | nothing (writes a Mind) |
 | `chamber-lens` | prompt turn | `compose` | none | a per-subject lens panel |
 | `chamber-lens-refresh` | prompt turn | `refresh` | none | re-emits an existing living lens |
@@ -81,13 +81,17 @@ changed since the last digest.
   nothing.
 - `publish`: a `bash` node with `trigger_rule: "all_done"`. It runs whether
   `author` ran, was skipped, or failed, re-reads the digest store from disk, and
-  publishes the board to `DIGEST_KEY`. This keeps the Digest register current on
-  each nudge and self-heals a failed authoring: an un-advanced fingerprint drives a
-  re-author on the next mutation.
+  publishes the board to `DIGEST_KEY`. This keeps the register current on each nudge
+  and self-heals a failed authoring: an un-advanced fingerprint drives a re-author on
+  the next mutation.
 
-The cost-safety invariant: a quiet Chamber (no new Minds, rooms, lenses, or
-exhibits since the last digest) never spends an agent turn. `publish` still runs on
-every nudge, so the Digest register stays current with a fresh `composedAt` timestamp.
+The cost-safety invariant: a quiet Chamber (no new rooms, lenses, or exhibits since
+the last digest) never spends an agent turn. Minds sit outside the *content floor*
+only — they are capacity, not work, so a bench that has produced nothing has no shape
+to synthesize and authoring a Mind onto a bare bench buys no turn. Once a room, lens,
+or exhibit exists the floor is met, and Minds are in the fingerprint like everything
+else: seating or retiring one then does re-author. `publish` still runs on every
+nudge, so the register stays current with a fresh `composedAt` timestamp.
 
 - `bindSnapshotKey: DIGEST_KEY` and `validate: expectView(DIGEST_KEY, "board")`.
 - The digest has no surface region or cadence of its own. The rib nudges the whole

@@ -6,7 +6,7 @@ import { readMinds } from "../minds-store.ts";
 import { mindsDir, roomsDir } from "../paths.ts";
 import { readPendingGeneses } from "../pending-genesis.ts";
 import { normalizeGrounding, parseCriteriaLines, roomConfigFromFlat } from "../room-config.ts";
-import { clearDraft, readDraft, setAssembling, toggleSelected } from "../room-draft.ts";
+import { clearDraft, readDraft, toggleSelected } from "../room-draft.ts";
 import {
   DEFAULT_ROOM_TURN_BUDGET,
   getDriver,
@@ -83,17 +83,15 @@ export async function draftSetAction(action: RibAction): Promise<RibActionResult
   }
 }
 
-// Open or close the convene composer (the footer launcher / Cancel). Flips the draft's
-// assembling flag — closing also clears the selection (setAssembling) — and recomposes
-// the Chamber panel so the seats sprout (or shed) their Seat toggles and the composer
-// unfolds (or folds) beneath the bench.
-export async function assembleAction(action: RibAction): Promise<RibActionResult> {
-  const payload = (action.payload ?? {}) as Record<string, unknown>;
-  const on = payload.on === true;
+// Clear the table (the Clear chip). Empties the inclusion draft and recomposes the
+// Chamber panel, which folds the composer away — assembly is derived from the cast, so
+// emptying it IS leaving. The bulk undo for a seat set the operator no longer wants;
+// a single Mind is still cheaper to unseat by clicking its card again.
+export async function draftClearAction(_action: RibAction): Promise<RibActionResult> {
   try {
-    const draft = await setAssembling(on);
+    await clearDraft();
     refreshPresence();
-    return { ok: true, data: { assembling: draft.assembling } };
+    return { ok: true, data: { selected: [] } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }

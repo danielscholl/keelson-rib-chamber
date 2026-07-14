@@ -68,7 +68,7 @@ const RIB_VIEWS: RibViewDescriptor[] = [
   { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
   { key: EXHIBITS_KEY, canvasKind: "view", title: "Exhibits" },
   // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
-  // into the Briefing banner's Digest register — but the chamber-digest workflow
+  // into the Briefing banner's "The read" register — but the chamber-digest workflow
   // still binds it (its store is what the banner reads), so the view stays declared.
   { key: DIGEST_KEY, canvasKind: "view", title: "Digest" },
   { key: HTML_LENS_KEY, canvasKind: "html", title: "HTML Lens" },
