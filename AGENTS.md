@@ -43,8 +43,8 @@ contract change that breaks this rib turns CI red here.
 
 The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
 
-- **Views + a surface** — eight static snapshot keys: seven defined in `src/keys.ts`
-  (`rib:chamber:presence`, `:roster`, `:rooms`, `:lenses`, `:exhibits`, `:digest`,
+- **Views + a surface** — seven static snapshot keys: six defined in `src/keys.ts`
+  (`rib:chamber:presence`, `:roster`, `:rooms`, `:lenses`, `:digest`,
   `:brief`) plus `rib:chamber:lens-html`, defined in `src/lens-html.ts`, alongside
   dynamic per-room (`rib:chamber:room:<slug>` for live rooms,
   `rib:chamber:room-view:<slug>` for the drawer view) and per-lens keys, bound to the
@@ -52,9 +52,9 @@ The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
   mutable: each per-subject HTML lens pushes its own `canvasKind: "html"` entry at
   runtime via the `declareView` seam, because the host resolves a key's canvas kind
   by EXACT match. No hand-coded UI: every view is a board a producer publishes.
-- **Workflows** (`contributeWorkflows`, `src/workflows.ts`) — nine. Four
+- **Workflows** (`contributeWorkflows`, `src/workflows.ts`) — eight. Three
   deterministic collectors that read the data home (`chamber-roster` /
-  `chamber-rooms` / `chamber-lenses` / `chamber-exhibits`, each backed by a
+  `chamber-rooms` / `chamber-lenses`, each backed by a
   `bin/collect-*.ts`); four agent-turn authors (`chamber-genesis` writes a Mind's
   SOUL.md via the `chamber_emit_genesis` seam; `chamber-lens` authors a lens board;
   `chamber-lens-refresh` re-emits a living lens under the same id;

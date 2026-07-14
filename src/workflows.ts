@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import type { RibWorkflowContribution } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
-import { DIGEST_KEY, EXHIBITS_KEY, LENSES_KEY, ROOMS_KEY, ROSTER_KEY } from "./keys.ts";
+import { DIGEST_KEY, LENSES_KEY, ROOMS_KEY, ROSTER_KEY } from "./keys.ts";
 import { LENS_TOOL_NAME } from "./lens.ts";
 import { HTML_LENS_TOOL_NAME } from "./lens-html.ts";
 import { chamberDataHome } from "./paths.ts";
@@ -30,7 +30,6 @@ const ROOMS_COLLECTOR = fileURLToPath(new URL("../bin/collect-rooms.ts", import.
 // The lenses-index collector, resolved the same way (see ROSTER_COLLECTOR).
 const LENSES_COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", import.meta.url));
 // The exhibits-index collector, resolved the same way (see LENSES_COLLECTOR).
-const EXHIBITS_COLLECTOR = fileURLToPath(new URL("../bin/collect-exhibits.ts", import.meta.url));
 // The standing-digest collectors, resolved the same way (see ROSTER_COLLECTOR). The
 // gate reads all three stores + the digest, so it bakes in the data home (not a single
 // store dir); the publish collector reads the digest store from the same home.
@@ -134,31 +133,6 @@ export function contributeChamberWorkflows(): readonly RibWorkflowContribution[]
       },
       bindSnapshotKey: LENSES_KEY,
       validate: expectView(LENSES_KEY, "board"),
-    },
-    {
-      // The exhibits-index producer (the chamber-lenses sibling): a deterministic
-      // collector that reads the persisted exhibit-kind records from the data home
-      // and emits the tabled-deliverables index (one card per exhibit, each with
-      // Open + Delete). A table or a delete refreshes it; each exhibit also renders
-      // as its own live per-id panel on the Exhibits shelf.
-      definition: {
-        name: "chamber-exhibits",
-        mutates_checkout: false,
-        description:
-          'Use when: you want a single index of the exhibits rooms have tabled — the deliverables discussions produced. Triggers: "show the exhibits", "list exhibits", "what did the room produce". Does: reads the persisted exhibits from the Chamber data home and publishes a tabled-deliverables index (one card per exhibit, each with Open and a Delete control) to the Chamber Exhibits canvas. NOT for: living lenses (the chamber-lenses index), tabling an exhibit (a room turn calls chamber_table_exhibit), or viewing one (each exhibit has its own live panel; Open focuses it).',
-        nodes: [
-          {
-            id: "collect",
-            // Out-of-process (a bash node), so bake the resolved data home in —
-            // captured in registerTools, which runs before this (see the lenses
-            // collector).
-            bash: `bun ${shQuote(EXHIBITS_COLLECTOR)} ${shQuote(chamberDataHome())}`,
-            output_schema: { type: "object", required: ["view", "sections"] },
-          },
-        ],
-      },
-      bindSnapshotKey: EXHIBITS_KEY,
-      validate: expectView(EXHIBITS_KEY, "board"),
     },
     {
       // The digest producer (agent-turn arm of the standing-lens cost guard): a

@@ -152,17 +152,15 @@ function fakeSeams() {
 }
 
 describe("lens registry — kind-routed shelves", () => {
-  test("an exhibit publish registers a collapsible region on the Exhibits shelf", async () => {
+  test("an exhibit publish registers its key and NO panel", async () => {
     const f = fakeSeams();
     const registry = createLensRegistry(f.sm, f.registerRegion, f.store);
     await registry.publish("assessment", board("Assessment"), { reason: "gist" }, "exhibit");
-    expect(f.regions).toHaveLength(1);
-    const region = f.regions[0];
-    expect(region?.key).toBe(lensKey("assessment"));
-    expect(region?.group).toBe("exhibit");
-    expect(region?.groupTitle).toBe("Exhibits");
-    expect(region?.glyph).toEqual({ char: "▣", tone: "caution" });
-    expect(region?.collapsible).toBe(true);
+    // An exhibit is a room's deliverable, reached from the room that tabled it — it earns
+    // no standing panel. The KEY still registers: it is what lens-open focuses, so the
+    // room board's Tabled cards read it.
+    expect(f.regions).toHaveLength(0);
+    expect(f.sm.keys()).toContain(lensKey("assessment"));
     // The persisted record carries the kind so a restart reshelves it correctly.
     expect(f.saved).toEqual([{ id: "assessment", kind: "exhibit", sourceRoom: undefined }]);
   });
@@ -179,11 +177,26 @@ describe("lens registry — kind-routed shelves", () => {
     expect(f.saved).toEqual([{ id: "morning-brief", kind: "lens", sourceRoom: undefined }]);
   });
 
-  test("reregister reshelves by kind without re-saving (boot preserves updatedAt)", async () => {
+  test("reregister restores an exhibit's key without re-saving (boot preserves updatedAt)", async () => {
     const f = fakeSeams();
     const registry = createLensRegistry(f.sm, f.registerRegion, f.store);
     await registry.reregister("assessment", board("Assessment"), "exhibit");
-    expect(f.regions[0]?.group).toBe("exhibit");
+    // Boot brings the key back so a tabled exhibit is openable across a restart, and
+    // still no panel.
+    expect(f.sm.keys()).toContain(lensKey("assessment"));
+    expect(f.regions).toHaveLength(0);
     expect(f.saved).toEqual([]);
+  });
+
+  test("a lens re-published AS an exhibit loses its panel and keeps its key", async () => {
+    // The kind crossing: rewireRegion drops the region when a subject becomes an
+    // exhibit, rather than leaving a stale Lenses panel behind it.
+    const f = fakeSeams();
+    const registry = createLensRegistry(f.sm, f.registerRegion, f.store);
+    await registry.publish("crosser", board("Crosser"));
+    expect(f.regions).toHaveLength(1);
+    await registry.reregister("crosser", board("Crosser"), "exhibit");
+    expect(f.regions).toHaveLength(0);
+    expect(f.sm.keys()).toContain(lensKey("crosser"));
   });
 });

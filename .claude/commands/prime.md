@@ -98,13 +98,13 @@ allowed-tools: Bash, Read, Glob, Grep
     </step>
     <step name="boards">
       <action>LIST src/boards/ and bin/; read at most ONE builder if you need the shape.</action>
-      <extract>src/boards/ has SIX DETERMINISTIC board builders the rib composes
-        (canvas `board` data, zero React): exhibits, lenses, presence, room, rooms,
+      <extract>src/boards/ has FIVE DETERMINISTIC board builders the rib composes
+        (canvas `board` data, zero React): lenses, presence, room, rooms,
         roster — plus two section helpers, activity and convene, that are composed
         into other boards rather than published themselves. These are rib-built,
         NOT agent-authored — the roster, the Rooms index, and the live transcript
         are boards; a lens/exhibit is what a Mind authors. Four bin/collect-*.ts
-        files (roster, rooms, lenses, exhibits) are the deterministic collector
+        files (roster, rooms, lenses) are the deterministic collector
         behind a workflow of the same name; collect-digest-gate and
         collect-digest-publish are two nodes of the single chamber-digest
         workflow.</extract>
@@ -114,8 +114,8 @@ allowed-tools: Bash, Read, Glob, Grep
         constants, not literals, so grep the `name:` key rather than the string
         "chamber" or you will undercount.</action>
       <command>grep -nE '^\s*name: ' src/workflows.ts</command>
-      <extract>Nine: four deterministic collectors (chamber-roster / -rooms / -lenses
-        / -exhibits) that just read the data home; four agent-turn authors
+      <extract>Eight: three deterministic collectors (chamber-roster / -rooms /
+        -lenses) that just read the data home; four agent-turn authors
         (chamber-genesis, chamber-lens, chamber-lens-refresh, chamber-lens-html); and
         the self-gating chamber-digest (a gate node reads the fingerprint, the paid
         author node runs only when it advanced, an always-on publish node re-reads

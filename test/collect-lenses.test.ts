@@ -90,4 +90,30 @@ describe("collect-lenses", () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  test("an exhibit never reaches the lenses index — one store, split by kind", async () => {
+    // Lenses and exhibits share the lens store, so this collector's kind filter is the
+    // only thing keeping a room's deliverable off the standing-views shelf.
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-lenses-"));
+    try {
+      const store = createFileLensStore(join(home, "lenses"));
+      await store.saveLens({
+        id: "morning-brief",
+        board: { view: "board", title: "Morning Brief", sections: [] },
+      });
+      await store.saveLens({
+        id: "sample-assessment",
+        board: { view: "board", title: "Sample Assessment", sections: [] },
+        kind: "exhibit",
+        sourceRoom: "sample-review",
+      });
+
+      const { out, code } = await runCollector(home);
+      expect(code).toBe(0);
+      expect(out).toContain("morning-brief");
+      expect(out).not.toContain("sample-assessment");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });

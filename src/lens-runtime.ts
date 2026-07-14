@@ -140,14 +140,12 @@ function reconcileHtmlLensPanels(registry: HtmlLensRegistry): void {
   })();
 }
 
-// Both indexes that render an exhibit — its own shelf card and the producing
-// room's tabled link — refreshed together (concurrently; the collectors are
-// independent and each fail-soft) so neither goes stale after a mutation.
-export async function refreshExhibitIndexes(): Promise<void> {
-  await Promise.all([
-    refreshWorkflow("chamber-exhibits").catch(() => {}),
-    refreshWorkflow("chamber-rooms").catch(() => {}),
-  ]);
+// The one index that names an exhibit is its producing room's card, whose `tabled`
+// field is joined from the lens store — so a room card goes stale on any exhibit
+// mutation, and every exhibit write path refreshes it. Fail-soft, like every collector
+// refresh.
+export async function refreshExhibitIndex(): Promise<void> {
+  await refreshWorkflow("chamber-rooms").catch(() => {});
 }
 
 // The exhibits a room tabled, newest-first (listLenses already orders them). The
@@ -199,7 +197,7 @@ export function stampExhibitSources(rawIds: readonly string[], room: Room): void
     }
     // One refresh per index for the batch — the exhibit card's "from" field and
     // the room card's "tabled" link both just appeared.
-    if (stamped) await refreshExhibitIndexes();
+    if (stamped) await refreshExhibitIndex();
     if (owned) await republishSourceRoom(source);
   };
   void enqueueLensWrite(apply);
@@ -238,7 +236,7 @@ export async function deleteRoomExhibits(slug: string): Promise<string[]> {
       }
     }
     if (removed.length > 0) {
-      await refreshExhibitIndexes();
+      await refreshExhibitIndex();
       await refreshStandingPanels();
       // One gate evaluation for the batch (see deleteRecordOfKind for why a deletion
       // takes the free lapse path).
@@ -285,7 +283,7 @@ export async function deleteRecordOfKind(
     lensRegistry?.remove(id);
     if (expected === "exhibit") {
       // A room card listing this exhibit as tabled must drop the dead link.
-      await refreshExhibitIndexes();
+      await refreshExhibitIndex();
       // So must the producing room's own board — its Tabled section is a driver cache
       // that no delete would otherwise invalidate, leaving a card whose Open is dead.
       await republishSourceRoom(record?.sourceRoom);

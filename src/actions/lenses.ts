@@ -10,6 +10,7 @@ import {
   enqueueLensWrite,
   getHtmlLensRegistry,
   getLensRegistry,
+  refreshExhibitIndex,
 } from "../lens-runtime.ts";
 import { createFileLensStore, isExhibit, lensProvenance } from "../lens-store.ts";
 import { htmlLensesDir, lensesDir } from "../paths.ts";
@@ -205,7 +206,7 @@ export async function lensNoteAction(action: RibAction): Promise<RibActionResult
       // lens, the roster pulse; exhibits don't ride the "Live views" count), cheap
       // deterministic collectors, fail-soft like the emit/retire paths.
       if (isExhibit(record)) {
-        await refreshWorkflow("chamber-exhibits").catch(() => {});
+        await refreshExhibitIndex();
       } else {
         await refreshWorkflow("chamber-lenses").catch(() => {});
         await refreshWorkflow("chamber-roster").catch(() => {});

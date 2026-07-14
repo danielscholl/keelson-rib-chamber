@@ -4,11 +4,13 @@ import type { LensKind, LensProvenance, LensRefresh, LensStore } from "./lens-st
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
 // A Mind authors a lens by publishing a board under a per-subject key
-// (rib:chamber:lens:<id>). The registry registers that snapshot key AND adds a
-// surface region for it through the harness `registerRegion` seam, so each new
-// subject appears as its own panel — unbounded, no fixed pool, no eviction. The
-// rib withholds the lens tool entirely when that seam is absent (see index.ts), so
-// the registry requires it rather than publish invisible, unrendered keys.
+// (rib:chamber:lens:<id>). The registry registers that snapshot key AND — for a LENS —
+// adds a surface region for it through the harness `registerRegion` seam, so each new
+// subject appears as its own panel: unbounded, no fixed pool, no eviction. An EXHIBIT
+// shares the key namespace but gets no panel; it is a room's deliverable, reached from
+// the room that tabled it. The rib withholds the lens tool entirely when that seam is
+// absent (see index.ts), so the registry requires it rather than publish invisible,
+// unrendered keys.
 
 // The id of the Chamber surface lens panels attach to. Shared with the surface
 // declaration in index.ts so the registerRegion target can't drift from it.
@@ -146,7 +148,8 @@ interface LensEntry {
   key: string;
   publisher: { publish(board: CanvasBoardView): Promise<void> };
   unregisterSnapshot: () => void;
-  unregisterRegion: () => void;
+  // Absent for an exhibit: it holds a key but no panel (see regionFor).
+  unregisterRegion?: () => void;
   // The shelf wiring the live region was built from, so a re-publish that
   // changes the refresh backing can swap the region in place (and a failed
   // swap can restore this exact wiring).
@@ -161,51 +164,44 @@ export function createLensRegistry(
 ): LensRegistry {
   const entries = new Map<string, LensEntry>();
 
-  // Drop a single lens's snapshot key + surface region, a sync in-memory mirror
-  // of the per-entry handles dispose() invokes in bulk. No-op on an unknown id
+  // Drop a single subject's snapshot key and its panel, if it had one, a sync in-memory
+  // mirror of the per-entry handles dispose() invokes in bulk. No-op on an unknown id
   // (matches RoomKeyRegistry.release). Durable deletion (store.deleteLens) is
   // the caller's, so this stays a pure in-memory release.
   function release(id: string): boolean {
     const entry = entries.get(id);
     if (!entry) return false;
-    entry.unregisterRegion();
+    entry.unregisterRegion?.();
     entry.unregisterSnapshot();
     entries.delete(id);
     return true;
   }
 
-  // The kind decides the shelf (group/glyph/verb) and, for a refresh-backed
-  // lens, the region's re-compose wiring: the named workflow runs with input
-  // `lens` = this id, on the emit's cadence (clamped to the host floor).
-  function regionFor(id: string, kind: LensKind, refresh?: LensRefresh): RibSurfaceRegion {
-    const key = lensKey(id);
+  // A LENS's panel. Only a lens gets one: it is a standing view, continuously true, so
+  // it earns permanent surface. An exhibit is a room's deliverable — reached from the
+  // room that tabled it — so it holds a key with no panel, and regionFor is never
+  // called for one. A refresh-backed lens also carries the region's re-compose wiring:
+  // the named workflow runs with input `lens` = this id, on the emit's cadence (clamped
+  // to the host floor).
+  function regionFor(id: string, refresh?: LensRefresh): RibSurfaceRegion {
     return {
-      key,
+      key: lensKey(id),
       title: id,
       collapsible: true,
-      ...(kind === "exhibit"
+      glyph: { char: "✦", tone: "accent" as const },
+      group: "lens",
+      groupTitle: "Lenses",
+      headActions: [destructiveHeadAction("retire-lens", "Retire", "lens", id)],
+      ...(refresh
         ? {
-            glyph: { char: "▣", tone: "caution" as const },
-            group: "exhibit",
-            groupTitle: "Exhibits",
-            headActions: [destructiveHeadAction("delete-exhibit", "Delete", "exhibit", id)],
+            workflow: refresh.workflow,
+            workflowArgs: lensRefreshInputs(id),
+            cadenceMs: Math.max(
+              MIN_REFRESH_CADENCE_MS,
+              Math.round(refresh.cadenceMs ?? DEFAULT_LENS_REFRESH_CADENCE_MS),
+            ),
           }
-        : {
-            glyph: { char: "✦", tone: "accent" as const },
-            group: "lens",
-            groupTitle: "Lenses",
-            headActions: [destructiveHeadAction("retire-lens", "Retire", "lens", id)],
-            ...(refresh
-              ? {
-                  workflow: refresh.workflow,
-                  workflowArgs: lensRefreshInputs(id),
-                  cadenceMs: Math.max(
-                    MIN_REFRESH_CADENCE_MS,
-                    Math.round(refresh.cadenceMs ?? DEFAULT_LENS_REFRESH_CADENCE_MS),
-                  ),
-                }
-              : {}),
-          }),
+        : {}),
     };
   }
 
@@ -221,20 +217,25 @@ export function createLensRegistry(
       emptyLensBoard(),
     );
     const unregisterSnapshot = sm.register(key, latest, { validate: expectView(key, "board") });
-    let unregisterRegion: () => void;
-    try {
-      unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, kind, refresh));
-    } catch (e) {
-      // A failed region add (e.g. the harness per-surface ceiling) must not leak
-      // the snapshot registration we already made.
-      unregisterSnapshot();
-      throw e;
+    // An exhibit registers its KEY only. The key is what lens-open focuses, so it is what
+    // the room board's Tabled cards read — dropping it with the panel would leave every
+    // one of those cards opening a dead key.
+    let unregisterRegion: (() => void) | undefined;
+    if (kind !== "exhibit") {
+      try {
+        unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, refresh));
+      } catch (e) {
+        // A failed region add (e.g. the harness per-surface ceiling) must not leak
+        // the snapshot registration we already made.
+        unregisterSnapshot();
+        throw e;
+      }
     }
     const entry: LensEntry = {
       key,
       publisher,
       unregisterSnapshot,
-      unregisterRegion,
+      ...(unregisterRegion ? { unregisterRegion } : {}),
       kind,
       refresh,
     };
@@ -243,23 +244,30 @@ export function createLensRegistry(
   }
 
   // Swap an existing entry's region when a re-publish changes its shelf wiring
-  // (a refresh backing added/changed/cleared). The snapshot key and publisher
-  // stay put — only the layout re-registers, so the panel's frames are
-  // uninterrupted. A failed swap restores the prior wiring; if even that fails,
-  // release the whole entry so no orphaned key lingers behind a missing panel.
+  // (a refresh backing added/changed/cleared, or a kind crossing between lens and
+  // exhibit). The snapshot key and publisher stay put — only the layout re-registers,
+  // so the panel's frames are uninterrupted. A failed swap restores the prior wiring;
+  // if even that fails, release the whole entry so no orphaned key lingers behind a
+  // missing panel. An exhibit has no region: crossing INTO one drops the panel, and
+  // crossing out of one builds the first.
   function rewireRegion(id: string, entry: LensEntry, kind: LensKind, refresh?: LensRefresh): void {
     if (entry.kind === kind && sameRefresh(entry.refresh, refresh)) return;
-    entry.unregisterRegion();
+    entry.unregisterRegion?.();
+    entry.unregisterRegion = undefined;
+    if (kind === "exhibit") {
+      entry.kind = kind;
+      entry.refresh = refresh;
+      return;
+    }
     try {
-      entry.unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, kind, refresh));
+      entry.unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, refresh));
       entry.kind = kind;
       entry.refresh = refresh;
     } catch (e) {
       try {
-        entry.unregisterRegion = registerRegion(
-          CHAMBER_SURFACE_ID,
-          regionFor(id, entry.kind, entry.refresh),
-        );
+        if (entry.kind !== "exhibit") {
+          entry.unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, entry.refresh));
+        }
       } catch {
         entry.unregisterSnapshot();
         entries.delete(id);
