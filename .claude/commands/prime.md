@@ -75,7 +75,7 @@ allowed-tools: Bash, Read, Glob, Grep
       <extract>brief-gate (the rib-owned attention gate), reflection-gate (the
         close-only paid turn), runtime (host seams + the in-process Convene/Chamber
         panels), lens-runtime (the lens + HTML-lens registries), room-lifecycle
-        (driver, region registry, room loop). Tools live under src/tools/, board
+        (driver, key registry, room loop). Tools live under src/tools/, board
         actions under src/actions/.</extract>
     </step>
   </phase>
@@ -144,8 +144,8 @@ allowed-tools: Bash, Read, Glob, Grep
         own module + bindX/disposeX pair — index.ts gains wiring, not logic); zero
         React; strategies pure; attach only via the Rib contract; fail closed; paid
         turns budget-capped (MAX_ROOM_TURN_BUDGET) + confirm-gated; bounded
-        concurrent rooms (MAX_ACTIVE_ROOMS), each on its own per-slug key and
-        region, with a fresh slug per start; slugs are path segments, guarded by
+        concurrent rooms (MAX_ACTIVE_ROOMS), each on its own per-slug key, with
+        a fresh slug per start; slugs are path segments, guarded by
         assertSafeSlug / isSafeSlug before they touch the filesystem.</point>
       <point>Comments: default to none; capture non-obvious why; no narration.</point>
       <point>No abstractions ahead of a concrete second caller.</point>

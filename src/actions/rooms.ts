@@ -8,6 +8,7 @@ import { mindsDir, roomsDir } from "../paths.ts";
 import { readPendingGeneses } from "../pending-genesis.ts";
 import { normalizeGrounding, parseCriteriaLines, roomConfigFromFlat } from "../room-config.ts";
 import { clearDraft, readDraft, toggleSelected } from "../room-draft.ts";
+import { roomKey } from "../room-key-registry.ts";
 import {
   DEFAULT_ROOM_TURN_BUDGET,
   getDriver,
@@ -22,7 +23,6 @@ import {
   startRoom,
   stopRoom,
 } from "../room-lifecycle.ts";
-import { roomKey } from "../room-region-registry.ts";
 import { createFileRoomStore, deriveRoomName } from "../room-store.ts";
 import type { OutcomeSplit } from "../room-text.ts";
 import { splitOutcome } from "../room-text.ts";

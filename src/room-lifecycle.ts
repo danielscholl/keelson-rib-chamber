@@ -23,8 +23,8 @@ import type { RoomStore } from "./ports.ts";
 import { onRoomClosed } from "./reflection-gate.ts";
 import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { MAX_ACTIVE_ROOMS, type RoomConfigInput } from "./room-config.ts";
+import { createRoomKeyRegistry, type RoomKeyRegistry } from "./room-key-registry.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
-import { createRoomRegionRegistry, type RoomRegionRegistry } from "./room-region-registry.ts";
 import { createFileRoomStore, deriveRoomName, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import {
@@ -51,15 +51,14 @@ export const DEFAULT_ROOM_TURN_BUDGET = 8;
 // with the full ctx — runAgentTurn + snapshot manager) and reused thereafter. It
 // stays undefined when either seam is absent, and room actions then fail closed.
 let driver: RoomDriver | undefined;
-// The room region registry is a boot-time singleton like the lens one: it owns the
-// per-slug room snapshot keys + surface regions, built once in registerTools and
-// disposed in dispose(). roomSm tracks the manager it was built against so a
-// re-bootstrap with a different one rebinds it.
-let roomRegistry: RoomRegionRegistry | undefined;
+// The room key registry is a boot-time singleton like the lens one: it owns the
+// per-slug room snapshot keys, built once in registerTools and disposed in dispose().
+// roomSm tracks the manager it was built against so a re-bootstrap with a different
+// one rebinds it.
+let roomRegistry: RoomKeyRegistry | undefined;
 let roomSm: SnapshotManager | undefined;
-// A closed room is released from the region registry (retainOnly keeps only active +
-// the most-recent), so unlike a lens it has no standing key. room-open publishes each
-// opened room's board to its own snapshot-only key (roomViewKey(slug)) the drawer
+// A live room's board is read through its own key; room-open on a CLOSED room publishes
+// a rebuilt board to a separate snapshot-only key (roomViewKey(slug)) the drawer
 // subscribes to, registered lazily and torn down in dispose().
 let roomViewSm: SnapshotManager | undefined;
 const roomViewEntries = new Map<
@@ -94,14 +93,14 @@ const loops = new Set<string>();
 // Monotonic suffix so each room-start gets a brand-new slug (see freshRoomSlug).
 let roomSeq = 0;
 // Rooms currently active. Multiple run concurrently — each on its own per-slug
-// snapshot key + surface region — so a room is added when it opens and removed when
-// it stops or its loop ends. Set iteration is insertion-ordered, so the last entry
-// is the most-recently-started active room: the default target when a chat tool
-// omits an explicit slug.
+// snapshot key — so a room is added when it opens and removed when it stops or its
+// loop ends. Set iteration is insertion-ordered, so the last entry is the
+// most-recently-started active room: the default target when a chat tool omits an
+// explicit slug.
 const activeRooms = new Set<string>();
 // The most-recent room, active or finished. Unlike activeRooms it survives the room
-// ending, so chamber_room_status (and the surface's retained panel) can still show a
-// just-finished transcript. Cleared only on dispose.
+// ending, so chamber_room_status can still show a just-finished transcript. Cleared
+// only on dispose.
 let lastSlug: string | undefined;
 let roomRetentionSweep = Promise.resolve();
 
@@ -128,16 +127,9 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
   }
 }
 
-// The room surface shows a panel for every active room plus the most-recent room's,
-// so a just-finished room's final board lingers until a newer room supersedes it.
-// Recomputed after any room lifecycle change; retainOnly drops the panels of rooms
-// that are neither active nor the most-recent.
-function reconcileRoomPanels(): void {
-  const keep = new Set(activeRooms);
-  if (lastSlug) keep.add(lastSlug);
-  roomRegistry?.retainOnly(keep);
-  // Drive the rooms-index bar off the same lifecycle signal: tick while a room is
-  // live so its bar advances, quiet once the bench is idle.
+// Drive the rooms-index bar off every room lifecycle change: tick while a room is live
+// so its bar advances, quiet once the bench is idle.
+function syncRoomsTicker(): void {
   if (activeRooms.size > 0) startRoomsTick();
   else stopRoomsTick();
 }
@@ -179,17 +171,15 @@ export const ROOM_DISABLED: RibActionResult = {
 
 export function bindRoomLifecycle(seams: {
   sm: SnapshotManager;
-  registerRegion: NonNullable<RibContext["registerRegion"]>;
   runAgentTurn: NonNullable<RibContext["runAgentTurn"]>;
 }): { roomStore: RoomStore } {
-  const { sm, registerRegion, runAgentTurn: run } = seams;
-  // The room publisher routes each room's board to a per-slug key + dynamic surface
-  // region, so it requires registerRegion. Rebuilt against a new manager on a
-  // re-bootstrap, reused otherwise; built before the old one is disposed so a failed
-  // rebuild leaves the existing registry and roomSm consistent.
+  const { sm, runAgentTurn: run } = seams;
+  // The room publisher routes each room's board to a per-slug key. Rebuilt against a new
+  // manager on a re-bootstrap, reused otherwise; built before the old one is disposed so
+  // a failed rebuild leaves the existing registry and roomSm consistent.
   let registry = roomRegistry;
   if (!registry || sm !== roomSm) {
-    registry = createRoomRegionRegistry(sm, registerRegion);
+    registry = createRoomKeyRegistry(sm);
     roomRegistry?.dispose();
     roomRegistry = registry;
     roomSm = sm;
@@ -271,7 +261,11 @@ export function lastRoomSlug(): string | undefined {
 
 export function noteRoomDeleted(slug: string): void {
   if (lastSlug === slug) lastSlug = undefined;
-  reconcileRoomPanels();
+  // A room's key outlives the room ending, so the delete is what releases it — nothing
+  // else will, and the key composes from an in-memory `latest`, so it would go on
+  // serving the deleted room's final board.
+  roomRegistry?.release(slug);
+  syncRoomsTicker();
 }
 
 export async function publishRoomView(slug: string, board: CanvasView): Promise<void> {
@@ -312,10 +306,11 @@ function ensureLoop(slug: string): void {
       }
     } finally {
       loops.delete(slug);
-      // The room left "active" — drop it from the active set and reconcile the
-      // surface so its panel is released unless it is still the most-recent room.
+      // The room left "active" — drop it from the active set, which quiets the
+      // rooms-index ticker if it was the last one live. Its key stays: a drawer opened
+      // while it ran is still reading that board.
       activeRooms.delete(slug);
-      reconcileRoomPanels();
+      syncRoomsTicker();
       queueRoomRetentionSweep();
       // The room just became a closed session — refresh the index so its card
       // appears promptly instead of on the next cadence. Fail-soft, never thrown
@@ -647,11 +642,9 @@ export async function startRoom(
   // store a trimmed topic or none — a whitespace-only topic becomes no topic.
   const topic = (input.topic ?? "").trim();
   const slug = freshRoomSlug();
-  // Concurrency cap + reservation in one synchronous tick (no await between the size
-  // check and the add): two concurrent starts can neither overshoot MAX_ACTIVE_ROOMS
-  // nor have a racing reconcileRoomPanels (a finishing room's loop) drop this room's
-  // panel mid-driver.start — the slug is in activeRooms before that await, so it is
-  // always in the keep-set. Both entry points (chat tool, board action) route here.
+  // Concurrency cap + reservation in one synchronous tick: with no await between the
+  // size check and the add, two concurrent starts cannot both read a size under the cap
+  // and overshoot MAX_ACTIVE_ROOMS. Both entry points (chat tool, board action) route here.
   if (activeRooms.size >= MAX_ACTIVE_ROOMS) {
     return {
       ok: false,
@@ -674,9 +667,7 @@ export async function startRoom(
       ...(input.coding ? { coding: input.coding } : {}),
     });
     lastSlug = slug;
-    // driver.start published this room's first board (registering its per-slug
-    // region); reconcile so the surface keeps every active room plus the most-recent.
-    reconcileRoomPanels();
+    syncRoomsTicker();
     ensureLoop(slug);
     // The sessions index is a separate snapshot from the room's own panel — refresh
     // it so the new active session appears promptly instead of on the next cadence
@@ -685,9 +676,11 @@ export async function startRoom(
     void refreshStandingPanels();
     return { ok: true, data: { slug } };
   } catch (e) {
-    // The reserved slot never opened — release it and drop any partial panel.
+    // The reserved slot never opened — release it, and the key with it: a start that
+    // failed after its first publish would otherwise strand a key no room backs.
     activeRooms.delete(slug);
-    reconcileRoomPanels();
+    roomRegistry?.release(slug);
+    syncRoomsTicker();
     return { ok: false, error: errText(e) };
   }
 }
@@ -724,7 +717,7 @@ export async function stopRoom(slug: string): Promise<RibActionResult> {
   try {
     await driver.stop(slug);
     activeRooms.delete(slug);
-    reconcileRoomPanels();
+    syncRoomsTicker();
     // The room is now a closed session — refresh the index so it appears as a card
     // (fail-soft; cadence covers an older harness without the seam).
     await refreshWorkflow("chamber-rooms").catch(() => {});

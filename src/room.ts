@@ -227,9 +227,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   const now = deps.now ?? (() => new Date());
   const newId = deps.newId ?? defaultNewId();
   // Rooms currently driving. Multiple run concurrently — each owns its own per-slug
-  // snapshot key + surface region (room-region-registry), so there is no shared
-  // single-key contention. Tracked so releaseSlugState never GCs a live room's
-  // in-memory state; a fresh slug per start means starts never contend for a slot.
+  // snapshot key (room-key-registry), so there is no shared single-key contention.
+  // Tracked so releaseSlugState never GCs a live room's in-memory state; a fresh slug
+  // per start means starts never contend for a slot.
   const activeRooms = new Set<MindSlug>();
   // Set by dispose(). The CLI MVP can't cancel an in-flight child, so a turn can
   // settle after teardown; once disposed, a late turn drops its append/commit so
@@ -359,9 +359,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   // renders the committed room, not a stale copy.
   //
   // Only a DRIVING room may republish. The publisher lazily registers an unknown slug
-  // (room-region-registry), so publishing a room whose panel the surface already released
-  // would resurrect it — and an exhibit tabled by a closing turn stamps well after the
-  // room ends. A closed room needs none of this: its drawer resolves exhibits live.
+  // (room-key-registry), so republishing a room whose key was already released would
+  // resurrect it — and an exhibit tabled by a closing turn stamps well after the room
+  // ends, so a delete can land first. A closed room needs none of this: its drawer
+  // resolves exhibits live.
   async function republish(slug: MindSlug): Promise<void> {
     if (disposed || !activeRooms.has(slug)) return;
     const exhibits = await deps.exhibits?.(slug);

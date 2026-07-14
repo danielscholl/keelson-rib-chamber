@@ -163,7 +163,7 @@ export function createLensRegistry(
 
   // Drop a single lens's snapshot key + surface region, a sync in-memory mirror
   // of the per-entry handles dispose() invokes in bulk. No-op on an unknown id
-  // (matches RoomRegionRegistry.release). Durable deletion (store.deleteLens) is
+  // (matches RoomKeyRegistry.release). Durable deletion (store.deleteLens) is
   // the caller's, so this stays a pure in-memory release.
   function release(id: string): boolean {
     const entry = entries.get(id);
