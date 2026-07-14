@@ -48,6 +48,12 @@ const genesisEmitSchema = z.object({
   // Capability slugs the Mind may invoke in a room (see CAPABILITIES).
   // Unknown slugs are dropped at persist; omitted/empty keeps the Mind text-only.
   tools: z.array(z.string()).optional(),
+  // The pending marker's run-scoped id, threaded in as a workflow input for the turn
+  // to pass back verbatim, so the landing settles the boot card this run actually
+  // started. Optional because the model may drop it and `/genesis` never mints one;
+  // removeLandedGenesis falls back to its name guess, so a missing id costs accuracy,
+  // not correctness.
+  genesisId: z.string().optional(),
 });
 
 export function makeGenesisTool(): ToolDefinition {
@@ -73,6 +79,7 @@ export function makeGenesisTool(): ToolDefinition {
         tools,
         model: rawModel,
         provider: rawProvider,
+        genesisId,
       } = parsed.data;
       try {
         const knownTools = tools
@@ -116,7 +123,7 @@ export function makeGenesisTool(): ToolDefinition {
         const record = await scaffoldRun;
         // The genesis landed — settle its own boot-card marker (siblings keep theirs)
         // so the next roster frame shows the real seat instead of the boot card.
-        await settleGenesis(record.name);
+        await settleGenesis(record.name, genesisId);
         // Re-run the bound chamber-roster collector so the new Mind appears
         // promptly instead of waiting on the 120s cadence. Fail-soft — the Mind is
         // already scaffolded, so a host-refresh reject must not fail the emit.

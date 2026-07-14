@@ -215,29 +215,38 @@ export function stopGenesisTick(): void {
 // a freeform brief) and (re)start the boot-card tick — markers are a list, so parallel
 // geneses each keep their own boot card. Fail-soft — a marker write failure just skips
 // the boot card, never blocks the genesis workflow the caller is about to launch.
-export async function beginGenesis(info: { name?: string; role?: string }): Promise<void> {
+// Returns the marker's run-scoped id (its written startedAt) for the caller to thread
+// into the run so the landing settles this exact card; undefined when no marker
+// exists to settle, which the fail-soft path leaves as the guess.
+export async function beginGenesis(info: {
+  name?: string;
+  role?: string;
+}): Promise<string | undefined> {
   try {
     const marker: PendingGenesis = {
       startedAt: new Date().toISOString(),
       ...(info.name ? { name: info.name } : {}),
       ...(info.role ? { role: info.role } : {}),
     };
-    await appendPendingGenesis(marker);
+    const written = await appendPendingGenesis(marker);
     startGenesisTick();
+    return written.startedAt;
   } catch (e) {
     console.error(`[rib-chamber] pending-genesis write failed: ${errText(e)}`);
+    return undefined;
   }
 }
 
-// A genesis landed: settle ITS marker (matched by authored name, else the oldest
-// freeform marker — see removeLandedGenesis) and stop the tick only when no other
-// genesis is still in flight, so a sibling's boot card keeps pulsing. Fail-soft.
-export async function settleGenesis(name: string): Promise<void> {
+// A genesis landed: settle ITS marker (by the run-scoped id when the run carried one,
+// else the name / oldest-freeform guess — see removeLandedGenesis) and stop the tick
+// only when no other genesis is still in flight, so a sibling's boot card keeps
+// pulsing. Fail-soft.
+export async function settleGenesis(name: string, genesisId?: string): Promise<void> {
   // A marker-store failure must not be read as "nothing left" — that stops the
   // ticker while sibling boot cards are still pending and never lets them reach the
   // stalled/Dismiss state. Stop only after a real removal reports none remain.
   try {
-    const remaining = await removeLandedGenesis(name);
+    const remaining = await removeLandedGenesis({ name, genesisId });
     if (remaining.length === 0) stopGenesisTick();
   } catch {
     // leave the ticker running; siblings may still be in flight

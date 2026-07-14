@@ -48,7 +48,7 @@ export async function authorArchetypeAction(action: RibAction): Promise<RibActio
   if (!starter) return { ok: false, error: `unknown archetype: ${slug || "(none)"}` };
   // A starter's name/role are known now (pinned as inputs), so the boot card can show
   // them; stay on the surface (stay: true) so the operator watches the seat fill.
-  await beginGenesis({ name: starter.name, role: starter.role });
+  const genesisId = await beginGenesis({ name: starter.name, role: starter.role });
   return {
     ok: true,
     data: {
@@ -60,6 +60,7 @@ export async function authorArchetypeAction(action: RibAction): Promise<RibActio
         name: starter.name,
         role: starter.role,
         voice: starter.voice,
+        ...(genesisId ? { genesisId } : {}),
       },
     },
   };
@@ -78,14 +79,19 @@ export async function describeOwnAction(action: RibAction): Promise<RibActionRes
   if (!brief) return { ok: false, error: "Describe the Mind first — who should it feel like?" };
   // A freeform brief has no name/role yet (the workflow authors them), so the boot card
   // holds "calibrating…"; stay on the surface so the operator watches the seat fill.
-  await beginGenesis({});
+  // Its marker is unnamed, so the threaded id is the only thing that ties this landing
+  // back to this card when freeform geneses run in parallel.
+  const genesisId = await beginGenesis({});
   return {
     ok: true,
     data: {
       effect: "run-workflow",
       workflow: "chamber-genesis",
       stay: true,
-      args: { ARGUMENTS: brief.slice(0, MAX_BRIEF_CHARS) },
+      args: {
+        ARGUMENTS: brief.slice(0, MAX_BRIEF_CHARS),
+        ...(genesisId ? { genesisId } : {}),
+      },
     },
   };
 }
