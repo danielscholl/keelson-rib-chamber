@@ -81,6 +81,8 @@ export interface TurnScript {
   text: string;
   status?: RibAgentTurnResult["status"];
   chunks?: string[];
+  // Raw chunks yielded after the text ones — a turn that reached a tool.
+  emits?: MessageChunk[];
 }
 
 // Scripted runAgentTurn: each call consumes the next script (repeating the last).
@@ -99,6 +101,7 @@ export function scriptedRunAgentTurn(scripts: TurnScript[]) {
     const turn: RibAgentTurn = {
       stream: (async function* (): AsyncGenerator<MessageChunk> {
         for (const content of chunks) yield { type: "text", content };
+        for (const c of script.emits ?? []) yield c;
         yield { type: "done" };
       })(),
       result: Promise.resolve({

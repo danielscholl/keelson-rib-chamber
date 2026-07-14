@@ -196,6 +196,31 @@ describe("room driver — step", () => {
     expect(h.turns.requests).toHaveLength(2);
   });
 
+  test("an empty turn that reached a tool is NOT retried — the tool already ran", async () => {
+    // Re-running the attempt re-runs its tools; Edit/Write/Bash in a coding room are
+    // not idempotent, so a tool-using turn commits empty rather than double-applying.
+    const h = harness([
+      {
+        text: "",
+        emits: [{ type: "tool_use", id: "t1", toolName: "Edit", toolInput: { path: "a.ts" } }],
+      },
+      { text: "from retry" },
+    ]);
+    await h.driver.start({ ...START, turnBudget: 2 });
+    await h.driver.step("demo");
+    expect(h.turns.requests).toHaveLength(1);
+    const transcript = await h.store.loadTranscript("demo");
+    expect(transcript[0]?.parts[0]?.text).toBe("");
+  });
+
+  test("empty-turn retries are capped per room, not paid per turn", async () => {
+    const h = harness([{ text: "" }]);
+    await h.driver.start({ ...START, turnBudget: 8 });
+    for (let i = 0; i < 5; i++) await h.driver.step("demo");
+    // 5 turns; only the first 3 bought a retry — 5 + MAX_EMPTY_TURN_RETRIES.
+    expect(h.turns.requests).toHaveLength(8);
+  });
+
   test("prompt carries prior transcript text", async () => {
     const h = harness([{ text: "first" }, { text: "second" }]);
     await h.driver.start(START);
