@@ -264,6 +264,32 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
     sourceRoom,
   });
 
+  test("the delete confirm counts the exhibits it will take, and says nothing when there are none", () => {
+    // The dialog is the only consent gate on this path, and the delete cascades — an
+    // operator reads its enumeration as the whole blast radius.
+    const bare = buildRoomsIndexBoard([room({ slug: "bare", name: "Bare", status: "done" })]);
+    const bareBody = cards(bare)[0]?.actions?.find((a) => a.type === "room-delete")?.confirm?.body;
+    expect(bareBody).toBe("Delete Bare? This permanently removes the session and its transcript.");
+
+    const one = buildRoomsIndexBoard(
+      [room({ slug: "solo", name: "Solo", status: "done" })],
+      [],
+      [exhibit("verdict", "solo")],
+    );
+    expect(cards(one)[0]?.actions?.find((a) => a.type === "room-delete")?.confirm?.body).toBe(
+      "Delete Solo? This permanently removes the session, its transcript, and the 1 exhibit it tabled.",
+    );
+
+    const many = buildRoomsIndexBoard(
+      [room({ slug: "pair", name: "Pair", status: "done" })],
+      [],
+      [exhibit("a", "pair"), exhibit("b", "pair")],
+    );
+    expect(cards(many)[0]?.actions?.find((a) => a.type === "room-delete")?.confirm?.body).toBe(
+      "Delete Pair? This permanently removes the session, its transcript, and the 2 exhibits it tabled.",
+    );
+  });
+
   test("a closed card lists its tabled exhibits and links each one open, ahead of the room verbs", () => {
     const board = buildRoomsIndexBoard(
       [room({ slug: "review", status: "done" })],

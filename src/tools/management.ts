@@ -6,6 +6,7 @@ import { chamberFingerprint, readChamberRecords } from "../chamber-state.ts";
 import { writeDigest } from "../digest-store.ts";
 import { slugify } from "../genesis.ts";
 import { canonicalLensId } from "../lens.ts";
+import { deleteRoomExhibits } from "../lens-runtime.ts";
 import { isExhibit, listLenses } from "../lens-store.ts";
 import { type MindRecord, readMinds, retireMind, scaffoldMind } from "../minds-store.ts";
 import { lensesDir, mindsDir, roomsDir } from "../paths.ts";
@@ -423,15 +424,15 @@ export function makeRoomTranscriptTool(): ToolDefinition {
 }
 
 // Room delete seam: remove an ended room's directory (room.json + transcript +
-// ledger), drop its panel, and refresh the sessions index — the same path the
-// room-delete board action takes, exposed as a tool so an MCP client can clean up a
-// finished room. Refuses an active room (stop it first); deleteRoom asserts a safe
-// slug and throws when the room is absent, so this fails closed.
+// ledger) and the exhibits it tabled, drop its key, and refresh the sessions index —
+// the same path the room-delete board action takes, exposed as a tool so an MCP client
+// can clean up a finished room. Refuses an active room (stop it first); deleteRoom
+// asserts a safe slug and throws when the room is absent, so this fails closed.
 export function makeRoomDeleteTool(): ToolDefinition {
   return {
     name: "chamber_room_delete",
     description:
-      "Delete an ended Chamber room: permanently remove its record, transcript, and ledger. `room` is the room slug (see chamber_list_rooms). Stop an active room with chamber_room_stop before deleting it; fails closed if no such room exists. NOT for stopping a running room.",
+      "Delete an ended Chamber room: permanently remove its record, transcript, and ledger, AND every exhibit the room tabled — an exhibit is a child of its room, so it does not outlive it. Check chamber_list_exhibits first if a deliverable matters. `room` is the room slug (see chamber_list_rooms). Stop an active room with chamber_room_stop before deleting it; fails closed if no such room exists. NOT for stopping a running room.",
     inputSchema: roomDeleteSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -450,13 +451,16 @@ export function makeRoomDeleteTool(): ToolDefinition {
         return;
       }
       try {
+        // Room first: deleteRoom is the guard, so a refused delete must not already have
+        // destroyed the deliverables of a room that still exists.
         await createFileRoomStore(roomsDir()).deleteRoom(slug);
-        // Drop any lingering most-recent pin/panel for the deleted room (mirrors the
-        // board action), then refresh the index card away — fail-soft on the seam.
+        const exhibits = await deleteRoomExhibits(slug);
+        // Drop the deleted room's key and most-recent pin (mirrors the board action),
+        // then refresh the index card away — fail-soft on the seam.
         noteRoomDeleted(slug);
         await refreshWorkflow("chamber-rooms").catch(() => {});
         await refreshStandingPanels();
-        emitResult(ctx, JSON.stringify({ ok: true, slug }));
+        emitResult(ctx, JSON.stringify({ ok: true, slug, exhibits }));
       } catch (e) {
         emitResult(ctx, `chamber_room_delete failed: ${errText(e)}`, true);
       }

@@ -2,7 +2,7 @@ import type { RibAction, RibActionResult } from "@keelson/shared";
 import { asNonEmptyString, asStringArray, errText } from "@keelson/shared";
 import { buildRoomBoard } from "../boards/room.ts";
 import { roomViewKey } from "../keys.ts";
-import { tabledExhibitsFor } from "../lens-runtime.ts";
+import { deleteRoomExhibits, tabledExhibitsFor } from "../lens-runtime.ts";
 import { readMinds } from "../minds-store.ts";
 import { mindsDir, roomsDir } from "../paths.ts";
 import { readPendingGeneses } from "../pending-genesis.ts";
@@ -201,15 +201,17 @@ export async function roomStopAction(action: RibAction): Promise<RibActionResult
   return stopRoom(resolved.slug);
 }
 
-// Delete a closed room: remove its rooms/<slug>/ dir, then refresh the sessions
-// index so the card drops (the mutate-then-refresh pattern). Fail-closed on a
-// missing/unsafe slug (requireRoomSlug) before any FS touch. The in-memory
-// activeRooms check is a fast-path with a clear message; deleteRoom is the
-// authoritative guard — it re-reads the on-disk room.json status and refuses a
-// LIVE room (whose dir the driver rewrites each turn), so a stale in-memory set
-// (a restart or a second process) can't race a delete into a live room. deleteRoom
-// throws on an already-gone room (surfaced here, not as success); the try/catch
-// fails soft like retireAction.
+// Delete a closed room and the exhibits it tabled, then refresh the sessions index so
+// the card drops (the mutate-then-refresh pattern). Fail-closed on a missing/unsafe slug
+// (requireRoomSlug) before any FS touch. The in-memory activeRooms check is a fast-path
+// with a clear message; deleteRoom is the authoritative guard — it re-reads the on-disk
+// room.json status and refuses a LIVE room (whose dir the driver rewrites each turn), so
+// a stale in-memory set (a restart or a second process) can't race a delete into a live
+// room. deleteRoom throws on an already-gone room (surfaced here, not as success); the
+// try/catch fails soft like retireAction.
+//
+// The room goes FIRST: deleteRoom is the guard, so a refused delete must not already have
+// destroyed the deliverables of a room that still exists.
 export async function roomDeleteAction(action: RibAction): Promise<RibActionResult> {
   const resolved = requireRoomSlug(action);
   if ("error" in resolved) return resolved.error;
@@ -219,9 +221,10 @@ export async function roomDeleteAction(action: RibAction): Promise<RibActionResu
   }
   try {
     await createFileRoomStore(roomsDir()).deleteRoom(slug);
-    // Drop any lingering panel/most-recent pin for the deleted room, then refresh
-    // the index card away (fail-soft — the seam resolves on error / is absent on an
-    // older harness, where the 120s cadence drops the card).
+    await deleteRoomExhibits(slug);
+    // Drop the deleted room's key and most-recent pin, then refresh the index card away
+    // (fail-soft — the seam resolves on error / is absent on an older harness, where the
+    // 120s cadence drops the card).
     noteRoomDeleted(slug);
     await refreshWorkflow("chamber-rooms").catch(() => {});
     await refreshStandingPanels();
