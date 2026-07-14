@@ -44,8 +44,10 @@ not when one is merely absent.
 - **Paid agent turns are guarded.** Each room turn is a billed agent call. Flag a
   new room/turn entry point that bypasses the turn-budget cap
   (`MAX_ROOM_TURN_BUDGET`) or the `confirm`-gated dry-run on `chamber_room_start`.
-- **Single active room + fresh slug per start.** Flag changes that could reuse a
-  room slug or let a stopped room's late turn write into a new room's directory.
+- **Bounded concurrent rooms + fresh slug per start.** Rooms run concurrently,
+  each on its own `rib:chamber:room:<slug>` key, capped at `MAX_ACTIVE_ROOMS`.
+  Flag changes that could reuse a room slug, let a stopped room's late turn write
+  into a new room's directory, or add a start path that bypasses the cap.
 - **Slug safety.** Mind/room slugs are filesystem path segments. Flag any slug
   that reaches the filesystem without passing the safe-slug guard
   (`assertSafeSlug` / `isSafeSlug`).
