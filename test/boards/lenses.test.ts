@@ -50,9 +50,6 @@ describe("buildLensesIndexBoard empty", () => {
   test("the empty state is a pure list like Rooms — ZERO sections, no authoring chips", () => {
     const board = buildLensesIndexBoard([]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    // A lens is developed by a Mind (via /lens or a room), never seeded from a panel
-    // chip, so an empty library carries no actions/rows/cards — just its header,
-    // mirroring the Rooms index.
     expect(board.sections).toEqual([]);
   });
 });

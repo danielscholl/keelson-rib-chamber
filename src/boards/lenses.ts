@@ -32,9 +32,8 @@ function dotFor(maintainingMind: string | undefined, tones: Map<string, CanvasTo
 // and a destructive Retire. The provenance is fail-soft: a field the agent omitted is
 // omitted from the card, so an emit of just { id, board } yields the plain title +
 // freshness card (and a neutral dot). `minds` resolves the maintainer's tone; absent
-// (a standalone call) folds every dot to neutral. No lenses renders ZERO sections —
-// a lens is developed by a Mind (via /lens or a room), never seeded from a panel chip,
-// so an empty library is just its header, mirroring the Rooms index.
+// (a standalone call) folds every dot to neutral. No lenses renders ZERO sections — an
+// empty library is just its header, like the Rooms index.
 // Validated against canvasViewSchema in tests; the producer never parses.
 export function buildLensesIndexBoard(
   lenses: readonly LensRecord[],
