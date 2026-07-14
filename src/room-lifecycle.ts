@@ -15,8 +15,9 @@ import {
 } from "./capabilities.ts";
 import { composeRoomSystemPrompt } from "./compose.ts";
 import { assertSafeSlug } from "./genesis.ts";
-import { roomViewKey } from "./keys.ts";
+import { roomSummaryKey, roomViewKey } from "./keys.ts";
 import { EXHIBIT_TOOL_NAME } from "./lens.ts";
+import { htmlStringValidator } from "./lens-html.ts";
 import {
   deleteRoomExhibits,
   getLensRegistry,
@@ -69,6 +70,16 @@ let roomViewSm: SnapshotManager | undefined;
 const roomViewEntries = new Map<
   string,
   { publisher: { publish(view: CanvasView): Promise<void> }; unregister: () => void }
+>();
+let roomSummarySm: SnapshotManager | undefined;
+let declareRoomHtmlView: ((key: string, title?: string) => () => void) | undefined;
+const roomSummaryEntries = new Map<
+  string,
+  {
+    publisher: { publish(html: string): Promise<void> };
+    unregister: () => void;
+    undeclare: () => void;
+  }
 >();
 // The rooms-index ticker. The index card's bar reads room.turnIndex/turnBudget,
 // which commitActive persists every turn — but the index is a bound collector that
@@ -185,8 +196,14 @@ export const ROOM_DISABLED: RibActionResult = {
 export function bindRoomLifecycle(seams: {
   sm: SnapshotManager;
   runAgentTurn: NonNullable<RibContext["runAgentTurn"]>;
+  declareHtmlView?: (key: string, title?: string) => () => void;
 }): { roomStore: RoomStore } {
-  const { sm, runAgentTurn: run } = seams;
+  const { sm, runAgentTurn: run, declareHtmlView } = seams;
+  if (roomSummarySm !== sm || declareRoomHtmlView !== declareHtmlView) {
+    releaseRoomSummaries();
+    roomSummarySm = sm;
+    declareRoomHtmlView = declareHtmlView;
+  }
   // The room publisher routes each room's board to a per-slug key. Rebuilt against a new
   // manager on a re-bootstrap, reused otherwise; built before the old one is disposed so
   // a failed rebuild leaves the existing registry and roomSm consistent.
@@ -245,6 +262,9 @@ export async function disposeRoomLifecycle(): Promise<void> {
   roomSm = undefined;
   releaseRoomViews();
   roomViewSm = undefined;
+  releaseRoomSummaries();
+  roomSummarySm = undefined;
+  declareRoomHtmlView = undefined;
   await driver?.dispose();
 }
 
@@ -286,6 +306,18 @@ export async function publishRoomView(slug: string, board: CanvasView): Promise<
   const sm = roomSm;
   if (!sm) return;
   await ensureRoomViewPublisher(sm, slug).publish(board);
+}
+
+export async function publishRoomSummary(
+  slug: string,
+  html: string,
+  title?: string,
+): Promise<boolean> {
+  const sm = roomSm;
+  const declareHtmlView = declareRoomHtmlView;
+  if (!sm || !declareHtmlView) return false;
+  await ensureRoomSummaryPublisher(sm, declareHtmlView, slug, title).publish(html);
+  return true;
 }
 
 // Drive turns on their own until the room leaves "active" (budget reached, or a
@@ -769,6 +801,44 @@ function ensureRoomViewPublisher(
   const { publisher, latest } = createCoalescingPublisher(() => sm.recompose(key));
   const unregister = sm.register(key, latest, { validate: expectView(key, "board") });
   roomViewEntries.set(slug, { publisher, unregister });
+  return publisher;
+}
+
+function releaseRoomSummaries(): void {
+  for (const entry of roomSummaryEntries.values()) {
+    entry.unregister();
+    entry.undeclare();
+  }
+  roomSummaryEntries.clear();
+}
+
+function ensureRoomSummaryPublisher(
+  sm: SnapshotManager,
+  declareHtmlView: (key: string, title?: string) => () => void,
+  slug: string,
+  title?: string,
+): { publish(html: string): Promise<void> } {
+  if (roomSummarySm !== sm || declareRoomHtmlView !== declareHtmlView) {
+    releaseRoomSummaries();
+    roomSummarySm = sm;
+    declareRoomHtmlView = declareHtmlView;
+  }
+  const existing = roomSummaryEntries.get(slug);
+  if (existing) return existing.publisher;
+  const key = roomSummaryKey(slug);
+  const { publisher, latest } = createCoalescingPublisher(
+    () => sm.recompose(key),
+    "<p>No room summary yet.</p>",
+  );
+  const unregister = sm.register(key, latest, { validate: htmlStringValidator(key) });
+  let undeclare: () => void;
+  try {
+    undeclare = declareHtmlView(key, title);
+  } catch (error) {
+    unregister();
+    throw error;
+  }
+  roomSummaryEntries.set(slug, { publisher, unregister, undeclare });
   return publisher;
 }
 
