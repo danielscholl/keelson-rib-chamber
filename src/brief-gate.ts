@@ -160,6 +160,14 @@ export function publishBriefing(): Promise<void> {
   return next;
 }
 
+export function dropBriefRoomSource(slug: string): void {
+  if (promotedSources.length === 0) return;
+  const kept = promotedSources.filter((s) => !(s.kind === "room" && s.ref === slug));
+  if (kept.length === promotedSources.length) return;
+  promotedSources = kept;
+  void publishBriefing();
+}
+
 // The brief turn's budget. A briefing is a single composing turn (no tools), so a
 // modest ceiling bounds a wedged provider without starving a normal compose.
 const BRIEF_TURN_TIMEOUT_MS = 60_000;
