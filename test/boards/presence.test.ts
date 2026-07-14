@@ -414,7 +414,10 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     expect(
       one.sections.some(
         (s) =>
-          s.kind === "rows" && s.items.some((i) => (i.text ?? "").includes("click another Mind")),
+          s.kind === "rows" &&
+          s.items.some(
+            (i) => i.text === "Ada is at the table — click another Mind to choose a room shape.",
+          ),
       ),
     ).toBe(true);
   });

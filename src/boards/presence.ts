@@ -169,9 +169,6 @@ function benchSections(
   return sections;
 }
 
-// The composer's one guidance line while fewer than two Minds are seated, tuned to
-// the cast so the instruction is specific: click to seat, then how many more to
-// unlock the room shape. Two or more seated replaces this with the shape catalog.
 function assemblyHint(cast: readonly Mind[]): string {
   if (cast.length === 0) return "Click a Mind to bring them to the table.";
   return `${cast[0]?.name} is at the table — click another Mind to choose a room shape.`;
