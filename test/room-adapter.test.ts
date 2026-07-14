@@ -13,7 +13,7 @@ import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { chamberDataHome, mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
-import { clearDraft, readDraftExclusion } from "../src/room-draft.ts";
+import { clearDraft, readDraft } from "../src/room-draft.ts";
 import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 import { gatedRunAgentTurn, scriptedRunAgentTurn } from "./helpers/fakes.ts";
@@ -383,38 +383,38 @@ describe("room adapter — room-open", () => {
   });
 });
 
-describe("room adapter — convene composer (draft-set + convene)", () => {
+describe("room adapter — convene composer (draft-set + assemble + convene)", () => {
   let snap: ReturnType<typeof fakeSnapshotManager>;
+  const seated = async () => [...(await readDraft()).selected].sort();
   beforeAll(() => {
     const { run } = scriptedRunAgentTurn([{ text: "Alice speaks." }, { text: "Bob replies." }]);
     snap = fakeSnapshotManager();
     registerTools(makeCtx({ run, sm: snap.sm }));
   });
   beforeEach(async () => {
-    await clearDraft(); // start each case from all-selected
+    await clearDraft(); // start each case from an empty table — nobody seated
   });
   afterAll(async () => {
     await clearDraft();
     await rib.dispose?.(); // reset module-global state for the live-room block
   });
 
-  it("draft-set toggles a Mind into and out of the exclusion set", async () => {
-    const off = await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
-    expect(off.ok).toBe(true);
-    if (off.ok) expect((off.data as { excluded: string[] }).excluded).toEqual(["alice"]);
-    expect([...(await readDraftExclusion())]).toEqual(["alice"]);
-    // Toggling the same slug again clears it (back to all-selected).
+  it("draft-set seats then unseats a Mind (the inclusion set)", async () => {
     const on = await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
     expect(on.ok).toBe(true);
-    if (on.ok) expect((on.data as { excluded: string[] }).excluded).toEqual([]);
-    expect([...(await readDraftExclusion())]).toEqual([]);
+    if (on.ok) expect((on.data as { selected: string[] }).selected).toEqual(["alice"]);
+    expect(await seated()).toEqual(["alice"]);
+    // Toggling the same slug again unseats it (back to nobody at the table).
+    const off = await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    expect(off.ok).toBe(true);
+    if (off.ok) expect((off.data as { selected: string[] }).selected).toEqual([]);
+    expect(await seated()).toEqual([]);
   });
 
   it("draft-set fails closed on a slug that is not a current Mind", async () => {
     const res = await onAction({ type: "draft-set", payload: { slug: "ghost" } }, makeCtx());
     expect(res.ok).toBe(false);
-    // The unknown slug never lands in the draft.
-    expect([...(await readDraftExclusion())]).toEqual([]);
+    expect(await seated()).toEqual([]);
   });
 
   it("draft-set fails closed on an unsafe/reserved slug and on a missing slug", async () => {
@@ -425,30 +425,36 @@ describe("room adapter — convene composer (draft-set + convene)", () => {
       (await onAction({ type: "draft-set", payload: { slug: "director" } }, makeCtx())).ok,
     ).toBe(false);
     expect((await onAction({ type: "draft-set", payload: {} }, makeCtx())).ok).toBe(false);
-    expect([...(await readDraftExclusion())]).toEqual([]);
+    expect(await seated()).toEqual([]);
   });
 
-  it("convene with the default (empty) draft starts a room with all Minds", async () => {
-    const store = createFileRoomStore(roomsDir());
+  it("assemble opens the composer; Cancel leaves assembly AND drops the cast", async () => {
+    const open = await onAction({ type: "assemble", payload: { on: true } }, makeCtx());
+    expect(open.ok).toBe(true);
+    if (open.ok) expect((open.data as { assembling: boolean }).assembling).toBe(true);
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    expect(await seated()).toEqual(["alice"]);
+    const close = await onAction({ type: "assemble", payload: { on: false } }, makeCtx());
+    expect(close.ok).toBe(true);
+    const draft = await readDraft();
+    expect(draft.assembling).toBe(false);
+    expect([...draft.selected]).toEqual([]);
+  });
+
+  it("convene fails closed with fewer than two seated and leaves the draft intact", async () => {
+    // Nobody seated → below the 2-speaker floor.
+    expect((await onAction({ type: "convene" }, makeCtx({ sm: snap.sm }))).ok).toBe(false);
+    // One seated → still below the floor; the selection survives the failed convene.
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
     const res = await onAction({ type: "convene" }, makeCtx({ sm: snap.sm }));
-    const slug = slugOf(res);
-    expect(slug).toMatch(/^room-/);
-    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
-    // All current Minds (alice, bob, mod) minus an empty exclusion = every Mind.
-    // readMinds orders by createdAt (equal here), so assert the set, not the order.
-    expect([...((await store.loadRoom(slug))?.participants ?? [])].sort()).toEqual([
-      "alice",
-      "bob",
-      "mod",
-    ]);
+    expect(res.ok).toBe(false);
+    expect(await seated()).toEqual(["alice"]);
   });
 
-  it("convene resolves participants as all-minus-excluded and clears the draft on success", async () => {
+  it("convene starts a room with exactly the seated Minds and clears the draft on success", async () => {
     const store = createFileRoomStore(roomsDir());
-    // Exclude mod; the convened room must be exactly alice + bob.
-    await onAction({ type: "draft-set", payload: { slug: "mod" } }, makeCtx());
-    expect([...(await readDraftExclusion())]).toEqual(["mod"]);
-
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
     const res = await onAction(
       { type: "convene", payload: { topic: "hello" } },
       makeCtx({ sm: snap.sm }),
@@ -460,14 +466,17 @@ describe("room adapter — convene composer (draft-set + convene)", () => {
       "alice",
       "bob",
     ]);
-    // A successful convene resets the draft back to all-selected.
-    expect([...(await readDraftExclusion())]).toEqual([]);
+    // A successful convene resets the draft (leaves assembly, empties the cast).
+    const draft = await readDraft();
+    expect(draft.assembling).toBe(false);
+    expect([...draft.selected]).toEqual([]);
   });
 
   it("the Debate shape starts a group-chat room, resolving the moderator by name + parsing turns", async () => {
     const store = createFileRoomStore(roomsDir());
-    // A moderator never speaks, so exclude it from the draft; alice + bob remain.
-    await onAction({ type: "draft-set", payload: { slug: "mod" } }, makeCtx());
+    // Seat the two debaters; mod chairs as a non-participant facilitator.
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
     const res = await onAction(
       { type: "convene", payload: { strategy: "group-chat", moderator: "Mod", turns: "4" } },
       makeCtx({ sm: snap.sm }),
@@ -480,14 +489,14 @@ describe("room adapter — convene composer (draft-set + convene)", () => {
     expect(room?.turnBudget).toBe(4); // "4" parsed from the free-text turns field
     expect([...(room?.participants ?? [])].sort()).toEqual(["alice", "bob"]);
     await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
-    // A successful convene resets the draft back to all-selected.
-    expect([...(await readDraftExclusion())]).toEqual([]);
   });
 
-  it("the Debate shape pulls a selected moderator out of the cast", async () => {
+  it("the Debate shape pulls a seated moderator out of the cast", async () => {
     const store = createFileRoomStore(roomsDir());
-    // The new model: every Mind stays selected and the chair is one of them —
-    // convene subtracts the named moderator from participants so it routes, not speaks.
+    // Seat all three; naming mod as chair subtracts it from participants so it routes.
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "mod" } }, makeCtx());
     const res = await onAction(
       { type: "convene", payload: { strategy: "group-chat", moderator: "mod" } },
       makeCtx({ sm: snap.sm }),
@@ -496,31 +505,22 @@ describe("room adapter — convene composer (draft-set + convene)", () => {
     expect(slug).toMatch(/^room-/);
     const room = await store.loadRoom(slug);
     expect(room?.config?.moderator).toBe("mod");
-    // mod chairs, so the cast is alice + bob — pulled out despite being selected.
+    // mod chairs, so the cast is alice + bob — pulled out despite being seated.
     expect([...(room?.participants ?? [])].sort()).toEqual(["alice", "bob"]);
     await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
   });
 
   it("the Debate shape fails closed on a moderator that names no Mind", async () => {
-    await onAction({ type: "draft-set", payload: { slug: "mod" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
     const res = await onAction(
       { type: "convene", payload: { strategy: "group-chat", moderator: "ghost" } },
       makeCtx({ sm: snap.sm }),
     );
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("moderator");
-    // The draft survives a failed convene (mod stays excluded).
-    expect([...(await readDraftExclusion())]).toEqual(["mod"]);
-  });
-
-  it("convene fails closed at < 2 selected and leaves the draft intact", async () => {
-    // Exclude alice and bob, leaving only mod selected — below the 2-speaker floor.
-    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
-    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
-    const res = await onAction({ type: "convene" }, makeCtx({ sm: snap.sm }));
-    expect(res.ok).toBe(false);
-    // The draft is NOT cleared on failure — the operator's selection survives.
-    expect([...(await readDraftExclusion())].sort()).toEqual(["alice", "bob"]);
+    // The draft survives a failed convene.
+    expect(await seated()).toEqual(["alice", "bob"]);
   });
 });
 

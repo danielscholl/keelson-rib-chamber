@@ -4,8 +4,9 @@ import { buildRoomBoard } from "../boards/room.ts";
 import { roomViewKey } from "../keys.ts";
 import { readMinds } from "../minds-store.ts";
 import { mindsDir, roomsDir } from "../paths.ts";
+import { readPendingGeneses } from "../pending-genesis.ts";
 import { normalizeGrounding, parseCriteriaLines, roomConfigFromFlat } from "../room-config.ts";
-import { clearDraft, readDraftExclusion, toggleDraftExclusion } from "../room-draft.ts";
+import { clearDraft, readDraft, setAssembling, toggleSelected } from "../room-draft.ts";
 import {
   DEFAULT_ROOM_TURN_BUDGET,
   getDriver,
@@ -25,7 +26,7 @@ import type { OutcomeSplit } from "../room-text.ts";
 import { splitOutcome } from "../room-text.ts";
 import { stripControlJson } from "../routing.ts";
 import {
-  refreshConvene,
+  refreshPresence,
   refreshStandingPanels,
   refreshWorkflow,
   resolveMindByNameOrId,
@@ -58,11 +59,11 @@ export function roomStartAction(action: RibAction): Promise<RibActionResult> {
   });
 }
 
-// Toggle one Mind's membership in the Convene draft (the deselected-slug set). The
-// slug must name a real, current Mind (validated against the live roster, not just
-// shape) so a stale/forged chip can't write an unknown slug into the draft. On success
-// recompose the Convene board so the chips re-render with the new glyph and the shape
-// gating re-evaluates against the new cast. Returns the new exclusion list.
+// Seat or unseat one Mind at the table (toggle its membership in the inclusion draft).
+// The slug must name a real, current Mind (validated against the live roster, not just
+// shape) so a stale/forged seat toggle can't write an unknown slug into the draft. On
+// success recompose the Chamber panel so the seat re-renders with the new glyph and the
+// shape gating re-evaluates against the new cast. Returns the new selection.
 export async function draftSetAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const slug = asNonEmptyString(payload.slug);
@@ -74,38 +75,61 @@ export async function draftSetAction(action: RibAction): Promise<RibActionResult
     if (!minds.some((m) => m.slug === slug)) {
       return { ok: false, error: `unknown Mind: ${slug}` };
     }
-    const excluded = await toggleDraftExclusion(slug);
-    refreshConvene();
-    return { ok: true, data: { excluded: [...excluded] } };
+    const draft = await toggleSelected(slug);
+    refreshPresence();
+    return { ok: true, data: { selected: [...draft.selected] } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
 }
 
-// Convene a room from the current draft and the chosen shape: participants are the
-// selected Minds (all current Minds minus the draft's excluded set) minus the named
-// facilitator — a Debate chair / Delegate manager is one of the selected Minds, pulled
-// out of the cast so it routes/plans rather than speaks/works. The room shape (a
-// `strategy` in the
-// action payload) and its per-shape fields (topic, project, moderator, manager, turns)
-// come from the shape action the operator clicked. Reuses the room start path
-// (startRoom → validateStart → driver), so the <2-participant / facilitator-rules /
-// cross-vendor / seam-absent guards aren't duplicated here — a shape the draft can't
-// satisfy (a Review that isn't a cross-vendor pair, a Debate whose moderator is also a
-// participant) surfaces validateStart's error. On success clear the draft (back to
-// all-selected) and recompose the Convene board so the chips reset and it folds to its
-// bar (a room now exists). An empty draft with the Discussion shape yields every Mind
-// in a sequential room — the historical Start.
+// Open or close the convene composer (the footer launcher / Cancel). Flips the draft's
+// assembling flag — closing also clears the selection (setAssembling) — and recomposes
+// the Chamber panel so the seats sprout (or shed) their Seat toggles and the composer
+// unfolds (or folds) beneath the bench.
+export async function assembleAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const on = payload.on === true;
+  try {
+    const draft = await setAssembling(on);
+    refreshPresence();
+    return { ok: true, data: { assembling: draft.assembling } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
+// Convene a room from the current draft and the chosen shape: participants are the Minds
+// seated at the table (the inclusion draft) minus the named facilitator — a Debate chair
+// / Delegate manager is one of the seated Minds, pulled out of the cast so it routes/plans
+// rather than speaks/works. The room shape (a `strategy` in the action payload) and its
+// per-shape fields (topic, project, moderator, manager, turns) come from the shape action
+// the operator clicked. Reuses the room start path (startRoom → validateStart → driver),
+// so the <2-participant / facilitator-rules / cross-vendor / seam-absent guards aren't
+// duplicated here — a shape the cast can't satisfy (nobody seated, a Review that isn't a
+// cross-vendor pair, a Debate whose moderator is also a participant) surfaces
+// validateStart's error. On success clear the draft (leave assembly, empty the cast) and
+// recompose the Chamber panel so the composer folds away (a room now exists).
 export async function conveneAction(action: RibAction): Promise<RibActionResult> {
   const driver = getDriver();
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
+  // Can't convene while a Mind is being authored: the Chamber panel ticks during a
+  // genesis (aging the boot card), so the composer is suppressed on-screen while one is
+  // pending — this is the server-side backstop for a stale Convene click racing a genesis.
+  const pending = await readPendingGeneses().catch(() => []);
+  if (pending.length > 0) {
+    return {
+      ok: false,
+      error: "can't convene while a Mind is being authored — wait for genesis to finish",
+    };
+  }
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   let allMinds: Mind[];
   let draftedMinds: Mind[];
   try {
-    const excluded = await readDraftExclusion();
+    const draft = await readDraft();
     allMinds = await readMinds(mindsDir());
-    draftedMinds = allMinds.filter((m) => !excluded.has(m.slug));
+    draftedMinds = allMinds.filter((m) => draft.selected.has(m.slug));
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
@@ -169,7 +193,7 @@ export async function conveneAction(action: RibAction): Promise<RibActionResult>
   });
   if (res.ok) {
     await clearDraft().catch(() => {});
-    refreshConvene();
+    refreshPresence();
   }
   return res;
 }

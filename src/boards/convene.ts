@@ -6,15 +6,10 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type {
-  CanvasActionField,
-  CanvasActionItem,
-  CanvasBoardView,
-  CanvasTone,
-} from "@keelson/shared";
-import { identityToneForSlot, type Mind } from "../types.ts";
+import type { CanvasActionField, CanvasActionItem, CanvasBoardView } from "@keelson/shared";
+import type { Mind } from "../types.ts";
 
-// The host projects a room can target — the minimal shape buildConveneBoard needs
+// The host projects a room can target — the minimal shape conveneShapeSection needs
 // (id is the option value the convene action resolves; name is the label).
 export interface ConveneProject {
   id: string;
@@ -205,62 +200,21 @@ function shapeActions(
   });
 }
 
-// Pure: the roster + draft + host projects -> the Convene composer board. Under two
-// Minds it emits zero sections so the region (hideWhenEmpty) hides — the "author a
-// Mind / seat a second" guidance lives where the next act is (the Chamber launchpad,
-// the Briefing record), not a third copy here. At >=2 it is the who's-in toggle chips
-// (draft-set) plus the capability-gated shape tabs. `sessionCount` drives the header's
-// defaultCollapsed hint so the region auto-folds once rooms exist (the composer is the
-// two-Mind state cold, a one-click bar warm). Validated against canvasViewSchema in
-// tests; the producer never parses (validation lives at the binding edge).
-export function buildConveneBoard(
-  minds: readonly Mind[],
-  draftExcluded: ReadonlySet<string> = new Set(),
+// The "…and how" composer section the merged Chamber bench folds in below its seats:
+// the capability-gated shape tabs when the cast can run one, else the prompt to seat
+// more. `cast` is the Minds the operator has called to the table (the inclusion draft);
+// participant selection now lives on the seat cards, so there are no who's-in chips
+// here. Pure — validated against canvasViewSchema in the presence tests; the producer
+// never parses (validation lives at the binding edge).
+export function conveneShapeSection(
+  cast: readonly Mind[],
   projects: readonly ConveneProject[] = [],
-  sessionCount = 0,
-): CanvasBoardView {
-  const selected = minds.filter((m) => !draftExcluded.has(m.slug));
-  const sections: CanvasBoardView["sections"] = [];
-
-  if (minds.length >= 2) {
-    const chips: CanvasActionItem[] = minds.map((mind) => {
-      const isSelected = !draftExcluded.has(mind.slug);
-      return {
-        type: "draft-set",
-        label: mind.name,
-        glyph: isSelected ? "✓" : "+",
-        tone: identityToneForSlot(mind.identitySlot),
-        payload: { slug: mind.slug },
-      };
-    });
-    sections.push({ kind: "actions", title: "Who’s in", wrap: true, items: chips });
-    if (selected.length >= 2) {
-      sections.push({
-        kind: "actions",
-        title: "…and how",
-        tabs: true,
-        items: shapeActions(selected, projects),
-      });
-    } else {
-      sections.push({
-        kind: "rows",
-        items: [{ glyph: "neutral", text: "Select two or more Minds to choose a room shape." }],
-      });
-    }
+): CanvasBoardView["sections"][number] {
+  if (cast.length >= 2) {
+    return { kind: "actions", title: "…and how", tabs: true, items: shapeActions(cast, projects) };
   }
-
-  const status =
-    minds.length < 2
-      ? {
-          label: `${minds.length} ${minds.length === 1 ? "mind" : "minds"}`,
-          tone: "neutral" as CanvasTone,
-        }
-      : { label: `${selected.length} in`, tone: "brand" as CanvasTone };
-
   return {
-    view: "board",
-    title: "Convene",
-    header: { status, defaultCollapsed: sessionCount > 0 },
-    sections,
+    kind: "rows",
+    items: [{ glyph: "neutral", text: "Seat two or more Minds to choose a room shape." }],
   };
 }

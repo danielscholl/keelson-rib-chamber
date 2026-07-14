@@ -2,7 +2,6 @@
 // the view declarations, the workflow bindings, and the gates.
 export const BRIEF_KEY = "rib:chamber:brief";
 export const ROSTER_KEY = "rib:chamber:roster";
-export const CONVENE_KEY = "rib:chamber:convene";
 export const PRESENCE_KEY = "rib:chamber:presence";
 export const ROOMS_KEY = "rib:chamber:rooms";
 export const LENSES_KEY = "rib:chamber:lenses";

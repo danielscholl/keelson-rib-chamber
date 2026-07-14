@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { CanvasBoardView } from "@keelson/shared";
 import { canvasViewSchema } from "@keelson/shared";
-import { buildConveneBoard, type ConveneProject } from "../../src/boards/convene.ts";
+import { type ConveneProject, conveneShapeSection } from "../../src/boards/convene.ts";
 import type { Mind } from "../../src/types.ts";
 
 const mind = (over: Partial<Mind> = {}): Mind => ({
@@ -15,50 +16,44 @@ const A = mind({ slug: "a", name: "Ada", identitySlot: 0, provider: "anthropic" 
 const B = mind({ slug: "b", name: "Bo", identitySlot: 1, provider: "openai" });
 const C = mind({ slug: "c", name: "Cy", identitySlot: 2, provider: "anthropic" });
 
-function section(board: ReturnType<typeof buildConveneBoard>, title: string) {
-  return board.sections.find((s) => s.kind === "actions" && s.title === title);
+type Section = CanvasBoardView["sections"][number];
+
+// conveneShapeSection returns one section; wrap it in a minimal board so the shared
+// canvas schema still validates the shape the merged bench will publish.
+function valid(section: Section): boolean {
+  return canvasViewSchema.safeParse({ view: "board", sections: [section] }).success;
 }
-function chips(board: ReturnType<typeof buildConveneBoard>) {
-  const s = section(board, "Who’s in");
-  return s?.kind === "actions" ? s.items : [];
+function shapes(section: Section) {
+  return section.kind === "actions" ? section.items : [];
 }
-function shapes(board: ReturnType<typeof buildConveneBoard>) {
-  const s = section(board, "…and how");
-  return s?.kind === "actions" ? s.items : [];
-}
-function byStrategy(board: ReturnType<typeof buildConveneBoard>) {
-  return new Map(shapes(board).map((i) => [(i.payload as { strategy: string }).strategy, i]));
+function byStrategy(cast: readonly Mind[], projects: readonly ConveneProject[] = []) {
+  const section = conveneShapeSection(cast, projects);
+  return new Map(shapes(section).map((i) => [(i.payload as { strategy: string }).strategy, i]));
 }
 
-describe("buildConveneBoard cast + shapes", () => {
-  test("under two Minds it emits ZERO sections, so the region's hideWhenEmpty hides it; valid", () => {
-    for (const roster of [[], [A]]) {
-      const board = buildConveneBoard(roster);
-      expect(canvasViewSchema.safeParse(board).success).toBe(true);
-      expect(chips(board)).toHaveLength(0);
-      expect(shapes(board)).toHaveLength(0);
-      expect(board.sections).toEqual([]);
+describe("conveneShapeSection cast + shapes", () => {
+  test("under two seated it prompts to seat more (no shape tabs); valid", () => {
+    for (const cast of [[], [A]]) {
+      const section = conveneShapeSection(cast);
+      expect(valid(section)).toBe(true);
+      expect(section.kind).toBe("rows");
+      expect(section.kind === "rows" && section.items[0]?.text).toContain("Seat two or more");
     }
   });
 
-  test("at two Minds: identity-toned draft-set chips + a tabs strip of five shapes", () => {
-    const board = buildConveneBoard([A, B]);
-    expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const cs = chips(board);
-    expect(cs.map((c) => c.type)).toEqual(["draft-set", "draft-set"]);
-    expect(cs.map((c) => c.tone)).toEqual(["id-blue", "id-amber"]);
-    expect(cs.map((c) => c.glyph)).toEqual(["✓", "✓"]);
-    expect(cs.map((c) => c.payload)).toEqual([{ slug: "a" }, { slug: "b" }]);
-    const how = section(board, "…and how");
-    expect(how?.kind === "actions" && how.tabs).toBe(true);
-    expect(shapes(board).map((i) => i.label)).toEqual([
+  test("at two seated: a tabs strip of the five shapes", () => {
+    const section = conveneShapeSection([A, B]);
+    expect(valid(section)).toBe(true);
+    expect(section.kind === "actions" && section.title).toBe("…and how");
+    expect(section.kind === "actions" && section.tabs).toBe(true);
+    expect(shapes(section).map((i) => i.label)).toEqual([
       "Discussion",
       "Debate",
       "Open floor",
       "Review",
       "Delegate",
     ]);
-    expect(shapes(board).map((i) => (i.payload as { strategy: string }).strategy)).toEqual([
+    expect(shapes(section).map((i) => (i.payload as { strategy: string }).strategy)).toEqual([
       "sequential",
       "group-chat",
       "open-floor",
@@ -67,20 +62,11 @@ describe("buildConveneBoard cast + shapes", () => {
     ]);
   });
 
-  test("an excluded slug renders unselected (+); shapes drop below two selected", () => {
-    const board = buildConveneBoard([A, B], new Set(["a"]));
-    const a = chips(board).find((c) => (c.payload as { slug: string }).slug === "a");
-    expect(a?.glyph).toBe("+");
-    expect(shapes(board)).toHaveLength(0);
-  });
-
   test("every shape shows only its name — the description rides the hover hint", () => {
-    // Three Minds all in: Discussion, Debate, and Delegate enabled (three selected —
-    // two run, one facilitates), Review gated (not a pair). A gated tab still carries
-    // its hover hint so the description survives the disable.
-    const board = buildConveneBoard([A, B, C]);
-    const bs = byStrategy(board);
-    for (const item of shapes(board)) {
+    // Three seated: Discussion, Debate, and Delegate enabled (three — two run, one
+    // facilitates), Review gated (not a pair). A gated tab still carries its hover hint.
+    const bs = byStrategy([A, B, C]);
+    for (const item of shapes(conveneShapeSection([A, B, C]))) {
       expect(item.subtitle).toBeUndefined();
       expect(typeof item.hint).toBe("string");
       expect(item.hint?.length ?? 0).toBeGreaterThan(0);
@@ -95,9 +81,9 @@ describe("buildConveneBoard cast + shapes", () => {
   });
 });
 
-describe("buildConveneBoard capability gating", () => {
-  test("Debate/Delegate are disabled (need a third to facilitate) with only two selected", () => {
-    const bs = byStrategy(buildConveneBoard([A, B]));
+describe("conveneShapeSection capability gating", () => {
+  test("Debate/Delegate are disabled (need a third to facilitate) with only two seated", () => {
+    const bs = byStrategy([A, B]);
     expect(bs.get("group-chat")?.disabled).toBe(true);
     expect(bs.get("group-chat")?.reason).toContain("chair");
     // A gated shape carries no form (a disabled tab can't open one).
@@ -106,10 +92,9 @@ describe("buildConveneBoard capability gating", () => {
     expect(bs.get("magentic")?.reason).toContain("manage");
   });
 
-  test("Debate enables at three selected with a chair select drawn from the cast", () => {
-    // All three selected → any of them can be named chair; the other two debate.
-    const board = buildConveneBoard([A, B, C]);
-    const debate = byStrategy(board).get("group-chat");
+  test("Debate enables at three seated with a chair select drawn from the cast", () => {
+    const section = conveneShapeSection([A, B, C]);
+    const debate = byStrategy([A, B, C]).get("group-chat");
     expect(debate?.disabled ?? false).toBe(false);
     const chair = debate?.fields?.find((f) => f.name === "moderator");
     expect(chair?.required).toBe(true);
@@ -118,62 +103,55 @@ describe("buildConveneBoard capability gating", () => {
       { value: "b", label: "Bo" },
       { value: "c", label: "Cy" },
     ]);
-    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(valid(section)).toBe(true);
   });
 
-  test("Review needs exactly two Minds of different vendors", () => {
+  test("Review needs exactly two seated of different vendors", () => {
     // Same vendor (A + C both anthropic) → disabled.
-    const same = byStrategy(buildConveneBoard([A, C])).get("review");
-    expect(same?.disabled).toBe(true);
-    expect(same?.reason).toContain("vendors");
+    expect(byStrategy([A, C]).get("review")?.disabled).toBe(true);
+    expect(byStrategy([A, C]).get("review")?.reason).toContain("vendors");
     // Different vendors (A anthropic + B openai) → enabled.
-    const cross = byStrategy(buildConveneBoard([A, B])).get("review");
-    expect(cross?.disabled ?? false).toBe(false);
-    // Three selected → not a pair → disabled.
-    const trio = byStrategy(buildConveneBoard([A, B, C])).get("review");
-    expect(trio?.disabled).toBe(true);
+    expect(byStrategy([A, B]).get("review")?.disabled ?? false).toBe(false);
+    // Three seated → not a pair → disabled.
+    expect(byStrategy([A, B, C]).get("review")?.disabled).toBe(true);
   });
 
   test("Review is disabled when a provider is unpinned", () => {
     const unpinned = mind({ slug: "d", name: "Di", identitySlot: 3 });
-    const review = byStrategy(buildConveneBoard([A, unpinned])).get("review");
+    const review = byStrategy([A, unpinned]).get("review");
     expect(review?.disabled).toBe(true);
     expect(review?.reason).toContain("provider");
   });
 });
 
-describe("buildConveneBoard project picker + collapse", () => {
+describe("conveneShapeSection project picker + grounding", () => {
   const projects: ConveneProject[] = [
     { id: "p1", name: "keelson" },
     { id: "p2", name: "chamber" },
   ];
 
   test("Discussion carries a project select over the host projects", () => {
-    const board = buildConveneBoard([A, B], new Set(), projects);
-    const proj = byStrategy(board)
+    const section = conveneShapeSection([A, B], projects);
+    const proj = byStrategy([A, B], projects)
       .get("sequential")
       ?.fields?.find((f) => f.name === "project");
     expect(proj?.options).toEqual([
       { value: "p1", label: "keelson" },
       { value: "p2", label: "chamber" },
     ]);
-    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(valid(section)).toBe(true);
   });
 
   test("no project field when the host exposes no projects", () => {
-    const bs = byStrategy(buildConveneBoard([A, B]));
-    expect(bs.get("sequential")?.fields?.some((f) => f.name === "project")).toBe(false);
+    expect(
+      byStrategy([A, B])
+        .get("sequential")
+        ?.fields?.some((f) => f.name === "project"),
+    ).toBe(false);
   });
 
-  test("defaultCollapsed follows the session count (folds once rooms exist)", () => {
-    expect(buildConveneBoard([A, B], new Set(), [], 0).header?.defaultCollapsed).toBe(false);
-    expect(buildConveneBoard([A, B], new Set(), [], 2).header?.defaultCollapsed).toBe(true);
-  });
-});
-
-describe("buildConveneBoard grounding fields", () => {
   test("the design-bearing shapes expose the grounding source + criteria fields", () => {
-    const bs = byStrategy(buildConveneBoard([A, B, C]));
+    const bs = byStrategy([A, B, C]);
     for (const strategy of ["sequential", "group-chat", "open-floor", "magentic"]) {
       const names = bs.get(strategy)?.fields?.map((f) => f.name) ?? [];
       expect(names).toContain("groundingUrl");
@@ -184,8 +162,10 @@ describe("buildConveneBoard grounding fields", () => {
   });
 
   test("Review carries no grounding fields — its cross-vendor pass is not a synthesis close", () => {
-    const review = byStrategy(buildConveneBoard([A, B])).get("review");
-    const names = review?.fields?.map((f) => f.name) ?? [];
+    const names =
+      byStrategy([A, B])
+        .get("review")
+        ?.fields?.map((f) => f.name) ?? [];
     expect(names).not.toContain("groundingUrl");
     expect(names).not.toContain("criteria");
   });

@@ -1,9 +1,9 @@
 import type { CanvasView, Project, RibContext, SnapshotManager } from "@keelson/shared";
 import { errText, expectView } from "@keelson/shared";
-import { buildConveneBoard, type ConveneProject } from "./boards/convene.ts";
+import type { ConveneProject } from "./boards/convene.ts";
 import { buildChamberBoard } from "./boards/presence.ts";
 import { publishBriefing } from "./brief-gate.ts";
-import { CONVENE_KEY, PRESENCE_KEY } from "./keys.ts";
+import { PRESENCE_KEY } from "./keys.ts";
 import { readMinds } from "./minds-store.ts";
 import { mindsDir, roomsDir } from "./paths.ts";
 import {
@@ -16,7 +16,7 @@ import {
   readPendingGeneses,
   removeLandedGenesis,
 } from "./pending-genesis.ts";
-import { readDraftExclusion } from "./room-draft.ts";
+import { readDraft } from "./room-draft.ts";
 import { listRooms } from "./room-store.ts";
 import type { Mind, Room } from "./types.ts";
 
@@ -35,17 +35,15 @@ let getProjects: RibContext["getProjects"];
 
 // The refresh fan-out: onAction handlers re-run a bound collector on demand instead of
 // waiting on cadence — room-delete uses it to drop a deleted session's card. Always
-// defined (a stable function, not a captured seam): Convene and Presence are cadence-free
-// in-process boards, so their local recompose must fire on a roster/rooms mutation
-// regardless — else they would freeze at their first snapshot on a host that provides a
-// snapshot manager but no refreshWorkflow. Any roster refresh (genesis, retire, set-model
-// — a Mind or its provider changed) also recomposes the in-process Convene board, whose
-// chips + capability gating draw from the same Minds; draft-set / convene call
-// refreshConvene directly. The Presence ribbon draws from both the bench and the rooms,
-// so recompose it on either a roster or a rooms refresh. Reads the module-private host
-// seam at call time, so it no-ops (returns a resolved promise) when unbound (post-dispose).
+// defined (a stable function, not a captured seam): the Chamber panel is a cadence-free
+// in-process board, so its local recompose must fire on a roster/rooms mutation
+// regardless — else it would freeze at its first snapshot on a host that provides a
+// snapshot manager but no refreshWorkflow. It draws from the bench AND the rooms (its
+// seats, status footers, and folded-in assembly composer all track both), so recompose
+// it on either a roster or a rooms refresh; draft-set / assemble / convene call
+// refreshPresence directly. Reads the module-private host seam at call time, so it no-ops
+// (returns a resolved promise) when unbound (post-dispose).
 export function refreshWorkflow(name: string, inputs?: Record<string, string>): Promise<void> {
-  if (name === "chamber-roster") refreshConvene();
   if (name === "chamber-roster" || name === "chamber-rooms") refreshPresence();
   return hostRefreshWorkflow?.(name, inputs) ?? Promise.resolve();
 }
@@ -141,48 +139,28 @@ export function resolveMindByNameOrId(minds: readonly Mind[], input: string): st
   );
 }
 
-// The Convene composer is an in-process snapshot (like the Briefing banner, not a
-// bound collector) because its shape gating and project picker need the host's live
-// project list — an out-of-process collector can't reach ctx.getProjects. Registered
-// in bindRuntime and recomposed whenever the Minds it draws chips + capability
-// gating from change (the refreshWorkflow fan-out above) or on a draft/convene mutation.
-let conveneSm: SnapshotManager | undefined;
-let conveneUnregister: (() => void) | undefined;
+// The Chamber panel leads the surface: an in-process board (needs the host's live
+// project list for the folded-in convene composer, so it can't be an out-of-process
+// collector) reading the bench + rooms + the pending-genesis marker + the convene draft,
+// so seats, status footers, the live pulse, the boot card, and assembly all track
+// mutations. Recomposed whenever a roster or rooms refresh fires (the refreshWorkflow
+// fan-out) — which is also how the genesis/rooms tickers advance it — or on a
+// draft/assemble/convene mutation. Fail closed on an older harness (no snapshot manager).
+let presenceSm: SnapshotManager | undefined;
+let presenceUnregister: (() => void) | undefined;
 
-async function composeConveneBoard(): Promise<CanvasView> {
-  const [minds, excluded, rooms] = await Promise.all([
+async function composePresenceBoard(): Promise<CanvasView> {
+  const [minds, rooms, pending, draft] = await Promise.all([
     readMinds(mindsDir()).catch(() => [] as Mind[]),
-    readDraftExclusion().catch(() => new Set<string>()),
     listRooms(roomsDir()).catch(() => [] as Room[]),
+    readPendingGeneses(),
+    readDraft().catch(() => ({ assembling: false, selected: new Set<string>() })),
   ]);
   const projects: ConveneProject[] = (getProjects?.() ?? []).map((p) => ({
     id: p.id,
     name: p.name,
   }));
-  return buildConveneBoard(minds, excluded, projects, rooms.length);
-}
-
-// Fire-and-forget recompose of the Convene board. No-op until bindRuntime has bound
-// it to a snapshot manager (fail closed on an older harness).
-export function refreshConvene(): void {
-  void conveneSm?.recompose(CONVENE_KEY).catch(() => {});
-}
-
-// The Chamber panel leads the surface: an in-process board (like Convene) reading the
-// bench + rooms + the pending-genesis marker, so seats, status footers, the live pulse,
-// and the boot card all track mutations. Recomposed whenever a roster or rooms refresh
-// fires (the refreshWorkflow fan-out) — which is also how the genesis/rooms tickers
-// advance it. Fail closed on an older harness (no snapshot manager).
-let presenceSm: SnapshotManager | undefined;
-let presenceUnregister: (() => void) | undefined;
-
-async function composePresenceBoard(): Promise<CanvasView> {
-  const [minds, rooms, pending] = await Promise.all([
-    readMinds(mindsDir()).catch(() => [] as Mind[]),
-    listRooms(roomsDir()).catch(() => [] as Room[]),
-    readPendingGeneses(),
-  ]);
-  return buildChamberBoard(minds, rooms, pending);
+  return buildChamberBoard(minds, rooms, pending, Date.now(), draft, projects);
 }
 
 export function refreshPresence(): void {
@@ -278,19 +256,10 @@ export function bindRuntime(seams: {
   hostRefreshWorkflow = seams.refreshWorkflow;
   getProjects = seams.getProjects;
   const sm = seams.sm;
-  // The Convene composer: an in-process board (needs getProjects) registered on the
-  // snapshot manager and primed once; rebound onto a new manager on a re-bootstrap.
-  if (sm && sm !== conveneSm) {
-    conveneUnregister?.();
-    conveneUnregister = sm.register(CONVENE_KEY, composeConveneBoard, {
-      validate: expectView(CONVENE_KEY, "board"),
-    });
-    conveneSm = sm;
-    void sm.recompose(CONVENE_KEY);
-  }
   // The Chamber panel: an in-process board (reads the bench + rooms + the pending
-  // marker) registered on the snapshot manager and primed once; rebound onto a new
-  // manager on a re-boot, like Convene.
+  // marker + the convene draft, and needs getProjects for the folded-in composer)
+  // registered on the snapshot manager and primed once; rebound onto a new manager on a
+  // re-boot.
   if (sm && sm !== presenceSm) {
     presenceUnregister?.();
     presenceUnregister = sm.register(PRESENCE_KEY, composePresenceBoard, {
@@ -330,9 +299,6 @@ export async function disposeRuntime(): Promise<void> {
   await clearPendingGenesis().catch(() => {});
   hostRefreshWorkflow = undefined;
   getProjects = undefined;
-  conveneUnregister?.();
-  conveneUnregister = undefined;
-  conveneSm = undefined;
   presenceUnregister?.();
   presenceUnregister = undefined;
   presenceSm = undefined;

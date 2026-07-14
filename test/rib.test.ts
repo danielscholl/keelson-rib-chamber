@@ -212,22 +212,15 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:activity");
   });
 
-  it("Convene leads the rows, above the Rooms + Lenses row (the bench lives in the header)", () => {
+  it("the standing rows are Rooms + Lenses then Exhibits (convening folded into the header bench)", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
     expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
-      ["rib:chamber:convene"],
       ["rib:chamber:rooms", "rib:chamber:lenses"],
       ["rib:chamber:exhibits"],
     ]);
-    // Convene is in-process (no workflow binding) and folds to its head bar.
-    const convene = rows[0]?.columns[0];
-    expect(convene?.key).toBe("rib:chamber:convene");
-    expect(convene?.workflow).toBeUndefined();
-    expect(convene?.collapsible).toBe(true);
-    // hideWhenEmpty is what hides the panel under two Minds; guard it here so the
-    // flag can't be dropped while the board test (zero sections) still passes.
-    expect(convene?.hideWhenEmpty).toBe(true);
     const cols = rows.flatMap((r) => r.columns);
+    // The Convene panel retired — its composer folds into the Chamber (presence) header.
+    expect(cols.some((c) => c.key === "rib:chamber:convene")).toBe(false);
     // Neither what's-happening narrator has a standing column anymore.
     expect(cols.some((c) => c.key === "rib:chamber:activity")).toBe(false);
     expect(cols.some((c) => c.key === "rib:chamber:digest")).toBe(false);

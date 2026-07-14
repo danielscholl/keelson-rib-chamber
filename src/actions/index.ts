@@ -17,6 +17,7 @@ import {
   setModelAction,
 } from "./minds.ts";
 import {
+  assembleAction,
   conveneAction,
   draftSetAction,
   outcomeCopyAction,
@@ -64,6 +65,8 @@ export function dispatchChamberAction(
       return roomStartAction(action);
     case "draft-set":
       return draftSetAction(action);
+    case "assemble":
+      return assembleAction(action);
     case "convene":
       return conveneAction(action);
     case "room-inject":
