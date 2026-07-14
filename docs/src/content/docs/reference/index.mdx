@@ -20,6 +20,7 @@ standing; four are per-instance families bound at runtime.
 
 | Key | Producer | When it updates |
 |---|---|---|
+| `rib:chamber:presence` | the rib (in-process board) | on any roster, rooms, or draft mutation, and while a genesis ticks |
 | `rib:chamber:roster` | `chamber-roster` collector | on a 120000 ms cadence, and when a Mind is authored or retired |
 | `rib:chamber:rooms` | `chamber-rooms` collector | on cadence, and when a room ends, stops, or is deleted (a starting room appears on the next cadence) |
 | `rib:chamber:lenses` | `chamber-lenses` collector | on cadence, and when a lens is authored or retired |

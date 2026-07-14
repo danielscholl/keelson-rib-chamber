@@ -27,7 +27,7 @@ gate with a conditional agent turn.
 
 ## The collectors
 
-The four index workflows are deterministic. Each has a single `bash` node that
+The three index workflows are deterministic. Each has a single `bash` node that
 shells a `bin/collect-*.ts` script with the resolved directory baked into the
 command, reads the data home off disk, and emits a board on stdout. No agent
 turn runs, so a refresh is free. Each binds its output to a fixed snapshot key
