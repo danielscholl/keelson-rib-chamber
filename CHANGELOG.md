@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.38.0...v0.39.0) (2026-07-14)
+
+
+### Added
+
+* **chamber:** seat Minds without a convene mode and quiet a fresh bench ([df112ed](https://github.com/danielscholl/keelson-rib-chamber/commit/df112ede090910bb9ba9041e6b1298f2d99afe9c))
+
 ## [0.38.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.37.0...v0.38.0) (2026-07-14)
 
 
