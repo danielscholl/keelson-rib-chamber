@@ -115,6 +115,14 @@ describe("the room republish hook", () => {
     expect((await tabledExhibitsFor("demo")).map((e) => e.id).sort()).toEqual(["one", "two"]);
   });
 
+  test("an unstamped exhibit receives its first source-room stamp", async () => {
+    await seed("one", "exhibit");
+    stampExhibitSources(["one"], ROOM);
+    await settled(() => republished.length > 0);
+    const record = await createFileLensStore(lensesDir()).loadLens("one");
+    expect(record?.sourceRoom).toBe("demo");
+  });
+
   test("a re-table republishes even though the stamp writes nothing", async () => {
     // Already this room's: sourceRoom does not change, so nothing is written — but the
     // exhibit's content just did, and the room's card renders from it.
@@ -124,10 +132,14 @@ describe("the room republish hook", () => {
     expect(republished).toEqual(["demo"]);
   });
 
-  test("an id this room does not own republishes nothing", async () => {
+  test("ids this room does not own keep their provenance and republish nothing", async () => {
     await seed("standing", "lens", "demo");
-    stampExhibitSources(["standing", "never-existed"], ROOM);
+    await seed("theirs", "exhibit", "other-room");
+    stampExhibitSources(["standing", "theirs", "never-existed"], ROOM);
     await new Promise((r) => setTimeout(r, 60));
+    const record = await createFileLensStore(lensesDir()).loadLens("theirs");
+    expect(record?.sourceRoom).toBe("other-room");
+    expect(record?.board).toEqual(board("theirs"));
     expect(republished).toEqual([]);
   });
 
