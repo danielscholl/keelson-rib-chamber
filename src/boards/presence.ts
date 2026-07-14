@@ -1,5 +1,6 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { PendingGenesis } from "../pending-genesis.ts";
+import { MAX_ACTIVE_ROOMS } from "../room-config.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 import { type ConveneProject, conveneShapeSection } from "./convene.ts";
@@ -45,11 +46,12 @@ export function buildChamberBoard(
   projects: readonly ConveneProject[] = [],
 ): CanvasBoardView {
   const live = rooms.filter((r) => r.status === "active");
-  // Convening is only offered on a quiet bench with a cast to draw from and no room
-  // already live — a genesis in flight suppresses it (the panel is ticking, so an open
-  // composer form could be clobbered mid-input), and the single-active-room invariant
-  // forbids a second room. Assembly can only render inside that window.
-  const canConvene = minds.length >= 2 && pending.length === 0 && live.length === 0;
+  // Convening needs a cast and headroom under the cap — offering it at the cap would
+  // compose a form startRoom then refuses. A genesis in flight suppresses it too (the panel
+  // is ticking, so an open composer form could be clobbered mid-input). The cap here is
+  // advisory: `live` is disk-derived while startRoom counts the driver's in-memory set, so a
+  // stale-active room withholds the composer early rather than promising a start that fails.
+  const canConvene = minds.length >= 2 && pending.length === 0 && live.length < MAX_ACTIVE_ROOMS;
   // Assembly is not a mode the operator enters — the cast IS the state. A seat click
   // seats a Mind and the bench is assembling exactly while someone is at the table, so
   // the hint that teaches the flow is never gated behind a button that only reveals it.

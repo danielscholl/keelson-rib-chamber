@@ -50,8 +50,7 @@ import {
 import { roomControlTools } from "./tools/room-control.ts";
 import { contributeChamberWorkflows } from "./workflows.ts";
 
-export { normalizeGrounding } from "./room-config.ts";
-export { MAX_ACTIVE_ROOMS } from "./room-lifecycle.ts";
+export { MAX_ACTIVE_ROOMS, normalizeGrounding } from "./room-config.ts";
 // Re-exported for the gate tests, which drive each gate through the rib's registerTools
 // seams and then call these directly.
 export { evaluateBriefGate, runReflectionForRoom };
