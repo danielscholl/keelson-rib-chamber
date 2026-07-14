@@ -51,17 +51,14 @@ keelson restart
 
 ## Compatibility
 
-| | |
-|---|---|
-| Chamber | `0.9.x` |
-| Keelson shared contract | `@keelson/shared >= 0.12.0` (peer dependency) |
-| Tested against | Keelson `main` (CI tracks the latest harness) |
-| Status | Experimental — the `Rib` contract it builds on is still pre-1.0 |
+Experimental — the `Rib` contract it builds on is still pre-1.0 and may make
+breaking changes. CI tracks Keelson `main`, so the latest harness is the
+supported target.
 
-`@keelson/shared` resolves from the harness, so an up-to-date `keelson` satisfies
-the floor and `keelson update` keeps it current. The contract may still make
-breaking changes before 1.0; pin a Chamber version against a known-good Keelson
-if you need stability.
+`@keelson/shared` resolves from the harness as a peer dependency, so an
+up-to-date `keelson` satisfies the version floor and `keelson update` keeps it
+current; the floor itself is declared in [`package.json`](package.json). If you
+need stability, pin a Chamber version against a known-good Keelson.
 
 ## Try it
 
