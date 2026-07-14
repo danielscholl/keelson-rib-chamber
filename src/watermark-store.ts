@@ -31,7 +31,7 @@ const EMPTY: Watermark = {
 
 // Tolerant read: a missing or corrupt/torn file degrades to the empty watermark
 // (cold start — everything reads as new and unpromoted) rather than throwing, the
-// same fail-soft contract readDraftExclusion / readMinds keep.
+// same fail-soft contract readDraft / readMinds keep.
 export async function readWatermark(dataHome: string = chamberDataHome()): Promise<Watermark> {
   try {
     const parsed: unknown = JSON.parse(await readFile(watermarkFile(dataHome), "utf8"));

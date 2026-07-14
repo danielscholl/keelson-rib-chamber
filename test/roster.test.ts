@@ -67,7 +67,10 @@ describe("Chamber surface (Phase 1)", () => {
     // off-surface, so no row binds ROSTER_KEY.
     const keys = layout?.rows.flatMap((r) => r.columns.map((c) => c.key)) ?? [];
     expect(keys).not.toContain(ROSTER_KEY);
-    expect(layout?.rows[0]?.columns[0]?.key).toBe("rib:chamber:convene");
+    // The Convene row folded into the Chamber (presence) header; the standing rows
+    // now lead with the Rooms + Lenses index.
+    expect(keys).not.toContain("rib:chamber:convene");
+    expect(layout?.rows[0]?.columns[0]?.key).toBe("rib:chamber:rooms");
     expect(ribSurfaceDescriptorSchema.safeParse(rib.surfaces?.[0]).success).toBe(true);
   });
 

@@ -1,7 +1,8 @@
-import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { PendingGenesis } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
+import { type ConveneProject, conveneShapeSection } from "./convene.ts";
 import {
   bootCard,
   bootSlotsFor,
@@ -13,6 +14,16 @@ import {
 
 type Section = CanvasBoardView["sections"][number];
 
+// The convene draft the bench reads to render assembly — whether the composer is
+// open and which Minds sit at the table. A structural shape (not the room-draft
+// module's type) so this pure board builder stays free of the fs-backed store.
+interface DraftView {
+  assembling: boolean;
+  selected: ReadonlySet<string>;
+}
+
+const NO_DRAFT: DraftView = { assembling: false, selected: new Set() };
+
 // The bench's declared capacity: four set-size tracks per row. The open seat is
 // permanent furniture riding the NEXT free seat — items lay out
 // minds → boot card → open seat → pad ghosts, so composing happens exactly
@@ -21,18 +32,26 @@ type Section = CanvasBoardView["sections"][number];
 const BENCH_COLUMNS = 4;
 
 // The Chamber panel — the surface's one focal panel: the bench itself (a seat card
-// per Mind), the boot card while a genesis runs, and the open author seat, in every
-// state — the cold bench renders the same grid with the seat's brief open. The
-// standalone roster board (boards/roster.ts) backs the chamber-roster workflow and
-// canvas view, sharing this file's card verbs and launchpad builders so the two
-// benches can't drift.
+// per Mind), the boot card while a genesis runs, the open author seat, and — folded in
+// from the retired Convene panel — the assembly composer that calls a subset of the
+// bench to the table and starts a room. The standalone roster board (boards/roster.ts)
+// backs the chamber-roster workflow and canvas view, sharing this file's card verbs and
+// launchpad builders so the two benches can't drift.
 export function buildChamberBoard(
   minds: readonly Mind[],
   rooms: readonly Room[] = [],
   pending: readonly PendingGenesis[] = [],
   now: number = Date.now(),
+  draft: DraftView = NO_DRAFT,
+  projects: readonly ConveneProject[] = [],
 ): CanvasBoardView {
   const live = rooms.filter((r) => r.status === "active");
+  // Convening is only offered on a quiet bench with a cast to draw from and no room
+  // already live — a genesis in flight suppresses it (the panel is ticking, so an open
+  // composer form could be clobbered mid-input), and the single-active-room invariant
+  // forbids a second room. Assembly can only render inside that window.
+  const canConvene = minds.length >= 2 && pending.length === 0 && live.length === 0;
+  const assembling = canConvene && draft.assembling;
 
   const assembled =
     minds.length === 0
@@ -51,37 +70,56 @@ export function buildChamberBoard(
   const chip =
     live.length > 0
       ? `${live.length} ${live.length === 1 ? "room" : "rooms"} · in session`
-      : minds.length > 0
-        ? "bench at rest"
-        : pending.length > 0
-          ? undefined
-          : "awaiting genesis";
+      : assembling
+        ? "assembling"
+        : minds.length > 0
+          ? "bench at rest"
+          : pending.length > 0
+            ? undefined
+            : "awaiting genesis";
 
   return {
     view: "board",
     header: { status: assembled, ...(chip ? { chip } : {}) },
-    sections: benchSections(minds, rooms, pending, now),
+    sections: benchSections(minds, rooms, pending, now, {
+      canConvene,
+      assembling,
+      draft,
+      projects,
+    }),
   };
 }
 
 // Every state is the same four-track bench: seat cards, the boot card in the
 // seat being taken while a genesis runs, the open author seat on the next free
-// cell, and decorative pad ghosts trailing — never stretched, never withheld.
+// cell, and decorative pad ghosts trailing. Below the bench sits the convene
+// affordance — a one-click launcher at rest, the unfolded composer while assembling.
 function benchSections(
   minds: readonly Mind[],
   rooms: readonly Room[],
   pending: readonly PendingGenesis[],
   now: number,
+  convene: {
+    canConvene: boolean;
+    assembling: boolean;
+    draft: DraftView;
+    projects: readonly ConveneProject[];
+  },
 ): Section[] {
   // readMinds is newest-first; the bench seats in arrival order — a Mind boots
   // into the leftmost open seat and stays there. Landed Minds group before pending
-  // boot cards, so a genesis that lands out of authoring order can take an earlier
-  // cell than a still-booting sibling; a shared reservation key would pin the cell
-  // across the pending->landed hop — tracked as follow-up. Concurrent geneses each
-  // hold a boot card, in the order they were authored (see bootSlotsFor for hues).
+  // boot cards. Concurrent geneses each hold a boot card, in the order they were
+  // authored (see bootSlotsFor for hues).
+  const seatedOrder = [...minds].reverse();
   const slots = bootSlotsFor(pending, minds);
   const seats = [
-    ...[...minds].reverse().map((m) => seatCard(m, rooms)),
+    ...seatedOrder.map((m) =>
+      seatCard(
+        m,
+        rooms,
+        convene.assembling ? { selected: convene.draft.selected.has(m.slug) } : undefined,
+      ),
+    ),
     ...pending.map((p, i) => bootCard(p, slots[i] ?? -1, now)),
   ];
   // Trailing pads round the last row up to capacity so the bench always reads
@@ -107,21 +145,55 @@ function benchSections(
       ],
     });
   }
+  if (convene.assembling) {
+    const cast = seatedOrder.filter((m) => convene.draft.selected.has(m.slug));
+    if (cast.length > 0) {
+      sections.push({
+        kind: "rows",
+        items: [{ glyph: "brand", text: `${cast.length} at the table` }],
+      });
+    }
+    sections.push(conveneShapeSection(cast, convene.projects));
+    sections.push({ kind: "actions", items: [assembleAction(false, "Cancel", "✕")] });
+  } else if (convene.canConvene) {
+    sections.push({
+      kind: "actions",
+      items: [assembleAction(true, "Convene a Room", "＋", "brand")],
+    });
+  }
   return sections;
 }
 
+// The footer convene control: one `assemble` verb that opens (`on: true`) or closes
+// (`on: false`) the composer. The action handler flips the draft's assembling flag and
+// recomposes the panel.
+function assembleAction(
+  on: boolean,
+  label: string,
+  glyph: string,
+  tone?: CanvasTone,
+): CanvasActionItem {
+  return { type: "assemble", label, glyph, ...(tone ? { tone } : {}), payload: { on } };
+}
+
 // One Mind -> one seat card: identity dot, the role pill wearing the same hue,
-// the mission stanza (authored at genesis; pre-mission Minds fall back to the
-// roster tagline), a room-scoped status footer, and the shared management verbs.
-function seatCard(mind: Mind, rooms: readonly Room[]) {
+// the mission stanza, a status footer, and the shared management verbs. While the
+// operator is assembling a room the card also carries a Seat/Seated toggle — the
+// participant picker lives on the seats themselves, not a separate roster — and its
+// status footer reads "at the table" when it is in the cast.
+function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boolean }) {
   const active = rooms.filter((r) => r.status === "active" && seatsMind(r, mind.slug));
-  const status =
-    active.length === 0
+  const status = select?.selected
+    ? { value: "at the table", tone: "brand" as CanvasTone }
+    : active.length === 0
       ? { value: "on the bench" }
       : active.length === 1
         ? { value: `in session · ${active[0]?.name}`, tone: "info" as CanvasTone }
         : { value: `active in ${active.length} rooms`, tone: "info" as CanvasTone };
   const tone = identityToneForSlot(mind.identitySlot);
+  const actions = select
+    ? [seatToggle(mind, select.selected), ...mindCardActions(mind)]
+    : mindCardActions(mind);
   return {
     title: mind.name,
     dot: tone,
@@ -133,7 +205,20 @@ function seatCard(mind: Mind, rooms: readonly Room[]) {
     // footer beneath it, not an inline `·`-joined meta row.
     stacked: true,
     fields: [{ value: mission(mind.mission?.trim() || mind.persona) }, status],
-    actions: mindCardActions(mind),
+    actions,
+  };
+}
+
+// The per-seat participant toggle (the retired Convene panel's who's-in chip, moved
+// onto the card that represents the Mind): a `draft-set` that flips the Mind in or out
+// of the inclusion draft. Brand-toned and checked when the Mind is at the table.
+function seatToggle(mind: Mind, selected: boolean): CanvasActionItem {
+  return {
+    type: "draft-set",
+    label: selected ? "Seated" : "Seat",
+    glyph: selected ? "✓" : "＋",
+    ...(selected ? { tone: "brand" as CanvasTone } : {}),
+    payload: { slug: mind.slug },
   };
 }
 

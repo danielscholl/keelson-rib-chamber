@@ -5,7 +5,6 @@ import { bindBriefGate, disposeBriefGate, evaluateBriefGate } from "./brief-gate
 import { CHAMBER_COMMANDS, completeChamberCommand, invokeChamberCommand } from "./commands.ts";
 import {
   BRIEF_KEY,
-  CONVENE_KEY,
   DIGEST_KEY,
   EXHIBITS_KEY,
   LENSES_KEY,
@@ -65,7 +64,6 @@ export { evaluateBriefGate, runReflectionForRoom };
 const RIB_VIEWS: RibViewDescriptor[] = [
   { key: PRESENCE_KEY, canvasKind: "view", title: "The Chamber" },
   { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
-  { key: CONVENE_KEY, canvasKind: "view", title: "Convene" },
   { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
   { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
   { key: EXHIBITS_KEY, canvasKind: "view", title: "Exhibits" },
@@ -154,24 +152,6 @@ const rib: Rib = {
           glyph: { char: "❖", tone: "brand" },
         },
         rows: [
-          {
-            columns: [
-              {
-                key: CONVENE_KEY,
-                title: "Convene",
-                // In-process board (no workflow binding): the rib recomposes it on a
-                // roster/draft/convene mutation, not on cadence. Collapsible so it folds
-                // to its head bar once rooms exist (the board's defaultCollapsed hint).
-                // hideWhenEmpty keeps it invisible under two Minds (the builder emits zero
-                // sections then) — Convene has nothing to offer until a room can be
-                // convened, and the seat-a-second guidance lives in the Chamber panel and
-                // the Briefing; it appears the moment a second Mind is seated.
-                collapsible: true,
-                hideWhenEmpty: true,
-                glyph: { char: "＋", tone: "brand" },
-              },
-            ],
-          },
           {
             columns: [
               {

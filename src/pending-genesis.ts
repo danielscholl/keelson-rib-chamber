@@ -39,7 +39,7 @@ function asMarker(value: unknown): PendingGenesis | null {
 
 // Tolerant read: a missing/corrupt/torn file — or entries without a string
 // startedAt — degrade to fewer (or no) markers, the same fail-soft contract
-// readWatermark / readDraftExclusion keep. A legacy single-object file (the
+// readWatermark / readDraft keep. A legacy single-object file (the
 // pre-list shape) reads as a one-marker list, so an in-place upgrade never drops
 // a genesis that was in flight. Arrival order (startedAt ascending) so boot
 // cards seat in the order the operator authored.
