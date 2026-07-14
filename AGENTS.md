@@ -131,7 +131,7 @@ owns turns, persistence, and publishing.
   budget is capped (`MAX_ROOM_TURN_BUDGET`), and `chamber_room_start` is a
   confirm-gated dry-run by default.
 - **Bounded concurrent rooms, fresh slug per start.** Rooms run concurrently —
-  each on its own `rib:chamber:room:<slug>` key and surface region — capped at
+  each on its own `rib:chamber:room:<slug>` key — capped at
   `MAX_ACTIVE_ROOMS`, since every room drives its own loop of paid turns. Each
   start mints a fresh slug, so a late turn from a stopped room can't bleed into a
   new one. Mind/room slugs are path segments, guarded by `assertSafeSlug` /

@@ -65,7 +65,15 @@ function fakeSnapshotManager() {
     keys: () => [...composers.keys()],
     dispose: async () => {},
   } as unknown as SnapshotManager;
-  return { sm, registered, recomposed, lastBoard: () => lastBoard };
+  // `registered` is append-only history; `live` is what is registered RIGHT NOW, so a
+  // release is observable rather than invisible behind its own registration.
+  return {
+    sm,
+    registered,
+    recomposed,
+    live: () => [...composers.keys()],
+    lastBoard: () => lastBoard,
+  };
 }
 
 function makeCtx(
@@ -237,6 +245,25 @@ describe("room adapter — room-delete", () => {
     const res = await onAction({ type: "room-delete", payload: { slug: "del-me" } }, makeCtx());
     expect(res).toEqual({ ok: true, data: { slug: "del-me" } });
     expect(await store.loadRoom("del-me")).toBeUndefined();
+  });
+
+  it("a room's key outlives the room ending, and the delete is what releases it", async () => {
+    const started = await onAction(startPayload(), makeCtx({ sm: snap.sm }));
+    const slug = slugOf(started);
+    const key = `rib:chamber:room:${slug}`;
+    await waitFor(async () => snap.live().includes(key));
+
+    gate.release();
+    await onAction({ type: "room-stop", payload: { slug } }, makeCtx({ sm: snap.sm }));
+    // Ending a room does NOT take its key: a drawer may still be reading it, and the host
+    // closes a subscription to a gone key permanently.
+    expect(snap.live()).toContain(key);
+
+    const res = await onAction({ type: "room-delete", payload: { slug } }, makeCtx());
+    expect(res.ok).toBe(true);
+    // Nothing else would ever release it, and a key with no record behind it would
+    // compose an empty board forever.
+    expect(snap.live()).not.toContain(key);
   });
 
   it("fails closed with no slug (requires payload { slug })", async () => {

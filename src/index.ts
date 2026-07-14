@@ -118,14 +118,13 @@ const rib: Rib = {
   // seat cards, authoring, live pulse), the Briefing banner follows as the
   // always-on heartbeat (the one narrator, folding what were three what's-happening
   // panels — delta / digest / record — into one), and the
-  // standing row pairs the sessions index (ended rooms) with the lenses index (the
-  // living views) at half width each. The live room panels and
-  // lens panels are push-fed dynamic regions a producer registers at runtime — each
-  // ACTIVE room registers its own per-slug region (group "rooms") on start via
-  // room-region-registry, and a Mind authors lenses (chamber_emit_lens, group "lens"),
-  // all through registerRegion. The rooms index is the history of CLOSED rooms (an
-  // active room shows as its live inline panel); the lenses index sits alongside each
-  // lens's own live panel, with Open focusing it.
+  // standing row pairs the rooms index (every session, live or ended) with the lenses
+  // index (the living views) at half width each. A panel is for what is continuously
+  // true, so a room — an activity — has none: it is entered from its index card, and
+  // Open focuses the per-slug key its driver publishes to (room-key-registry). Lens
+  // panels ARE push-fed dynamic regions a Mind registers at runtime
+  // (chamber_emit_lens, group "lens", via registerRegion); the lenses index sits
+  // alongside each lens's own live panel, with Open focusing it.
   surfaces: [
     {
       id: CHAMBER_SURFACE_ID,
@@ -210,11 +209,11 @@ const rib: Rib = {
   contributeWorkflows: contributeChamberWorkflows,
 
   // Boot-time wiring of the room loop. Builds the driver against the real seams:
-  // runAgentTurn (C1) for the turns, the per-slug room region registry as the
-  // publisher (each room's board is cached and recomposed under its own
-  // rib:chamber:room:<slug> key — a live WS push, no collector), the FS data home as
-  // the store, and the roster as the minds resolver. The seams are optional, so the
-  // driver stays undefined on a host without them and room actions fail closed.
+  // runAgentTurn (C1) for the turns, the per-slug room key registry as the publisher
+  // (each room's board is cached and recomposed under its own rib:chamber:room:<slug>
+  // key — a live WS push, no collector), the FS data home as the store, and the roster
+  // as the minds resolver. The seams are optional, so the driver stays undefined on a
+  // host without them and room actions fail closed.
   registerTools: (ctx: RibContext) => {
     // Capture the data home from the blessed ctx.getDataDir seam once, before any
     // store/driver/region is built from it — and before contributeWorkflows bakes
@@ -284,15 +283,19 @@ const rib: Rib = {
         : [];
     const htmlLensTools =
       sm && registerRegion && htmlLensReg ? [makeEmitLensHtmlTool(htmlLensReg)] : [];
+    // The room subsystem itself needs no registerRegion (rooms hold no panel), but a room
+    // turn grants chamber_table_exhibit only when the lens registry exists — and that
+    // needs the seam. Keep rooms behind it rather than silently shipping a room that
+    // cannot table its deliverable.
     if (sm && registerRegion && run) {
       // Capture the agent-turn seam for the close-only reflection pass (onRoomClosed,
       // below) — the same run the room driver uses for room turns.
       bindReflectionGate({ runAgentTurn: run });
-      // The room subsystem — driver, region registry, retention sweep, and the room
+      // The room subsystem — driver, key registry, retention sweep, and the room
       // loop/start/stop/inject core — lives in src/room-lifecycle.ts; bindRoomLifecycle
       // owns the singleton discipline (build once, reuse, rebuild against a new manager)
       // and returns the room store the control tools share.
-      const { roomStore } = bindRoomLifecycle({ sm, registerRegion, runAgentTurn: run });
+      const { roomStore } = bindRoomLifecycle({ sm, runAgentTurn: run });
       // Expose the room controls as chat tools (start / say / stop / status),
       // sharing the same driver + store this hook just built. Returned only when
       // the seams are present (no driver -> no tools), mirroring how the actions
@@ -381,7 +384,7 @@ const rib: Rib = {
     // late load-append-publish can't publish to a disposed registry or interleave
     // with a re-boot's writes. See src/lens-runtime.ts.
     await disposeLensRuntime();
-    // Tear down the room subsystem last: dispose the region registry, release the
+    // Tear down the room subsystem last: dispose the key registry, release the
     // room-view keys, and dispose the driver (which aborts any in-flight turn). See
     // src/room-lifecycle.ts.
     await disposeRoomLifecycle();

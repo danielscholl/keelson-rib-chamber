@@ -26,9 +26,9 @@ export interface RoomStore {
 
 // Publish seam. The driver composes the finished board and hands it over with the
 // owning room's slug; the adapter routes it to that room's per-slug snapshot key
-// (rib:chamber:room:<slug>) and surface region. Keeping the snapshot key / register
-// / coalescing discipline out of the core is deliberate — that is C1/C3 adapter
-// territory (see room-region-registry.ts).
+// (rib:chamber:room:<slug>). Keeping the snapshot key / register / coalescing
+// discipline out of the core is deliberate — that is C1/C3 adapter territory
+// (see room-key-registry.ts).
 export interface RoomPublisher {
   publish(slug: MindSlug, view: CanvasView): Promise<void>;
 }
