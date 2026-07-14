@@ -224,6 +224,9 @@ describe("rib-chamber", () => {
     expect(convene?.key).toBe("rib:chamber:convene");
     expect(convene?.workflow).toBeUndefined();
     expect(convene?.collapsible).toBe(true);
+    // hideWhenEmpty is what hides the panel under two Minds; guard it here so the
+    // flag can't be dropped while the board test (zero sections) still passes.
+    expect(convene?.hideWhenEmpty).toBe(true);
     const cols = rows.flatMap((r) => r.columns);
     // Neither what's-happening narrator has a standing column anymore.
     expect(cols.some((c) => c.key === "rib:chamber:activity")).toBe(false);

@@ -31,12 +31,14 @@ function byStrategy(board: ReturnType<typeof buildConveneBoard>) {
 }
 
 describe("buildConveneBoard cast + shapes", () => {
-  test("under two Minds it is a single nudge, no chips or shapes; valid", () => {
-    const board = buildConveneBoard([A]);
-    expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    expect(chips(board)).toHaveLength(0);
-    expect(shapes(board)).toHaveLength(0);
-    expect(board.sections[0]?.kind).toBe("rows");
+  test("under two Minds it emits ZERO sections, so the region's hideWhenEmpty hides it; valid", () => {
+    for (const roster of [[], [A]]) {
+      const board = buildConveneBoard(roster);
+      expect(canvasViewSchema.safeParse(board).success).toBe(true);
+      expect(chips(board)).toHaveLength(0);
+      expect(shapes(board)).toHaveLength(0);
+      expect(board.sections).toEqual([]);
+    }
   });
 
   test("at two Minds: identity-toned draft-set chips + a tabs strip of five shapes", () => {

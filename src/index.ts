@@ -161,9 +161,13 @@ const rib: Rib = {
                 title: "Convene",
                 // In-process board (no workflow binding): the rib recomposes it on a
                 // roster/draft/convene mutation, not on cadence. Collapsible so it folds
-                // to its head bar once rooms exist (the board's defaultCollapsed hint),
-                // a one-click open when you want it — the empty-state cold.
+                // to its head bar once rooms exist (the board's defaultCollapsed hint).
+                // hideWhenEmpty keeps it invisible under two Minds (the builder emits zero
+                // sections then) — Convene has nothing to offer until a room can be
+                // convened, and the seat-a-second guidance lives in the Chamber panel and
+                // the Briefing; it appears the moment a second Mind is seated.
                 collapsible: true,
+                hideWhenEmpty: true,
                 glyph: { char: "＋", tone: "brand" },
               },
             ],
