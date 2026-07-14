@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.36.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.36.1...v0.36.2) (2026-07-14)
+
+
+### Fixed
+
+* **boards:** trim empty-state help text and slim Convene shape tabs ([#252](https://github.com/danielscholl/keelson-rib-chamber/issues/252)) ([71273ab](https://github.com/danielscholl/keelson-rib-chamber/commit/71273ab508cd0449f9cd857e00153b7ef1609a26))
+* **briefing:** lapse promoted delta when a lens or exhibit is deleted ([#254](https://github.com/danielscholl/keelson-rib-chamber/issues/254)) ([5b2a773](https://github.com/danielscholl/keelson-rib-chamber/commit/5b2a77398222167dc8e9147e58115a03759aa12e))
+* **convene:** hide the panel until two Minds are seated ([#255](https://github.com/danielscholl/keelson-rib-chamber/issues/255)) ([0d0f395](https://github.com/danielscholl/keelson-rib-chamber/commit/0d0f395bde63dee62846e21306c232d5a4c42b6e))
+* **lenses:** drop starter chips so the empty index is a pure list ([#256](https://github.com/danielscholl/keelson-rib-chamber/issues/256)) ([6213d9f](https://github.com/danielscholl/keelson-rib-chamber/commit/6213d9f4aaeeeb808a29f0a5f592ce2faf13cbf1))
+
 ## [0.36.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.36.0...v0.36.1) (2026-07-13)
 
 
