@@ -174,6 +174,28 @@ describe("room driver — step", () => {
     expect(room?.turnIndex).toBe(1);
   });
 
+  test("a clean empty turn retries once before committing and counting", async () => {
+    const h = harness([{ text: "" }, { text: "from retry" }]);
+    await h.driver.start({ ...START, turnBudget: 2 });
+    await h.driver.step("demo");
+    const transcript = await h.store.loadTranscript("demo");
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.parts[0]?.text).toBe("from retry");
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(1);
+    expect(h.turns.requests).toHaveLength(2);
+  });
+
+  test("a persistently empty turn retries once, then commits and counts once", async () => {
+    const h = harness([{ text: "" }]);
+    await h.driver.start({ ...START, turnBudget: 2 });
+    await h.driver.step("demo");
+    const transcript = await h.store.loadTranscript("demo");
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.parts[0]?.text).toBe("");
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(1);
+    expect(h.turns.requests).toHaveLength(2);
+  });
+
   test("prompt carries prior transcript text", async () => {
     const h = harness([{ text: "first" }, { text: "second" }]);
     await h.driver.start(START);
@@ -207,6 +229,7 @@ describe("room driver — step", () => {
     await h.driver.step("demo");
     expect((await h.store.loadRoom("demo"))?.status).toBe("active");
     expect(await h.store.loadTranscript("demo")).toHaveLength(1);
+    expect(h.turns.requests).toHaveLength(1);
   });
 });
 
@@ -339,6 +362,7 @@ describe("room driver — stop / abort", () => {
     await h.turns.started;
     await h.driver.stop("demo");
     await stepP;
+    expect(h.turns.requests).toHaveLength(1);
     expect((await h.store.loadRoom("demo"))?.status).toBe("stopped");
     const t = await h.store.loadTranscript("demo");
     expect(t.some((e) => e.aborted)).toBe(true);

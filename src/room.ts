@@ -769,36 +769,51 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
             ...(deps.readTools ?? []).filter((t) => !declared.some((d) => d.name === t.name)),
           ]
         : declared;
-      const turn = deps.runAgentTurn({
-        system,
-        prompt,
-        abortSignal: controller.signal,
-        ...(cwd ? { cwd } : {}),
-        ...(tools.length > 0 ? { tools } : {}),
-        ...(confineRoot ? { allowedDirectories: [confineRoot] } : {}),
-        ...(mind.model ? { model: mind.model } : {}),
-        ...(mind.provider ? { provider: mind.provider } : {}),
-      });
-      // The drain doubles as the exhibit witness: a tool_use chunk naming the
-      // table-exhibit seam proves THIS room's turn tabled that id, so the rib can
-      // stamp sourceRoom without trusting the agent to name its own room.
-      const tabledIds: string[] = [];
-      try {
-        // Draining the stream could drive throttled partial publishes later; for
-        // now the result is the source of truth.
-        for await (const chunk of turn.stream) {
-          if (chunk.type !== "tool_use" || chunk.toolName !== EXHIBIT_TOOL_NAME) continue;
-          const rawId = chunk.toolInput?.id;
-          if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
+      const runAttempt = async () => {
+        const turn = deps.runAgentTurn({
+          system,
+          prompt,
+          abortSignal: controller.signal,
+          ...(cwd ? { cwd } : {}),
+          ...(tools.length > 0 ? { tools } : {}),
+          ...(confineRoot ? { allowedDirectories: [confineRoot] } : {}),
+          ...(mind.model ? { model: mind.model } : {}),
+          ...(mind.provider ? { provider: mind.provider } : {}),
+        });
+        // The drain doubles as the exhibit witness: a tool_use chunk naming the
+        // table-exhibit seam proves THIS room's turn tabled that id, so the rib can
+        // stamp sourceRoom without trusting the agent to name its own room.
+        const tabledIds: string[] = [];
+        try {
+          // Draining the stream could drive throttled partial publishes later; for
+          // now the result is the source of truth.
+          for await (const chunk of turn.stream) {
+            if (chunk.type !== "tool_use" || chunk.toolName !== EXHIBIT_TOOL_NAME) continue;
+            const rawId = chunk.toolInput?.id;
+            if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
+          }
+        } catch {
+          // a stream error surfaces via result.status below
         }
-      } catch {
-        // a stream error surfaces via result.status below
+        const result = await turn.result;
+        // Stamp even on an aborted/errored result: the tool already ran server-side
+        // when its tool_use chunk streamed, so the record exists either way (the
+        // stamp itself load-checks and skips a record the emit never persisted).
+        if (tabledIds.length > 0) deps.onExhibitsTabled?.(tabledIds, room);
+        return result;
+      };
+      let result = await runAttempt();
+      if (
+        !disposed &&
+        !controller.signal.aborted &&
+        result.status === "ok" &&
+        result.text.trim().length === 0
+      ) {
+        console.warn(
+          `[rib-chamber] empty turn from '${mind.slug}' in room '${room.slug}'; retrying once`,
+        );
+        result = await runAttempt();
       }
-      const result = await turn.result;
-      // Stamp even on an aborted/errored result: the tool already ran server-side
-      // when its tool_use chunk streamed, so the record exists either way (the
-      // stamp itself load-checks and skips a record the emit never persisted).
-      if (tabledIds.length > 0) deps.onExhibitsTabled?.(tabledIds, room);
       aborted = result.status === "aborted" || controller.signal.aborted;
       errored = result.status === "error" || result.status === "timeout";
       text =
