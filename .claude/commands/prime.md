@@ -143,8 +143,9 @@ allowed-tools: Bash, Read, Glob, Grep
       <point>Invariants: index.ts stays a composition root (a new subsystem gets its
         own module + bindX/disposeX pair — index.ts gains wiring, not logic); zero
         React; strategies pure; attach only via the Rib contract; fail closed; paid
-        turns budget-capped (MAX_ROOM_TURN_BUDGET) + confirm-gated; single active
-        room with a fresh slug per start; slugs are path segments, guarded by
+        turns budget-capped (MAX_ROOM_TURN_BUDGET) + confirm-gated; bounded
+        concurrent rooms (MAX_ACTIVE_ROOMS), each on its own per-slug key and
+        region, with a fresh slug per start; slugs are path segments, guarded by
         assertSafeSlug / isSafeSlug before they touch the filesystem.</point>
       <point>Comments: default to none; capture non-obvious why; no narration.</point>
       <point>No abstractions ahead of a concrete second caller.</point>
