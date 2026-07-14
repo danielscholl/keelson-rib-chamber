@@ -396,7 +396,7 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     expect(bo?.fields?.at(-1)?.value).toBe("on the bench");
   });
 
-  test("with two seated the composer unfolds the shape tabs, the named cast, and Clear", () => {
+  test("with two seated the composer unfolds the shape tabs and named cast without Clear", () => {
     const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const how = board.sections.find(
@@ -415,10 +415,10 @@ describe("buildChamberBoard convene composer (folded in)", () => {
       (s) => s.kind === "rows" && s.items.some((i) => i.text === "Bo and Ada at the table"),
     );
     expect(cast).toBeDefined();
-    const clear = board.sections.find((s) => s.kind === "actions" && s.items[0]?.label === "Clear");
-    expect(clear?.kind === "actions" && clear.items[0]?.type).toBe("draft-clear");
-    // A compact chip, not the full-width bar a stacked actions section renders.
-    expect(clear?.kind === "actions" && clear.wrap).toBe(true);
+    // Unseating is a click on the seat card, so the bench offers no Clear chip.
+    expect(board.sections.some((s) => s.kind === "actions" && s.items[0]?.label === "Clear")).toBe(
+      false,
+    );
   });
 
   test("the cast is named to three, then falls back to a count", () => {
@@ -452,10 +452,6 @@ describe("buildChamberBoard convene composer (folded in)", () => {
           s.items.some((i) => i.text === "Click a Mind to bring them to the table."),
       ),
     ).toBe(true);
-    // Nothing at the table — nothing to clear.
-    expect(none.sections.some((s) => s.kind === "actions" && s.items[0]?.label === "Clear")).toBe(
-      false,
-    );
     // Exactly one seated names them and asks for one more — not a generic prompt.
     const one = buildChamberBoard([A, B], [], [], NOW, draft(["a"]));
     expect(howTab(one)).toBe(false);
@@ -466,10 +462,6 @@ describe("buildChamberBoard convene composer (folded in)", () => {
           s.items.some((i) => i.text === "Ada is at the table — click another Mind to convene."),
       ),
     ).toBe(true);
-    // One seated is still a cast, so Clear is offered.
-    expect(one.sections.some((s) => s.kind === "actions" && s.items[0]?.label === "Clear")).toBe(
-      true,
-    );
   });
 
   test("assembly is suppressed by a live room or a pending genesis (never overlaps the tick)", () => {

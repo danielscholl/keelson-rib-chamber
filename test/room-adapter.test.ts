@@ -434,17 +434,22 @@ describe("room adapter — convene composer (draft-set + assemble + convene)", (
     expect(await seated()).toEqual(["alice"]);
   });
 
-  it("draft-clear empties the cast", async () => {
+  it("a second click on a seated Mind unseats it — the undo that replaced Clear", async () => {
     await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
     await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
     expect((await seated()).sort()).toEqual(["alice", "bob"]);
-    const cleared = await onAction({ type: "draft-clear" }, makeCtx());
-    expect(cleared.ok).toBe(true);
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
     expect([...(await readDraft()).selected]).toEqual([]);
   });
 
   it("the retired assemble verb is no longer dispatchable", async () => {
     const res = await onAction({ type: "assemble", payload: { on: true } }, makeCtx());
+    expect(res.ok).toBe(false);
+  });
+
+  it("the retired draft-clear verb is no longer dispatchable", async () => {
+    const res = await onAction({ type: "draft-clear" }, makeCtx());
     expect(res.ok).toBe(false);
   });
 

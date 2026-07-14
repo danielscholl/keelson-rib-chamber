@@ -7,8 +7,8 @@ allowed-tools: Bash, Read, Glob, Grep
   <objective>
     Build a working mental model of @keelson/rib-chamber — a Keelson rib that adds
     the multi-agent layer (genesis agents, agent-to-agent rooms, agent-authored
-    lenses) — fast enough to navigate it and respect its invariants before making
-    a change.
+    lenses and exhibits, the standing Briefing) — fast enough to navigate it and
+    respect its invariants before making a change.
   </objective>
 
   <constraints>
@@ -36,31 +36,96 @@ allowed-tools: Bash, Read, Glob, Grep
     <intent>This rib is one Rib object plus its types. Read these.</intent>
     <step name="rib">
       <action>Read src/index.ts.</action>
-      <extract>The exported `Rib`: views + the Chamber surface; contributeWorkflows
-        (chamber-roster / -brief / -genesis); registerTools (genesis seam always;
-        room tools only when runAgentTurn + snapshot seams exist); onAction; the
-        agents + commands seams; and the fail-closed wiring.</extract>
+      <extract>The exported `Rib`, and the fact that this file is a COMPOSITION ROOT
+        — it wires modules, it does not implement them. Specifically: the mutable
+        RIB_VIEWS array (statics, plus per-subject HTML lenses pushed at runtime via
+        the declareView seam); the Chamber surface layout; contributeWorkflows
+        delegating to workflows.ts; registerTools as assembly (see the seam ladder
+        below); onAction delegating to dispatchChamberAction; the agents + commands
+        seams; and dispose() composing the module teardowns.</extract>
+      <extract>The SEAM LADDER in registerTools — the fail-closed shape worth
+        internalizing. Genesis, digest, the read tools, and the cleanup tools need
+        only the disk paths, so they are ALWAYS present. Lens/exhibit tools need the
+        snapshot manager AND registerRegion. Room-control tools additionally need
+        runAgentTurn. A missing seam means the tool is never returned — not a tool
+        that half-works.</extract>
     </step>
     <step name="types">
       <action>Read src/types.ts.</action>
-      <extract>Mind, RoomConfig, the strategy decision type, RoomStrategyName.</extract>
+      <extract>Mind (incl. the identity-slot allocation rules), Room, RoomConfig,
+        TaskLedger (magentic), RoomStrategyName, and the strategy decision types
+        (StrategyInput / StrategyStep / Strategy).</extract>
     </step>
     <step name="driver">
-      <action>Skim src/room.ts and src/ports.ts.</action>
-      <extract>The driver owns turns, persistence, and publishing; the ports are the
-        seams (store, publisher, runAgentTurn, minds resolver).</extract>
+      <action>Skim src/ports.ts (short — read it) and src/room.ts (~1600 lines —
+        SKIM ONLY: the interfaces near the top, not the body).</action>
+      <extract>ports.ts: the two seams — RoomStore (persistence; transcript is the
+        source of truth) and RoomPublisher (the driver composes a board, the adapter
+        routes it to the per-slug key).</extract>
+      <extract>room.ts: RoomDriverDeps (store, publisher, runAgentTurn, minds
+        resolver, plus optional project/tool/cwd resolvers), the RoomDriver interface
+        (start / step / inject / stop / dispose), and StepOutcome — "advanced" |
+        "ended" | "busy", three-way because a second stepper must tell a serial-gate
+        no-op apart from a closed room.</extract>
+    </step>
+    <step name="modules">
+      <action>LIST, don't read: each subsystem is a `bindX(seams)` / `disposeX()`
+        pair built in registerTools and torn down in dispose().</action>
+      <command>grep -rn 'export function bind\|export async function dispose\|export function dispose' src/*.ts</command>
+      <extract>brief-gate (the rib-owned attention gate), reflection-gate (the
+        close-only paid turn), runtime (host seams + the in-process Convene/Chamber
+        panels), lens-runtime (the lens + HTML-lens registries), room-lifecycle
+        (driver, region registry, room loop). Tools live under src/tools/, board
+        actions under src/actions/.</extract>
     </step>
   </phase>
 
-  <phase number="3" name="strategies-and-lenses">
-    <action>Read ONE strategy as the pattern; list the rest.</action>
-    <points>
-      <point>src/strategies/sequential.ts — a pure turn decision (speak/end). The
-        others (group-chat, open-floor, concurrent) follow the same shape, registered
-        in strategies/index.ts.</point>
-      <point>src/boards/ — board builders for the roster and room lenses (canvas
-        `board` data, no React). bin/collect-roster.ts is the roster collector.</point>
-    </points>
+  <phase number="3" name="strategies-boards-workflows">
+    <step name="strategies">
+      <action>Read ONE strategy as the pattern (src/strategies/sequential.ts — 14
+        lines); LIST the rest, don't read them.</action>
+      <extract>A strategy is a pure `StrategyInput -> StrategyStep` function: it reads
+        room state + transcript and returns speak / speak-parallel / moderate /
+        synthesize / manage / assign / end. No I/O, no provider or host coupling —
+        the driver runs the turns, parses any routing tail, and validates picks.</extract>
+      <extract>There are SIX, registered in strategies/index.ts behind an
+        `Object.hasOwn` guard (a bare index would resolve "constructor"/"__proto__" to
+        a truthy non-Strategy): sequential (round-robin), concurrent (one parallel
+        round), group-chat (moderator-routed), open-floor (each speaker nominates the
+        next), review (two-Mind cross-vendor pass), magentic (a non-participant
+        manager plans a task ledger and delegates). synthesis.ts is the shared
+        close helper, not a strategy.</extract>
+    </step>
+    <step name="boards">
+      <action>LIST src/boards/ and bin/; read at most ONE builder if you need the shape.</action>
+      <extract>src/boards/ has SIX DETERMINISTIC board builders the rib composes
+        (canvas `board` data, zero React): exhibits, lenses, presence, room, rooms,
+        roster — plus two section helpers, activity and convene, that are composed
+        into other boards rather than published themselves. These are rib-built,
+        NOT agent-authored — the roster, the Rooms index, and the live transcript
+        are boards; a lens/exhibit is what a Mind authors. Four bin/collect-*.ts
+        files (roster, rooms, lenses, exhibits) are the deterministic collector
+        behind a workflow of the same name; collect-digest-gate and
+        collect-digest-publish are two nodes of the single chamber-digest
+        workflow.</extract>
+    </step>
+    <step name="workflows">
+      <action>Skim src/workflows.ts — names and node shape only. NB: some names are
+        constants, not literals, so grep the `name:` key rather than the string
+        "chamber" or you will undercount.</action>
+      <command>grep -nE '^\s*name: ' src/workflows.ts</command>
+      <extract>Nine: four deterministic collectors (chamber-roster / -rooms / -lenses
+        / -exhibits) that just read the data home; four agent-turn authors
+        (chamber-genesis, chamber-lens, chamber-lens-refresh, chamber-lens-html); and
+        the self-gating chamber-digest (a gate node reads the fingerprint, the paid
+        author node runs only when it advanced, an always-on publish node re-reads
+        the store).</extract>
+      <extract>The Briefing (rib:chamber:brief) is NOT a workflow — it is the
+        rib-owned attention gate (evaluateBriefGate in brief-gate.ts), published
+        in-process and gated fail-closed against a persisted watermark so a quiet
+        Chamber runs no paid turn. The Chamber panel and Convene composer are
+        likewise in-process (runtime.ts), which is why they bind no workflow.</extract>
+    </step>
   </phase>
 
   <phase number="4" name="inventory">
@@ -75,9 +140,14 @@ allowed-tools: Bash, Read, Glob, Grep
     <action>Skim CONTRIBUTING.md for the rules that gate a PR.</action>
     <points>
       <point>Green before a PR: `bun run check`, `bun run typecheck`, `bun test`.</point>
-      <point>Invariants: zero React; strategies pure; attach only via the Rib
-        contract; fail closed; paid turns are budget-capped + confirm-gated.</point>
+      <point>Invariants: index.ts stays a composition root (a new subsystem gets its
+        own module + bindX/disposeX pair — index.ts gains wiring, not logic); zero
+        React; strategies pure; attach only via the Rib contract; fail closed; paid
+        turns budget-capped (MAX_ROOM_TURN_BUDGET) + confirm-gated; single active
+        room with a fresh slug per start; slugs are path segments, guarded by
+        assertSafeSlug / isSafeSlug before they touch the filesystem.</point>
       <point>Comments: default to none; capture non-obvious why; no narration.</point>
+      <point>No abstractions ahead of a concrete second caller.</point>
     </points>
   </phase>
 
@@ -85,7 +155,9 @@ allowed-tools: Bash, Read, Glob, Grep
     <format>Concise markdown — no multi-page dump:</format>
     <sections>
       <section>Project: 1–2 sentences (a Keelson rib; the multi-agent layer).</section>
-      <section>The Rib surface: views/surface, workflows, tools, actions, agents/commands.</section>
+      <section>The Rib surface: views/surface, workflows, the tool seam ladder,
+        actions, agents/commands — and index.ts as composition root over the
+        bindX/disposeX modules.</section>
       <section>The room loop: strategies (pure) ⇄ driver (I/O) ⇄ publisher (fail-closed board).</section>
       <section>Commands: test / typecheck / check / link:keelson.</section>
       <section>Invariants to respect for the change at hand.</section>
@@ -93,9 +165,18 @@ allowed-tools: Bash, Read, Glob, Grep
     </sections>
   </phase>
 
+  <phase number="7" name="report-drift">
+    <action>If anything you read contradicts this command file or AGENTS.md, SAY SO
+      in a closing line — name the file and the specific claim. This rib moves fast;
+      the code is the truth and these docs drift. Don't silently paper over it.</action>
+  </phase>
+
   <anti-patterns>
     <avoid>Reading every strategy/board/test to "understand patterns" — read one, list the rest.</avoid>
+    <avoid>Deep-reading src/room.ts. It is ~1600 lines; skim the interfaces at the top.</avoid>
     <avoid>Launching subagents.</avoid>
     <avoid>A multi-page summary.</avoid>
+    <avoid>Trusting this file's inventories over the code. The counts and names here
+      are a starting map, not a contract — the greps re-derive them.</avoid>
   </anti-patterns>
 </prime-command>

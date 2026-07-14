@@ -18,7 +18,6 @@ import {
 } from "./minds.ts";
 import {
   conveneAction,
-  draftClearAction,
   draftSetAction,
   outcomeCopyAction,
   outcomeExploreAction,
@@ -65,8 +64,6 @@ export function dispatchChamberAction(
       return roomStartAction(action);
     case "draft-set":
       return draftSetAction(action);
-    case "draft-clear":
-      return draftClearAction(action);
     case "convene":
       return conveneAction(action);
     case "room-inject":
