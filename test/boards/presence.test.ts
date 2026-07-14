@@ -338,8 +338,7 @@ describe("buildChamberBoard convene composer (folded in)", () => {
   const B = mind({ slug: "b", name: "Bo", identitySlot: 1, provider: "openai" });
   // Assembly is derived from the cast, so a draft is only ever its inclusion set.
   const draft = (selected: string[] = []) => ({ selected: new Set(selected) });
-  // A bench running n rooms. Distinct slugs: the gate counts them, so reusing one slug
-  // would pass at any n and never reach the cap.
+  // A bench running n rooms, each its own — what listRooms hands the board.
   const liveRooms = (n: number) =>
     Array.from({ length: n }, (_, i) => room({ slug: `room-${i}`, status: "active" }));
 
