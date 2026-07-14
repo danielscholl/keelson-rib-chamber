@@ -434,7 +434,7 @@ describe("room adapter — convene composer (draft-set + assemble + convene)", (
     expect(await seated()).toEqual(["alice"]);
   });
 
-  it("a second click on a seated Mind unseats it — the only way to empty the table", async () => {
+  it("a second click on a seated Mind unseats it — the undo that replaced Clear", async () => {
     await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
     await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
     expect((await seated()).sort()).toEqual(["alice", "bob"]);

@@ -98,12 +98,16 @@ allowed-tools: Bash, Read, Glob, Grep
     </step>
     <step name="boards">
       <action>LIST src/boards/ and bin/; read at most ONE builder if you need the shape.</action>
-      <extract>src/boards/ is eight DETERMINISTIC builders the rib composes (canvas
-        `board` data, zero React): activity, convene, exhibits, lenses, presence,
-        room, rooms, roster. These are rib-built, NOT agent-authored — the roster, the
-        Rooms index, and the live transcript are boards; a lens/exhibit is what a Mind
-        authors. Each bin/collect-*.ts is the deterministic collector behind a
-        workflow of the same name.</extract>
+      <extract>src/boards/ has SIX DETERMINISTIC board builders the rib composes
+        (canvas `board` data, zero React): exhibits, lenses, presence, room, rooms,
+        roster — plus two section helpers, activity and convene, that are composed
+        into other boards rather than published themselves. These are rib-built,
+        NOT agent-authored — the roster, the Rooms index, and the live transcript
+        are boards; a lens/exhibit is what a Mind authors. Four bin/collect-*.ts
+        files (roster, rooms, lenses, exhibits) are the deterministic collector
+        behind a workflow of the same name; collect-digest-gate and
+        collect-digest-publish are two nodes of the single chamber-digest
+        workflow.</extract>
     </step>
     <step name="workflows">
       <action>Skim src/workflows.ts — names and node shape only. NB: some names are
