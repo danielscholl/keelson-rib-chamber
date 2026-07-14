@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.39.0...v0.40.0) (2026-07-14)
+
+
+### Added
+
+* **chamber:** drop the redundant Clear chip from the bench ([#263](https://github.com/danielscholl/keelson-rib-chamber/issues/263)) ([9248518](https://github.com/danielscholl/keelson-rib-chamber/commit/9248518c3d2701ef805e303921c9c9c942bd81b9))
+
 ## [0.39.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.38.0...v0.39.0) (2026-07-14)
 
 
