@@ -164,6 +164,7 @@ export interface Room {
   // root is the confinement boundary — so a coding turn never runs unconfined.
   coding?: boolean;
   pending?: RoomPending;
+  outcomeAt?: string;
   createdAt: string;
 }
 

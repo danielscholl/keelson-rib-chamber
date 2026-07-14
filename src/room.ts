@@ -1351,17 +1351,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         });
         const turn = await runOneTurn(room, synth, prompt, controller);
         if (turn === "disposed") return false;
-        await appendEntry(
+        const synthesisEntry = buildAgentEntry(
           room.slug,
-          gen,
-          buildAgentEntry(
-            room.slug,
-            cursor,
-            synth.slug,
-            { text: turn.text, aborted: turn.aborted, usage: turn.usage },
-            synthRound,
-          ),
+          cursor,
+          synth.slug,
+          { text: turn.text, aborted: turn.aborted, usage: turn.usage },
+          synthRound,
         );
+        await appendEntry(room.slug, gen, synthesisEntry);
         return await withLock(room.slug, async () => {
           const current = (await deps.store.loadRoom(room.slug)) ?? room;
           // The fidelity turn (if any) already advanced the cursor via its own commit, so
@@ -1371,6 +1368,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
             turnIndex: current.turnIndex + 1,
             round: await roundAfter(room.slug, current),
             status: "done",
+            outcomeAt: synthesisEntry.at,
           });
         });
       }
