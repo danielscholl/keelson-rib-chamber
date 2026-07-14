@@ -258,12 +258,19 @@ describe("hasDigestContent", () => {
     expect(hasDigestContent(state())).toBe(false);
   });
 
-  test("any of minds / active rooms / ended rooms / lenses counts as content", () => {
-    expect(hasDigestContent(state({ mindCount: 1 }))).toBe(true);
+  test("any of active rooms / ended rooms / lenses / exhibits counts as content", () => {
     expect(hasDigestContent(state({ activeRoomCount: 1 }))).toBe(true);
     expect(hasDigestContent(state({ endedRoomSlugs: ["r1"] }))).toBe(true);
     expect(hasDigestContent(state({ liveLensCount: 1 }))).toBe(true);
     expect(hasDigestContent(state({ exhibitCount: 1 }))).toBe(true);
+  });
+
+  test("Minds alone are NOT content — a bench that has produced nothing has no shape", () => {
+    // The digest prompt forbids restating counts, so a minds-only chamber leaves the
+    // author nothing true to say; paying a turn for it buys atmosphere.
+    expect(hasDigestContent(state({ mindCount: 5 }))).toBe(false);
+    // But they ride along once the bench has actually produced something.
+    expect(hasDigestContent(state({ mindCount: 5, endedRoomSlugs: ["r1"] }))).toBe(true);
   });
 });
 

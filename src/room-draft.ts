@@ -2,19 +2,16 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chamberDataHome } from "./paths.ts";
 
-// The convene draft the merged Chamber bench holds between recomposes: whether the
-// operator is assembling a room, and which Minds they have called to the table.
-// Selection is an INCLUSION set (opt-in) — an empty/missing draft means nobody is
-// seated yet, so convening starts from a deliberate pick, not from every Mind.
-// `assembling` is what unfolds the composer under the bench; exiting it clears the
-// selection so a cancelled assembly leaves no stale cast behind.
+// The convene draft the merged Chamber bench holds between recomposes: which Minds the
+// operator has called to the table. Selection is an INCLUSION set (opt-in) — an
+// empty/missing draft means nobody is seated yet, so convening starts from a deliberate
+// pick, not from every Mind. Assembly is not a stored mode: the bench is assembling
+// exactly while this set is non-empty, so a seat click is the only thing that enters it.
 export interface RoomDraft {
-  assembling: boolean;
   selected: Set<string>;
 }
 
 interface DraftFile {
-  assembling: boolean;
   selected: string[];
 }
 
@@ -28,21 +25,21 @@ export function draftFile(dataHome: string = chamberDataHome()): string {
 }
 
 function emptyDraft(): RoomDraft {
-  return { assembling: false, selected: new Set() };
+  return { selected: new Set() };
 }
 
-// Tolerant read: a missing or corrupt/torn file degrades to the empty default (not
-// assembling, nobody selected) rather than throwing, mirroring readMinds / readWatermark.
+// Tolerant read: a missing or corrupt/torn file degrades to the empty default (nobody
+// selected) rather than throwing, mirroring readMinds / readWatermark. A draft written
+// before assembly was derived carries a stale `assembling` key, which is simply ignored.
 export async function readDraft(dataHome: string = chamberDataHome()): Promise<RoomDraft> {
   try {
     const parsed: unknown = JSON.parse(await readFile(draftFile(dataHome), "utf8"));
     if (typeof parsed !== "object" || parsed === null) return emptyDraft();
-    const assembling = (parsed as { assembling?: unknown }).assembling === true;
     const selectedRaw = (parsed as { selected?: unknown }).selected;
     const selected = Array.isArray(selectedRaw)
       ? new Set(selectedRaw.filter((s): s is string => typeof s === "string"))
       : new Set<string>();
-    return { assembling, selected };
+    return { selected };
   } catch {
     return emptyDraft();
   }
@@ -59,7 +56,7 @@ async function writeDraft(draft: RoomDraft, dataHome: string): Promise<void> {
   await mkdir(dataHome, { recursive: true });
   const file = draftFile(dataHome);
   const tmp = `${file}.${process.pid}.${writeSeq++}.tmp`;
-  const payload: DraftFile = { assembling: draft.assembling, selected: [...draft.selected].sort() };
+  const payload: DraftFile = { selected: [...draft.selected].sort() };
   await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`);
   await rename(tmp, file);
 }
@@ -77,20 +74,8 @@ export async function toggleSelected(
   return draft;
 }
 
-// Enter or leave assembly mode. Leaving clears the selection: a cancelled assembly
-// must not leave a stale cast that a later re-entry would silently reuse.
-export async function setAssembling(
-  on: boolean,
-  dataHome: string = chamberDataHome(),
-): Promise<RoomDraft> {
-  const draft = await readDraft(dataHome);
-  const next: RoomDraft = on ? { assembling: true, selected: draft.selected } : emptyDraft();
-  await writeDraft(next, dataHome);
-  return next;
-}
-
-// Reset to the empty default (not assembling, nobody selected) — the state a
-// successful convene returns the bench to. Writing (rather than unlinking) keeps the
+// Reset to the empty default (nobody selected) — the state a successful convene, or a
+// deliberate Clear, returns the bench to. Writing (rather than unlinking) keeps the
 // file's presence stable for readers.
 export async function clearDraft(dataHome: string = chamberDataHome()): Promise<void> {
   await writeDraft(emptyDraft(), dataHome);

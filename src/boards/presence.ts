@@ -14,15 +14,14 @@ import {
 
 type Section = CanvasBoardView["sections"][number];
 
-// The convene draft the bench reads to render assembly — whether the composer is
-// open and which Minds sit at the table. A structural shape (not the room-draft
-// module's type) so this pure board builder stays free of the fs-backed store.
+// The convene draft the bench reads to render assembly — which Minds sit at the
+// table. A structural shape (not the room-draft module's type) so this pure board
+// builder stays free of the fs-backed store.
 interface DraftView {
-  assembling: boolean;
   selected: ReadonlySet<string>;
 }
 
-const NO_DRAFT: DraftView = { assembling: false, selected: new Set() };
+const NO_DRAFT: DraftView = { selected: new Set() };
 
 // The bench's declared capacity: four set-size tracks per row. The open seat is
 // permanent furniture riding the NEXT free seat — items lay out
@@ -51,7 +50,11 @@ export function buildChamberBoard(
   // composer form could be clobbered mid-input), and the single-active-room invariant
   // forbids a second room. Assembly can only render inside that window.
   const canConvene = minds.length >= 2 && pending.length === 0 && live.length === 0;
-  const assembling = canConvene && draft.assembling;
+  // Assembly is not a mode the operator enters — the cast IS the state. A seat click
+  // seats a Mind and the bench is assembling exactly while someone is at the table, so
+  // the hint that teaches the flow is never gated behind a button that only reveals it.
+  const cast = canConvene ? [...minds].reverse().filter((m) => draft.selected.has(m.slug)) : [];
+  const assembling = cast.length > 0;
 
   const assembled =
     minds.length === 0
@@ -83,7 +86,7 @@ export function buildChamberBoard(
     header: { status: assembled, ...(chip ? { chip } : {}) },
     sections: benchSections(minds, rooms, pending, now, {
       canConvene,
-      assembling,
+      cast,
       draft,
       projects,
     }),
@@ -93,7 +96,8 @@ export function buildChamberBoard(
 // Every state is the same four-track bench: seat cards, the boot card in the
 // seat being taken while a genesis runs, the open author seat on the next free
 // cell, and decorative pad ghosts trailing. Below the bench sits the convene
-// affordance — a one-click launcher at rest, the unfolded composer while assembling.
+// affordance, which unfolds from the cast itself: the invitation on an empty table,
+// the shape tabs once two Minds are seated.
 function benchSections(
   minds: readonly Mind[],
   rooms: readonly Room[],
@@ -101,7 +105,7 @@ function benchSections(
   now: number,
   convene: {
     canConvene: boolean;
-    assembling: boolean;
+    cast: readonly Mind[];
     draft: DraftView;
     projects: readonly ConveneProject[];
   },
@@ -117,7 +121,7 @@ function benchSections(
       seatCard(
         m,
         rooms,
-        convene.assembling ? { selected: convene.draft.selected.has(m.slug) } : undefined,
+        convene.canConvene ? { selected: convene.draft.selected.has(m.slug) } : undefined,
       ),
     ),
     ...pending.map((p, i) => bootCard(p, slots[i] ?? -1, now)),
@@ -145,52 +149,48 @@ function benchSections(
       ],
     });
   }
-  if (convene.assembling) {
-    const cast = seatedOrder.filter((m) => convene.draft.selected.has(m.slug));
+  if (convene.canConvene) {
+    const { cast } = convene;
     if (cast.length >= 2) {
-      sections.push({
-        kind: "rows",
-        items: [{ glyph: "brand", text: `${cast.length} at the table` }],
-      });
+      sections.push({ kind: "rows", items: [{ glyph: "brand", text: castLine(cast) }] });
       sections.push(conveneShapeSection(cast, convene.projects));
     } else {
-      sections.push({
-        kind: "rows",
-        items: [{ glyph: cast.length === 1 ? "brand" : "neutral", text: assemblyHint(cast) }],
-      });
+      // Brand-toned on an empty table too: this row carries the pull the retired
+      // "Convene a Room" button used to, and it is the bench's only invitation in.
+      sections.push({ kind: "rows", items: [{ glyph: "brand", text: assemblyHint(cast) }] });
     }
-    sections.push({ kind: "actions", items: [assembleAction(false, "Cancel", "✕")] });
-  } else if (convene.canConvene) {
-    sections.push({
-      kind: "actions",
-      items: [assembleAction(true, "Convene a Room", "＋", "brand")],
-    });
+    if (cast.length > 0) sections.push({ kind: "actions", wrap: true, items: [clearAction()] });
   }
   return sections;
 }
 
-function assemblyHint(cast: readonly Mind[]): string {
-  if (cast.length === 0) return "Click a Mind to bring them to the table.";
-  return `${cast[0]?.name} is at the table — click another Mind to choose a room shape.`;
+// Name the cast rather than count it: two or three names verify at a glance against the
+// seats they were clicked from, in the same left-to-right order. Past three the list is
+// the same work as a count, so it falls back to one.
+function castLine(cast: readonly Mind[]): string {
+  const names = cast.map((m) => m.name);
+  if (names.length === 2) return `${names[0]} and ${names[1]} at the table`;
+  if (names.length === 3) return `${names[0]}, ${names[1]}, and ${names[2]} at the table`;
+  return `${names.length} at the table`;
 }
 
-// The footer convene control: one `assemble` verb that opens (`on: true`) or closes
-// (`on: false`) the composer. The action handler flips the draft's assembling flag and
-// recomposes the panel.
-function assembleAction(
-  on: boolean,
-  label: string,
-  glyph: string,
-  tone?: CanvasTone,
-): CanvasActionItem {
-  return { type: "assemble", label, glyph, ...(tone ? { tone } : {}), payload: { on } };
+function assemblyHint(cast: readonly Mind[]): string {
+  if (cast.length === 0) return "Click a Mind to bring them to the table.";
+  return `${cast[0]?.name} is at the table — click another Mind to convene.`;
+}
+
+// Clearing the table acts on the bench, not the room, so it never joins the shape tabs:
+// `wrap` keeps it a compact chip rather than the full-width bar a stacked actions
+// section renders. Unseating one Mind is a click on its card; this is the bulk undo.
+function clearAction(): CanvasActionItem {
+  return { type: "draft-clear", label: "Clear", glyph: "✕" };
 }
 
 // One Mind -> one seat card: identity dot, the role pill wearing the same hue,
-// the mission stanza, a status footer, and the shared management verbs. While the
-// operator is assembling a room the whole card becomes the participant toggle — a
-// click flips the Mind in/out of the inclusion draft and the card rings when it is
-// at the table — so the picker lives on the seats themselves, not a separate roster.
+// the mission stanza, a status footer, and the shared management verbs. Wherever the
+// bench can convene at all, the whole card is the participant toggle — a click flips
+// the Mind in/out of the inclusion draft and the card rings when it is at the table —
+// so the picker lives on the seats themselves, not a separate roster.
 function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boolean }) {
   const active = rooms.filter((r) => r.status === "active" && seatsMind(r, mind.slug));
   const status = select?.selected
@@ -213,9 +213,9 @@ function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boole
     stacked: true,
     fields: [{ value: mission(mind.mission?.trim() || mind.persona) }, status],
     actions: mindCardActions(mind),
-    // Assembling: the card body IS the who's-in control (a `draft-set` toggle),
-    // `selected` rings the ones at the table. The Enter/Model buttons keep their
-    // own clicks — the renderer ignores card-body clicks that land on a child.
+    // The card body IS the who's-in control (a `draft-set` toggle); `selected` rings
+    // the ones at the table. The Enter/Model buttons keep their own clicks — the
+    // renderer ignores card-body clicks that land on a child.
     ...(select
       ? { action: { type: "draft-set", payload: { slug: mind.slug } }, selected: select.selected }
       : {}),

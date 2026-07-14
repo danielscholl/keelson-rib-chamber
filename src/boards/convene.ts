@@ -200,21 +200,27 @@ function shapeActions(
   });
 }
 
-// The "…and how" composer section the merged Chamber bench folds in below its seats:
-// the capability-gated shape tabs when the cast can run one, else the prompt to seat
-// more. `cast` is the Minds the operator has called to the table (the inclusion draft);
-// participant selection now lives on the seat cards, so there are no who's-in chips
-// here. Pure — validated against canvasViewSchema in the presence tests; the producer
-// never parses (validation lives at the binding edge).
+// The composer section the merged Chamber bench folds in below its seats: the
+// capability-gated shape tabs when the cast can run one, else the prompt to seat more.
+// The title asks the question the tabs answer, echoing the open seat's "Who should this
+// Mind feel like?" one card over — who, then how. `cast` is the Minds the operator has
+// called to the table (the inclusion draft); participant selection now lives on the seat
+// cards, so there are no who's-in chips here. Pure — validated against canvasViewSchema
+// in the presence tests; the producer never parses (validation lives at the binding edge).
 export function conveneShapeSection(
   cast: readonly Mind[],
   projects: readonly ConveneProject[] = [],
 ): CanvasBoardView["sections"][number] {
   if (cast.length >= 2) {
-    return { kind: "actions", title: "…and how", tabs: true, items: shapeActions(cast, projects) };
+    return {
+      kind: "actions",
+      title: "How should they convene?",
+      tabs: true,
+      items: shapeActions(cast, projects),
+    };
   }
   return {
     kind: "rows",
-    items: [{ glyph: "neutral", text: "Seat two or more Minds to choose a room shape." }],
+    items: [{ glyph: "neutral", text: "Seat two or more Minds to convene." }],
   };
 }

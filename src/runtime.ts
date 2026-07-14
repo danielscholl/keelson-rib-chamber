@@ -145,7 +145,7 @@ export function resolveMindByNameOrId(minds: readonly Mind[], input: string): st
 // so seats, status footers, the live pulse, the boot card, and assembly all track
 // mutations. Recomposed whenever a roster or rooms refresh fires (the refreshWorkflow
 // fan-out) — which is also how the genesis/rooms tickers advance it — or on a
-// draft/assemble/convene mutation. Fail closed on an older harness (no snapshot manager).
+// draft-set/draft-clear/convene mutation. Fail closed on an older harness (no snapshot manager).
 let presenceSm: SnapshotManager | undefined;
 let presenceUnregister: (() => void) | undefined;
 
@@ -154,7 +154,7 @@ async function composePresenceBoard(): Promise<CanvasView> {
     readMinds(mindsDir()).catch(() => [] as Mind[]),
     listRooms(roomsDir()).catch(() => [] as Room[]),
     readPendingGeneses(),
-    readDraft().catch(() => ({ assembling: false, selected: new Set<string>() })),
+    readDraft().catch(() => ({ selected: new Set<string>() })),
   ]);
   const projects: ConveneProject[] = (getProjects?.() ?? []).map((p) => ({
     id: p.id,

@@ -169,8 +169,11 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(wm.lensFingerprints).toEqual({ keep: "t1" });
   });
 
-  test("the Digest register embeds digest.json's sections with any stats dropped, labelled 'Digest'", async () => {
-    await seedMinds(); // the chamber has content, so the digest register may render
+  test("the Digest register embeds digest.json's sections with any stats dropped, labelled 'The read'", async () => {
+    await seedMinds();
+    // A produced artifact is what makes the chamber non-empty — Minds alone are
+    // capacity, and the register's floor mirrors hasDigestContent.
+    await createFileRoomStore(roomsDir()).saveRoom(makeRoom({ slug: "r-done", status: "done" }));
     await writeDigest(
       {
         board: {
@@ -191,9 +194,9 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
     rib.registerTools?.(makeCtx(run, sm));
     // Boot composes the footer in-process; wait for the Digest register to appear.
-    await waitFor(() => (lastBoard()?.sections ?? []).some((s) => s.title === "Digest"));
+    await waitFor(() => (lastBoard()?.sections ?? []).some((s) => s.title === "The read"));
     const footer = lastBoard();
-    const digest = footer?.sections.find((s) => s.title === "Digest");
+    const digest = footer?.sections.find((s) => s.title === "The read");
     expect(digest?.kind).toBe("rows"); // the stats section was dropped; the rows section leads
     expect(JSON.stringify(digest)).toContain("The bench is naming a new rib.");
     // No stats section reached the footer from the digest.
@@ -218,7 +221,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     rib.registerTools?.(makeCtx(run, sm));
     // Wait for the composed footer (its record register shows the empty-chamber hint).
     await waitFor(() => JSON.stringify(lastBoard() ?? {}).includes("No activity yet"));
-    expect(lastBoard()?.sections.some((s) => s.title === "Digest")).toBe(false);
+    expect(lastBoard()?.sections.some((s) => s.title === "The read")).toBe(false);
     expect(JSON.stringify(lastBoard())).not.toContain("a stale synthesis");
   });
 
@@ -390,7 +393,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
       {} as unknown as RibContext,
     );
     expect(res?.ok).toBe(true);
-    await waitFor(() => lastBoard()?.header?.status?.label === "Up to date");
+    await waitFor(() => lastBoard()?.header?.status === undefined);
     expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
     expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
     // The lapse is free: no second paid turn, and the watermark is un-promoted.
@@ -414,8 +417,9 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     // No second paid turn.
     expect(requests).toHaveLength(1);
     // The delta register lapses (the digest + record remain); the header is calm again
-    // and the jump chips lapse with their register.
-    expect(lastBoard()?.header?.status?.label).toBe("Up to date");
+    // and the jump chips lapse with their register. Calm means NO pill: the pill is the
+    // promoted signal, not a standing badge.
+    expect(lastBoard()?.header?.status).toBeUndefined();
     expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
     expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
     expect((await readWatermark(home)).briefPromoted).toBe(false);
@@ -454,7 +458,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     // …but its bad output was dropped: no delta register reached the footer, the header
     // stays calm, and the watermark did NOT advance (a later valid turn can promote).
     expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
-    expect(lastBoard()?.header?.status?.label).toBe("Up to date");
+    expect(lastBoard()?.header?.status).toBeUndefined();
     const wm = await readWatermark(home);
     expect(wm.briefPromoted).toBe(false);
     expect(wm.ackedEndedRooms).toEqual([]);

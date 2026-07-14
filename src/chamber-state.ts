@@ -146,9 +146,13 @@ export function chamberFingerprint(
 // Whether the chamber has anything worth digesting yet. Authoring a digest of an empty
 // chamber is a wasted (paid) turn, so the gate withholds the author node until some
 // content exists — the same cost floor diffAgainstWatermark's hasSubstance applies.
+// Minds are deliberately NOT content: a bench that has produced nothing has no shape to
+// synthesize, and the digest prompt forbids restating counts, so a minds-only chamber
+// leaves the author nothing true to say. The Briefing's own render gate must apply the
+// same floor (see brief-gate's hasContent), or emptying a chamber back to minds goes
+// quiet here while a stale board keeps rendering there.
 export function hasDigestContent(state: ChamberState): boolean {
   return (
-    state.mindCount > 0 ||
     state.activeRoomCount > 0 ||
     state.endedRoomSlugs.length > 0 ||
     state.liveLensCount > 0 ||
