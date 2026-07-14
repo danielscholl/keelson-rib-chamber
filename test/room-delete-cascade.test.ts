@@ -109,15 +109,11 @@ describe("deleteRoomExhibits", () => {
     expect(await idsOnDisk()).toEqual([]);
   });
 
-  test("a stamp racing the cascade cannot resurrect the exhibit it deleted", async () => {
-    // The reason the cascade rides the lens write queue: stampExhibitSources does
-    // loadLens -> saveLens, and saveLens mkdirs, so a delete landing between the two
-    // recreates the record. Queued, the stamp lands first and the cascade sees its write.
-    // Unqueued, the cascade reads the pre-stamp sourceRoom, matches nothing, and the
-    // stamp then writes the record back — a permanent orphan of a deleted room.
+  test("a refused cross-room stamp cannot expose an exhibit to the wrong cascade", async () => {
     await seed("verdict", "exhibit", "other");
     stampExhibitSources(["verdict"], ROOM);
-    expect(await deleteRoomExhibits("demo")).toEqual(["verdict"]);
-    expect(await idsOnDisk()).toEqual([]);
+    expect(await deleteRoomExhibits("demo")).toEqual([]);
+    expect(await idsOnDisk()).toEqual(["verdict"]);
+    expect((await tabledExhibitsFor("other")).map((e) => e.id)).toEqual(["verdict"]);
   });
 });
