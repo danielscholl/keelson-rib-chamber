@@ -4,7 +4,13 @@ import { evaluateBriefGate } from "./brief-gate.ts";
 import { canonicalLensId, createLensRegistry, type LensRegistry, lensKey } from "./lens.ts";
 import { createHtmlLensRegistry, type HtmlLensRegistry } from "./lens-html.ts";
 import { createFileHtmlLensStore, listHtmlLenses } from "./lens-html-store.ts";
-import { createFileLensStore, isExhibit, type LensKind, listLenses } from "./lens-store.ts";
+import {
+  createFileLensStore,
+  isExhibit,
+  type LensKind,
+  type LensRecord,
+  listLenses,
+} from "./lens-store.ts";
 import { htmlLensesDir, lensesDir } from "./paths.ts";
 import { refreshStandingPanels, refreshWorkflow } from "./runtime.ts";
 import type { Room } from "./types.ts";
@@ -131,13 +137,36 @@ export async function refreshExhibitIndexes(): Promise<void> {
   ]);
 }
 
+// The exhibits a room tabled, newest-first (listLenses already orders them). The
+// join is the driver-witnessed sourceRoom stamp, so an exhibit only reaches a room
+// board the driver actually saw produce it. Fail-soft: an unreadable lenses dir
+// yields no exhibits rather than failing the board that asked.
+export async function tabledExhibitsFor(slug: string): Promise<readonly LensRecord[]> {
+  try {
+    const records = await listLenses(lensesDir());
+    return records.filter((r) => isExhibit(r) && r.sourceRoom === slug);
+  } catch (e) {
+    console.error(`[rib-chamber] tabled exhibits for '${slug}' failed: ${errText(e)}`);
+    return [];
+  }
+}
+
 // The witnessed-provenance stamp: the room driver saw the table-exhibit tool fire
 // in a turn it ran, so record the room as each exhibit's source — serialized on
 // lensWriteInFlight with the other record writers, fail-soft per id, and
 // preserving updatedAt (a provenance stamp is not a re-tabling). The stamp is
 // the room's SLUG (the stable identifier room cards and open links join on);
 // display sites resolve it to the room's name, falling back to the raw value.
-export function stampExhibitSources(rawIds: readonly string[], room: Room): void {
+// `onStamped` re-publishes the room's own board: the stamp is what makes an exhibit
+// findable from its room, and it lands after the turn already published, so without
+// this the Tabled section would first appear a turn late. Awaited (not voided) so it
+// rides lensWriteInFlight, which disposeLensRuntime drains before the room subsystem
+// tears down.
+export function stampExhibitSources(
+  rawIds: readonly string[],
+  room: Room,
+  onStamped?: (slug: string) => Promise<void>,
+): void {
   const source = room.slug;
   const apply = async (): Promise<void> => {
     await lensReconcileInFlight?.catch(() => {});
@@ -158,6 +187,11 @@ export function stampExhibitSources(rawIds: readonly string[], room: Room): void
     // One refresh per index for the batch — the exhibit card's "from" field and
     // the room card's "tabled" link both just appeared.
     if (stamped) await refreshExhibitIndexes();
+    if (stamped && onStamped) {
+      await onStamped(source).catch((e) => {
+        console.error(`[rib-chamber] room '${source}' republish failed: ${errText(e)}`);
+      });
+    }
   };
   void enqueueLensWrite(apply);
 }

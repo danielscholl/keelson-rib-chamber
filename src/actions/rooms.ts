@@ -2,6 +2,7 @@ import type { RibAction, RibActionResult } from "@keelson/shared";
 import { asNonEmptyString, asStringArray, errText } from "@keelson/shared";
 import { buildRoomBoard } from "../boards/room.ts";
 import { roomViewKey } from "../keys.ts";
+import { tabledExhibitsFor } from "../lens-runtime.ts";
 import { readMinds } from "../minds-store.ts";
 import { mindsDir, roomsDir } from "../paths.ts";
 import { readPendingGeneses } from "../pending-genesis.ts";
@@ -249,7 +250,15 @@ export async function roomOpenAction(action: RibAction): Promise<RibActionResult
     const ledger = room.strategy === "magentic" ? await store.loadLedger(resolved.slug) : undefined;
     const minds = await resolveMinds();
     const projectName = room.projectId ? resolveProjectName(room.projectId) : undefined;
-    const board = buildRoomBoard(room, transcript, ledger, minds, projectName ?? room.projectId);
+    const tabled = await tabledExhibitsFor(resolved.slug);
+    const board = buildRoomBoard(
+      room,
+      transcript,
+      ledger,
+      minds,
+      projectName ?? room.projectId,
+      tabled,
+    );
     await publishRoomView(resolved.slug, board);
     return {
       ok: true,

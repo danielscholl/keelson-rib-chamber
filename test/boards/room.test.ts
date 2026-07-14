@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { canvasViewSchema } from "@keelson/shared";
 import { buildRoomBoard } from "../../src/boards/room.ts";
+import type { LensRecord } from "../../src/lens-store.ts";
 import { clockTime } from "../../src/room-text.ts";
 import type { LedgerTask, Mind, Room, TurnEntry } from "../../src/types.ts";
 
@@ -953,5 +954,83 @@ describe("grounding section", () => {
   test("an ungrounded room's board has no Grounding section", () => {
     const board = buildRoomBoard(room(), []);
     expect(board.sections.some((s) => s.kind === "rows" && s.title === "Grounding")).toBe(false);
+  });
+});
+
+describe("buildRoomBoard — the Tabled section", () => {
+  const exhibit = (over: Partial<LensRecord> = {}): LensRecord => ({
+    id: "verdict",
+    board: { view: "board", title: "The Verdict", sections: [] },
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    kind: "exhibit",
+    ...over,
+  });
+
+  function tabledSection(board: Board) {
+    const s = board.sections.find((x) => x.kind === "cards" && x.title === "Tabled");
+    return s?.kind === "cards" ? s : undefined;
+  }
+
+  test("a room that tabled nothing has no Tabled section", () => {
+    expect(tabledSection(buildRoomBoard(room(), []))).toBeUndefined();
+    // Explicitly empty is the same as omitted — the shelf exists only once used.
+    expect(tabledSection(buildRoomBoard(room(), [], undefined, [], undefined, []))).toBeUndefined();
+  });
+
+  test("each exhibit is a card carrying Open and a confirm-gated delete", () => {
+    const board = buildRoomBoard(room(), [], undefined, [], undefined, [exhibit()]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const items = tabledSection(board)?.items ?? [];
+    expect(items).toHaveLength(1);
+    expect(items[0]?.title).toBe("The Verdict");
+    expect(items[0]?.actions?.map((a) => a.type)).toEqual(["lens-open", "delete-exhibit"]);
+    // Both verbs address the exhibit by id — a payload-less button could not.
+    expect(items[0]?.actions?.[0]?.payload).toEqual({ id: "verdict" });
+    expect(items[0]?.actions?.[1]?.payload).toEqual({ id: "verdict" });
+    // The delete is destructive and asks first: this card is an exhibit's entry point.
+    expect(items[0]?.actions?.[1]?.destructive).toBe(true);
+    expect(items[0]?.actions?.[1]?.confirm?.title).toBe("Delete exhibit");
+  });
+
+  test("Tabled sits below the outcome and above the controls — controls stay last", () => {
+    const board = buildRoomBoard(room(), [], undefined, [], undefined, [exhibit()]);
+    const kinds = board.sections.map((s) => (s.kind === "cards" ? `cards:${s.title}` : s.kind));
+    expect(kinds.at(-1)).toBe("actions");
+    expect(kinds.at(-2)).toBe("cards:Tabled");
+  });
+
+  test("an untitled exhibit falls back to its id", () => {
+    const board = buildRoomBoard(room(), [], undefined, [], undefined, [
+      exhibit({ board: { view: "board", sections: [] } }),
+    ]);
+    expect(tabledSection(board)?.items[0]?.title).toBe("verdict");
+  });
+
+  test("a reason rides the card as its gist; absent leaves none", () => {
+    const withReason = buildRoomBoard(room(), [], undefined, [], undefined, [
+      exhibit({ reason: "the cluster is healthy" }),
+    ]);
+    expect(tabledSection(withReason)?.items[0]?.reason).toEqual({
+      label: "gist",
+      text: "the cluster is healthy",
+    });
+    const without = buildRoomBoard(room(), [], undefined, [], undefined, [exhibit()]);
+    expect(tabledSection(without)?.items[0]?.reason).toBeUndefined();
+  });
+
+  test("no card restates the room it is already on — provenance would be noise", () => {
+    const board = buildRoomBoard(room(), [], undefined, [], undefined, [
+      exhibit({ sourceRoom: "r" }),
+    ]);
+    const fields = tabledSection(board)?.items[0]?.fields ?? [];
+    expect(fields.map((f) => f.label)).toEqual(["tabled"]);
+  });
+
+  test("the vitals row is still found by kind — a titled Tabled cannot hijack it", () => {
+    const board = buildRoomBoard(room({ turnIndex: 1 }), [entry()], undefined, [], undefined, [
+      exhibit(),
+    ]);
+    expect(vitalsRow(board)).toBeDefined();
+    expect(outcomeCard(board)).toBeUndefined();
   });
 });
