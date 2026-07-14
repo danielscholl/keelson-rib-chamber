@@ -15,6 +15,7 @@ import { writeDigest } from "../src/digest-store.ts";
 import rib, { evaluateBriefGate } from "../src/index.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import { mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
+import { noteRoomDeleted } from "../src/room-lifecycle.ts";
 import { createFileRoomStore } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 import { readWatermark, writeWatermark } from "../src/watermark-store.ts";
@@ -313,6 +314,54 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const wm = await readWatermark(home);
     expect(wm.ackedEndedRooms).toEqual(["r-done"]);
     expect(wm.briefPromoted).toBe(true);
+  });
+
+  test("deleting a promoted room drops its jump chip without a paid turn", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
+    const { sm, published, lastBoard } = fakeSnapshotManager();
+    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    rib.registerTools?.(makeCtx(run, sm));
+    await evaluateBriefGate();
+    expect(requests).toHaveLength(1);
+    const chips = lastBoard()?.sections.find((s) => s.title === "Open what changed");
+    expect(chips?.kind).toBe("actions");
+    if (chips?.kind !== "actions") throw new Error("no jump-chip section");
+    expect(chips.items).toContainEqual({
+      type: "room-open",
+      label: "Design Review ↗",
+      glyph: "▦",
+      payload: { slug: "r-done" },
+    });
+
+    const publishCount = published.length;
+    await rooms.deleteRoom("r-done");
+    noteRoomDeleted("r-done");
+    await waitFor(() => published.length > publishCount);
+
+    expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
+    expect(requests).toHaveLength(1);
+  });
+
+  test("a delete landing mid-turn is not resurrected when the paid turn lands", async () => {
+    // The promote rebuilds `sources` from a read taken before the turn ran, so without
+    // the dropped-slug set the late assign clobbers the delete back in as a dead chip.
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-race", name: "Race Room", status: "done" }));
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run, started, release } = gatedRunAgentTurn(JSON.stringify(briefBoard));
+    rib.registerTools?.(makeCtx(run, sm));
+
+    const gate = evaluateBriefGate();
+    await started;
+    await rooms.deleteRoom("r-race");
+    noteRoomDeleted("r-race");
+    release();
+    await gate;
+
+    expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
   });
 
   test("a changed lens promotes via the chamber_emit_lens hook (exactly one turn)", async () => {

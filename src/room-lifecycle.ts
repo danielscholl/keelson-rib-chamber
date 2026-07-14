@@ -6,7 +6,7 @@ import type {
   SnapshotManager,
 } from "@keelson/shared";
 import { errText, expectView } from "@keelson/shared";
-import { evaluateBriefGate } from "./brief-gate.ts";
+import { dropBriefRoomSource, evaluateBriefGate } from "./brief-gate.ts";
 import {
   codingReviewCapabilityError,
   codingToolPool,
@@ -278,6 +278,7 @@ export function noteRoomDeleted(slug: string): void {
   // key composes from an in-memory `latest`, so it would otherwise go on serving the
   // deleted room's final board.
   roomRegistry?.release(slug);
+  dropBriefRoomSource(slug);
   syncRoomsTicker();
 }
 
