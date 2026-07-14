@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.41.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.40.2...v0.41.0) (2026-07-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **chamber:** the rib:chamber:exhibits snapshot key and the chamber-exhibits workflow are removed. A client bound to either gets nothing.
+
+### Added
+
+* **chamber:** cascade a room delete to its exhibits ([810386e](https://github.com/danielscholl/keelson-rib-chamber/commit/810386e72ffc1ab41b309da4aedaa734b6c28f01))
+* **chamber:** retire the Exhibits index ([c267fcd](https://github.com/danielscholl/keelson-rib-chamber/commit/c267fcdf4c8c1841252824a4cb659d69ff48cbf3))
+* **rooms:** drop the duplicate exhibit links from closed room cards ([5133291](https://github.com/danielscholl/keelson-rib-chamber/commit/51332916bf918131a1043cde875c5e3c70569930))
+* **rooms:** open a live room from its index card ([4f9d487](https://github.com/danielscholl/keelson-rib-chamber/commit/4f9d4879561bd8f5eba225c662c93b387ae7558c))
+* **rooms:** retire the per-room surface panels ([9b89a4e](https://github.com/danielscholl/keelson-rib-chamber/commit/9b89a4e13a067c0e9ec98c6b07dd03087deed3ff))
+* **room:** table exhibits on the room board ([0781457](https://github.com/danielscholl/keelson-rib-chamber/commit/078145740e57ec9b26fe5ee8838a172e1910806f))
+
+
+### Fixed
+
+* **chamber:** offer convene while rooms run below the cap ([f4ca2e7](https://github.com/danielscholl/keelson-rib-chamber/commit/f4ca2e779546e149dd30f4a61db45712bb851199))
+
+
+### Documentation
+
+* **prime:** update invariant to describe bounded concurrent rooms ([#270](https://github.com/danielscholl/keelson-rib-chamber/issues/270)) ([8f3f01c](https://github.com/danielscholl/keelson-rib-chamber/commit/8f3f01c2f51aa5685087c8bb22aa6c5cd48b7474))
+* retire the Exhibits shelf and the live room panels ([d99536a](https://github.com/danielscholl/keelson-rib-chamber/commit/d99536aa1e9483eb4c245896b3654b8cc85c5336))
+
 ## [0.40.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.40.1...v0.40.2) (2026-07-14)
 
 
