@@ -3,6 +3,7 @@ import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
 import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
 import { EXHIBIT_TOOL_NAME } from "./lens.ts";
+import type { LensRecord } from "./lens-store.ts";
 import type { RoomPublisher, RoomStore, RunAgentTurn } from "./ports.ts";
 import {
   allHeardInCycle,
@@ -88,6 +89,10 @@ export interface RoomDriverDeps {
   // sourceRoom off this — witnessed provenance, never agent-claimed. Fire-and-forget:
   // the driver neither awaits nor observes it (a stamp must never block a turn).
   onExhibitsTabled?: (ids: readonly string[], room: Room) => void;
+  // Resolve the exhibits a room has tabled, for the board's Tabled section. Called
+  // only from republish() — never on the turn path, since it scans the lenses dir.
+  // Omitted (a host without the lens seams) means the board carries no Tabled section.
+  exhibits?: (slug: MindSlug) => Promise<readonly LensRecord[]>;
   // The coding tier's pool, layered on top of turnTools only for a room that opted
   // in (`room.coding`) AND has a cwd to confine the turn to. These are host provider
   // built-ins (Bash/Edit/Write/Read), so a turn that gets them is confined to its
@@ -146,6 +151,10 @@ export interface RoomDriver {
   // steer instead of a false success.
   inject(slug: MindSlug, input: RoomInjectInput): Promise<boolean>;
   stop(slug: MindSlug): Promise<void>;
+  // Re-publish a room's board from current state, without writing any. The rib calls
+  // this once an exhibit's provenance stamp lands, so the Tabled section appears in
+  // the room it was tabled in rather than a turn later. A no-op for an unknown room.
+  republish(slug: MindSlug): Promise<void>;
   dispose(): Promise<void>;
   isDisposed(): boolean;
 }
@@ -202,6 +211,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     cachedMinds = minds;
     return minds;
   }
+
+  // What each room has tabled, read SYNCHRONOUSLY by publishBoard for the same reason
+  // as cachedMinds — and additionally because deps.exhibits scans the whole lenses
+  // directory, which a per-turn publish must not pay for. Populated only by
+  // republish(), which the lens stamp calls once a table is witnessed. Empty is the
+  // correct initial state: a fresh slug per start means a starting room has tabled
+  // nothing yet.
+  const cachedExhibits = new Map<MindSlug, readonly LensRecord[]>();
 
   const controllers = new Map<MindSlug, AbortController>();
   // Rooms with a turn in flight. The serial gate: one turn at a time per room, so
@@ -260,6 +277,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     controllers.delete(slug);
     transcripts.delete(slug);
     generations.delete(slug);
+    cachedExhibits.delete(slug);
   }
 
   // Per-room serialization for the load-modify-save commit sections. A director
@@ -308,8 +326,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return transcripts.get(slug) ?? (await deps.store.loadTranscript(slug));
   }
 
-  async function persistAndPublish(room: Room): Promise<void> {
-    await deps.store.saveRoom(room);
+  async function publishBoard(room: Room): Promise<void> {
     const transcript = await loadCachedTranscript(room.slug);
     // A magentic room carries a task ledger; load it so the board renders the plan.
     // Other strategies have none (loadLedger -> undefined), so the board omits the
@@ -320,8 +337,41 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     const projectName = room.projectId ? deps.resolveProjectName?.(room.projectId) : undefined;
     await deps.publisher.publish(
       room.slug,
-      buildRoomBoard(room, transcript, ledger, cachedMinds, projectName ?? room.projectId),
+      buildRoomBoard(
+        room,
+        transcript,
+        ledger,
+        cachedMinds,
+        projectName ?? room.projectId,
+        cachedExhibits.get(room.slug) ?? [],
+      ),
     );
+  }
+
+  async function persistAndPublish(room: Room): Promise<void> {
+    await deps.store.saveRoom(room);
+    await publishBoard(room);
+  }
+
+  // Re-publish a live room's board after its exhibits changed. Deliberately does NOT
+  // save: generation gating owns every room write, and an exhibit change is not room
+  // state. The room is re-read inside the lock so a publish racing a turn's commit
+  // renders the committed room, not a stale copy.
+  //
+  // Only a DRIVING room may republish. The publisher lazily registers an unknown slug
+  // (room-region-registry), so publishing a room whose panel the surface already released
+  // would resurrect it — and an exhibit tabled by a closing turn stamps well after the
+  // room ends. A closed room needs none of this: its drawer resolves exhibits live.
+  async function republish(slug: MindSlug): Promise<void> {
+    if (disposed || !activeRooms.has(slug)) return;
+    const exhibits = await deps.exhibits?.(slug);
+    if (!exhibits) return;
+    cachedExhibits.set(slug, exhibits);
+    await withLock(slug, async () => {
+      if (disposed || !activeRooms.has(slug)) return;
+      const room = await deps.store.loadRoom(slug);
+      if (room) await publishBoard(room);
+    });
   }
 
   // Commit a still-active room, unless a newer generation has superseded this op.
@@ -1401,7 +1451,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       const projectName = room.projectId ? deps.resolveProjectName?.(room.projectId) : undefined;
       await deps.publisher.publish(
         room.slug,
-        buildRoomBoard(room, transcript, inProgress, cachedMinds, projectName ?? room.projectId),
+        buildRoomBoard(
+          room,
+          transcript,
+          inProgress,
+          cachedMinds,
+          projectName ?? room.projectId,
+          cachedExhibits.get(room.slug) ?? [],
+        ),
       );
     });
     const prompt = buildWorkerPrompt({
@@ -1566,7 +1623,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     return disposed;
   }
 
-  return { start, step, inject, stop, dispose, isDisposed };
+  return { start, step, inject, stop, republish, dispose, isDisposed };
 }
 
 function defaultNewId(): () => string {

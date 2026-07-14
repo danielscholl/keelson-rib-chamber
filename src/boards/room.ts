@@ -1,4 +1,6 @@
 import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
+import type { LensRecord } from "../lens-store.ts";
+import { agoLabel } from "../relative-time.ts";
 import { flatFromRoomConfig } from "../room-config.ts";
 import {
   clockTime,
@@ -52,6 +54,8 @@ interface RailEntry extends DecisionMarker {
 // older callers and a minimal test setup still render a valid board. `projectLabel`
 // is the room's optional scope, already resolved to a display string by the
 // caller — the board never resolves a project id itself, staying pure.
+// `tabled` is the room's own exhibits (the caller filters by kind and sourceRoom);
+// omitted means the board carries no Tabled section at all.
 // Validated against canvasViewSchema in tests.
 export function buildRoomBoard(
   room: Room,
@@ -59,6 +63,7 @@ export function buildRoomBoard(
   ledger?: TaskLedger,
   minds: readonly Mind[] = [],
   projectLabel?: string,
+  tabled: readonly LensRecord[] = [],
 ): CanvasBoardView {
   const mindBySlug = new Map(minds.map((m) => [m.slug, m]));
   const counts = speakerCounts(transcript);
@@ -124,9 +129,9 @@ export function buildRoomBoard(
     },
     // Vitals, the room's backed journey, then the topic brief, the magentic plan
     // (when applicable), the debate+rail columns, the outcome document (when the
-    // room produced one), then board-baked controls. Each control carries the
-    // room slug as payload (a static actions[] button can't), so onAction routes
-    // to the right room.
+    // room produced one), what the room tabled, then board-baked controls. Each
+    // control carries the room slug as payload (a static actions[] button can't),
+    // so onAction routes to the right room.
     sections: [
       ...vitalsSection,
       ...journeySection,
@@ -135,7 +140,47 @@ export function buildRoomBoard(
       ...planSection,
       columnsSection,
       ...outcomeSection,
+      ...buildTabledSection(tabled),
       roomControls(room, mindBySlug),
+    ],
+  };
+}
+
+// The room's deliverables, as cards below its outcome. Zero exhibits yields ZERO
+// sections (the shelf only exists once the room has tabled something), mirroring
+// the exhibits index. No provenance field: every card here is by definition from
+// this room, so "from" would restate the board it sits on.
+function buildTabledSection(tabled: readonly LensRecord[]): CanvasBoardView["sections"] {
+  if (tabled.length === 0) return [];
+  return [{ kind: "cards", title: "Tabled", items: tabled.map(tabledCard) }];
+}
+
+// One exhibit -> one card. Open rides lens-open because exhibits and lenses share
+// the lens key namespace. The delete is confirm-gated and destructive: this card is
+// the exhibit's entry point, so it carries the same verbs its index card does.
+function tabledCard(exhibit: LensRecord) {
+  const title = exhibit.board.title || exhibit.id;
+  return {
+    title,
+    dot: "caution" as CanvasTone,
+    fields: [{ label: "tabled", value: agoLabel(exhibit.updatedAt) }],
+    ...(exhibit.reason ? { reason: { label: "gist", text: exhibit.reason } } : {}),
+    actions: [
+      { type: "lens-open", label: "Open", glyph: "↗", payload: { id: exhibit.id } },
+      {
+        type: "delete-exhibit",
+        label: "Delete exhibit…",
+        glyph: "✕",
+        tone: "warn" as CanvasTone,
+        destructive: true,
+        payload: { id: exhibit.id },
+        confirm: {
+          title: "Delete exhibit",
+          body: `Delete ${title}? This permanently removes the exhibit.`,
+          confirmLabel: "Delete",
+          cancelLabel: "Cancel",
+        },
+      },
     ],
   };
 }
