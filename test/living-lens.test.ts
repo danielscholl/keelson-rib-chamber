@@ -107,13 +107,14 @@ describe("living-lens region wiring", () => {
     expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens"]);
   });
 
-  it("an exhibit region carries the delete head verb and never refresh wiring", async () => {
+  it("an exhibit gets no region at all — refresh wiring is a lens's affordance", async () => {
+    // Refresh backing is what makes a lens LIVING; an exhibit is a room's finished
+    // deliverable and holds no panel to wire.
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
     await reg.publish("verdict", board("Verdict"), undefined, "exhibit");
-    const wired = region.current(lensKey("verdict"));
-    expect(wired?.workflow).toBeUndefined();
-    expect(wired?.headActions?.map((a) => a.type)).toEqual(["delete-exhibit"]);
+    expect(region.current(lensKey("verdict"))).toBeUndefined();
+    expect(region.calls).toHaveLength(0);
   });
 
   it("re-publishing with a changed refresh swaps the region in place; unchanged leaves it alone", async () => {

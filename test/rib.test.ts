@@ -212,11 +212,10 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:activity");
   });
 
-  it("the standing rows are Rooms + Lenses then Exhibits (convening folded into the header bench)", () => {
+  it("the one standing row is Rooms + Lenses (convening folded into the header bench)", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
     expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
       ["rib:chamber:rooms", "rib:chamber:lenses"],
-      ["rib:chamber:exhibits"],
     ]);
     const cols = rows.flatMap((r) => r.columns);
     // The Convene panel retired — its composer folds into the Chamber (presence) header.
@@ -224,9 +223,23 @@ describe("rib-chamber", () => {
     // Neither what's-happening narrator has a standing column anymore.
     expect(cols.some((c) => c.key === "rib:chamber:activity")).toBe(false);
     expect(cols.some((c) => c.key === "rib:chamber:digest")).toBe(false);
+    // The Exhibits index retired: an exhibit is reached from the room that tabled it.
+    expect(cols.some((c) => c.key === "rib:chamber:exhibits")).toBe(false);
     // The Briefing is the one narrator, in the banner.
     expect(rib.surfaces?.[0]?.layout.banner?.key).toBe("rib:chamber:brief");
     expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
+  });
+
+  it("no longer contributes a chamber-exhibits workflow (a room's board lists what it tabled)", () => {
+    const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
+    expect(wfs.some((w) => (w.definition as { name?: string }).name === "chamber-exhibits")).toBe(
+      false,
+    );
+    // The index went, not the species: chamber_list_exhibits is now the only exhaustive
+    // exhibit reader, and it needs no seam — an orphan with no room to be reached from
+    // is still findable.
+    const names = (rib.registerTools?.({} as RibContext) ?? []).map((t) => t.name);
+    expect(names).toContain("chamber_list_exhibits");
   });
 
   it("no longer contributes a chamber-activity workflow (the record is composed in-process)", () => {

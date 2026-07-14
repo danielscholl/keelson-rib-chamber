@@ -5,7 +5,6 @@ export const ROSTER_KEY = "rib:chamber:roster";
 export const PRESENCE_KEY = "rib:chamber:presence";
 export const ROOMS_KEY = "rib:chamber:rooms";
 export const LENSES_KEY = "rib:chamber:lenses";
-export const EXHIBITS_KEY = "rib:chamber:exhibits";
 export const DIGEST_KEY = "rib:chamber:digest";
 
 // The snapshot-only key family the Rooms index `Open` focuses (see roomOpenAction).

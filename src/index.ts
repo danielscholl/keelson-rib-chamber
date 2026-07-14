@@ -3,15 +3,7 @@ import { dispatchChamberAction } from "./actions/index.ts";
 import { listAgents, resolveAgent } from "./agents.ts";
 import { bindBriefGate, disposeBriefGate, evaluateBriefGate } from "./brief-gate.ts";
 import { CHAMBER_COMMANDS, completeChamberCommand, invokeChamberCommand } from "./commands.ts";
-import {
-  BRIEF_KEY,
-  DIGEST_KEY,
-  EXHIBITS_KEY,
-  LENSES_KEY,
-  PRESENCE_KEY,
-  ROOMS_KEY,
-  ROSTER_KEY,
-} from "./keys.ts";
+import { BRIEF_KEY, DIGEST_KEY, LENSES_KEY, PRESENCE_KEY, ROOMS_KEY, ROSTER_KEY } from "./keys.ts";
 import { CHAMBER_SURFACE_ID } from "./lens.ts";
 import { HTML_LENS_KEY, htmlLensKey } from "./lens-html.ts";
 import {
@@ -70,7 +62,6 @@ const RIB_VIEWS: RibViewDescriptor[] = [
   { key: ROSTER_KEY, canvasKind: "view", title: "Roster" },
   { key: ROOMS_KEY, canvasKind: "view", title: "Rooms" },
   { key: LENSES_KEY, canvasKind: "view", title: "Lenses" },
-  { key: EXHIBITS_KEY, canvasKind: "view", title: "Exhibits" },
   // DIGEST_KEY has no surface region of its own anymore — the standing digest folds
   // into the Briefing banner's "The read" register — but the chamber-digest workflow
   // still binds it (its store is what the banner reads), so the view stays declared.
@@ -180,24 +171,6 @@ const rib: Rib = {
                 // A long living-views index can collapse to its head strip.
                 collapsible: true,
                 glyph: { char: "✦", tone: "accent" },
-              },
-            ],
-          },
-          {
-            columns: [
-              {
-                key: EXHIBITS_KEY,
-                workflow: "chamber-exhibits",
-                title: "Exhibits",
-                // The tabled-deliverables index, the lenses index's sibling: same
-                // cheap collector + cadence, refreshed on table/delete. hideWhenEmpty
-                // keeps the shelf invisible until a discussion has tabled something
-                // (the builder emits zero sections when empty), so a fresh Chamber
-                // doesn't advertise a concept it hasn't produced.
-                cadenceMs: 120_000,
-                collapsible: true,
-                hideWhenEmpty: true,
-                glyph: { char: "▣", tone: "caution" },
               },
             ],
           },

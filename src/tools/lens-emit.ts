@@ -25,7 +25,7 @@ import {
   awaitLensReconcile,
   deleteRecordOfKind,
   enqueueLensWrite,
-  refreshExhibitIndexes,
+  refreshExhibitIndex,
 } from "../lens-runtime.ts";
 import { isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
 import { refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
@@ -336,7 +336,7 @@ export function makeTableExhibitTool(store: LensStore, registry: LensRegistry): 
           // producing room's tabled link), and a tabled deliverable is briefing
           // substance. No roster refresh — exhibits don't ride the pulse's "Live
           // views" count.
-          await refreshExhibitIndexes();
+          await refreshExhibitIndex();
           void evaluateBriefGate().catch(() => {});
           await refreshStandingPanels();
           emitResult(ctx, JSON.stringify({ ok: true, key }));
