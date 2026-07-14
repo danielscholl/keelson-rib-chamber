@@ -43,15 +43,15 @@ contract change that breaks this rib turns CI red here.
 
 The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
 
-- **Views + a surface** — eight static snapshot keys (`src/keys.ts` is the source of
-  truth: `rib:chamber:presence`, `:roster`, `:rooms`, `:lenses`, `:exhibits`,
-  `:digest`, `:brief`, plus `rib:chamber:lens-html`) alongside dynamic per-room
-  (`rib:chamber:room:<slug>` for live rooms, `rib:chamber:room-view:<slug>` for the
-  drawer view) and per-lens keys, bound to the canvas renderer, and the **Chamber**
-  nav surface that lays them out. `RIB_VIEWS` is mutable: each per-subject HTML lens
-  pushes its own `canvasKind: "html"` entry at runtime via the `declareView` seam,
-  because the host resolves a key's canvas kind by EXACT match. No hand-coded UI:
-  every view is a board a producer publishes.
+- **Views + a surface** — eight static snapshot keys: seven defined in `src/keys.ts`
+  (`rib:chamber:presence`, `:roster`, `:rooms`, `:lenses`, `:exhibits`, `:digest`,
+  `:brief`) plus `rib:chamber:lens-html`, defined in `src/lens-html.ts`, alongside
+  dynamic per-room (`rib:chamber:room:<slug>` for live rooms,
+  `rib:chamber:room-view:<slug>` for the drawer view) and per-lens keys, bound to the
+  canvas renderer, and the **Chamber** nav surface that lays them out. `RIB_VIEWS` is
+  mutable: each per-subject HTML lens pushes its own `canvasKind: "html"` entry at
+  runtime via the `declareView` seam, because the host resolves a key's canvas kind
+  by EXACT match. No hand-coded UI: every view is a board a producer publishes.
 - **Workflows** (`contributeWorkflows`, `src/workflows.ts`) — nine. Four
   deterministic collectors that read the data home (`chamber-roster` /
   `chamber-rooms` / `chamber-lenses` / `chamber-exhibits`, each backed by a
@@ -64,10 +64,11 @@ The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
   re-reads the store every tick — so the Digest board stays live but a paid turn
   fires only on a real change). The **Briefing** (`rib:chamber:brief`) is NOT a
   workflow — it is the rib-owned attention gate (`evaluateBriefGate`,
-  `src/chamber-state.ts` + `src/watermark-store.ts`): a room ending or a lens changing
-  promotes it to one agent-authored board, gated fail-closed against a persisted
-  watermark so a quiet Chamber runs no paid turn. The Chamber panel and Convene
-  composer are likewise in-process (`runtime.ts`), which is why they bind no workflow.
+  `src/brief-gate.ts`, backed by `src/chamber-state.ts` and `src/watermark-store.ts`):
+  a room ending or a lens changing promotes it to one agent-authored board, gated
+  fail-closed against a persisted watermark so a quiet Chamber runs no paid turn.
+  The Chamber panel and Convene composer are likewise in-process (`runtime.ts`),
+  which is why they bind no workflow.
 - **Tools** (`registerTools`) — a **seam ladder**, so a missing host seam means a tool
   is never returned rather than one that half-runs. Always present (they need only the
   disk paths): the `chamber_emit_genesis` and `chamber_emit_digest` write seams, five
