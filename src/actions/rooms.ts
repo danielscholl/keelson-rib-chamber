@@ -83,20 +83,6 @@ export async function draftSetAction(action: RibAction): Promise<RibActionResult
   }
 }
 
-// Clear the table (the Clear chip). Empties the inclusion draft and recomposes the
-// Chamber panel, which folds the composer away — assembly is derived from the cast, so
-// emptying it IS leaving. The bulk undo for a seat set the operator no longer wants;
-// a single Mind is still cheaper to unseat by clicking its card again.
-export async function draftClearAction(_action: RibAction): Promise<RibActionResult> {
-  try {
-    await clearDraft();
-    refreshPresence();
-    return { ok: true, data: { selected: [] } };
-  } catch (e) {
-    return { ok: false, error: errText(e) };
-  }
-}
-
 // Convene a room from the current draft and the chosen shape: participants are the Minds
 // seated at the table (the inclusion draft) minus the named facilitator — a Debate chair
 // / Delegate manager is one of the seated Minds, pulled out of the cast so it routes/plans

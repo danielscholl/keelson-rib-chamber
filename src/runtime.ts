@@ -40,7 +40,7 @@ let getProjects: RibContext["getProjects"];
 // regardless — else it would freeze at its first snapshot on a host that provides a
 // snapshot manager but no refreshWorkflow. It draws from the bench AND the rooms (its
 // seats, status footers, and folded-in assembly composer all track both), so recompose
-// it on either a roster or a rooms refresh; draft-set / draft-clear / convene call
+// it on either a roster or a rooms refresh; draft-set / convene call
 // refreshPresence directly. Reads the module-private host seam at call time, so it no-ops
 // (returns a resolved promise) when unbound (post-dispose).
 export function refreshWorkflow(name: string, inputs?: Record<string, string>): Promise<void> {
@@ -145,7 +145,7 @@ export function resolveMindByNameOrId(minds: readonly Mind[], input: string): st
 // so seats, status footers, the live pulse, the boot card, and assembly all track
 // mutations. Recomposed whenever a roster or rooms refresh fires (the refreshWorkflow
 // fan-out) — which is also how the genesis/rooms tickers advance it — or on a
-// draft-set/draft-clear/convene mutation. Fail closed on an older harness (no snapshot manager).
+// draft-set/convene mutation. Fail closed on an older harness (no snapshot manager).
 let presenceSm: SnapshotManager | undefined;
 let presenceUnregister: (() => void) | undefined;
 

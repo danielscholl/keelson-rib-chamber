@@ -1,4 +1,4 @@
-import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { PendingGenesis } from "../pending-genesis.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
@@ -159,7 +159,6 @@ function benchSections(
       // convening, so it has to pull like an affordance rather than read as a note.
       sections.push({ kind: "rows", items: [{ glyph: "brand", text: assemblyHint(cast) }] });
     }
-    if (cast.length > 0) sections.push({ kind: "actions", wrap: true, items: [clearAction()] });
   }
   return sections;
 }
@@ -177,13 +176,6 @@ function castLine(cast: readonly Mind[]): string {
 function assemblyHint(cast: readonly Mind[]): string {
   if (cast.length === 0) return "Click a Mind to bring them to the table.";
   return `${cast[0]?.name} is at the table — click another Mind to convene.`;
-}
-
-// Clearing the table acts on the bench, not the room, so it never joins the shape tabs:
-// `wrap` keeps it a compact chip rather than the full-width bar a stacked actions
-// section renders. Unseating one Mind is a click on its card; this is the bulk undo.
-function clearAction(): CanvasActionItem {
-  return { type: "draft-clear", label: "Clear", glyph: "✕" };
 }
 
 // One Mind -> one seat card: identity dot, the role pill wearing the same hue,
