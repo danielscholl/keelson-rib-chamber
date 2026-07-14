@@ -6,10 +6,9 @@ import { identityToneForSlot, type Mind, type Room } from "../types.ts";
 
 // Pure: the persisted rooms -> a canvas `board`. Active rooms come first (most
 // relevant), then closed (done/stopped) history; listRooms is already newest-first
-// so order is preserved within each group. An active room ALSO keeps its live inline
-// per-slug panel (reconcileRoomPanels), so its index card is additive and status-only
-// (no actions). A closed card offers Open (-> the room in the canvas drawer) and a
-// destructive Delete. No rooms at all renders a cold/empty state. `minds` resolves
+// so order is preserved within each group. Every card offers Open (-> the room in the
+// canvas drawer); a closed card adds a destructive Delete. No rooms at all renders a
+// cold/empty state. `minds` resolves
 // each participant slug to its Mind's display name + identity tone for the `with`
 // people field; absent (a standalone call) the cast folds to bare slugs with the
 // muted dot, mirroring lenses.ts's maintainer fold. `lenses` may be the raw
@@ -73,11 +72,10 @@ function personFor(slug: string, bySlug: ReadonlyMap<string, Mind>): CanvasPerso
 // where the prior version packed both into a `done · 12/12` pill string. The numbers
 // stay as a field in ink, alongside the room shape (strategy + facilitator), the
 // cast (a people field — each name in its Mind's identity hue), and the
-// started-relative time. A CLOSED room adds an Open (focuses its transcript in the
-// canvas drawer) and a destructive Delete (overflow, a confirm dialog). An ACTIVE
-// room is status-only: it is already live in its inline panel, so a frozen drawer
-// snapshot would just go stale beside it (and the delete handler refuses a live
-// room anyway).
+// started-relative time. EVERY room offers an Open — a closed room's drawer holds its
+// frozen transcript, a live room's streams turns as they land (roomOpenAction picks the
+// key). Only a closed room adds the destructive Delete (overflow, a confirm dialog): the
+// handler refuses a live room, so offering it would only promise a refusal.
 function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly LensRecord[]) {
   const tone = statusTone(room.status);
   const cappedTurnIndex = Math.min(room.turnIndex, room.turnBudget);
@@ -108,7 +106,7 @@ function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly
         : []),
     ],
   };
-  if (room.status === "active") return card;
+  if (room.status === "active") return { ...card, actions: [openAction(room)] };
   // Closed rooms link each tabled exhibit open ahead of the room verbs — the
   // deliverable is usually what you came back for, the transcript second.
   return {

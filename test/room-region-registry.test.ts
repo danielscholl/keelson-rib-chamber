@@ -103,7 +103,7 @@ describe("room region registry", () => {
     expect(region.active.has(roomKey("room-b"))).toBe(true);
   });
 
-  test("retainOnly keeps the named slugs and unregisters the rest", async () => {
+  test("retainOnly drops the unnamed rooms' panels but keeps their keys", async () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createRoomRegionRegistry(sm, region.register);
@@ -113,22 +113,40 @@ describe("room region registry", () => {
     await reg.publish("room-c", board("C"));
     reg.retainOnly(["room-b", "room-c"]);
 
-    expect(keys()).toEqual(expect.arrayContaining([roomKey("room-b"), roomKey("room-c")]));
-    expect(keys()).not.toContain(roomKey("room-a"));
     expect(region.active.has(roomKey("room-a"))).toBe(false);
     expect(region.active.has(roomKey("room-b"))).toBe(true);
     expect(region.active.has(roomKey("room-c"))).toBe(true);
+    // The key outlives the panel: a drawer opened on room-a is still reading it, and the
+    // host closes a subscription to a gone key for good.
+    expect(keys()).toEqual(
+      expect.arrayContaining([roomKey("room-a"), roomKey("room-b"), roomKey("room-c")]),
+    );
   });
 
-  test("retainOnly([]) releases every room panel", async () => {
+  test("retainOnly([]) drops every panel and is idempotent", async () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createRoomRegionRegistry(sm, region.register);
 
     await reg.publish("room-a", board("A"));
     reg.retainOnly([]);
+    reg.retainOnly([]);
 
-    expect(keys()).toEqual([]);
+    expect(region.active.size).toBe(0);
+    expect(keys()).toEqual([roomKey("room-a")]);
+  });
+
+  test("a room whose panel was dropped still publishes — and gets no panel back", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createRoomRegionRegistry(sm, region.register);
+
+    await reg.publish("room-a", board("A"));
+    reg.retainOnly([]);
+    await reg.publish("room-a", board("A again"));
+
+    expect(keys()).toEqual([roomKey("room-a")]);
+    // Republishing a room the surface has retired must not float its panel back.
     expect(region.active.size).toBe(0);
   });
 
