@@ -299,7 +299,12 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const [card] = cards(board);
     // Only THIS room's exhibits ride the card — sourceRoom is the join key.
-    expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("Sample Assessment");
+    expect(card?.fields?.find((f) => f.label === "tabled")).toEqual({
+      label: "tabled",
+      value: "Sample Assessment",
+      tone: "accent",
+    });
+    expect(card?.pill).toEqual({ label: "done", tone: "ok" });
     // The card names them; it does not link them. Every card lands on the same two
     // verbs, so its footprint is the same whether the room tabled nothing or ten.
     expect(card?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);
@@ -312,7 +317,12 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
       [exhibit("draft-plan", "live")],
     );
     const [card] = cards(board);
-    expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("draft-plan");
+    expect(card?.fields?.find((f) => f.label === "tabled")).toEqual({
+      label: "tabled",
+      value: "draft-plan",
+      tone: "accent",
+    });
+    expect(card?.pill).toEqual({ label: "active", tone: "info" });
     // A live room is reached through its own board, which lists its exhibits — the index
     // card says only that it has some.
     expect(card?.actions?.map((a) => a.type)).toEqual(["room-open"]);
@@ -321,6 +331,27 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
   test("no exhibits for a room → no tabled field (fail-soft like every provenance bit)", () => {
     const board = buildRoomsIndexBoard([room({ slug: "bare" })], [], []);
     expect(cards(board)[0]?.fields?.some((f) => f.label === "tabled")).toBe(false);
+    expect(cards(board)[0]?.pill).toEqual({ label: "done", tone: "ok" });
+  });
+
+  test("several exhibits collapse to a toned count without adding actions", () => {
+    const board = buildRoomsIndexBoard(
+      [room({ slug: "review", status: "done" })],
+      [],
+      [
+        exhibit("assessment", "review", "Sample Assessment"),
+        exhibit("verdict", "review", "Final Verdict"),
+      ],
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const [card] = cards(board);
+    expect(card?.fields?.find((f) => f.label === "tabled")).toEqual({
+      label: "tabled",
+      value: "2 exhibits",
+      tone: "accent",
+    });
+    expect(card?.pill).toEqual({ label: "done", tone: "ok" });
+    expect(card?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);
   });
 
   test("the builder itself keeps only exhibits — a raw store listing can't leak lenses onto a card", () => {
@@ -333,7 +364,11 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
     const [card] = cards(board);
     // The kind filter still guards the field and the delete count, even with no per-
     // exhibit link left to leak onto.
-    expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("Sample Assessment");
+    expect(card?.fields?.find((f) => f.label === "tabled")).toEqual({
+      label: "tabled",
+      value: "Sample Assessment",
+      tone: "accent",
+    });
     expect(card?.actions?.find((a) => a.type === "room-delete")?.confirm?.body).toContain(
       "the 1 exhibit it tabled",
     );
