@@ -71,10 +71,14 @@ const RIB_VIEWS: RibViewDescriptor[] = [
 ];
 
 function declareHtmlLensView(id: string, title?: string): () => void {
+  return declareHtmlViewByKey(htmlLensKey(id), title ?? id);
+}
+
+function declareHtmlViewByKey(key: string, title?: string): () => void {
   const view: RibViewDescriptor = {
-    key: htmlLensKey(id),
+    key,
     canvasKind: "html",
-    title: title ?? id,
+    title: title ?? key,
   };
   RIB_VIEWS.push(view);
   return () => {
@@ -268,7 +272,11 @@ const rib: Rib = {
       // loop/start/stop/inject core — lives in src/room-lifecycle.ts; bindRoomLifecycle
       // owns the singleton discipline (build once, reuse, rebuild against a new manager)
       // and returns the room store the control tools share.
-      const { roomStore } = bindRoomLifecycle({ sm, runAgentTurn: run });
+      const { roomStore } = bindRoomLifecycle({
+        sm,
+        runAgentTurn: run,
+        declareHtmlView: declareHtmlViewByKey,
+      });
       // Expose the room controls as chat tools (start / say / stop / status),
       // sharing the same driver + store this hook just built. Returned only when
       // the seams are present (no driver -> no tools), mirroring how the actions

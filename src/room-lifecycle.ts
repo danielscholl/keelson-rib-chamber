@@ -196,7 +196,7 @@ export const ROOM_DISABLED: RibActionResult = {
 export function bindRoomLifecycle(seams: {
   sm: SnapshotManager;
   runAgentTurn: NonNullable<RibContext["runAgentTurn"]>;
-  declareHtmlView?: (key: string, title?: string) => () => void;
+  declareHtmlView: (key: string, title?: string) => () => void;
 }): { roomStore: RoomStore } {
   const { sm, runAgentTurn: run, declareHtmlView } = seams;
   if (roomSummarySm !== sm || declareRoomHtmlView !== declareHtmlView) {
