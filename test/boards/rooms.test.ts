@@ -290,7 +290,7 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
     );
   });
 
-  test("a closed card lists its tabled exhibits and links each one open, ahead of the room verbs", () => {
+  test("a closed card names its tabled exhibits — only THIS room's", () => {
     const board = buildRoomsIndexBoard(
       [room({ slug: "review", status: "done" })],
       [],
@@ -300,10 +300,9 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
     const [card] = cards(board);
     // Only THIS room's exhibits ride the card — sourceRoom is the join key.
     expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("Sample Assessment");
-    expect(card?.actions?.map((a) => a.type)).toEqual(["lens-open", "room-open", "room-delete"]);
-    const open = card?.actions?.find((a) => a.type === "lens-open");
-    expect(open?.label).toBe("▣ Sample Assessment");
-    expect(open?.payload).toEqual({ id: "assessment" });
+    // The card names them; it does not link them. Every card lands on the same two
+    // verbs, so its footprint is the same whether the room tabled nothing or ten.
+    expect(card?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);
   });
 
   test("an active card names what it tabled but links none of it open; an untitled exhibit falls back to its id", () => {
@@ -332,7 +331,22 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
       [standing, exhibit("assessment", "review", "Sample Assessment")],
     );
     const [card] = cards(board);
+    // The kind filter still guards the field and the delete count, even with no per-
+    // exhibit link left to leak onto.
     expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("Sample Assessment");
-    expect(card?.actions?.filter((a) => a.type === "lens-open")).toHaveLength(1);
+    expect(card?.actions?.find((a) => a.type === "room-delete")?.confirm?.body).toContain(
+      "the 1 exhibit it tabled",
+    );
+  });
+
+  test("no card links an exhibit open — that is the room's own board's job", () => {
+    const board = buildRoomsIndexBoard(
+      [room({ slug: "review", status: "done" }), room({ slug: "live", status: "active" })],
+      [],
+      [exhibit("a", "review"), exhibit("b", "review"), exhibit("c", "live")],
+    );
+    for (const card of cards(board)) {
+      expect(card.actions?.some((a) => a.type === "lens-open")).toBe(false);
+    }
   });
 });
