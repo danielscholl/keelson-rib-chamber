@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.40.1...v0.40.2) (2026-07-14)
+
+
+### Documentation
+
+* correct the single-active-room invariant to bounded concurrency ([#268](https://github.com/danielscholl/keelson-rib-chamber/issues/268)) ([9315c5b](https://github.com/danielscholl/keelson-rib-chamber/commit/9315c5b398d8a435a3f87e4fa720bd7cd6da6345))
+
 ## [0.40.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.40.0...v0.40.1) (2026-07-14)
 
 
