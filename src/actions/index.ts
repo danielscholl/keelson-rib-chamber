@@ -10,7 +10,6 @@ import {
 } from "./lenses.ts";
 import {
   authorArchetypeAction,
-  authorLensAction,
   describeOwnAction,
   dismissGenesisAction,
   enterMindAction,
@@ -51,8 +50,6 @@ export function dispatchChamberAction(
       return enterMindAction(action);
     case "author-archetype":
       return authorArchetypeAction(action);
-    case "author-lens":
-      return authorLensAction(action);
     case "describe-own":
       return describeOwnAction(action);
     case "dismiss-genesis":
