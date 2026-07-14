@@ -291,7 +291,7 @@ export function makeTableExhibitTool(store: LensStore, registry: LensRegistry): 
   return {
     name: EXHIBIT_TOOL_NAME,
     description:
-      "Table an exhibit: publish a canvas `board` DELIVERABLE your discussion produced onto the Chamber surface, where it shows as its own panel on the Exhibits shelf — a point-in-time record (an assessment, a plan, a findings summary), kept until deleted. `id` is a short, stable kebab-case identifier for the deliverable; `board` is the canvas board view; optional `reason` is a one-line gist of what the exhibit holds. Call it once when the discussion has converged on something worth keeping. NOT for a standing view you intend to keep updating — author that with chamber_emit_lens.",
+      "Table an exhibit: publish a canvas `board` DELIVERABLE your discussion produced, where it lands in the Tabled section of your room's own board — a point-in-time record (an assessment, a plan, a findings summary), kept until the exhibit or its room is deleted. `id` is a short, stable kebab-case identifier for the deliverable; `board` is the canvas board view; optional `reason` is a one-line gist of what the exhibit holds. Call it once when the discussion has converged on something worth keeping. NOT for a standing view you intend to keep updating — author that with chamber_emit_lens.",
     inputSchema: exhibitEmitSchema,
     state_changing: true,
     execute(input, ctx) {
@@ -357,7 +357,7 @@ export function makeDeleteExhibitTool(): ToolDefinition {
   return {
     name: "chamber_delete_exhibit",
     description:
-      "Delete an exhibit: permanently remove a tabled deliverable — its persisted record AND its live Chamber panel. `id` is the exhibit's stable kebab-case identifier (the same id chamber_table_exhibit used; see chamber_list_exhibits). Fails closed if no such exhibit exists. NOT for retiring a lens (chamber_retire_lens).",
+      "Delete an exhibit: permanently remove a tabled deliverable — its persisted record and its snapshot key, so it drops from the Tabled section of the room that tabled it. `id` is the exhibit's stable kebab-case identifier (the same id chamber_table_exhibit used; see chamber_list_exhibits). Fails closed if no such exhibit exists. NOT for retiring a lens (chamber_retire_lens).",
     inputSchema: exhibitDeleteSchema,
     state_changing: true,
     async execute(input, ctx) {

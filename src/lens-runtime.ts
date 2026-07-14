@@ -195,8 +195,7 @@ export function stampExhibitSources(rawIds: readonly string[], room: Room): void
         console.error(`[rib-chamber] exhibit '${id}' source stamp failed: ${errText(e)}`);
       }
     }
-    // One refresh per index for the batch — the exhibit card's "from" field and
-    // the room card's "tabled" link both just appeared.
+    // One refresh for the batch — the producing room's card just gained a `tabled` name.
     if (stamped) await refreshExhibitIndex();
     if (owned) await republishSourceRoom(source);
   };

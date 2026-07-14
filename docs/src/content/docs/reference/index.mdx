@@ -15,17 +15,16 @@ the room strategies, and what the rib persists on disk. It is terse by design; t
 
 ## Snapshot keys
 
-Every Chamber panel is a board published to a `rib:chamber:*` snapshot key. Eight
-keys are standing; four are per-instance families bound at runtime.
+Every Chamber board is published to a `rib:chamber:*` snapshot key. Seven keys are
+standing; four are per-instance families bound at runtime.
 
 | Key | Producer | When it updates |
 |---|---|---|
+| `rib:chamber:presence` | the rib (in-process board) | on any roster, rooms, or draft mutation, and while a genesis ticks |
 | `rib:chamber:roster` | `chamber-roster` collector | on a 120000 ms cadence, and when a Mind is authored or retired |
 | `rib:chamber:rooms` | `chamber-rooms` collector | on cadence, and when a room ends, stops, or is deleted (a starting room appears on the next cadence) |
 | `rib:chamber:lenses` | `chamber-lenses` collector | on cadence, and when a lens is authored or retired |
-| `rib:chamber:exhibits` | `chamber-exhibits` collector | on cadence, and when an exhibit is tabled or deleted |
 | `rib:chamber:brief` | the rib's attention gate | only when a room ends, a lens changes, or an exhibit is tabled |
-| `rib:chamber:convene` | the rib (in-process board) | on roster, draft, and convene mutations |
 | `rib:chamber:digest` | `chamber-digest` gate + conditional agent turn | nudged on every Chamber mutation; spends an agent turn only when the Chamber's structural fingerprint has advanced |
 | `rib:chamber:lens-html` | `chamber_emit_lens_html` | on demand, when a Mind emits an HTML canvas board (sandboxed iframe, in-memory, not per-subject) |
 | `rib:chamber:room:{slug}` | the room driver | live, as turns land in each active room |
@@ -37,7 +36,7 @@ keys are standing; four are per-instance families bound at runtime.
 
 <CardGrid>
   <LinkCard title="The Chamber surface" href="surface/" description="The nav surface, its standing regions, and the dynamic panels added at runtime." />
-  <LinkCard title="Workflows" href="workflows/" description="The nine workflows the rib contributes, each defined in code." />
+  <LinkCard title="Workflows" href="workflows/" description="The eight workflows the rib contributes, each defined in code." />
   <LinkCard title="Tools, commands, and actions" href="tools-and-commands/" description="Every chat tool, slash command, the agents seam, and the board action verbs." />
   <LinkCard title="Room strategies" href="strategies/" description="The pure strategy contract, the six shipped strategies, and the routing knobs." />
   <LinkCard title="Data on disk" href="data-on-disk/" description="What the rib persists under its data home, and the board payload it publishes." />

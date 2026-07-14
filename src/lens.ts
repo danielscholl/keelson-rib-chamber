@@ -114,9 +114,9 @@ function sameRefresh(a?: LensRefresh, b?: LensRefresh): boolean {
 // id updates the existing panel in place. Holds the snapshot + region handles per id
 // so dispose() releases both (letting a re-bootstrap re-register cleanly).
 //
-// Kind decides only the region's shelf (group/glyph): lenses and exhibits share
-// the store, the id space, and the lensKey namespace, so the open path and the
-// briefing's jump chips resolve either kind through one key shape.
+// Kind decides whether there is a panel at all (a lens has one, an exhibit does not):
+// the two share the store, the id space, and the lensKey namespace, so the open path
+// and the briefing's jump chips resolve either kind through one key shape.
 export interface LensRegistry {
   // `provenance` (scope / maintaining-Mind / reason / source-room) is forwarded to
   // the store for the index card; the live key + region are board-only, so

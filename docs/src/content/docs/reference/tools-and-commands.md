@@ -27,12 +27,12 @@ optional field is marked `?`.
 | `chamber_list_exhibits` | no | no | List exhibits (deliverables rooms tabled) newest first: id, tabledAt, producing room, gist. Read-only. | _(none)_ |
 | `chamber_room_transcript` | no | no | Page a room's persisted transcript with `offset`/`limit`, avoiding the truncation `chamber_room_status` applies to a long transcript. Read-only. | `room`, `offset?`, `limit?` |
 | `chamber_retire_mind` | yes | no | Permanently remove a Mind's record and SOUL.md from the roster. Fails closed if absent. | `slug` |
-| `chamber_room_delete` | yes | no | Permanently delete an ended room's record, transcript, and ledger. Stop first with `chamber_room_stop`. | `room` |
+| `chamber_room_delete` | yes | no | Permanently delete an ended room's record, transcript, and ledger, plus every exhibit it tabled. Stop first with `chamber_room_stop`. | `room` |
 | `chamber_emit_lens` | yes | no | Author a lens: render an agent-composed canvas board onto the surface as its own live panel. | `id`, `board`, `scope?`, `maintainingMind?`, `reason?` |
 | `chamber_emit_lens_html` | yes | no | Author an HTML lens: publish a self-contained HTML page as its own live panel. A stable kebab-case `id` creates a per-subject panel that persists across restarts (re-emit to update); `title` names the panel head; omit `id` to target the shared legacy canvas. | `html`, `id?`, `title?` |
 | `chamber_retire_lens` | yes | no | Permanently remove a lens, both its record and its live panel. Fails closed if no such lens, or if the id names an exhibit. | `id` |
-| `chamber_table_exhibit` | yes | no | Table an exhibit: publish a canvas-board deliverable a discussion produced as its own panel on the Exhibits shelf. | `id`, `board`, `reason?` |
-| `chamber_delete_exhibit` | yes | no | Permanently remove an exhibit, both its record and its live panel. Fails closed if no such exhibit, or if the id names a lens. | `id` |
+| `chamber_table_exhibit` | yes | no | Table an exhibit: publish a canvas-board deliverable a discussion produced into the Tabled section of its room's board. | `id`, `board`, `reason?` |
+| `chamber_delete_exhibit` | yes | no | Permanently remove an exhibit, both its record and its snapshot key. Fails closed if no such exhibit, or if the id names a lens. | `id` |
 | `chamber_room_status` | no | no | Return a room's participants, status, turn count, and transcript so far. Read-only. | `room?` |
 | `chamber_room_start` | yes | yes | Open a room where named Minds converse turn by turn. Dry-runs until `confirm` is set. `grounding` (`{ sourceUrl?, criteria?: string[] }`) adds a brief; its criteria drive a cross-vendor fidelity check before a design-bearing room closes, when the cast spans two providers. | `participants`, `turnBudget?`, `name?`, `topic?`, `grounding?`, `strategy?`, `moderator?`, `manager?`, `synthesizer?`, `minRounds?`, `maxSpeakerRepeats?`, `endVoteThreshold?`, `projectId?`, `coding?`, `confirm?` |
 | `chamber_room_say` | yes | no | Steer a live room: guide the next speaker, call on a Mind, or drop a director message. | `room?`, `direction?`, `callOn?`, `text?` |
@@ -160,7 +160,7 @@ without navigating.
 | `room-inject` | `{ slug, directionInjection?, nextSpeaker?, text? }` | data (`{ slug }`) |
 | `room-stop` | `{ slug }` | data (`{ slug }`) |
 | `room-delete` | `{ slug }` | data (`{ slug }`) |
-| `room-open` | `{ slug }` | `open-canvas` (the room-view key) |
+| `room-open` | `{ slug }` | `open-canvas` (a driving room's own key, else the room-view key; liveness is the driver's in-memory set, not the record's status) |
 | `outcome-copy` | `{ slug }` | data (the room's outcome as a markdown string) |
 | `outcome-explore` | `{ slug }` | `open-chat` (seeded from the outcome document) |
 | `set-model` | `{ slug, model?, provider? }` | data (`{ slug, model? }`) |
@@ -171,9 +171,10 @@ without navigating.
 | `lens-note` | `{ id, note }` | data (`{ id, key }`) |
 | `refresh-lens` | `{ id }` | data (`{ id, workflow }`): fires the lens's refresh workflow with input `lens` |
 
-`retire-lens`, `retire-lens-html`, and `delete-exhibit` also ride each panel's
-own head **⋯** menu (`headActions` on the region), so a panel can be put away
-without its index card. For an HTML lens, that menu is the only delete path.
+`retire-lens` and `retire-lens-html` also ride each lens panel's own head **⋯** menu
+(`headActions` on the region), so a panel can be put away without its index card. For
+an HTML lens, that menu is the only delete path. `delete-exhibit` has no such menu:
+an exhibit holds no panel, so its delete rides the card in its room's Tabled section.
 
 Two verbs are restricted to the sandboxed HTML-lens iframe context
 (`origin: "canvas-html"`): `lens-html` (no-op ack returning the HTML lens canvas

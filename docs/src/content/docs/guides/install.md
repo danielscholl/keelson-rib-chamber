@@ -75,7 +75,7 @@ http://127.0.0.1:7878
 ### The cold-start view
 
 A fresh install has no Minds yet, so the surface opens quiet. The
-**Roster** is empty and offers your first move: three preset
+**Chamber** panel is empty and offers your first move: three preset
 archetypes, **Moneypenny**, **Mycroft**, and **Jarvis**, each one a
 brief you can author into a Mind. The **Briefing** banner sits quiet
 until there is something to report. Authoring a Mind from one of the

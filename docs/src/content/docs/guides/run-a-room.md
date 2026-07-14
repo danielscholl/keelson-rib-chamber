@@ -13,32 +13,33 @@ of the harness does. For why rooms work the way they do, see
 
 ## Convene a room
 
-The fastest way to start a room is the Convene composer region, a separate
-collapsible board directly below the Roster. (The Roster itself is now Minds-only.)
-It needs at least two Minds before it can open one.
+The fastest way to start a room is the convene composer, folded into the Chamber
+panel at the top of the surface. It needs at least two Minds before it can open
+one, and it stays available while rooms are already running, up to the concurrency
+cap.
 
-The Convene draft is an exclusion set, not a pick list. Every current Mind starts
-selected. You deselect the ones you want to leave out, and Convene opens a room
-with whoever is still selected. The first toggle drops a single Mind rather than
-clearing your whole roster, which matches the common case of running everyone but
+The convene draft is a pick list, not an exclusion set. The bench starts empty. You
+click a Mind's seat card to bring them to the table, and Convene opens a room with
+whoever is seated. Clicking a seated Mind again unseats them, which matches the
+common case of running everyone but
 one.
 
 Once two or more Minds stay selected, Convene surfaces a `…and how` shape picker
 with five tabs, each opening a small form and starting its own strategy:
 
 - **Discussion** (sequential): the default.
-- **Debate** (group-chat): needs a chair — one of the selected Minds you name to
+- **Debate** (group-chat): needs a chair, one of the seated Minds you name to
   moderate the rest, so at least three selected.
 - **Open floor** (open-floor): unmoderated.
 - **Review**: a single-pass critique of exactly two Minds pinned to different
   providers.
-- **Delegate** (magentic): needs a manager — one of the selected Minds you name to
+- **Delegate** (magentic): needs a manager, one of the seated Minds you name to
   plan and delegate, so at least three selected.
 
 Shapes the current cast cannot satisfy are disabled with the reason shown. See
 [Choose a strategy](#choose-a-strategy) below and
 [Strategies](../../reference/strategies/) for the per-shape contract. Once a room
-opens, the draft resets to all Minds selected, ready for the next one.
+opens, the draft clears, ready for the next cast.
 
 ## Start from chat
 
@@ -102,8 +103,9 @@ A room runs its own turns until it hits its budget or you stop it.
   except review appends one extra billed closing-synthesis turn, so it bills up to
   `turnBudget + 1` agent calls (51 at the cap). A room you stop early, or run as
   review, is unaffected.
-- **Concurrency**: several rooms can run at once, up to six. Each gets its own
-  panel on the surface and its own turn loop.
+- **Concurrency**: several rooms can run at once, up to the `MAX_ACTIVE_ROOMS` cap
+  (six). Each gets its own turn loop and its own card on the Rooms index. None of
+  them takes a panel: a room is an activity you enter, not a standing view.
 
 ## Steer a live room
 
@@ -136,12 +138,13 @@ and no message can claim another speaker's identity.
 
 The Rooms index shows every room, active and closed.
 
-- **Active rooms** appear as status-only cards alongside their own live panel,
-  where the transcript streams as turns land.
-- **Closed rooms** offer **Open** and **Delete**. Open reopens the transcript in a
-  drawer, rebuilt from the saved log, with the room's start controls so you can
-  relaunch a similar session. Delete is rejected while a room is active: stop it
-  first.
+- **Active rooms** offer **Open**, which focuses the live board its driver is
+  publishing to, so the transcript streams into the drawer as turns land.
+- **Closed rooms** offer **Open** and **Delete**. Open rebuilds the transcript from
+  the saved log, with the room's start controls so you can relaunch a similar
+  session. Only a closed card offers Delete, because the handler refuses a live
+  room. Delete takes the exhibits the room tabled with it, and the dialog counts
+  them before you confirm.
 
 Past rooms are kept as bounded history, so the index does not grow without limit.
 

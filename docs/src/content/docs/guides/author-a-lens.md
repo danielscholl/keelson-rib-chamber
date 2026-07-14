@@ -82,8 +82,8 @@ it every time you re-author the subject.
 
 A Mind cannot author a lens during a room turn: `chamber_emit_lens` is never on a
 room turn rail. What a Mind can do mid-room is table an **exhibit**, a point-in-time
-deliverable (a findings summary, an assessment, a plan) that lands on the Exhibits
-shelf. This is opt-in per Mind: only a Mind that declares the `lens` capability gets
+deliverable (a findings summary, an assessment, a plan) that lands in the **Tabled**
+section of its own room's board. This is opt-in per Mind: only a Mind that declares the `lens` capability gets
 the exhibit tool on its turn rail. The slug keeps the historical name `lens`, but it
 now authorizes `chamber_table_exhibit`, not lens authoring. A text-only Mind, the
 room default, cannot table one. To declare the capability, see

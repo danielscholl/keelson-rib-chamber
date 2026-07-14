@@ -140,12 +140,14 @@ interface Room {
 ## The room driver is the router (composition with C1)
 
 > **Update (2026-07-14): superseded — single-active lifted (#29 Slice B).** Gap C5
-> closed. Rooms now publish to per-room `rib:chamber:room:<slug>` keys registered
-> as dynamic surface regions, so several run concurrently under a
+> closed, then retired for rooms. Rooms now publish to per-room
+> `rib:chamber:room:<slug>` keys, so several run concurrently under a
 > `MAX_ACTIVE_ROOMS` cap (`src/room-config.ts`); `room-start` no longer refuses
-> a second room. Fresh-slug-per-start is kept, and the driver is still the router
-> — only the one-key simplification and the single-active rule below are retired.
-> The section below is retained for history.
+> a second room. A room holds no surface region: it is an activity entered from the
+> Rooms index, whose `Open` focuses the driver's per-slug key
+> (`src/room-key-registry.ts`). Fresh-slug-per-start is kept, and the driver is still
+> the router — only the one-key simplification and the single-active rule below are
+> retired. The section below is retained for history.
 
 The driver owns room state under the rib data home and publishes the transcript
 to the **single** `rib:chamber:room` board key ([C1](./C1-agent-invocation.md)).

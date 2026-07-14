@@ -24,8 +24,8 @@ async function main() {
     listLenses(join(home, "lenses")).catch(() => []),
     readMinds(join(home, "minds")).catch(() => []),
   ]);
-  // The store holds both species; this index is the LENSES shelf only — the
-  // exhibits shelf has its own collector (collect-exhibits.ts).
+  // The store holds both species; this index is the LENSES shelf only. An exhibit is
+  // reached from the room that tabled it, so it has no index of its own.
   const lenses = records.filter((r) => !isExhibit(r));
   process.stdout.write(JSON.stringify(buildLensesIndexBoard(lenses, minds)));
 }

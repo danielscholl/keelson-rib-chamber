@@ -23,7 +23,7 @@ seam is absent rather than degrading silently.
 |---|---|---|
 | `runAgentTurn` | run a room, lens, or briefing turn | the room driver and room tools are not built; room actions fail closed |
 | `getSnapshotManager` | publish boards to `rib:chamber:*` keys | lens and room publishing are unavailable |
-| `registerRegion` | add a live room or lens panel at runtime | lenses and live room panels are unavailable |
+| `registerRegion` | add a lens panel at runtime | lenses are unavailable, and rooms with them: a room turn grants the exhibit tool only when the lens registry exists |
 | `getDataDir` | a writable per-rib home for Minds, rooms, and lenses | falls back to a resolved per-rib data directory |
 | `getProjects` | resolve a targeted project's root path for coding room turns | coding rooms reject a targeted project id at start (fail closed); project targeting is unavailable |
 

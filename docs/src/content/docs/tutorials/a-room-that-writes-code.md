@@ -44,8 +44,8 @@ Two details matter before you open the third tier. First, the write tier's
 capability gate is per-Mind: `coding: true` opens it on the room, but only a
 Mind whose own record declares `code` can run Bash, Edit, or Write. Every
 speaker in a project room already holds the read tier; a Mind without `code`
-keeps that read access and nothing more. Second, the Convene panel's Build
-tab targets a project (that is
+keeps that read access and nothing more. Second, the convene composer's optional
+Project field targets a project (that is
 the read tier) but never opens the coding tier. Opening it is a deliberate
 act you take from chat or the `chamber_room_start` tool, where the flag is
 spelled out in the call you confirm.
@@ -194,18 +194,19 @@ cannot table anything (the capability gate is per-Mind, and it holds even
 when the director asks). Calling on the reviewer hands it the turn and the
 direction together.
 
-The exhibit lands on the Chamber surface's Exhibits index, and its provenance
-is worth noticing: the producing room is stamped by the driver, which
+The exhibit lands in the room's own board, under a **Tabled** section, and its
+provenance is worth noticing: the producing room is stamped by the driver, which
 witnessed the tool run inside a turn it ran. The exhibit says which room
 tabled it because the driver saw it happen, not because the board claims so.
-Long after the room panel rolls off the surface, the verdict card remains,
-pointing back at the session that produced it. See
+That stamp is also what reaches it: **Open** the room from the Rooms index and
+its Tabled section holds the verdict card, long after the session ended. See
 [Exhibits](../../concepts/lenses/#exhibits-the-deliverable-sibling) for the
 capability.
 
-With the exhibit tabled, let the room run out its budget, or stop it from
-the room panel (or `chamber_room_stop`); stopping is reversible, and the
-transcript stays as bounded history either way.
+With the exhibit tabled, let the room run out its budget, or stop it from the
+room's own board (or `chamber_room_stop`); stopping is reversible, and the
+transcript stays as bounded history either way. Deleting the room later deletes
+the exhibits it tabled, so keep the room if you want the verdict.
 
 ## Verify like an operator
 
