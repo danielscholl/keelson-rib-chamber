@@ -1208,8 +1208,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // Tier 2: the last speaker's nomination, if it names a valid OTHER participant
     // under the anti-monopoly cap. Self-nominations and over-cap picks fall through.
     const lastAgent = [...transcript].reverse().find((e) => e.role === "agent");
+    const lastText = lastAgent?.parts.map((p) => p.text).join("\n");
     if (lastAgent) {
-      const nom = parseNomination(lastAgent.parts.map((p) => p.text).join("\n"));
+      const nom = parseNomination(lastText ?? "");
       if (nom?.action === "nominate" && nom.slug) {
         const cap = room.config?.maxSpeakerRepeats ?? DEFAULT_MAX_SPEAKER_REPEATS;
         if (
@@ -1222,7 +1223,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       }
     }
     // Tier 3: the pure strategy seeds the first speaker / rotates by leastSpoken.
-    return openFloor({ room, transcript });
+    const fallback = openFloor({ room, transcript });
+    if (lastAgent && lastText?.trim().length === 0 && fallback.kind === "speak") {
+      console.warn(
+        `[rib-chamber] empty open-floor turn from '${lastAgent.from}' in room '${room.slug}'; falling back to least-spoken '${fallback.mind}'`,
+      );
+    }
+    return fallback;
   }
 
   async function runBudgetSynthesisIfExhausted(

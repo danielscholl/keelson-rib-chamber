@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { CanvasBoardView } from "@keelson/shared";
 import { createRoomDriver } from "../../src/room.ts";
 import type { Mind, Room, RoomConfig, RoomStrategyName, TurnEntry } from "../../src/types.ts";
@@ -1438,6 +1438,23 @@ describe("room driver — open-floor", () => {
     await startOf(h.driver);
     await h.driver.step("of"); // a speaks, nominates itself
     await h.driver.step("of"); // self rejected -> leastSpoken -> b
+    expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b"]);
+  });
+
+  test("a persistently empty turn logs the least-spoken fallback", async () => {
+    const h = ofHarness([{ text: "" }, { text: "" }, { text: "b1" }]);
+    await startOf(h.driver);
+    await h.driver.step("of");
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await h.driver.step("of");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("[rib-chamber]");
+      expect(String(warn.mock.calls[0]?.[0])).toContain("room 'of'");
+      expect(String(warn.mock.calls[0]?.[0])).toContain("least-spoken 'b'");
+    } finally {
+      warn.mockRestore();
+    }
     expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b"]);
   });
 
