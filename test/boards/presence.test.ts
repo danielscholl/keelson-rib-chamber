@@ -353,8 +353,9 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     const launcher = actionSections(board)[0];
     expect(launcher?.kind === "actions" && launcher.items[0]?.type).toBe("assemble");
     expect(launcher?.kind === "actions" && launcher.items[0]?.payload).toEqual({ on: true });
-    // Seats stay in browse mode — no participant toggle until assembly opens.
-    expect(seat(board, "Ada")?.actions?.some((a) => a.type === "draft-set")).toBe(false);
+    // Seats stay in browse mode — no card-body toggle until assembly opens.
+    expect(seat(board, "Ada")?.action).toBeUndefined();
+    expect(seat(board, "Ada")?.selected).toBeUndefined();
   });
 
   test("no launcher with a lone Mind, a pending genesis, or a live room", () => {
@@ -363,18 +364,21 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     expect(actionSections(buildChamberBoard([A, B], [room({ status: "active" })]))).toHaveLength(0);
   });
 
-  test("assembling: seats carry the Seat toggle and read 'at the table' when seated", () => {
+  test("assembling: seats become click-to-seat toggles and read 'at the table' when seated", () => {
     const board = buildChamberBoard([A, B], [], [], NOW, draft(true, ["a"]));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.header?.chip).toBe("assembling");
     const ada = seat(board, "Ada");
-    expect(ada?.actions?.[0]?.type).toBe("draft-set");
-    expect(ada?.actions?.[0]?.glyph).toBe("✓");
-    expect(ada?.actions?.[0]?.payload).toEqual({ slug: "a" });
+    // The whole card is the participant toggle now: a draft-set on the card body,
+    // selected + "at the table"; the management verbs stay their own buttons.
+    expect(ada?.action).toEqual({ type: "draft-set", payload: { slug: "a" } });
+    expect(ada?.selected).toBe(true);
     expect(ada?.fields?.at(-1)?.value).toBe("at the table");
-    // The un-seated Mind shows the additive '＋' and stays on the bench.
+    expect(ada?.actions?.map((a) => a.type)).toEqual(["enter-mind", "set-model", "retire"]);
+    // The un-seated Mind carries the same toggle, not selected, still on the bench.
     const bo = seat(board, "Bo");
-    expect(bo?.actions?.[0]?.glyph).toBe("＋");
+    expect(bo?.action).toEqual({ type: "draft-set", payload: { slug: "b" } });
+    expect(bo?.selected).toBe(false);
     expect(bo?.fields?.at(-1)?.value).toBe("on the bench");
   });
 
@@ -394,13 +398,28 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     expect(cancel?.kind === "actions" && cancel.items[0]?.payload).toEqual({ on: false });
   });
 
-  test("with fewer than two seated the composer prompts to seat more", () => {
-    const board = buildChamberBoard([A, B], [], [], NOW, draft(true, ["a"]));
-    expect(board.sections.some((s) => s.kind === "actions" && s.title === "…and how")).toBe(false);
-    const prompt = board.sections.find(
-      (s) => s.kind === "rows" && s.items.some((i) => (i.text ?? "").includes("Seat two or more")),
-    );
-    expect(prompt).toBeDefined();
+  test("with fewer than two seated the composer prompts specifically to seat more", () => {
+    const none = buildChamberBoard([A, B], [], [], NOW, draft(true, []));
+    expect(none.sections.some((s) => s.kind === "actions" && s.title === "…and how")).toBe(false);
+    expect(
+      none.sections.some(
+        (s) =>
+          s.kind === "rows" &&
+          s.items.some((i) => i.text === "Click a Mind to bring them to the table."),
+      ),
+    ).toBe(true);
+    // Exactly one seated names them and asks for one more — not a generic prompt.
+    const one = buildChamberBoard([A, B], [], [], NOW, draft(true, ["a"]));
+    expect(one.sections.some((s) => s.kind === "actions" && s.title === "…and how")).toBe(false);
+    expect(
+      one.sections.some(
+        (s) =>
+          s.kind === "rows" &&
+          s.items.some(
+            (i) => i.text === "Ada is at the table — click another Mind to choose a room shape.",
+          ),
+      ),
+    ).toBe(true);
   });
 
   test("assembly is suppressed by a live room or a pending genesis (never overlaps the tick)", () => {
@@ -414,7 +433,7 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     );
     expect(live.header?.chip).toBe("1 room · in session");
     expect(live.sections.some((s) => s.kind === "actions")).toBe(false);
-    expect(seat(live, "Ada")?.actions?.some((a) => a.type === "draft-set")).toBe(false);
+    expect(seat(live, "Ada")?.action).toBeUndefined();
     // A genesis in flight hides the composer (the panel is ticking) but the draft survives.
     const booting = buildChamberBoard([A, B], [], [pending()], NOW, draft(true, ["a", "b"]));
     expect(booting.sections.some((s) => s.kind === "actions")).toBe(false);

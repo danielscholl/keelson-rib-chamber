@@ -147,13 +147,18 @@ function benchSections(
   }
   if (convene.assembling) {
     const cast = seatedOrder.filter((m) => convene.draft.selected.has(m.slug));
-    if (cast.length > 0) {
+    if (cast.length >= 2) {
       sections.push({
         kind: "rows",
         items: [{ glyph: "brand", text: `${cast.length} at the table` }],
       });
+      sections.push(conveneShapeSection(cast, convene.projects));
+    } else {
+      sections.push({
+        kind: "rows",
+        items: [{ glyph: cast.length === 1 ? "brand" : "neutral", text: assemblyHint(cast) }],
+      });
     }
-    sections.push(conveneShapeSection(cast, convene.projects));
     sections.push({ kind: "actions", items: [assembleAction(false, "Cancel", "✕")] });
   } else if (convene.canConvene) {
     sections.push({
@@ -162,6 +167,11 @@ function benchSections(
     });
   }
   return sections;
+}
+
+function assemblyHint(cast: readonly Mind[]): string {
+  if (cast.length === 0) return "Click a Mind to bring them to the table.";
+  return `${cast[0]?.name} is at the table — click another Mind to choose a room shape.`;
 }
 
 // The footer convene control: one `assemble` verb that opens (`on: true`) or closes
@@ -178,9 +188,9 @@ function assembleAction(
 
 // One Mind -> one seat card: identity dot, the role pill wearing the same hue,
 // the mission stanza, a status footer, and the shared management verbs. While the
-// operator is assembling a room the card also carries a Seat/Seated toggle — the
-// participant picker lives on the seats themselves, not a separate roster — and its
-// status footer reads "at the table" when it is in the cast.
+// operator is assembling a room the whole card becomes the participant toggle — a
+// click flips the Mind in/out of the inclusion draft and the card rings when it is
+// at the table — so the picker lives on the seats themselves, not a separate roster.
 function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boolean }) {
   const active = rooms.filter((r) => r.status === "active" && seatsMind(r, mind.slug));
   const status = select?.selected
@@ -191,9 +201,6 @@ function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boole
         ? { value: `in session · ${active[0]?.name}`, tone: "info" as CanvasTone }
         : { value: `active in ${active.length} rooms`, tone: "info" as CanvasTone };
   const tone = identityToneForSlot(mind.identitySlot);
-  const actions = select
-    ? [seatToggle(mind, select.selected), ...mindCardActions(mind)]
-    : mindCardActions(mind);
   return {
     title: mind.name,
     dot: tone,
@@ -205,20 +212,13 @@ function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boole
     // footer beneath it, not an inline `·`-joined meta row.
     stacked: true,
     fields: [{ value: mission(mind.mission?.trim() || mind.persona) }, status],
-    actions,
-  };
-}
-
-// The per-seat participant toggle (the retired Convene panel's who's-in chip, moved
-// onto the card that represents the Mind): a `draft-set` that flips the Mind in or out
-// of the inclusion draft. Brand-toned and checked when the Mind is at the table.
-function seatToggle(mind: Mind, selected: boolean): CanvasActionItem {
-  return {
-    type: "draft-set",
-    label: selected ? "Seated" : "Seat",
-    glyph: selected ? "✓" : "＋",
-    ...(selected ? { tone: "brand" as CanvasTone } : {}),
-    payload: { slug: mind.slug },
+    actions: mindCardActions(mind),
+    // Assembling: the card body IS the who's-in control (a `draft-set` toggle),
+    // `selected` rings the ones at the table. The Enter/Model buttons keep their
+    // own clicks — the renderer ignores card-body clicks that land on a child.
+    ...(select
+      ? { action: { type: "draft-set", payload: { slug: mind.slug } }, selected: select.selected }
+      : {}),
   };
 }
 
