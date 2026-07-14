@@ -10,6 +10,9 @@ import type { MindSlug } from "./types.ts";
 // the same mechanism lenses use. The rib withholds the room driver entirely when
 // `registerRegion` is absent (see index.ts), so the registry requires it rather than
 // publishing an invisible key that never renders.
+//
+// A key and its panel have DIFFERENT lifetimes: the panel is for a room that is live,
+// but the key is what the Rooms index `Open` reads, so it survives the panel.
 
 export function roomKey(slug: string): string {
   return `rib:chamber:room:${slug}`;
@@ -19,7 +22,8 @@ type RegisterRegion = (surfaceId: string, region: RibSurfaceRegion) => () => voi
 
 // A RoomPublisher whose publish() routes each room's board to its own snapshot key
 // and surface region, lazily registering both the first time a slug publishes.
-// `retainOnly` keeps the named rooms' panels and releases the rest; dispose() all.
+// `retainOnly` keeps the named rooms' PANELS and drops the rest; dispose() releases
+// everything.
 export interface RoomRegionRegistry extends RoomPublisher {
   retainOnly(keep: Iterable<MindSlug>): void;
   dispose(): void;
@@ -29,7 +33,8 @@ interface RoomEntry {
   key: string;
   publisher: { publish(view: CanvasView): Promise<void> };
   unregisterSnapshot: () => void;
-  unregisterRegion: () => void;
+  // Cleared once the panel is retired — the key outlives it (see releaseRegion).
+  unregisterRegion?: () => void;
 }
 
 export function createRoomRegionRegistry(
@@ -68,10 +73,21 @@ export function createRoomRegionRegistry(
     return entry;
   }
 
+  // Retire a room's PANEL but keep its key alive. A drawer opened on a live room reads
+  // that key, and the host closes a subscription to a gone key permanently — so a room
+  // ending under an open drawer must not take the board out from under it. The key then
+  // outlives the panel, as roomViewKey's already does, until dispose.
+  function releaseRegion(slug: string): void {
+    const entry = entries.get(slug);
+    if (!entry?.unregisterRegion) return;
+    entry.unregisterRegion();
+    entry.unregisterRegion = undefined;
+  }
+
   function release(slug: string): void {
     const entry = entries.get(slug);
     if (!entry) return;
-    entry.unregisterRegion();
+    entry.unregisterRegion?.();
     entry.unregisterSnapshot();
     entries.delete(slug);
   }
@@ -94,7 +110,7 @@ export function createRoomRegionRegistry(
     retainOnly(keep) {
       const keepSet = keep instanceof Set ? keep : new Set(keep);
       for (const slug of [...entries.keys()]) {
-        if (!keepSet.has(slug)) release(slug);
+        if (!keepSet.has(slug)) releaseRegion(slug);
       }
     },
     dispose() {

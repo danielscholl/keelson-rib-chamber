@@ -61,9 +61,9 @@ describe("buildRoomsIndexBoard empty", () => {
     expect(items[0]?.pill).toEqual({ label: "active", tone: "info" });
     expect(items[0]?.bar).toEqual({ value: 2, total: 6 });
     expect(items[0]?.dot).toBe("info");
-    // An active room is status-only — already live in its inline panel — so its card
-    // carries no actions (no frozen-snapshot Open, no orphaning Delete).
-    expect(items[0]?.actions).toBeUndefined();
+    // Open is how a live room is watched; Delete is withheld because the handler
+    // refuses a live room.
+    expect(items[0]?.actions?.map((a) => a.type)).toEqual(["room-open"]);
   });
 });
 
@@ -78,14 +78,19 @@ describe("buildRoomsIndexBoard active + closed", () => {
     expect(cards(board).map((c) => c.title)).toEqual(["Live", "Ended"]);
   });
 
-  test("active card is status-only (no actions); the closed card keeps Open + Delete", () => {
+  test("both cards Open; only the closed one Deletes", () => {
     const board = buildRoomsIndexBoard([
       room({ slug: "live", status: "active" }),
       room({ slug: "ended", status: "done" }),
     ]);
     const [activeCard, closedCard] = cards(board);
-    expect(activeCard?.actions).toBeUndefined();
+    expect(activeCard?.actions?.map((a) => a.type)).toEqual(["room-open"]);
     expect(closedCard?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);
+  });
+
+  test("a stopped room Deletes — only an ACTIVE room withholds it", () => {
+    const board = buildRoomsIndexBoard([room({ slug: "halted", status: "stopped" })]);
+    expect(cards(board)[0]?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);
   });
 });
 
@@ -275,7 +280,7 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
     expect(open?.payload).toEqual({ id: "assessment" });
   });
 
-  test("an active card shows the tabled field but stays action-free; an untitled exhibit falls back to its id", () => {
+  test("an active card names what it tabled but links none of it open; an untitled exhibit falls back to its id", () => {
     const board = buildRoomsIndexBoard(
       [room({ slug: "live", status: "active" })],
       [],
@@ -283,7 +288,9 @@ describe("buildRoomsIndexBoard tabled exhibits", () => {
     );
     const [card] = cards(board);
     expect(card?.fields?.find((f) => f.label === "tabled")?.value).toBe("draft-plan");
-    expect(card?.actions).toBeUndefined();
+    // A live room is reached through its own board, which lists its exhibits — the index
+    // card says only that it has some.
+    expect(card?.actions?.map((a) => a.type)).toEqual(["room-open"]);
   });
 
   test("no exhibits for a room → no tabled field (fail-soft like every provenance bit)", () => {

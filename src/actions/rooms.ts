@@ -22,6 +22,7 @@ import {
   startRoom,
   stopRoom,
 } from "../room-lifecycle.ts";
+import { roomKey } from "../room-region-registry.ts";
 import { createFileRoomStore, deriveRoomName } from "../room-store.ts";
 import type { OutcomeSplit } from "../room-text.ts";
 import { splitOutcome } from "../room-text.ts";
@@ -230,11 +231,13 @@ export async function roomDeleteAction(action: RibAction): Promise<RibActionResu
   }
 }
 
-// Open a closed room from the sessions index: rebuild its board from the persisted
-// transcript, publish it to the room's own room-view key, and return the host
-// open-canvas effect. The board carries the room's Start-again / group-chat / open-floor
-// controls, so a past session can be relaunched from the drawer. Fails closed on a
-// missing/unsafe slug, an unknown room, or an absent room seam.
+// Open a room from the index. A LIVE room focuses the key its driver already publishes
+// to, so the drawer streams turns as they land; rebuilding a frozen copy would race the
+// driver for the same board. A CLOSED room has no such key, so its board is rebuilt from
+// the persisted transcript and published to its own room-view key. Either way the board
+// carries the room's Start-again / group-chat / open-floor controls, so a past session can
+// be relaunched from the drawer. Fails closed on a missing/unsafe slug, an unknown room,
+// or an absent room seam.
 export async function roomOpenAction(action: RibAction): Promise<RibActionResult> {
   const resolved = requireRoomSlug(action);
   if ("error" in resolved) return resolved.error;
@@ -244,6 +247,16 @@ export async function roomOpenAction(action: RibAction): Promise<RibActionResult
     const store = createFileRoomStore(roomsDir());
     const room = await store.loadRoom(resolved.slug);
     if (!room) return { ok: false, error: `room '${resolved.slug}' not found` };
+    // Liveness is the driver's in-memory set, never room.status: a crash leaves a room
+    // "active" on disk with no key ever registered for it, and keys register lazily on
+    // publish with nothing replaying them at boot. A stale-active room must take the
+    // frozen path or Open would hand back a key that does not exist.
+    if (isRoomActive(resolved.slug)) {
+      return {
+        ok: true,
+        data: { effect: "open-canvas", key: roomKey(resolved.slug), title: room.name },
+      };
+    }
     const transcript = await store.loadTranscript(resolved.slug);
     // A magentic room's plan lives in its ledger; load it so a reopened closed room
     // renders the Plan section, not just the transcript (the live board does the same).

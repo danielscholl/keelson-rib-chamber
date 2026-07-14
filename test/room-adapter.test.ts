@@ -313,6 +313,33 @@ describe("room adapter — room-open", () => {
     });
   }
 
+  it("a room left 'active' on disk by a crash opens frozen — the driver decides liveness", async () => {
+    // Keys register lazily on publish and nothing replays them at boot, so a room whose
+    // record says active but whose driver is gone has no live key. Trusting room.status
+    // here would hand back a key that does not exist.
+    const store = createFileRoomStore(roomsDir());
+    await store.saveRoom({
+      slug: "stale-active",
+      name: "Interrupted",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: "active",
+      turnBudget: 2,
+      turnIndex: 1,
+      round: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } satisfies Room);
+    const res = await onAction({ type: "room-open", payload: { slug: "stale-active" } }, makeCtx());
+    expect(res).toEqual({
+      ok: true,
+      data: {
+        effect: "open-canvas",
+        key: "rib:chamber:room-view:stale-active",
+        title: "Interrupted",
+      },
+    });
+  });
+
   it("opens a closed room: returns open-canvas over the room's per-slug view key and seeds its board", async () => {
     await seedClosedWithTurn("open-me", "Q3 priorities");
     const res = await onAction({ type: "room-open", payload: { slug: "open-me" } }, makeCtx());
@@ -380,6 +407,43 @@ describe("room adapter — room-open", () => {
     const ghost = await onAction({ type: "room-open", payload: { slug: "ghost-room" } }, makeCtx());
     expect(ghost.ok).toBe(false);
     if (!ghost.ok) expect(ghost.error).toContain("not found");
+  });
+});
+
+// Its own block: a live room needs a turn held in flight, so it cannot share the
+// immediately-resolving seam the closed-room opens are registered against.
+describe("room adapter — room-open on a live room", () => {
+  let snap: ReturnType<typeof fakeSnapshotManager>;
+  let release: () => void;
+  beforeAll(() => {
+    const gated = gatedRunAgentTurn();
+    release = gated.release;
+    snap = fakeSnapshotManager();
+    registerTools(makeCtx({ run: gated.run, sm: snap.sm }));
+  });
+  afterAll(async () => {
+    release();
+    await rib.dispose?.();
+  });
+
+  it("focuses the driver's own key — and publishes no frozen copy beside it", async () => {
+    const started = await onAction(startPayload(), makeCtx({ sm: snap.sm }));
+    const slug = slugOf(started);
+    expect(slug).not.toBe("");
+    await waitFor(async () => snap.registered.includes(`rib:chamber:room:${slug}`));
+
+    const res = await onAction({ type: "room-open", payload: { slug } }, makeCtx());
+    expect(res.ok).toBe(true);
+    expect((res as { data: { key: string } }).data.key).toBe(`rib:chamber:room:${slug}`);
+    // The driver owns that key and is publishing to it as turns land. Building a frozen
+    // snapshot too would race the live board and go stale the moment it rendered.
+    expect(snap.registered).not.toContain(`rib:chamber:room-view:${slug}`);
+
+    // Once it stops, the same card opens the frozen view instead — the branch is on
+    // liveness, not on which card was clicked.
+    await onAction({ type: "room-stop", payload: { slug } }, makeCtx({ sm: snap.sm }));
+    const after = await onAction({ type: "room-open", payload: { slug } }, makeCtx());
+    expect((after as { data: { key: string } }).data.key).toBe(`rib:chamber:room-view:${slug}`);
   });
 });
 
