@@ -344,6 +344,26 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(requests).toHaveLength(1);
   });
 
+  test("a delete landing mid-turn is not resurrected when the paid turn lands", async () => {
+    // The promote rebuilds `sources` from a read taken before the turn ran, so without
+    // the dropped-slug set the late assign clobbers the delete back in as a dead chip.
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-race", name: "Race Room", status: "done" }));
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run, started, release } = gatedRunAgentTurn(JSON.stringify(briefBoard));
+    rib.registerTools?.(makeCtx(run, sm));
+
+    const gate = evaluateBriefGate();
+    await started;
+    await rooms.deleteRoom("r-race");
+    noteRoomDeleted("r-race");
+    release();
+    await gate;
+
+    expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
+  });
+
   test("a changed lens promotes via the chamber_emit_lens hook (exactly one turn)", async () => {
     await seedMinds();
     const { sm, published } = fakeSnapshotManager();

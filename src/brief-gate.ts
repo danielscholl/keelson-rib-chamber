@@ -160,8 +160,13 @@ export function publishBriefing(): Promise<void> {
   return next;
 }
 
+// Rooms deleted since the last promote. The gate's promote rebuilds `sources` from a
+// read taken BEFORE its paid turn ran, so a delete landing mid-turn would otherwise be
+// clobbered back in as a chip whose room key is already gone.
+let droppedRoomSlugs = new Set<string>();
+
 export function dropBriefRoomSource(slug: string): void {
-  if (promotedSources.length === 0) return;
+  droppedRoomSlugs.add(slug);
   const kept = promotedSources.filter((s) => !(s.kind === "room" && s.ref === slug));
   if (kept.length === promotedSources.length) return;
   promotedSources = kept;
@@ -280,7 +285,8 @@ async function runBriefGate(): Promise<void> {
     // deterministic jump chips.
     promotedDelta = board.sections;
     promotedCount = delta.newlyEndedRooms.length + delta.changedOrNewLenses.length;
-    promotedSources = sources;
+    promotedSources = sources.filter((s) => !(s.kind === "room" && droppedRoomSlugs.has(s.ref)));
+    droppedRoomSlugs.clear();
     await writeWatermark({
       ackedEndedRooms: state.endedRoomSlugs,
       lensFingerprints: state.lensFingerprints,
@@ -412,5 +418,6 @@ export function disposeBriefGate(): void {
   promotedDelta = undefined;
   promotedCount = 0;
   promotedSources = [];
+  droppedRoomSlugs = new Set();
   briefingPublishInFlight = Promise.resolve();
 }
