@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.37.0...v0.38.0) (2026-07-14)
+
+
+### Added
+
+* **chamber:** click a card to seat a Mind while assembling ([#259](https://github.com/danielscholl/keelson-rib-chamber/issues/259)) ([e7f2929](https://github.com/danielscholl/keelson-rib-chamber/commit/e7f29294754e196e19604000136743a5483fcc59))
+
 ## [0.37.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.36.2...v0.37.0) (2026-07-14)
 
 

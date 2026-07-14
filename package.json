@@ -1,6 +1,6 @@
 {
   "name": "@keelson/rib-chamber",
-  "version": "0.37.0",
+  "version": "0.38.0",
   "description": "Chamber as a Keelson rib — genesis agents, agent-to-agent rooms, and agent-authored lenses on the canvas substrate.",
   "license": "Apache-2.0",
   "author": "Daniel Scholl",
