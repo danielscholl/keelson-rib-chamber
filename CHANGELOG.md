@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.40.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.40.0...v0.40.1) (2026-07-14)
+
+
+### Fixed
+
+* **genesis:** settle the boot card its own run started ([#267](https://github.com/danielscholl/keelson-rib-chamber/issues/267)) ([802074a](https://github.com/danielscholl/keelson-rib-chamber/commit/802074a92d19b112521dbca6f9be340d0286bac4))
+
+
+### Documentation
+
+* **readme:** update compatibility notes ([#265](https://github.com/danielscholl/keelson-rib-chamber/issues/265)) ([c37cb5f](https://github.com/danielscholl/keelson-rib-chamber/commit/c37cb5feed319be4e82640289566fe242d83c2f8))
+
 ## [0.40.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.39.0...v0.40.0) (2026-07-14)
 
 
