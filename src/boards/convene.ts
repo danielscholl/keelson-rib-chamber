@@ -206,10 +206,12 @@ function shapeActions(
 }
 
 // Pure: the roster + draft + host projects -> the Convene composer board. Under two
-// Minds it is a single nudge; at >=2 it is the who's-in toggle chips (draft-set)
-// plus the capability-gated shape tabs. `sessionCount` drives the header's
-// defaultCollapsed hint so the region auto-folds once rooms exist (the composer is
-// the empty-state cold, a one-click bar warm). Validated against canvasViewSchema in
+// Minds it emits zero sections so the region (hideWhenEmpty) hides — the "author a
+// Mind / seat a second" guidance lives where the next act is (the Chamber launchpad,
+// the Briefing record), not a third copy here. At >=2 it is the who's-in toggle chips
+// (draft-set) plus the capability-gated shape tabs. `sessionCount` drives the header's
+// defaultCollapsed hint so the region auto-folds once rooms exist (the composer is the
+// two-Mind state cold, a one-click bar warm). Validated against canvasViewSchema in
 // tests; the producer never parses (validation lives at the binding edge).
 export function buildConveneBoard(
   minds: readonly Mind[],
@@ -220,20 +222,7 @@ export function buildConveneBoard(
   const selected = minds.filter((m) => !draftExcluded.has(m.slug));
   const sections: CanvasBoardView["sections"] = [];
 
-  if (minds.length < 2) {
-    sections.push({
-      kind: "rows",
-      items: [
-        {
-          glyph: "neutral",
-          text:
-            minds.length === 0
-              ? "Author a Mind in the Chamber panel above, then seat a second to convene a Room."
-              : "Seat a second Mind in the Chamber panel above to convene a Room.",
-        },
-      ],
-    });
-  } else {
+  if (minds.length >= 2) {
     const chips: CanvasActionItem[] = minds.map((mind) => {
       const isSelected = !draftExcluded.has(mind.slug);
       return {
