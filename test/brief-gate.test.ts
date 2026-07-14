@@ -362,6 +362,42 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(Object.keys(wm.lensFingerprints)).toContain("findings");
   });
 
+  test("retiring a promoted lens lapses the delta — the delete fires the gate, no second paid turn", async () => {
+    await seedMinds();
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const tools = rib.registerTools?.(makeCtx(run, sm)) ?? [];
+    const emit = tools.find((t) => t.name === "chamber_emit_lens");
+    const toolCtx: ToolContext = {
+      cwd: ".",
+      emit: () => {},
+      abortSignal: new AbortController().signal,
+    };
+    // The emit fires the gate fire-and-forget, which promotes the lens into the delta
+    // register (one paid turn). Wait for that promote to land, and do NOT call the gate
+    // again — a second eval would itself lapse it (that path is tested below).
+    await emit?.execute({ id: "findings", board: briefBoard }, toolCtx);
+    await waitFor(() => lastBoard()?.header?.status?.label === "1 new");
+    expect(requests).toHaveLength(1);
+    expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(true);
+    expect((await readWatermark(home)).briefPromoted).toBe(true);
+
+    // Retire the lens through the real board verb. The delete alone must lapse the
+    // stale delta (no explicit gate call from the test) — else the banner keeps a
+    // "1 new" chip opening a now-dead key (the reported bug).
+    const res = await rib.onAction?.(
+      { type: "retire-lens", payload: { id: "findings" } },
+      {} as unknown as RibContext,
+    );
+    expect(res?.ok).toBe(true);
+    await waitFor(() => lastBoard()?.header?.status?.label === "Up to date");
+    expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
+    expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
+    // The lapse is free: no second paid turn, and the watermark is un-promoted.
+    expect(requests).toHaveLength(1);
+    expect((await readWatermark(home)).briefPromoted).toBe(false);
+  });
+
   test("re-evaluating after a promote with nothing new runs NO turn and flips briefPromoted false", async () => {
     await seedMinds();
     const rooms = createFileRoomStore(roomsDir());

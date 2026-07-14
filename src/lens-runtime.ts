@@ -1,5 +1,6 @@
 import type { RibContext, SnapshotManager } from "@keelson/shared";
 import { errText } from "@keelson/shared";
+import { evaluateBriefGate } from "./brief-gate.ts";
 import { canonicalLensId, createLensRegistry, type LensRegistry, lensKey } from "./lens.ts";
 import { createHtmlLensRegistry, type HtmlLensRegistry } from "./lens-html.ts";
 import { createFileHtmlLensStore, listHtmlLenses } from "./lens-html-store.ts";
@@ -206,6 +207,11 @@ export async function deleteRecordOfKind(
       await refreshWorkflow("chamber-roster").catch(() => {});
     }
     await refreshStandingPanels();
+    // A promoted Briefing delta may name this record ("Since you last looked… ↗");
+    // deleting it must lapse that delta, or the banner keeps a "N new" chip that opens
+    // a dead key. The gate re-diffs and — a deletion is never *new* substance — takes
+    // the free lapse path (no paid turn). Fire-and-forget: a delete never waits on it.
+    void evaluateBriefGate().catch(() => {});
     return { ok: true, id, key: lensKey(id) };
   } catch (e) {
     return { ok: false, error: errText(e) };
