@@ -1,39 +1,7 @@
-import type { CanvasActionItem, CanvasBoardView, CanvasTone } from "@keelson/shared";
+import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { identityToneForSlot, type Mind } from "../types.ts";
-
-export const STARTER_LENSES = [
-  {
-    label: "Architecture",
-    subject: "Architecture — how the pieces fit together, and where the seams strain",
-  },
-  {
-    label: "Risk",
-    subject: "Risk — what could break next, ranked by blast radius and likelihood",
-  },
-  {
-    label: "Cost",
-    subject: "Cost — where the money and tokens go, and what is drifting",
-  },
-  {
-    label: "Customer",
-    subject: "Customer — what users feel first, friction before features",
-  },
-  {
-    label: "Security",
-    subject: "Security — exposed surfaces, trust boundaries, and doors left open",
-  },
-] as const satisfies readonly { label: string; subject: string }[];
-
-function starterLensAction(starter: (typeof STARTER_LENSES)[number]): CanvasActionItem {
-  return {
-    type: "author-lens",
-    label: starter.label,
-    glyph: "❖",
-    payload: { subject: starter.subject },
-  };
-}
 
 // A lens's dot carries the identity of the Mind that MAINTAINS it (keelson#390),
 // never a hash across the status ramp — a lens could otherwise wear error-red for no
@@ -64,7 +32,8 @@ function dotFor(maintainingMind: string | undefined, tones: Map<string, CanvasTo
 // and a destructive Retire. The provenance is fail-soft: a field the agent omitted is
 // omitted from the card, so an emit of just { id, board } yields the plain title +
 // freshness card (and a neutral dot). `minds` resolves the maintainer's tone; absent
-// (a standalone call) folds every dot to neutral. No lenses renders starter chips.
+// (a standalone call) folds every dot to neutral. No lenses renders ZERO sections — an
+// empty library is just its header, like the Rooms index.
 // Validated against canvasViewSchema in tests; the producer never parses.
 export function buildLensesIndexBoard(
   lenses: readonly LensRecord[],
@@ -73,7 +42,7 @@ export function buildLensesIndexBoard(
   const tones = maintainerTones(minds);
   const sections: CanvasBoardView["sections"] =
     lenses.length === 0
-      ? emptySections()
+      ? []
       : [{ kind: "cards", items: lenses.map((lens) => cardFor(lens, tones)) }];
 
   return {
@@ -146,16 +115,4 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
       },
     ],
   };
-}
-
-// Teach by example while keeping the empty region a valid board.
-function emptySections(): CanvasBoardView["sections"] {
-  return [
-    {
-      kind: "actions",
-      title: "Author a lens on…",
-      wrap: true,
-      items: STARTER_LENSES.map(starterLensAction),
-    },
-  ];
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type CanvasTone, canvasViewSchema } from "@keelson/shared";
-import { buildLensesIndexBoard, STARTER_LENSES } from "../../src/boards/lenses.ts";
+import { buildLensesIndexBoard } from "../../src/boards/lenses.ts";
 import type { LensRecord } from "../../src/lens-store.ts";
 import type { Mind } from "../../src/types.ts";
 
@@ -47,33 +47,10 @@ describe("buildLensesIndexBoard empty", () => {
     expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
   });
 
-  test("the empty state teaches lens authoring with starter brief chips", () => {
+  test("the empty state is a pure list like Rooms — ZERO sections, no authoring chips", () => {
     const board = buildLensesIndexBoard([]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-
-    const actions = board.sections.find((s) => s.kind === "actions");
-    expect(actions?.kind).toBe("actions");
-    if (actions?.kind !== "actions") throw new Error("no actions section");
-    expect(actions.wrap).toBe(true);
-    expect(actions.items).toHaveLength(STARTER_LENSES.length);
-
-    for (const [index, item] of actions.items.entries()) {
-      const starter = STARTER_LENSES[index];
-      if (!starter) throw new Error(`missing starter at ${index}`);
-      expect(item.type).toBe("author-lens");
-      expect(item.label).toBe(starter.label);
-      expect(item.destructive).toBeUndefined();
-      expect(item.confirm).toBeUndefined();
-      const subject = (item.payload as { subject?: unknown } | undefined)?.subject;
-      expect(subject).toBe(starter.subject);
-      expect(typeof subject).toBe("string");
-      if (typeof subject === "string") {
-        expect(subject.length).toBeGreaterThan(starter.label.length);
-      }
-    }
-
-    expect(board.sections.some((s) => s.kind === "rows")).toBe(false);
-    expect(board.sections.some((s) => s.kind === "cards")).toBe(false);
+    expect(board.sections).toEqual([]);
   });
 });
 
