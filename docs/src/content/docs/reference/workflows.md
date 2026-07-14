@@ -86,10 +86,12 @@ changed since the last digest.
   the next mutation.
 
 The cost-safety invariant: a quiet Chamber (no new rooms, lenses, or exhibits since
-the last digest) never spends an agent turn. Minds are deliberately outside that
-floor — they are capacity, not work, so a bench that has produced nothing has no
-shape to synthesize and authoring one never buys a turn. `publish` still runs on
-every nudge, so the register stays current with a fresh `composedAt` timestamp.
+the last digest) never spends an agent turn. Minds sit outside the *content floor*
+only — they are capacity, not work, so a bench that has produced nothing has no shape
+to synthesize and authoring a Mind onto a bare bench buys no turn. Once a room, lens,
+or exhibit exists the floor is met, and Minds are in the fingerprint like everything
+else: seating or retiring one then does re-author. `publish` still runs on every
+nudge, so the register stays current with a fresh `composedAt` timestamp.
 
 - `bindSnapshotKey: DIGEST_KEY` and `validate: expectView(DIGEST_KEY, "board")`.
 - The digest has no surface region or cadence of its own. The rib nudges the whole
