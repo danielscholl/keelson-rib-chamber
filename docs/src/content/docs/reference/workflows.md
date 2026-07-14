@@ -56,8 +56,9 @@ without waiting on the cadence.
 
 The lenses collector reads a store it shares with exhibits and keeps only the
 standing views: an exhibit is a room's deliverable and has no index of its own, so
-the Rooms index is the one board that names it. That is why tabling or deleting an
-exhibit refreshes `chamber-rooms`.
+the Rooms index is the one index that names it. That is why tabling or deleting an
+exhibit refreshes `chamber-rooms`. The exhibit itself is read from its room's own
+board, which no collector produces: the room driver publishes it.
 
 ## chamber-digest
 

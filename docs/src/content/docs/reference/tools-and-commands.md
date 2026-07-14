@@ -160,7 +160,7 @@ without navigating.
 | `room-inject` | `{ slug, directionInjection?, nextSpeaker?, text? }` | data (`{ slug }`) |
 | `room-stop` | `{ slug }` | data (`{ slug }`) |
 | `room-delete` | `{ slug }` | data (`{ slug }`) |
-| `room-open` | `{ slug }` | `open-canvas` (a live room's own key, or the room-view key once it has ended) |
+| `room-open` | `{ slug }` | `open-canvas` (a driving room's own key, else the room-view key; liveness is the driver's in-memory set, not the record's status) |
 | `outcome-copy` | `{ slug }` | data (the room's outcome as a markdown string) |
 | `outcome-explore` | `{ slug }` | `open-chat` (seeded from the outcome document) |
 | `set-model` | `{ slug, model?, provider? }` | data (`{ slug, model? }`) |
