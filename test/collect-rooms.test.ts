@@ -106,6 +106,38 @@ describe("collect-rooms", () => {
     }
   });
 
+  test("gates Summary from the room marker without reading a transcript", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(
+        room({
+          slug: "marked",
+          name: "Marked",
+          outcomeAt: "2026-01-01T00:05:00.000Z",
+        }),
+      );
+      await store.saveRoom(room({ slug: "legacy", name: "Legacy" }));
+
+      const { out, code } = await runCollector(home);
+
+      expect(code).toBe(0);
+      const board = JSON.parse(out) as {
+        sections: {
+          kind: string;
+          items: { title: string; actions?: { type: string }[] }[];
+        }[];
+      };
+      const items = board.sections.find((section) => section.kind === "cards")?.items ?? [];
+      const actionsFor = (title: string) =>
+        items.find((item) => item.title === title)?.actions?.map((action) => action.type);
+      expect(actionsFor("Marked")).toEqual(["room-open", "room-summary", "room-delete"]);
+      expect(actionsFor("Legacy")).toEqual(["room-open", "room-delete"]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   test("a room's tabled exhibits ride its card; sibling lenses stay off it", async () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
     try {

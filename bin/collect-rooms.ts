@@ -27,7 +27,12 @@ async function main() {
     readMinds(join(home, "minds")).catch(() => []),
     listLenses(join(home, "lenses")).catch(() => []),
   ]);
-  process.stdout.write(JSON.stringify(buildRoomsIndexBoard(rooms, minds, lenses)));
+  const outcomeSlugs = new Set(
+    rooms
+      .filter((room) => room.status !== "active" && room.outcomeAt)
+      .map((room) => room.slug),
+  );
+  process.stdout.write(JSON.stringify(buildRoomsIndexBoard(rooms, minds, lenses, outcomeSlugs)));
 }
 
 await main();
