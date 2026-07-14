@@ -11,8 +11,15 @@ import type {
 } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
+import { createFileLensStore, listLenses } from "../src/lens-store.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
-import { chamberDataHome, mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
+import {
+  chamberDataHome,
+  lensesDir,
+  mindsDir,
+  roomsDir,
+  setChamberDataHome,
+} from "../src/paths.ts";
 import { clearDraft, readDraft } from "../src/room-draft.ts";
 import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
@@ -245,6 +252,46 @@ describe("room adapter — room-delete", () => {
     const res = await onAction({ type: "room-delete", payload: { slug: "del-me" } }, makeCtx());
     expect(res).toEqual({ ok: true, data: { slug: "del-me" } });
     expect(await store.loadRoom("del-me")).toBeUndefined();
+  });
+
+  it("deleting a room takes its exhibits with it, and leaves another room's alone", async () => {
+    const lensStore = createFileLensStore(lensesDir());
+    const exhibit = (id: string, sourceRoom: string) =>
+      lensStore.saveLens({
+        id,
+        board: { view: "board" as const, title: id, sections: [] },
+        kind: "exhibit",
+        sourceRoom,
+      });
+    await seedClosed("cascade-me");
+    await seedClosed("keep-me");
+    await exhibit("its-verdict", "cascade-me");
+    await exhibit("their-verdict", "keep-me");
+
+    const res = await onAction({ type: "room-delete", payload: { slug: "cascade-me" } }, makeCtx());
+    expect(res.ok).toBe(true);
+
+    // An exhibit is a child of its room: it has no life once the room is gone.
+    const left = (await listLenses(lensesDir())).map((r) => r.id);
+    expect(left).not.toContain("its-verdict");
+    expect(left).toContain("their-verdict");
+  });
+
+  it("a refused delete leaves the room's exhibits intact", async () => {
+    // The room goes first precisely so this holds: deleteRoom is the guard, and a room
+    // that still exists must still have its deliverables.
+    await createFileLensStore(lensesDir()).saveLens({
+      id: "safe-verdict",
+      board: { view: "board" as const, title: "Safe", sections: [] },
+      kind: "exhibit",
+      sourceRoom: "no-such-room",
+    });
+    const res = await onAction(
+      { type: "room-delete", payload: { slug: "no-such-room" } },
+      makeCtx(),
+    );
+    expect(res.ok).toBe(false);
+    expect((await listLenses(lensesDir())).map((r) => r.id)).toContain("safe-verdict");
   });
 
   it("a room's key outlives the room ending, and the delete is what releases it", async () => {

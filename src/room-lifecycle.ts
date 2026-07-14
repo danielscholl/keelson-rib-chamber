@@ -17,7 +17,12 @@ import { composeRoomSystemPrompt } from "./compose.ts";
 import { assertSafeSlug } from "./genesis.ts";
 import { roomViewKey } from "./keys.ts";
 import { EXHIBIT_TOOL_NAME } from "./lens.ts";
-import { getLensRegistry, stampExhibitSources, tabledExhibitsFor } from "./lens-runtime.ts";
+import {
+  deleteRoomExhibits,
+  getLensRegistry,
+  stampExhibitSources,
+  tabledExhibitsFor,
+} from "./lens-runtime.ts";
 import { chamberDataHome, mindsDir, roomsDir } from "./paths.ts";
 import type { RoomStore } from "./ports.ts";
 import { onRoomClosed } from "./reflection-gate.ts";
@@ -119,6 +124,14 @@ async function runRoomRetentionSweep(root: string): Promise<void> {
     // standing panels (like the user-initiated room-delete) so an evicted room stops
     // showing instead of lingering until the 120s cadence.
     if (removed.length > 0) {
+      // The sweep is a second, silent delete path, so it settles like one: cascade to the
+      // room's exhibits (or "an exhibit is reachable iff its room is" would hold for the
+      // delete verb and quietly fail here) and note the deletion, releasing the key and
+      // any most-recent pin on a room whose record it just removed.
+      for (const slug of removed) {
+        await deleteRoomExhibits(slug).catch(() => []);
+        noteRoomDeleted(slug);
+      }
       await refreshWorkflow("chamber-rooms").catch(() => {});
       await refreshStandingPanels();
     }
@@ -261,9 +274,9 @@ export function lastRoomSlug(): string | undefined {
 
 export function noteRoomDeleted(slug: string): void {
   if (lastSlug === slug) lastSlug = undefined;
-  // A room's key outlives the room ending, so the delete is what releases it — nothing
-  // else will, and the key composes from an in-memory `latest`, so it would go on
-  // serving the deleted room's final board.
+  // A room's key outlives the room ending, so losing the RECORD is what releases it: the
+  // key composes from an in-memory `latest`, so it would otherwise go on serving the
+  // deleted room's final board.
   roomRegistry?.release(slug);
   syncRoomsTicker();
 }

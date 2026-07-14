@@ -111,7 +111,11 @@ function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly
   // deliverable is usually what you came back for, the transcript second.
   return {
     ...card,
-    actions: [...tabled.map((e) => openExhibitAction(e)), openAction(room), deleteAction(room)],
+    actions: [
+      ...tabled.map((e) => openExhibitAction(e)),
+      openAction(room),
+      deleteAction(room, tabled),
+    ],
   };
 }
 
@@ -154,7 +158,14 @@ function openAction(room: Room) {
   };
 }
 
-function deleteAction(room: Room) {
+// The delete cascades to the room's exhibits, so the dialog counts them: it is the only
+// consent gate on the board path, and the operator reads its enumeration as the whole
+// blast radius. A room that tabled nothing says nothing about exhibits.
+function deleteAction(room: Room, tabled: readonly LensRecord[]) {
+  const body =
+    tabled.length === 0
+      ? `Delete ${room.name}? This permanently removes the session and its transcript.`
+      : `Delete ${room.name}? This permanently removes the session, its transcript, and the ${tabled.length} ${tabled.length === 1 ? "exhibit" : "exhibits"} it tabled.`;
   return {
     type: "room-delete",
     label: "Delete room…",
@@ -164,7 +175,7 @@ function deleteAction(room: Room) {
     payload: { slug: room.slug },
     confirm: {
       title: "Delete room",
-      body: `Delete ${room.name}? This permanently removes the session and its transcript.`,
+      body,
       confirmLabel: "Delete",
       cancelLabel: "Cancel",
     },

@@ -205,6 +205,49 @@ export function stampExhibitSources(rawIds: readonly string[], room: Room): void
   void enqueueLensWrite(apply);
 }
 
+// Delete every exhibit a room tabled — the delete-time half of "an exhibit is reachable
+// iff its room is". An exhibit is a child of its room, but it is STORED beside the lenses
+// (a record under a deleted room's dir could not outlive it even to be swept), so the
+// cascade is a join on sourceRoom rather than a directory removal.
+//
+// Enqueued on the lens write chain, unlike the per-id delete verb: stampExhibitSources
+// does loadLens -> saveLens, and a delete landing between the two lets saveLens recreate
+// the record it just removed (saveLens mkdirs its dir). Batched like the stamp — one
+// index refresh for the whole room, not one per exhibit.
+export async function deleteRoomExhibits(slug: string): Promise<string[]> {
+  return enqueueLensWrite(async () => {
+    await lensReconcileInFlight?.catch(() => {});
+    const store = createFileLensStore(lensesDir());
+    const records = await listLenses(lensesDir()).catch(() => []);
+    const removed: string[] = [];
+    for (const record of records) {
+      if (!isExhibit(record) || record.sourceRoom !== slug) continue;
+      try {
+        await store.deleteLens(record.id);
+        lensRegistry?.remove(record.id);
+        removed.push(record.id);
+      } catch (e) {
+        // Already gone is the outcome we wanted: a manual delete racing the cascade is
+        // not a failure. Anything else is logged and skipped — one bad record must not
+        // strand the rest, and the room itself is already gone.
+        if (!/not found/i.test(errText(e))) {
+          console.error(
+            `[rib-chamber] exhibit '${record.id}' cascade delete failed: ${errText(e)}`,
+          );
+        }
+      }
+    }
+    if (removed.length > 0) {
+      await refreshExhibitIndexes();
+      await refreshStandingPanels();
+      // One gate evaluation for the batch (see deleteRecordOfKind for why a deletion
+      // takes the free lapse path).
+      void evaluateBriefGate().catch(() => {});
+    }
+    return removed;
+  });
+}
+
 // One kind-checked delete backs all four delete verbs (two board actions, two
 // tools): serialize behind boot re-registration (a delete must not race a
 // reregister into resurrecting the record), verify the record's species, delete,

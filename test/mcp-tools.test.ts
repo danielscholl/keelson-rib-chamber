@@ -11,7 +11,7 @@ import type {
 } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
-import { createFileLensStore } from "../src/lens-store.ts";
+import { createFileLensStore, listLenses } from "../src/lens-store.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
 import { lensesDir, mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore, listRooms } from "../src/room-store.ts";
@@ -258,6 +258,55 @@ describe("chamber cleanup tools (drive cleanup over MCP)", () => {
     const t = makeToolCtx();
     await tool(tools, "chamber_room_delete").execute({ room: "room-ghost" }, t.ctx);
     expect(t.errored()).toBe(true);
+  });
+
+  it("chamber_room_delete cascades to the room's exhibits and names them in the result", async () => {
+    const store = createFileLensStore(lensesDir());
+    const exhibit = (id: string, sourceRoom: string) =>
+      store.saveLens({
+        id,
+        board: { view: "board" as const, title: id, sections: [] },
+        kind: "exhibit",
+        sourceRoom,
+      });
+    await createFileRoomStore(roomsDir()).saveRoom({
+      slug: "room-cascade",
+      name: "Cascade",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: "done",
+      turnBudget: 2,
+      turnIndex: 2,
+      round: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } satisfies Room);
+    await exhibit("its-verdict", "room-cascade");
+    await exhibit("other-verdict", "some-other-room");
+
+    const t = makeToolCtx();
+    await tool(tools, "chamber_room_delete").execute({ room: "room-cascade" }, t.ctx);
+    expect(t.errored()).toBe(false);
+    // The result names what it destroyed — the tool's description promises the cascade,
+    // so the payload is the receipt for it.
+    expect(JSON.parse(t.out())).toMatchObject({ ok: true, exhibits: ["its-verdict"] });
+    const left = (await listLenses(lensesDir())).map((r) => r.id);
+    expect(left).not.toContain("its-verdict");
+    expect(left).toContain("other-verdict");
+  });
+
+  it("chamber_room_delete leaves the exhibits alone when the delete is refused", async () => {
+    // Room-first ordering: deleteRoom is the guard, so a room that still exists must
+    // still have its deliverables.
+    await createFileLensStore(lensesDir()).saveLens({
+      id: "ghost-verdict",
+      board: { view: "board" as const, title: "Ghost", sections: [] },
+      kind: "exhibit",
+      sourceRoom: "room-ghost-2",
+    });
+    const t = makeToolCtx();
+    await tool(tools, "chamber_room_delete").execute({ room: "room-ghost-2" }, t.ctx);
+    expect(t.errored()).toBe(true);
+    expect((await listLenses(lensesDir())).map((r) => r.id)).toContain("ghost-verdict");
   });
 });
 
