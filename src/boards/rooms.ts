@@ -99,6 +99,10 @@ function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly
       // The Room model carries only createdAt — no end/close time — so this is an
       // honest "started <relative> ago", not an invented "ended" timestamp.
       { label: "started", value: agoLabel(room.createdAt) },
+      // The exhibits this room tabled (driver-witnessed sourceRoom), so the
+      // provenance link reads both ways: the exhibit names its room, the room
+      // lists its deliverables. Toned rather than pilled — the card's one pill
+      // slot carries STATE, and a count keeps the footprint flat past one.
       ...(tabled.length > 0
         ? [
             {
