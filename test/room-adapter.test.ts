@@ -1045,10 +1045,10 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
     await seedRoomWithOutcome("summarize-me");
     const key = roomSummaryKey("summarize-me");
 
-    const res = await roomSummaryAction({
-      type: "room-summary",
-      payload: { slug: "summarize-me" },
-    });
+    const res = await onAction(
+      { type: "room-summary", payload: { slug: "summarize-me" } },
+      makeCtx(),
+    );
 
     expect(res).toEqual({
       ok: true,
@@ -1074,6 +1074,20 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
     });
 
     expect(res).toEqual({ ok: false, error: "room summary unavailable on this harness" });
+  });
+
+  it("room-summary is refused when relayed from an HTML frame", async () => {
+    await seedRoomWithOutcome("frame-summary");
+
+    const res = await onAction(
+      { type: "room-summary", payload: { slug: "frame-summary" }, origin: "canvas-html" },
+      makeCtx(),
+    );
+
+    expect(res).toEqual({
+      ok: false,
+      error: "'room-summary' is not permitted from an HTML lens",
+    });
   });
 
   it("outcome-copy returns the reconstructed markdown document verbatim", async () => {

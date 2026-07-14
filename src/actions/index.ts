@@ -24,6 +24,7 @@ import {
   roomDeleteAction,
   roomInjectAction,
   roomOpenAction,
+  roomSummaryAction,
   roomStartAction,
   roomStopAction,
 } from "./rooms.ts";
@@ -74,6 +75,8 @@ export function dispatchChamberAction(
       return roomDeleteAction(action);
     case "room-open":
       return roomOpenAction(action);
+    case "room-summary":
+      return roomSummaryAction(action);
     case "outcome-copy":
       return outcomeCopyAction(action);
     case "outcome-explore":
