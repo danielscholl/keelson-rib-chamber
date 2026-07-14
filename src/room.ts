@@ -353,17 +353,22 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     await publishBoard(room);
   }
 
-  // Re-publish a room's board after its exhibits changed. Deliberately does NOT save:
-  // generation gating owns every room write, and a provenance stamp is not room state.
-  // The room is re-read inside the lock so a publish racing a turn's commit renders the
-  // committed room, not a stale copy.
+  // Re-publish a live room's board after its exhibits changed. Deliberately does NOT
+  // save: generation gating owns every room write, and an exhibit change is not room
+  // state. The room is re-read inside the lock so a publish racing a turn's commit
+  // renders the committed room, not a stale copy.
+  //
+  // Only a DRIVING room may republish. The publisher lazily registers an unknown slug
+  // (room-region-registry), so publishing a room whose panel the surface already released
+  // would resurrect it — and an exhibit tabled by a closing turn stamps well after the
+  // room ends. A closed room needs none of this: its drawer resolves exhibits live.
   async function republish(slug: MindSlug): Promise<void> {
-    if (disposed) return;
+    if (disposed || !activeRooms.has(slug)) return;
     const exhibits = await deps.exhibits?.(slug);
     if (!exhibits) return;
     cachedExhibits.set(slug, exhibits);
     await withLock(slug, async () => {
-      if (disposed) return;
+      if (disposed || !activeRooms.has(slug)) return;
       const room = await deps.store.loadRoom(slug);
       if (room) await publishBoard(room);
     });

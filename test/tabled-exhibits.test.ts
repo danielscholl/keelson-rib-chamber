@@ -2,7 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stampExhibitSources, tabledExhibitsFor } from "../src/lens-runtime.ts";
+import {
+  bindLensRuntime,
+  deleteRecordOfKind,
+  stampExhibitSources,
+  tabledExhibitsFor,
+} from "../src/lens-runtime.ts";
 import { createFileLensStore } from "../src/lens-store.ts";
 import { lensesDir, setChamberDataHome } from "../src/paths.ts";
 import type { Room } from "../src/types.ts";
@@ -87,38 +92,71 @@ describe("tabledExhibitsFor", () => {
   });
 });
 
-describe("stampExhibitSources — the republish hook", () => {
-  test("republishes the stamped room, once for the batch", async () => {
+describe("the room republish hook", () => {
+  let republished: string[];
+
+  beforeEach(() => {
+    republished = [];
+    bindLensRuntime({
+      declareView: () => () => {},
+      republishRoom: async (slug) => {
+        republished.push(slug);
+      },
+    });
+  });
+
+  test("a stamp republishes the room it stamped, once for the batch", async () => {
     await seed("one", "exhibit");
     await seed("two", "exhibit");
-    const republished: string[] = [];
-    stampExhibitSources(["one", "two"], ROOM, async (slug) => {
-      republished.push(slug);
-    });
+    stampExhibitSources(["one", "two"], ROOM);
     await settled(() => republished.length > 0);
     // One republish for the whole batch, not one per id.
     expect(republished).toEqual(["demo"]);
     expect((await tabledExhibitsFor("demo")).map((e) => e.id).sort()).toEqual(["one", "two"]);
   });
 
-  test("a stamp that changes nothing republishes nothing", async () => {
-    // Already stamped: no write, so no board could have changed.
+  test("a re-table republishes even though the stamp writes nothing", async () => {
+    // Already this room's: sourceRoom does not change, so nothing is written — but the
+    // exhibit's content just did, and the room's card renders from it.
     await seed("one", "exhibit", "demo");
-    const republished: string[] = [];
-    stampExhibitSources(["one"], ROOM, async (slug) => {
-      republished.push(slug);
-    });
+    stampExhibitSources(["one"], ROOM);
+    await settled(() => republished.length > 0);
+    expect(republished).toEqual(["demo"]);
+  });
+
+  test("an id this room does not own republishes nothing", async () => {
+    await seed("standing", "lens", "demo");
+    stampExhibitSources(["standing", "never-existed"], ROOM);
     await new Promise((r) => setTimeout(r, 60));
+    expect(republished).toEqual([]);
+  });
+
+  test("deleting an exhibit republishes the room that tabled it", async () => {
+    // The room board's Tabled section is a driver cache; without this the deleted
+    // exhibit keeps a card whose Open opens a dead key.
+    await seed("one", "exhibit", "demo");
+    const res = await deleteRecordOfKind("one", "exhibit", (id) => `${id} is a lens`);
+    expect(res.ok).toBe(true);
+    expect(republished).toEqual(["demo"]);
+  });
+
+  test("deleting an unstamped exhibit republishes nothing — no room owns it", async () => {
+    await seed("orphan", "exhibit");
+    await deleteRecordOfKind("orphan", "exhibit", (id) => `${id} is a lens`);
     expect(republished).toEqual([]);
   });
 
   test("a failing republish never poisons the stamp", async () => {
     await seed("one", "exhibit");
     let called = false;
-    stampExhibitSources(["one"], ROOM, async () => {
-      called = true;
-      throw new Error("publisher is gone");
+    bindLensRuntime({
+      declareView: () => () => {},
+      republishRoom: async () => {
+        called = true;
+        throw new Error("publisher is gone");
+      },
     });
+    stampExhibitSources(["one"], ROOM);
     await settled(() => called);
     // The stamp is the durable half; the republish is a courtesy on top of it.
     expect((await tabledExhibitsFor("demo")).map((e) => e.id)).toEqual(["one"]);

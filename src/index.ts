@@ -27,7 +27,12 @@ import {
   resetReflectionAbort,
   runReflectionForRoom,
 } from "./reflection-gate.ts";
-import { bindRoomLifecycle, clearRoomTracking, disposeRoomLifecycle } from "./room-lifecycle.ts";
+import {
+  bindRoomLifecycle,
+  clearRoomTracking,
+  disposeRoomLifecycle,
+  getDriver,
+} from "./room-lifecycle.ts";
 import { bindRuntime, disposeRuntime } from "./runtime.ts";
 import {
   makeDeleteExhibitTool,
@@ -259,7 +264,14 @@ const rib: Rib = {
     // require runAgentTurn). bindLensRuntime owns the singleton discipline (build once,
     // reuse, rebuild against a new manager) and reconciles persisted lenses; declareView
     // is injected so it never touches this rib's view array. See src/lens-runtime.ts.
-    const { lensStore } = bindLensRuntime({ sm, registerRegion, declareView: declareHtmlLensView });
+    const { lensStore } = bindLensRuntime({
+      sm,
+      registerRegion,
+      declareView: declareHtmlLensView,
+      // Resolved per call, not captured: the driver is built below (and rebuilt on a
+      // re-bootstrap), so binding it here by value would pin a stale one.
+      republishRoom: (slug) => getDriver()?.republish(slug) ?? Promise.resolve(),
+    });
     const lensReg = getLensRegistry();
     const htmlLensReg = getHtmlLensRegistry();
     const lensTools =

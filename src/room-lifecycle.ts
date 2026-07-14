@@ -219,11 +219,8 @@ export function bindRoomLifecycle(seams: {
     // stays the operator's /lens act, so the two shelves can't re-cross.
     turnTools: [...(getLensRegistry() ? [{ name: EXHIBIT_TOOL_NAME }] : []), ...externalToolPool()],
     // The witnessed-provenance stamp: the driver saw the table-exhibit tool run
-    // in this room's turn, so record the room as the exhibit's source. The stamp
-    // republishes the room's board, since the stamp is the join its Tabled section
-    // reads — without it the exhibit would surface a turn late.
-    onExhibitsTabled: (ids, room) =>
-      stampExhibitSources(ids, room, (slug) => driver?.republish(slug) ?? Promise.resolve()),
+    // in this room's turn, so record the room as the exhibit's source.
+    onExhibitsTabled: (ids, room) => stampExhibitSources(ids, room),
     exhibits: tabledExhibitsFor,
     // The coding pool (host built-ins), always handed over but inert until a
     // room opts in (room.coding) and is confined — the tier is gated per-room.

@@ -36,6 +36,19 @@ let htmlLensRegisterRegion: NonNullable<RibContext["registerRegion"]> | undefine
 // live key/panel with no on-disk record).
 let lensReconcileInFlight: Promise<void> | undefined;
 
+// Re-publish a live room's board, injected by bindLensRuntime (the declareView pattern —
+// the callback flows WITH the room-lifecycle -> lens-runtime edge, so neither module
+// imports the other's owner). Every exhibit mutation a room owns goes through here: the
+// room board's Tabled section is a cache the driver cannot invalidate on its own.
+let republishRoom: ((slug: string) => Promise<void>) | undefined;
+
+async function republishSourceRoom(slug: string | undefined): Promise<void> {
+  if (!slug || !republishRoom) return;
+  await republishRoom(slug).catch((e) => {
+    console.error(`[rib-chamber] room '${slug}' republish failed: ${errText(e)}`);
+  });
+}
+
 // Serializes lens write-backs (the lens-note action's load-append-publish) so two
 // concurrent appends to the same board can't lose-update each other. Mirrors
 // briefInFlight: a global chain, reset on dispose so a re-boot starts fresh.
@@ -157,27 +170,27 @@ export async function tabledExhibitsFor(slug: string): Promise<readonly LensReco
 // preserving updatedAt (a provenance stamp is not a re-tabling). The stamp is
 // the room's SLUG (the stable identifier room cards and open links join on);
 // display sites resolve it to the room's name, falling back to the raw value.
-// `onStamped` re-publishes the room's own board: the stamp is what makes an exhibit
-// findable from its room, and it lands after the turn already published, so without
-// this the Tabled section would first appear a turn late. Awaited (not voided) so it
+// The room's own board is republished too: it lands after the turn already published, so
+// the Tabled section would otherwise first appear a turn late. Awaited (not voided) so it
 // rides lensWriteInFlight, which disposeLensRuntime drains before the room subsystem
 // tears down.
-export function stampExhibitSources(
-  rawIds: readonly string[],
-  room: Room,
-  onStamped?: (slug: string) => Promise<void>,
-): void {
+export function stampExhibitSources(rawIds: readonly string[], room: Room): void {
   const source = room.slug;
   const apply = async (): Promise<void> => {
     await lensReconcileInFlight?.catch(() => {});
     const store = createFileLensStore(lensesDir());
     let stamped = false;
+    // Tracked apart from `stamped`: a RE-table of an id this room already owns writes
+    // nothing here, but its content changed, so the room's board is stale either way.
+    let owned = false;
     for (const rawId of rawIds) {
       const id = canonicalLensId(rawId);
       if (!id) continue;
       try {
         const record = await store.loadLens(id);
-        if (!record || !isExhibit(record) || record.sourceRoom === source) continue;
+        if (!record || !isExhibit(record)) continue;
+        owned = true;
+        if (record.sourceRoom === source) continue;
         await store.saveLens({ ...record, sourceRoom: source });
         stamped = true;
       } catch (e) {
@@ -187,11 +200,7 @@ export function stampExhibitSources(
     // One refresh per index for the batch — the exhibit card's "from" field and
     // the room card's "tabled" link both just appeared.
     if (stamped) await refreshExhibitIndexes();
-    if (stamped && onStamped) {
-      await onStamped(source).catch((e) => {
-        console.error(`[rib-chamber] room '${source}' republish failed: ${errText(e)}`);
-      });
-    }
+    if (owned) await republishSourceRoom(source);
   };
   void enqueueLensWrite(apply);
 }
@@ -234,6 +243,9 @@ export async function deleteRecordOfKind(
     if (expected === "exhibit") {
       // A room card listing this exhibit as tabled must drop the dead link.
       await refreshExhibitIndexes();
+      // So must the producing room's own board — its Tabled section is a driver cache
+      // that no delete would otherwise invalidate, leaving a card whose Open is dead.
+      await republishSourceRoom(record?.sourceRoom);
     } else {
       await refreshWorkflow("chamber-lenses").catch(() => {});
       // The retired lens drops from the roster pulse's "Live views" count too —
@@ -263,8 +275,10 @@ export function bindLensRuntime(seams: {
   sm?: SnapshotManager;
   registerRegion?: RibContext["registerRegion"];
   declareView: (id: string, title?: string) => () => void;
+  republishRoom?: (slug: string) => Promise<void>;
 }): { lensStore: ReturnType<typeof createFileLensStore> } {
   const { sm, registerRegion, declareView } = seams;
+  republishRoom = seams.republishRoom;
   const lensStore = createFileLensStore(lensesDir());
   if (!sm || !registerRegion) {
     htmlLensRegistry?.dispose();

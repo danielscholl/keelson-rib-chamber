@@ -64,10 +64,15 @@ const EXHIBIT: LensRecord = {
 // The rib's real wiring shape: the witness fires the provenance stamp, and the stamp
 // republishes the room it stamped. Modelled here so the driver half is provable without
 // the on-disk lens store.
+//
+// The republish is QUEUED, not run inline, because that is what production does — the
+// stamp rides enqueueLensWrite and lands well after the turn's own publish. Running it
+// inline would let the turn's publish read the freshly-set cache, hiding whether
+// republish publishes at all.
 function stampingHarness(perTurnChunks: MessageChunk[][], tabled: LensRecord[] = [EXHIBIT]) {
   const { store, rooms } = makeFakeStore();
   const pub = makeFakePublisher();
-  const republishes: Promise<void>[] = [];
+  const queued: string[] = [];
   let driver: RoomDriver | undefined;
   driver = createRoomDriver({
     store,
@@ -75,13 +80,19 @@ function stampingHarness(perTurnChunks: MessageChunk[][], tabled: LensRecord[] =
     runAgentTurn: chunkedRunAgentTurn(perTurnChunks),
     minds: () => MINDS,
     exhibits: async (slug) => tabled.filter((e) => e.sourceRoom === slug),
-    onExhibitsTabled: (_ids, room) => {
-      republishes.push(driver?.republish(room.slug) ?? Promise.resolve());
-    },
+    onExhibitsTabled: (_ids, room) => queued.push(room.slug),
     now: fixedClock(),
     newId: seqIds(),
   });
-  return { driver, pub, rooms, settle: () => Promise.all(republishes) };
+  return {
+    driver,
+    pub,
+    rooms,
+    // Drain the deferred stamps, as the lens write queue eventually does.
+    settle: async () => {
+      for (const slug of queued.splice(0)) await driver?.republish(slug);
+    },
+  };
 }
 
 const TABLE_CHUNK: MessageChunk = {
@@ -159,14 +170,15 @@ describe("room driver — the exhibit witness", () => {
 });
 
 describe("room driver — republish", () => {
-  test("a turn that tables an exhibit republishes the board with it, not a turn later", async () => {
+  test("the republish is what surfaces a tabled exhibit — the turn's own publish cannot", async () => {
     const h = stampingHarness([[{ type: "text", content: "converged —" }, TABLE_CHUNK]]);
     await h.driver?.start(START);
-    // Before any table, the room's own board carries no Tabled section.
     expect(tabledTitles(h.pub.last()!)).toEqual([]);
     await h.driver?.step("demo");
+    // The stamp has not landed, so the turn's own board cannot carry the exhibit yet —
+    // asserting this is what stops the test passing on the turn's publish instead.
+    expect(tabledTitles(h.pub.last()!)).toEqual([]);
     await h.settle();
-    // The exhibit reaches the board of the very turn that tabled it.
     expect(tabledTitles(h.pub.last()!)).toEqual(["The Verdict"]);
   });
 
@@ -175,9 +187,51 @@ describe("room driver — republish", () => {
     await h.driver?.start(START);
     const before = structuredClone(h.rooms.get("demo"));
     await h.driver?.republish("demo");
-    // A provenance stamp is not room state: generation gating owns every room write.
+    // An exhibit change is not room state: generation gating owns every room write.
     expect(h.rooms.get("demo")).toEqual(before!);
     expect(tabledTitles(h.pub.last()!)).toEqual(["The Verdict"]);
+  });
+
+  test("a room that has ended never republishes — that would resurrect its panel", async () => {
+    // The publisher lazily registers an unknown slug, and the surface releases a closed
+    // room's key and region. A late stamp (the closing turn is exactly where a room tables
+    // its deliverable) would otherwise re-register both and float a dead room's panel.
+    const h = stampingHarness([[{ type: "text", content: "quiet" }]]);
+    await h.driver?.start(START);
+    await h.driver?.stop("demo");
+    const published = h.pub.published.length;
+    await h.driver?.republish("demo");
+    expect(h.pub.published.length).toBe(published);
+  });
+
+  test("a room that ends while its exhibits resolve still never republishes", async () => {
+    // The window the entry check cannot close: the room was live when republish began and
+    // died during the (disk-backed) exhibit read, so liveness is re-checked under the lock.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: chunkedRunAgentTurn([[{ type: "text", content: "quiet" }]]),
+      minds: () => MINDS,
+      exhibits: async () => {
+        await gate;
+        return [EXHIBIT];
+      },
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const inFlight = driver.republish("demo");
+    await driver.stop("demo");
+    const published = pub.published.length;
+    release();
+    await inFlight;
+    expect(pub.published.length).toBe(published);
   });
 
   test("only the room's own exhibits ride its board — sourceRoom is the join", async () => {
@@ -190,7 +244,7 @@ describe("room driver — republish", () => {
     expect(tabledTitles(h.pub.last()!)).toEqual(["The Verdict"]);
   });
 
-  test("republish is a no-op for an unknown room", async () => {
+  test("republish is a no-op for a room this driver never started", async () => {
     const h = stampingHarness([[{ type: "text", content: "quiet" }]]);
     await h.driver?.start(START);
     const published = h.pub.published.length;
@@ -201,9 +255,19 @@ describe("room driver — republish", () => {
   test("without the exhibits seam a republish publishes nothing", async () => {
     // The seam ladder: a host without the lens seams leaves `exhibits` unwired, and the
     // board simply has no Tabled section rather than half-rendering one.
-    const h = harness([[{ type: "text", content: "quiet" }]]);
-    await h.driver.start(START);
-    await h.driver.republish("demo");
-    expect(h.witnessed).toEqual([]);
+    const { store } = makeFakeStore();
+    const pub = makeFakePublisher();
+    const driver = createRoomDriver({
+      store,
+      publisher: pub.publisher,
+      runAgentTurn: chunkedRunAgentTurn([[{ type: "text", content: "quiet" }]]),
+      minds: () => MINDS,
+      now: fixedClock(),
+      newId: seqIds(),
+    });
+    await driver.start(START);
+    const published = pub.published.length;
+    await driver.republish("demo");
+    expect(pub.published.length).toBe(published);
   });
 });
