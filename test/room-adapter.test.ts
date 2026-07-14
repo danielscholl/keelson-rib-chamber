@@ -9,8 +9,8 @@ import type {
   RibContext,
   SnapshotManager,
 } from "@keelson/shared";
-import type { RunAgentTurn } from "../src/agent-turn.ts";
 import { roomSummaryAction } from "../src/actions/rooms.ts";
+import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
 import { roomSummaryKey } from "../src/keys.ts";
 import { htmlLensStructuralError } from "../src/lens-html.ts";
@@ -1062,6 +1062,8 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
     expect(htmlLensStructuralError(frame?.data as string)).toBeUndefined();
     expect(frame?.data).toContain("Pinned Design");
     await rib.dispose?.();
+    expect(rib.views?.some((view) => view.key === key)).toBe(false);
+    expect(snap.live()).not.toContain(key);
   });
 
   it("room-summary fails closed when the summary publisher is unavailable", async () => {

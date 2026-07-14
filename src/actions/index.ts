@@ -24,9 +24,9 @@ import {
   roomDeleteAction,
   roomInjectAction,
   roomOpenAction,
-  roomSummaryAction,
   roomStartAction,
   roomStopAction,
+  roomSummaryAction,
 } from "./rooms.ts";
 
 // The only chamber verbs an untrusted HTML-lens iframe may reach (origin

@@ -53,6 +53,7 @@ describe("buildRoomSummaryHtml", () => {
     expect(html).toContain("Rollout plan");
     expect(html).not.toContain("data-action");
     expect(html).not.toContain("<script");
+    expect(html).not.toMatch(/<(?:a|button|form)\b/i);
   });
 
   test.each([

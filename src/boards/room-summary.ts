@@ -7,13 +7,13 @@ function esc(value: string): string {
     /[&<>"']/g,
     (char) =>
       (
-        {
+        ({
           "&": "&amp;",
           "<": "&lt;",
           ">": "&gt;",
           '"': "&quot;",
           "'": "&#39;",
-        } as const
+        }) as const
       )[char as "&" | "<" | ">" | '"' | "'"],
   );
 }
@@ -68,9 +68,7 @@ export function buildRoomSummaryHtml(
       : "<li>No disagreement markers were recorded.</li>";
   const produced =
     tabled.length > 0
-      ? tabled
-          .map((record) => `<li>${esc(record.board.title || record.id)}</li>`)
-          .join("")
+      ? tabled.map((record) => `<li>${esc(record.board.title || record.id)}</li>`).join("")
       : "<li>No exhibits were tabled.</li>";
 
   return `<!doctype html>

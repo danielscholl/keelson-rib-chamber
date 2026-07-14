@@ -112,10 +112,7 @@ describe("buildRoomsIndexBoard active + closed", () => {
       glyph: "☰",
       payload: { slug: "marked" },
     });
-    expect(legacyCard?.actions?.map((action) => action.type)).toEqual([
-      "room-open",
-      "room-delete",
-    ]);
+    expect(legacyCard?.actions?.map((action) => action.type)).toEqual(["room-open", "room-delete"]);
   });
 
   test("a stopped room Deletes — only an ACTIVE room withholds it", () => {

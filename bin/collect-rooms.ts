@@ -28,9 +28,7 @@ async function main() {
     listLenses(join(home, "lenses")).catch(() => []),
   ]);
   const outcomeSlugs = new Set(
-    rooms
-      .filter((room) => room.status !== "active" && room.outcomeAt)
-      .map((room) => room.slug),
+    rooms.filter((room) => room.status !== "active" && room.outcomeAt).map((room) => room.slug),
   );
   process.stdout.write(JSON.stringify(buildRoomsIndexBoard(rooms, minds, lenses, outcomeSlugs)));
 }
