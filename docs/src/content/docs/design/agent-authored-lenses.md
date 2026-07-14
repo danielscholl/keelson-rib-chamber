@@ -26,8 +26,9 @@ that key renders as its own panel on the surface. The lens seam,
 (`chamber-lens` or `chamber-lens-refresh`) and as a chat tool. It is not a room
 turn-tool. Inside a room a Mind reaches a separate seam, `chamber_table_exhibit`,
 which tables a first-class exhibit rather than a lens: a sibling species that
-shares the store, id space, and key namespace but shelves on its own Exhibits
-region with a driver-witnessed `sourceRoom`.
+shares the store, id space, and key namespace but registers a key with no panel of
+its own, carrying a driver-witnessed `sourceRoom` that reaches it from the Tabled
+section of the room that tabled it.
 
 ## Fail closed before you register or persist
 

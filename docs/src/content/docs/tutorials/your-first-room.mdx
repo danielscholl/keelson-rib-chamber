@@ -89,9 +89,10 @@ A room puts both Minds in one session and runs turns between them under a
 strategy. The simplest strategy, and the default, is **sequential**: each Mind
 speaks once per round, round-robin, in order.
 
-The easiest way to open one is the Convene panel, its own board just below the
-Briefing. By default it includes every Mind, so with two Minds authored it already
-has the right two selected. Add a topic so the room has something to chew on, then
+The easiest way to open one is the convene composer, folded into the Chamber panel
+at the top of the surface. Click a Mind's seat card to bring them to the table, so
+with two Minds authored you seat both. Add a topic so the room has something to chew
+on, then
 convene. That opens a sequential room with both Minds and a default budget of eight
 turns.
 
@@ -137,9 +138,10 @@ synthesis turn, so a default budget of eight can bill up to nine.
 
 ## Watch the turns land
 
-Once the room starts, a live room panel appears on the surface, and turns begin to
-land round by round. You do not drive them. The room advances on its own, running
-one Mind, then the next, then back to the first, until it reaches its budget.
+Once the room starts, its card appears on the Rooms index. Click **Open** on that
+card and the room's board streams into a drawer, turns landing round by round. You do
+not drive them. The room advances on its own, running one Mind, then the next, then
+back to the first, until it reaches its budget.
 
 What you are watching is the **driver** at work. The driver is the router for the
 room. There is no message bus and no inbox between the Minds. The driver holds the
@@ -150,7 +152,7 @@ previous reply is already in the transcript the driver hands to the next speaker
 Each turn is stateless. The driver rebuilds a speaker's context from the
 transcript every time, so a Mind carries no hidden memory from one turn to the
 next. Everything a Mind knows in the room is what is written down. That is why the
-transcript is the whole conversation, and why the live panel is just that
+transcript is the whole conversation, and why the room's board is just that
 transcript, published as a board and growing a turn at a time.
 
 The loop is worth a picture. The driver sits in the middle: it reads the
@@ -164,9 +166,9 @@ reply. The Minds connect to the driver and to nothing else.
 
 ## Read the transcript
 
-When the room reaches its budget it ends on its own. The live panel holds the
-finished transcript, oldest turn at the top, each entry labeled with the Mind that
-spoke it. Read it top to bottom and you can follow the whole exchange: the first
+When the room reaches its budget it ends on its own. The board holds the finished
+transcript, oldest turn at the top, each entry labeled with the Mind that spoke it.
+Read it top to bottom and you can follow the whole exchange: the first
 Mind opens, the second responds to what it sees, the first answers back, round by
 round. The last entry is not just another turn in that rotation. When the budget
 runs out, Chamber appends one closing synthesis turn, so the transcript ends by
@@ -200,15 +202,15 @@ The label on each turn is authoritative. The driver stamps who spoke; a Mind
 cannot claim to be another speaker. So when you read a name on a turn, that is the
 Mind the driver actually ran.
 
-A finished room stays as bounded history. You can reopen it later from its card to
-read the transcript again in a side panel, long after the live one has rolled off
-the surface.
+A finished room stays as bounded history. **Open** on its card rebuilds the
+transcript from disk and shows it in the drawer, so you can read the exchange again
+whenever you like.
 
 ## Stop the room
 
 A room you started will run to its budget, but you do not have to wait. To end it
-early, use the stop control on the room panel, or the `chamber_room_stop` chat
-tool. Stopping is reversible: it ends the current room, and you can start a fresh
+early, **Open** the room and use the stop control on its board, or the
+`chamber_room_stop` chat tool. Stopping is reversible: it ends the current room, and you can start a fresh
 one whenever you like. Each new room opens under its own identity, so a turn still
 finishing from the room you stopped lands in that old room's history and never
 bleeds into the next.

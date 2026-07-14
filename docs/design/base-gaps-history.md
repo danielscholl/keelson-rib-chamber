@@ -13,7 +13,7 @@
 | `C2` | Dynamic / agent-authored view registration | ✅ `ctx.registerRegion` — a lens registers its own surface region at runtime |
 | `C3` | Rib persistent data home | ✅ `ctx.getDataDir` → `<keelson-home>/rib-<id>` |
 | `C4` | Streaming / partial board frames | ↔ whole-frame today; partial deferred |
-| `C5` | Dynamic surface regions (N participants) | ✅ `ctx.registerRegion` — a room registers its own region |
+| `C5` | Dynamic surface regions (N participants) | ↔ closed, then retired for rooms — a room registers only its per-slug key and holds no panel; the seam stays wired for lenses (C2) |
 
 ---
 
@@ -71,13 +71,20 @@ shimmer / pulse) suggests partial frames may already exist.
 - **Action:** verify what `SnapshotManager` supports before building; this may be
   a no-op. Still a whole-frame MVP today.
 
-### C5 — Dynamic surface regions *(**wired**)*
+### C5 — Dynamic surface regions *(**retired for rooms**)*
 A room has a variable participant count; the surface layout
 (`rows[].columns[]`) was static.
-- **Resolved:** `ctx.registerRegion` lets a room register its own surface region
-  at runtime, so the layout is no longer fixed at activation. (The earlier MVP
+- **Resolved:** `ctx.registerRegion` lets a rib register a surface region at
+  runtime, so the layout is no longer fixed at activation. (The earlier MVP
   workaround — one room board with N cards/rows and no new regions — is no longer
   needed.)
+- **Update (2026-07-14): retired for rooms.** The rib has since dropped the room
+  region entirely. A room is an activity, not a standing view: it holds no panel and
+  registers only its per-slug `rib:chamber:room:<slug>` snapshot key
+  (`src/room-key-registry.ts`), which the Rooms index `Open` focuses. Note this
+  retires the gap's ROOM motivation only — the seam itself stays wired and
+  load-bearing for **lenses** (C2), which do register their own regions at runtime.
+  The text above is retained for history.
 
 **Dependency order (as built):** Phase 0 needed **nothing** (seam proof) →
 Phase 1 needed **C3** → Phase 2 needed **C1** (and settled **C4** as

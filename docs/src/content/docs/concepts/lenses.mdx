@@ -45,7 +45,7 @@ differs from the others by author and update model:
 |---|---|---|---|
 | Room board | The room driver | Show the attributed conversation | Updated after each committed turn |
 | Lens | A Mind or the lens workflow | Preserve an interpretation you keep watching | Re-authored explicitly under a stable id |
-| Exhibit | A room turn via `chamber_table_exhibit` | Preserve a deliverable a discussion produced | Tabled once; deleted when no longer needed |
+| Exhibit | A room turn via `chamber_table_exhibit` | Preserve a deliverable a discussion produced | Tabled once; deleted when no longer needed, or with its room |
 | Briefing | The rib's attention gate plus one agent turn | Surface newly ended rooms or changed lenses | Runs only when its watermark finds new substance |
 | Digest | Watermark-gated agent turn | Standing synthesis of current Chamber state | Runs only when fingerprint detects a change since last digest |
 | Roster and index boards | Deterministic collectors | Show persistent Chamber state | Cadence or explicit refresh |
@@ -78,9 +78,10 @@ action attached, an operator can append a note to it directly from its panel wit
 re-authoring the full board. The rib sets no fixed limit on how many lenses can
 exist; the harness enforces a per-surface ceiling.
 
-Every lens and exhibit panel also carries its own verbs in the head's **⋯** menu
-(**Retire lens…** on a lens, **Delete exhibit…** on an exhibit), so a panel can
-be put away without hunting its index card. Both confirm before acting.
+Every lens panel also carries its own verb in the head's **⋯** menu (**Retire
+lens…**), so a panel can be put away without hunting its index card. It confirms
+before acting. An exhibit has no panel: its verbs ride the card in its room's Tabled
+section.
 
 ## A living lens re-composes itself
 
@@ -127,8 +128,8 @@ was there before.
   `keelson workflow run chamber-lens --arguments "{subject}"`. One turn composes a board for
   the subject and publishes it. This is the standalone entry point.
 - **Not during a room.** A room turn's publish seam is the exhibit tool, not the
-  lens tool: a findings summary after a discussion is a deliverable, so it lands
-  on the Exhibits shelf (below). Authoring a standing lens stays a deliberate,
+  lens tool: a findings summary after a discussion is a deliverable, so it lands in
+  that room's own board (below). Authoring a standing lens stays a deliberate,
   named act: the workflow or a direct chat tool call.
 - **As an HTML canvas.** A Mind (or any tool call) can invoke `chamber_emit_lens_html`
   with a literal HTML string, rendered in a sandboxed iframe on the Chamber surface
@@ -147,17 +148,19 @@ stale, and a new discussion tables a *new* exhibit rather than updating an old
 one. The filing test: would re-running it produce the same thing? A lens says
 yes (same subject, fresher content); an exhibit says no.
 
-Mechanically the two share everything but the shelf. An exhibit rides the same
-store, the same per-id key family, and the same fail-closed publish pipeline; its
-record carries `kind: "exhibit"`, its panel joins the **Exhibits** group, and its
+Mechanically the two share everything but where they are read. An exhibit rides the
+same store, the same per-id key family, and the same fail-closed publish pipeline;
+its record carries `kind: "exhibit"`, it registers a key but no panel of its own, and its
 index offers **Open** and a confirmed **Delete** instead of Retire.
 
 Provenance is the load-bearing difference. An exhibit's card names the producing
 room, and that field is **witnessed, not claimed**: the room driver stamps
 `sourceRoom` after seeing `chamber_table_exhibit` fire in a turn it ran. The tool
 itself has no `sourceRoom` input, so a Mind cannot attribute an exhibit to a room
-it wasn't in. A Mind that declares the `lens` capability holds the exhibit tool in
-rooms; the Exhibits shelf stays hidden until the first exhibit is tabled.
+it wasn't in. That stamp is also the way in: it is what puts the exhibit in its
+room's **Tabled** section, and what a room delete follows to take its exhibits with
+it. An exhibit is reachable exactly as long as its room is. A Mind that declares the
+`lens` capability holds the exhibit tool in rooms.
 
 ## Every panel uses the same canvas contract
 

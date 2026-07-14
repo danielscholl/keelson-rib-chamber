@@ -1,25 +1,24 @@
 ---
 title: Workflows
-description: The nine workflows the Chamber rib contributes to the catalog, each defined in code with no YAML file
+description: The eight workflows the Chamber rib contributes to the catalog, each defined in code with no YAML file
 sidebar:
   order: 3
 ---
 
-Chamber contributes nine workflows to the catalog. They are defined in code, in
-the rib's `contributeWorkflows` hook, so there are no YAML files to edit. Four
+Chamber contributes eight workflows to the catalog. They are defined in code, in
+the rib's `contributeWorkflows` hook, so there are no YAML files to edit. Three
 are deterministic bash collectors that read the data home and publish a board;
 four are single prompt turns that author or re-author content; and one
 (chamber-digest) is a three-node self-gating pipeline that pairs a cheap bash
 gate with a conditional agent turn.
 
-## The nine
+## The eight
 
 | Workflow | Kind | Node | Snapshot key | Publishes |
 |---|---|---|---|---|
 | `chamber-roster` | bash collector | `collect` | `ROSTER_KEY` | the Roster board |
 | `chamber-rooms` | bash collector | `collect` | `ROOMS_KEY` | the Rooms index |
 | `chamber-lenses` | bash collector | `collect` | `LENSES_KEY` | the Lenses index |
-| `chamber-exhibits` | bash collector | `collect` | `EXHIBITS_KEY` | the Exhibits index |
 | `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, rendered as the Briefing banner's "The read" register |
 | `chamber-genesis` | prompt turn | `genesis` | none | nothing (writes a Mind) |
 | `chamber-lens` | prompt turn | `compose` | none | a per-subject lens panel |
@@ -40,7 +39,6 @@ and validates fail-closed: a board that does not parse, or whose `view` is not
 | `chamber-roster` | `bin/collect-roster.ts` | `ROSTER_KEY` | `expectView(ROSTER_KEY, "board")` |
 | `chamber-rooms` | `bin/collect-rooms.ts` | `ROOMS_KEY` | `expectView(ROOMS_KEY, "board")` |
 | `chamber-lenses` | `bin/collect-lenses.ts` | `LENSES_KEY` | `expectView(LENSES_KEY, "board")` |
-| `chamber-exhibits` | `bin/collect-exhibits.ts` | `EXHIBITS_KEY` | `expectView(EXHIBITS_KEY, "board")` |
 
 Each `collect` node carries an `output_schema` of `{ type: "object", required:
 ["view", "sections"] }`, and the script writes the JSON board its matching
@@ -48,20 +46,18 @@ builder produces. The roster collector also reads the watermark and assembles
 the roster pulse; the pulse is fail-soft, so a read error drops the pulse but
 never the board.
 
-These four are the producers behind the Roster, Rooms, Lenses, and Exhibits
-regions of the Chamber surface. On the surface each binds with a `cadenceMs` of
-`120000`, so the board re-collects every two minutes on its own. State changes
-that should show sooner (a new Mind, a room starting, ending, stopping, or being
-deleted, a lens authored or retired, an exhibit tabled or deleted) trigger a
-targeted `refreshWorkflow` so the right index republishes without waiting on the
-cadence. Starting a room also creates the room's own live per-slug panel at once,
-so the active session shows immediately as well as in the refreshed Rooms index.
+These three are the producers behind the Roster board and the Rooms and Lenses
+regions of the Chamber surface. The Rooms and Lenses indexes bind with a
+`cadenceMs` of `120000`, so each board re-collects every two minutes on its own.
+State changes that should show sooner (a new Mind, a room starting, ending,
+stopping, or being deleted, a lens authored or retired, an exhibit tabled or
+deleted) trigger a targeted `refreshWorkflow` so the right index republishes
+without waiting on the cadence.
 
-The lenses and exhibits collectors read the SAME store and split it by record
-kind: `chamber-lenses` emits the standing views, `chamber-exhibits` the tabled
-deliverables. The exhibits index emits zero sections when no exhibits exist, and
-its region sets `hideWhenEmpty`, so the shelf stays invisible until a discussion
-has tabled something.
+The lenses collector reads a store it shares with exhibits and keeps only the
+standing views: an exhibit is a room's deliverable and has no index of its own, so
+the Rooms index is the one board that names it. That is why tabling or deleting an
+exhibit refreshes `chamber-rooms`.
 
 ## chamber-digest
 
@@ -131,7 +127,8 @@ The workflow prompt asks the model for `{ id, board, scope?, reason? }`. The
 `maintainingMind`, which a Mind may set to record itself as the maintainer; see
 [Tools and commands](../tools-and-commands/) for the full schema. A deliverable a
 room discussion produced does not ride this workflow at all. A room turn tables
-it with `chamber_table_exhibit`, and it lands on the Exhibits shelf.
+it with `chamber_table_exhibit`, and it lands in the Tabled section of that room's
+own board.
 
 ## chamber-lens-refresh
 

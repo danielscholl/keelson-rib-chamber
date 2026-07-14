@@ -147,7 +147,8 @@ the driver alone: an agent's reply becomes `parts[0].text` and nothing more, so
 a turn can never assert another speaker's identity, and a director message is
 forced to `from: "director"` regardless of payload. `round` and `aborted` are
 optional. Closed-room retention keeps the newest 25 closed rooms and prunes
-older ones; active rooms are always kept.
+older ones; active rooms are always kept. A pruned room takes the exhibits it tabled
+with it, the same cascade an explicit delete performs.
 
 `ledger.json` is present only for magentic rooms. It persists the `TaskLedger`
 (the manager's goal, status, and task list) and is the sole durable artifact

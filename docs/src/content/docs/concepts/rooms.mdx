@@ -144,18 +144,22 @@ billed turn per speaker, only for Minds that actually spoke, and it fails closed
 without touching memory if anything goes wrong. See
 [How minds remember](../../design/how-minds-remember/) for the gate and its limits.
 
-## Many rooms, each its own panel
+## Many rooms at once
 
-Several rooms can run at once, up to six. Each gets its own panel on the surface
-and its own turn loop, and each opens under a fresh unique slug. The fresh slug
+Several rooms can run at once, up to the `MAX_ACTIVE_ROOMS` cap (six). Each gets
+its own turn loop and its own snapshot key, and each opens under a fresh unique
+slug. The cap is a cost bound, not a layout one: every room drives its own loop of
+paid turns. The fresh slug
 matters: if a turn is still draining from a room you just stopped, it lands in that
 old room's history and can never bleed into the next one. When you steer without
 naming a room, the most recently started one is the target.
 
-Rooms you are not watching live show up in the Rooms index. An active room appears
-there as a status-only card beside its live panel; a closed room offers **Open**,
-which rebuilds its transcript in a drawer from the saved log, and **Delete**, which
-is refused until the room is stopped. A room takes its name from its topic, or from
+Every room shows up in the Rooms index, live or ended. A room is an activity, so it
+holds no standing panel: you enter it. **Open** on an active card focuses the live
+board its driver publishes to and streams the turns as they land; on a closed card
+it rebuilds the transcript in a drawer from the saved log. Only a closed card offers
+**Delete**, since the handler refuses a live room. A room takes its name from its
+topic, or from
 its participants when there is no topic. Past rooms are kept as bounded history, so
 the index does not grow without limit.
 
