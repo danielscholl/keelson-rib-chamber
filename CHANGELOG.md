@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.36.2...v0.37.0) (2026-07-14)
+
+
+### Added
+
+* **chamber:** fold Convene into the Chamber bench ([#257](https://github.com/danielscholl/keelson-rib-chamber/issues/257)) ([04cd49a](https://github.com/danielscholl/keelson-rib-chamber/commit/04cd49a8472fe863749cb422a84dfd2013747935))
+
 ## [0.36.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.36.1...v0.36.2) (2026-07-14)
 
 
