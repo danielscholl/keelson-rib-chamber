@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -220,7 +220,7 @@ describe("html lens store refresh round-trip", () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "chamber-html-store-"));
   });
-  afterAll(async () => {
+  afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   });
 
@@ -525,6 +525,27 @@ describe("lens tools cover both species", () => {
     // Neither was touched.
     expect(await createFileLensStore(lensesDir()).loadLens("twin")).toBeDefined();
     expect(await createFileHtmlLensStore(htmlLensesDir()).load("twin")).toBeDefined();
+  });
+
+  it("refuses rather than guessing when a twin exists but cannot be read", async () => {
+    // The ambiguity probe must ask whether the id is TAKEN, not whether it parses:
+    // both stores fold a torn record to undefined, so probing with a loader would let
+    // a damaged twin read as absent and delete the readable species on a guess.
+    await tool("chamber_emit_lens").execute(
+      { id: "twin", board: { view: "board", title: "B", sections: [] } },
+      makeToolCtx().ctx,
+    );
+    await emitHtml({ id: "twin", html: page("hi") });
+    await writeFile(join(htmlLensesDir(), "twin", "meta.json"), "{ not json");
+    // The html record is now unreadable...
+    expect(await createFileHtmlLensStore(htmlLensesDir()).load("twin")).toBeUndefined();
+    // ...but its id is still taken, so an unqualified retire must not touch the canvas one.
+    const t = await retire({ id: "twin" });
+    expect(t.errored()).toBe(true);
+    expect(await createFileLensStore(lensesDir()).loadLens("twin")).toBeDefined();
+    // kind is the way through, and it can still clear the damaged record.
+    expect((await retire({ id: "twin", kind: "html" })).errored()).toBe(false);
+    expect((await retire({ id: "twin" })).errored()).toBe(false);
   });
 
   it("kind picks the species when an id names both", async () => {

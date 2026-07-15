@@ -181,7 +181,7 @@ exception: it describes one authoring, so omitting it clears it.
 - **As an HTML canvas.** A Mind (or any tool call) can invoke `chamber_emit_lens_html`
   with a literal HTML string, rendered in a sandboxed iframe on the Chamber surface
   under the Lenses group. With an `id` it is per-subject and persisted like a board
-  lens, and it takes the same `refresh` backing — a designed page can be living too.
+  lens, and it takes the same `refresh` backing, so a designed page can be living too.
   Without an `id` it lands on the legacy fixed key `rib:chamber:lens-html`, in-memory
   only, and re-publishing replaces that single shared panel; having no record, it
   takes no backing. An HTML lens has no index card, so its panel-head
@@ -189,7 +189,7 @@ exception: it describes one authoring, so omitting it clears it.
   can't reach destructive verbs).
 
 The two species are separate lenses in separate stores, sharing nothing but the id
-string — so one id can name both a board and a page, which is the natural pairing when
+string. So one id can name both a board and a page, which is the natural pairing when
 a subject wants a structured view and a designed report. `chamber_list_lenses` returns
 both, marking each row's `kind` so the two are told apart, and `chamber_retire_lens`
 takes an optional `kind` for the same reason: an id naming both must say which, since

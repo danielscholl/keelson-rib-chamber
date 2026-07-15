@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ToolDefinition } from "@keelson/shared";
 import {
   CANVAS_PUBLISH_CONTRACT,
@@ -23,7 +24,7 @@ import {
   type HtmlLensRegistry,
   htmlLensStructuralError,
 } from "../lens-html.ts";
-import { createFileHtmlLensStore, type HtmlLensStore } from "../lens-html-store.ts";
+import type { HtmlLensStore } from "../lens-html-store.ts";
 import {
   awaitHtmlLensReconcile,
   awaitLensReconcile,
@@ -32,9 +33,10 @@ import {
   enqueueLensWrite,
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
-import { createFileLensStore, isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
+import { isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
 import { MAX_REFRESH_WORKFLOW_NAME } from "../lens-workflows.ts";
 import { htmlLensesDir, lensesDir } from "../paths.ts";
+import { recordDirState } from "../record-dir.ts";
 import { refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
 import { isChamberWorkflow, LENS_REFRESH_WORKFLOW } from "../workflows.ts";
 import { emitResult } from "./util.ts";
@@ -482,22 +484,25 @@ async function retireLensOfKind(
   if (kind === "html") return htmlRetire();
   const id = canonicalLensId(rawId);
   if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(rawId)}` };
-  const [canvasRecord, htmlRecord] = await Promise.all([
-    createFileLensStore(lensesDir())
-      .loadLens(id)
-      .catch(() => undefined),
-    createFileHtmlLensStore(htmlLensesDir())
-      .load(id)
-      .catch(() => undefined),
+  // Probe the record DIRECTORIES, not the loaders: both fold an unreadable record to
+  // undefined, so a torn twin would read as absent and collapse the very ambiguity
+  // this guard exists to catch — deleting the readable species on a guess.
+  const [canvas, html] = await Promise.all([
+    recordDirState(join(lensesDir(), id)),
+    recordDirState(join(htmlLensesDir(), id)),
   ]);
-  const canvasHit = canvasRecord !== undefined && !isExhibit(canvasRecord);
-  if (canvasHit && htmlRecord !== undefined) {
-    return {
-      ok: false,
-      error: `'${id}' names BOTH a canvas lens and an html lens — pass kind: "canvas" or kind: "html" to say which to retire`,
-    };
-  }
-  return htmlRecord !== undefined && !canvasHit ? htmlRetire() : canvasRetire();
+  // No html twin can exist, so there is nothing to be ambiguous about: the canvas path
+  // answers exactly as it did before this verb learned a second species — including
+  // "not found" and the exhibit steer.
+  if (html === "absent") return canvasRetire();
+  if (canvas === "absent") return htmlRetire();
+  return {
+    ok: false,
+    error:
+      canvas === "present" && html === "present"
+        ? `'${id}' names BOTH a canvas lens and an html lens — pass kind: "canvas" or kind: "html" to say which to retire`
+        : `'${id}' cannot be resolved to one species (a record directory is unreadable) — pass kind: "canvas" or kind: "html" to say which to retire`,
+  };
 }
 
 // Exhibit publish seam — the room driver's turn tool: a discussion tables its
