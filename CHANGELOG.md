@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.43.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.42.0...v0.43.0) (2026-07-15)
+
+
+### Added
+
+* **lenses:** teach board composition to the lens and exhibit authors ([#297](https://github.com/danielscholl/keelson-rib-chamber/issues/297)) ([59da241](https://github.com/danielscholl/keelson-rib-chamber/commit/59da2411ff4a8d996a6caadd0809d3f1eedda1db))
+
+
+### Fixed
+
+* **rooms:** summarize a room from its closing turn, not its formatting ([#295](https://github.com/danielscholl/keelson-rib-chamber/issues/295)) ([66ca144](https://github.com/danielscholl/keelson-rib-chamber/commit/66ca144b8c997f9365737fdd8c1f810471bf09a6))
+
 ## [0.42.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.41.0...v0.42.0) (2026-07-15)
 
 
