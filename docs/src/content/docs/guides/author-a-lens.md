@@ -65,8 +65,9 @@ turn:
 
 The card also shows an "updated" time. That value is stamped by the server, never
 supplied by the turn, and it tracks the **board**: a re-author that leaves the
-board byte-identical keeps the old time rather than claiming a fresh one. So the
-card answers "how current is this information", not "when did a turn last run".
+board structurally unchanged keeps the old time rather than claiming a fresh one.
+So the card answers "how current is this information", not "when did a turn last
+run".
 
 The `chamber-lens` workflow prompt asks the turn for `id`, `board`, `scope`, and
 `reason`, so a lens authored through the workflow usually carries no
@@ -76,7 +77,7 @@ for example from chat, and it is preserved across a `chamber-lens-refresh`.
 :::note
 `scope` and `maintainingMind` are the lens's durable identity: re-authoring without
 them keeps the existing values, and you clear one by passing `null`. `reason` is the
-opposite, because it describes a single authoring — omit it and it clears, rather
+opposite, because it describes a single authoring: omit it and it clears, rather
 than captioning the next revision with the last one's story.
 :::
 

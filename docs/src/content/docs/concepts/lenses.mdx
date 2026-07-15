@@ -98,7 +98,7 @@ cadence while the surface is open, and on demand from the **Refresh** verb its
 index card gains. The workflow re-reads the record and re-emits a board under the
 same id. If that board actually changed, the panel's "updated Xm ago" clock and the
 index card's freshness advance with it; if the refresh found nothing to change, the
-re-emit is a no-op and the clock holds — a lens whose content is a measurement must
+re-emit is a no-op and the clock holds. A lens whose content is a measurement must
 not read as current because a turn ran, only because something was re-measured.
 
 Two rules keep the backing honest. Re-authoring the lens **without** `refresh`
@@ -127,7 +127,7 @@ board changes. None of it is required.
 `refresh`: re-authoring without them preserves the existing values, and `null` clears
 one. That matters most for a custom `refresh.workflow`, which has no reason to know
 it would otherwise have to re-state a maintainer it never set. `reason` is the
-exception — it describes one authoring, so omitting it clears it.
+exception: it describes one authoring, so omitting it clears it.
 
 ## Ways to author one
 

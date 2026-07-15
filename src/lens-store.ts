@@ -61,9 +61,10 @@ export function lensProvenance(record: LensRecord): LensProvenance {
 }
 
 export interface LensStore {
-  // `updatedAt` is normally store-stamped at save; the optional override exists
-  // for the witness stamp, which annotates provenance on a record without
-  // advancing its freshness (a sourceRoom stamp is not a re-tabling).
+  // `updatedAt` is normally store-stamped at save; the optional override carries the
+  // prior stamp for a write that is not a change in the record's content — the
+  // witness stamp (a sourceRoom stamp is not a re-tabling) and a lens re-authored
+  // with a structurally identical board.
   saveLens(
     record: {
       id: string;

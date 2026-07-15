@@ -175,9 +175,11 @@ export interface LensRegistry {
 interface LensEntry {
   key: string;
   publisher: { publish(board: CanvasBoardView): Promise<void> };
-  // The board on the live key — liveRegister's comparand for skipping an identical
-  // republish.
-  latest: () => CanvasBoardView;
+  // The last board this entry actually got onto the key — liveRegister's comparand for
+  // skipping an identical republish. NOT the publisher's `latest`, which is assigned
+  // before the compose it feeds and so still advances when that compose throws: a
+  // retry would then skip and strand the panel a board behind.
+  published?: CanvasBoardView;
   unregisterSnapshot: () => void;
   // Absent for an exhibit: it holds a key but no panel (see regionFor).
   unregisterRegion?: () => void;
@@ -265,7 +267,6 @@ export function createLensRegistry(
     const entry: LensEntry = {
       key,
       publisher,
-      latest,
       unregisterSnapshot,
       ...(unregisterRegion ? { unregisterRegion } : {}),
       kind,
@@ -333,10 +334,14 @@ export function createLensRegistry(
     }
     // Re-broadcasting an identical board would restamp the frame's composedAt — the
     // "updated" a panel head reads — with freshness the content never earned. The
-    // comparand is the LIVE board, never the stored one: this is the surface, so a
-    // skip cannot strand it out of step with disk (a new entry holds only the seed,
-    // so a real board always publishes).
-    if (!boardsEqual(entry.latest(), board)) await entry.publisher.publish(board);
+    // comparand is what reached the SURFACE, never the stored record: skipping on the
+    // record would strand a panel whose save failed, with no later refresh able to
+    // converge it. Marked only after the publish resolves, so a failed broadcast
+    // leaves the entry re-publishable rather than falsely settled.
+    if (!entry.published || !boardsEqual(entry.published, board)) {
+      await entry.publisher.publish(board);
+      entry.published = board;
+    }
     return { key: entry.key };
   }
 
