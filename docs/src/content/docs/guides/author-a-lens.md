@@ -63,19 +63,29 @@ turn:
 - **`maintainingMind`** is the authoring Mind's own name. It renders first on the
   card, labeled "by".
 
-The card also shows an "updated" time. That value is stamped by the server when
-the lens is saved, not supplied by the turn, so it always reflects the real last
-write.
+The card also shows an "updated" time. That value is stamped by the server, never
+supplied by the turn, and it records exactly one thing: when the **board** last
+changed. A re-author that leaves the board structurally unchanged keeps the old
+time rather than claiming a fresh one.
+
+Read it for what it is. It is not a "last checked" time, and it cannot be: a
+refresh that genuinely re-measures and finds the same numbers keeps the old stamp,
+so a current board can read as old. That is the deliberate trade. The card cannot
+tell a real re-measurement from a cosmetic re-emit, and of the two possible lies,
+"nothing has changed since then" is the safer one. A lens that needs to assert when
+its data was gathered should say so in the board itself, as a "data as of" line it
+composes.
 
 The `chamber-lens` workflow prompt asks the turn for `id`, `board`, `scope`, and
 `reason`, so a lens authored through the workflow usually carries no
 `maintainingMind`. That field is filled when `chamber_emit_lens` is called directly,
 for example from chat, and it is preserved across a `chamber-lens-refresh`.
 
-:::caution
-Provenance is replace-on-write. Re-authoring a lens without a field that was set
-before clears the old value. If you want a `scope` or `reason` to persist, supply
-it every time you re-author the subject.
+:::note
+`scope` and `maintainingMind` are the lens's durable identity: re-authoring without
+them keeps the existing values, and you clear one by passing `null`. `reason` is the
+opposite, because it describes a single authoring: omit it and it clears, rather
+than captioning the next revision with the last one's story.
 :::
 
 ## Tabling a deliverable mid-room

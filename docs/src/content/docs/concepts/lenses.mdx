@@ -95,9 +95,13 @@ chamber_emit_lens { id: "morning-brief", board: {...}, refresh: {} }
 re-author) and an optional `cadenceMs` (default: one hour; floored at 30s). The
 lens's panel then re-runs that workflow with input `lens` = the lens id: on its
 cadence while the surface is open, and on demand from the **Refresh** verb its
-index card gains. The workflow re-reads the record and re-emits a fresh board
-under the same id, which advances the panel's "updated Xm ago" clock and the
-index card's freshness.
+index card gains. The workflow re-reads the record and re-emits a board under the
+same id. If that board actually changed, the panel's "updated Xm ago" clock and the
+index card's freshness advance with it; if the refresh found nothing to change, the
+re-emit is a no-op and the clock holds. So the clock tracks the board, not the
+turn: a lens whose content is a measurement must never read as current merely
+because a refresh ran. The cost of that is a board which was re-measured and did
+not move reads as old, which is the safer of the two available errors.
 
 Two rules keep the backing honest. Re-authoring the lens **without** `refresh`
 preserves the existing backing (the refresh turn itself re-emits the board and
@@ -118,9 +122,14 @@ library rather than an anonymous pile. The authoring turn may attach three optio
 fields: a **scope** (the board's kind, like "status board" or "checklist"), a
 **reason** (a short note on what the latest authoring changed), and a
 **maintainingMind** (the authoring Mind's own name). The index card shows
-each one when present, alongside an "updated" time the server stamps on every write.
-None of it is required, and re-authoring a subject without a field clears whatever
-was there before.
+each one when present, alongside an "updated" time the server stamps whenever the
+board changes. None of it is required.
+
+`scope` and `maintainingMind` are durable identity, so they follow the same rule as
+`refresh`: re-authoring without them preserves the existing values, and `null` clears
+one. That matters most for a custom `refresh.workflow`, which has no reason to know
+it would otherwise have to re-state a maintainer it never set. `reason` is the
+exception: it describes one authoring, so omitting it clears it.
 
 ## Ways to author one
 

@@ -135,6 +135,18 @@ describe("living-lens region wiring", () => {
     expect(wired?.workflow).toBeUndefined();
     expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens"]);
   });
+
+  it("a refresh-only change rewires the region even though the board is untouched", async () => {
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
+    await reg.publish("brief", board("Brief"), undefined, "lens", { workflow: "w1" });
+    expect(region.calls).toHaveLength(1);
+    // An identical board is not re-broadcast — but a cadence/workflow edit rides the
+    // same call, and must not be dropped along with the frame.
+    await reg.publish("brief", board("Brief"), undefined, "lens", { workflow: "w2" });
+    expect(region.calls).toHaveLength(2);
+    expect(region.current(lensKey("brief"))?.workflow).toBe("w2");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -293,6 +305,82 @@ describe("living-lens emit + verbs", () => {
       t3.ctx,
     );
     expect((await store.loadLens("brief"))?.refresh).toBeUndefined();
+  });
+
+  it("re-emit without provenance keeps scope/maintainingMind; null clears one; reason clears on omit", async () => {
+    const store = createFileLensStore(lensesDir());
+    const t1 = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      {
+        id: "brief",
+        board: board("Brief"),
+        scope: "status board",
+        maintainingMind: "rhea-locke",
+        reason: "initial assessment",
+      },
+      t1.ctx,
+    );
+    // A custom refresh workflow re-emits the board without repeating provenance it
+    // was never told to carry — the lens's maintainer has to survive that.
+    const t2 = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief 2") }, t2.ctx);
+    const kept = await store.loadLens("brief");
+    expect(kept?.scope).toBe("status board");
+    expect(kept?.maintainingMind).toBe("rhea-locke");
+    // reason describes ONE authoring, so it does not outlive the emit that set it.
+    expect(kept?.reason).toBeUndefined();
+    const t3 = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "brief", board: board("Brief 3"), maintainingMind: null },
+      t3.ctx,
+    );
+    const cleared = await store.loadLens("brief");
+    expect(cleared?.maintainingMind).toBeUndefined();
+    expect(cleared?.scope).toBe("status board");
+  });
+
+  it("an unchanged re-author holds updatedAt; a changed board advances it", async () => {
+    const store = createFileLensStore(lensesDir());
+    const t1 = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t1.ctx);
+    const first = (await store.loadLens("brief"))?.updatedAt;
+    expect(first).toBeDefined();
+    // The bundled refresh re-composes from the prior board, so an identical re-emit is
+    // the common case: it must not re-stamp freshness the content never earned (the
+    // brief and digest gates both fingerprint on updatedAt).
+    const t2 = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t2.ctx);
+    expect(t2.errored()).toBe(false);
+    expect((await store.loadLens("brief"))?.updatedAt).toBe(first);
+    const t3 = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief 2") }, t3.ctx);
+    expect((await store.loadLens("brief"))?.updatedAt).not.toBe(first);
+  });
+
+  it("a changed board always outruns the prior stamp, even within one millisecond", async () => {
+    const store = createFileLensStore(lensesDir());
+    // The gates compare updatedAt as an exact string, and the store's stamp is only
+    // millisecond-resolution — so two writes landing in the same tick would leave the
+    // fingerprint unmoved and lose a real edit. Seeding the prior ahead of the clock
+    // forces that collision deterministically instead of racing it.
+    const ahead = new Date(Date.now() + 1000).toISOString();
+    await store.saveLens({ id: "brief", board: board("Brief"), updatedAt: ahead });
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief 2") }, t.ctx);
+    const next = (await store.loadLens("brief"))?.updatedAt ?? "";
+    expect(Date.parse(next)).toBeGreaterThan(Date.parse(ahead));
+  });
+
+  it("an unparseable prior updatedAt is re-stamped, not held", async () => {
+    const store = createFileLensStore(lensesDir());
+    await store.saveLens({ id: "brief", board: board("Brief"), updatedAt: "not-a-date" });
+    // listLenses skips a record whose updatedAt won't Date.parse, so such a lens is
+    // invisible to the index, the gate and the digest until a save re-stamps it.
+    // Holding the prior stamp on an unchanged re-author would make that permanent.
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t.ctx);
+    const healed = (await store.loadLens("brief"))?.updatedAt ?? "";
+    expect(Number.isFinite(Date.parse(healed))).toBe(true);
   });
 
   it("a refresh object PATCHES the prior backing — a partial re-author can't swap or drop fields", async () => {

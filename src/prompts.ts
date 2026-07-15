@@ -80,14 +80,14 @@ export const LENS_REFRESH_WF_PROMPT = `You are REFRESHING an existing LENS for K
 
 Lens id: $inputs.lens
 
-First call chamber_list_lenses with { "id": "$inputs.lens" } — the matching record carries the prior board (the composition you are refreshing) and its scope/reason/maintainingMind provenance. If no such lens exists, reply with one short line saying so and STOP; do not author a new lens.
+First call chamber_list_lenses with { "id": "$inputs.lens" } — the matching record carries the prior board, the composition you are refreshing. If no such lens exists, reply with one short line saying so and STOP; do not author a new lens.
 
 Re-compose the SAME subject with fresh eyes: keep the board's shape and intent, update what changed, drop what no longer holds. Be honest — do NOT invent data you cannot see; if nothing changed, re-emit the board as it stands.
 
 Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, maintainingMind?, reason? }:
   - id: the SAME id — this updates the existing panel.
-  - carry the prior scope/maintainingMind through unchanged; set reason to a short note on what this refresh changed (e.g. "no change" or "two loops closed").
-  - do NOT pass refresh — omitting it keeps the lens's existing backing.
+  - set reason to a short note on what this refresh changed (e.g. "no change" or "two loops closed").
+  - do NOT pass scope, maintainingMind, or refresh — omitting them keeps the lens's existing provenance and backing.
 Do NOT print the JSON as your reply. After the tool returns, reply with one short line on what the refresh changed.`;
 
 // The HTML lens authoring prompt: one agent turn composes a designed,

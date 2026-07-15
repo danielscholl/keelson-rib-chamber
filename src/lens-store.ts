@@ -61,9 +61,12 @@ export function lensProvenance(record: LensRecord): LensProvenance {
 }
 
 export interface LensStore {
-  // `updatedAt` is normally store-stamped at save; the optional override exists
-  // for the witness stamp, which annotates provenance on a record without
-  // advancing its freshness (a sourceRoom stamp is not a re-tabling).
+  // `updatedAt` is normally store-stamped at save. The optional override hands the
+  // stamp to a caller that has read the prior record, which the store has not: to hold
+  // the prior freshness across a write that leaves the board alone (the witness stamp's
+  // sourceRoom, or a re-author touching only refresh/provenance), or to keep a changed
+  // board's stamp strictly ahead of it — this clock is millisecond-resolution and the
+  // brief/digest gates compare the value exactly.
   saveLens(
     record: {
       id: string;
@@ -96,8 +99,8 @@ export function createFileLensStore(lensesRoot: string): LensStore {
     async saveLens(record) {
       assertSafeSlug(record.id);
       await mkdir(lensDir(record.id), { recursive: true });
-      // The store owns the clock: stamp updatedAt server-side at save (like
-      // room/mind createdAt), overwriting on re-author so freshness is honest.
+      // The store owns the clock unless the caller supplied a stamp (see saveLens):
+      // stamp updatedAt server-side at save, like room/mind createdAt.
       // Provenance is spread in only when present, so an absent field leaves no key
       // on the record and the index omits it (a re-author without it clears a prior).
       const stored: LensRecord = {

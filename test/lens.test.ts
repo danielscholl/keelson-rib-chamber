@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
 import {
+  boardsEqual,
   CHAMBER_SURFACE_ID,
   canonicalLensId,
   createLensRegistry,
@@ -60,6 +61,52 @@ describe("canonicalLensId", () => {
   });
 });
 
+// boardsEqual decides whether a re-author is a change at all, so it gates both the
+// panel's freshness and the paid brief/digest turns behind it. A false "changed"
+// restores the bug; a false "unchanged" strands a real edit.
+describe("boardsEqual", () => {
+  const nested = (label: string): CanvasBoardView => ({
+    view: "board",
+    title: "Findings",
+    sections: [
+      { kind: "stats", items: [{ label, value: "3" }] },
+      { kind: "rows", title: "Notes", items: [{ text: "a", glyph: "ok" }, { text: "b" }] },
+    ],
+  });
+
+  test("compares nested sections and items, not just the top level", () => {
+    expect(boardsEqual(nested("Met"), nested("Met"))).toBe(true);
+    // The only difference is three levels down, inside a section's item.
+    expect(boardsEqual(nested("Met"), nested("Unmet"))).toBe(false);
+  });
+
+  test("ignores object key order — a board off disk need not match the emit's order", () => {
+    const a = { view: "board", title: "T", sections: [] } as CanvasBoardView;
+    const b = { sections: [], title: "T", view: "board" } as unknown as CanvasBoardView;
+    expect(boardsEqual(a, b)).toBe(true);
+  });
+
+  test("reads an explicit undefined as absent — JSON drops the key, the emit may not", () => {
+    const withKey = { view: "board", title: "T", sections: [], header: undefined };
+    const without = { view: "board", title: "T", sections: [] };
+    expect(boardsEqual(withKey as CanvasBoardView, without as CanvasBoardView)).toBe(true);
+  });
+
+  test("a missing item is a change, not a match on the shared prefix", () => {
+    const two = nested("Met");
+    const one = { ...two, sections: [two.sections[0]] } as CanvasBoardView;
+    expect(boardsEqual(two, one)).toBe(false);
+  });
+
+  test("distinguishes a value from its string form, so 3 never equals '3'", () => {
+    const num = { view: "board", title: "T", sections: [], header: { count: 3 } };
+    const str = { view: "board", title: "T", sections: [], header: { count: "3" } };
+    expect(boardsEqual(num as unknown as CanvasBoardView, str as unknown as CanvasBoardView)).toBe(
+      false,
+    );
+  });
+});
+
 describe("lens registry", () => {
   // A SnapshotManager double that runs the registered composer and its validator on
   // recompose, capturing the validated frame — so a published board is proven to
@@ -69,6 +116,13 @@ describe("lens registry", () => {
     const composers = new Map<string, () => unknown>();
     const validators = new Map<string, (d: unknown) => unknown>();
     const broadcasts: { key: string; view: unknown }[] = [];
+    // Arms a one-shot recompose failure, so a test can leave the live key behind the
+    // board its publish requested (the publisher assigns `latest` before composing).
+    let failOnce = false;
+    // Holds the next recompose open, so a test can land a second publish inside the
+    // pump's await and drive the coalescing path deterministically.
+    let gate: Promise<void> | undefined;
+    let openGate: (() => void) | undefined;
     const sm = {
       register(key: string, compose: () => unknown, opts?: { validate?: (d: unknown) => unknown }) {
         if (composers.has(key)) throw new Error(`duplicate key ${key}`);
@@ -80,6 +134,15 @@ describe("lens registry", () => {
         };
       },
       async recompose(key: string) {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("broadcast down");
+        }
+        if (gate) {
+          const held = gate;
+          gate = undefined;
+          await held;
+        }
         const composed = await composers.get(key)?.();
         const view = validators.get(key)?.(composed) ?? composed;
         broadcasts.push({ key, view });
@@ -89,7 +152,20 @@ describe("lens registry", () => {
       keys: () => [...composers.keys()],
       dispose: async () => {},
     } as unknown as SnapshotManager;
-    return { sm, broadcasts, keys: () => [...composers.keys()] };
+    return {
+      sm,
+      broadcasts,
+      keys: () => [...composers.keys()],
+      failNextRecompose: () => {
+        failOnce = true;
+      },
+      holdNextRecompose: () => {
+        gate = new Promise<void>((r) => {
+          openGate = r;
+        });
+        return () => openGate?.();
+      },
+    };
   }
 
   // A registerRegion double recording each call, its unregister invocations, and
@@ -138,6 +214,90 @@ describe("lens registry", () => {
     await reg.publish("a", board("A2"));
     expect(region.calls).toHaveLength(1); // region added once, not per publish
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A2") });
+  });
+
+  test("an identical re-author does not re-broadcast — the panel's freshness is the board's", async () => {
+    const { sm, broadcasts } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"));
+    // The seed compose on register, then the authored board.
+    expect(broadcasts).toHaveLength(2);
+    // A cadence refresh that found nothing to change: re-composing would restamp the
+    // frame and read as "updated just now" over numbers nothing re-measured.
+    await reg.publish("a", board("A"));
+    expect(broadcasts).toHaveLength(2);
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
+  });
+
+  test("broadcasts every real change, including a revert to a board published before", async () => {
+    const { sm, broadcasts } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A2"));
+    // A revert differs from the LIVE board, so it is a change like any other.
+    await reg.publish("a", board("A"));
+    expect(broadcasts).toHaveLength(4);
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
+  });
+
+  test("a re-author of the stored board still converges a panel a failed save left ahead", async () => {
+    const { sm, broadcasts } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const { store } = fakeLensStore();
+    const reg = createLensRegistry(sm, region.register, store);
+    await reg.publish("a", board("A"));
+    // publish() persists only after the live publish succeeds, so a store that throws
+    // leaves the panel on "B" while disk still says "A".
+    const saveLens = store.saveLens;
+    store.saveLens = () => Promise.reject(new Error("disk full"));
+    await expect(reg.publish("a", board("B"))).rejects.toThrow("disk full");
+    store.saveLens = saveLens;
+    // The refresh workflow re-emits the STORED board. It must reach the surface:
+    // skipping on the stored board would call this unchanged and strand "B" on the
+    // panel with no later refresh able to converge it.
+    await reg.publish("a", board("A"));
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
+  });
+
+  test("a retry after a failed broadcast republishes — the skip tracks what actually reached the surface", async () => {
+    const { sm, broadcasts, failNextRecompose } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"));
+    // The broadcast of B fails, so the panel is still showing A.
+    failNextRecompose();
+    await expect(reg.publish("a", board("B"))).rejects.toThrow("broadcast down");
+    // The refresh turn retries the same board. Skipping here would persist B while
+    // the panel stayed on A, with no later refresh able to converge them.
+    await reg.publish("a", board("B"));
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("B") });
+  });
+
+  test("a publish coalesced into another's compose leaves the tracker on what the key really shows", async () => {
+    const { sm, broadcasts, holdNextRecompose } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"));
+
+    // B enters the pump and stalls inside its compose; C then lands, coalesces onto
+    // that in-flight compose (publish returns without composing), and the pump's
+    // dirty loop is what actually puts C on the key. So B resolves LAST while C is
+    // what the panel shows.
+    const open = holdNextRecompose();
+    const bPublish = reg.publish("a", board("B"));
+    await new Promise((r) => setTimeout(r, 0));
+    await reg.publish("a", board("C"));
+    open();
+    await bPublish;
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("C") });
+
+    // A refresh re-emits B, the board the store still holds. It must reach the key:
+    // a tracker that recorded B (the last publish to resolve) would skip here and
+    // leave C on the panel with nothing able to converge it.
+    await reg.publish("a", board("B"));
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("B") });
   });
 
   test("authors distinct subjects as distinct panels with no eviction", async () => {

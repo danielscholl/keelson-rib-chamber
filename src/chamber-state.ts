@@ -104,8 +104,10 @@ export function diffAgainstWatermark(state: ChamberState, watermark: Watermark):
   const newlyEndedRooms = state.endedRoomSlugs.filter((slug) => !acked.has(slug));
   // A lens is substance when its fingerprint differs from the watermark's — which
   // covers a brand-new id (absent from the watermark, so `!==` against undefined) and
-  // a re-authored one (updatedAt advanced). A RETIRED lens (in the watermark, absent
-  // now) is NOT iterated here, so a retire alone never promotes the briefing.
+  // one whose board changed (updatedAt advances only then, so a cadence refresh that
+  // re-emits the same board is correctly not substance). A RETIRED lens (in the
+  // watermark, absent now) is NOT iterated here, so a retire alone never promotes
+  // the briefing.
   const changedOrNewLenses = Object.keys(state.lensFingerprints).filter(
     (id) => state.lensFingerprints[id] !== watermark.lensFingerprints[id],
   );
@@ -122,7 +124,8 @@ export function diffAgainstWatermark(state: ChamberState, watermark: Watermark):
 // fresh fingerprint against the one persisted at the last (paid) authoring to decide
 // whether re-authoring is warranted. Keyed on identity + rendered name (not counts), so
 // retiring one Mind for another — or a slug-stable rename — re-authors; a lens title
-// change rides updatedAt (re-authoring a lens bumps it). Slugs are colon-free
+// change rides updatedAt (a changed board bumps it, an identical re-author does not).
+// Slugs are colon-free
 // (kebab-case), so `slug:name` parses unambiguously. Deliberately excludes per-turn
 // churn (a room's turnIndex), so a live room can't drive a re-author each turn.
 export function chamberFingerprint(

@@ -414,6 +414,32 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(Object.keys(wm.lensFingerprints)).toContain("findings");
   });
 
+  test("an unchanged re-author is not substance — the cadence buys no second turn", async () => {
+    await seedMinds();
+    const { sm } = fakeSnapshotManager();
+    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const tools = rib.registerTools?.(makeCtx(run, sm)) ?? [];
+    const emit = tools.find((t) => t.name === "chamber_emit_lens");
+    const toolCtx: ToolContext = {
+      cwd: ".",
+      emit: () => {},
+      abortSignal: new AbortController().signal,
+    };
+    await emit?.execute({ id: "findings", board: briefBoard }, toolCtx);
+    await evaluateBriefGate();
+    expect(requests).toHaveLength(1);
+    const acked = (await readWatermark(home)).lensFingerprints;
+
+    // A cadence tick on a living lens: the bundled refresh re-composes from the prior
+    // board, so re-emitting it unchanged is the common case, not an edge. The gate
+    // fingerprints on updatedAt, so a re-stamp here would read as fresh substance and
+    // buy a briefing turn for a lens that says exactly what it said before.
+    await emit?.execute({ id: "findings", board: briefBoard }, toolCtx);
+    await evaluateBriefGate();
+    expect(requests).toHaveLength(1);
+    expect((await readWatermark(home)).lensFingerprints).toEqual(acked);
+  });
+
   test("retiring a promoted lens lapses the delta — the delete fires the gate, no second paid turn", async () => {
     await seedMinds();
     const { sm, lastBoard } = fakeSnapshotManager();
