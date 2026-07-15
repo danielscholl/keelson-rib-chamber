@@ -115,7 +115,7 @@ whatever it is made of, which need not be a turn at all.
 
 ## A data lens names a workflow of its own
 
-The bundled lens authors can read files — `Read`, `Glob`, `Grep`, and nothing else.
+The bundled lens authors can read files: `Read`, `Glob`, `Grep`, and nothing else.
 A lens over a repo, a report, or a facts file is grounded in it: the turn goes and
 reads the thing rather than composing from the subject string. What it cannot do is
 run a command or reach anything live, and it is asked to say so plainly rather than
@@ -125,7 +125,7 @@ So `chamber-lens-refresh` can re-read a file, and otherwise re-composes from the
 board it already wrote. That is enough for a lens that interprets a subject or
 watches a file, and not enough for one that *measures* something live: to re-derive
 those numbers, a lens needs a refresh workflow that goes and gets them. The floor
-stays there deliberately — loosening the bundled path far enough to reach live data
+stays there deliberately. Loosening the bundled path far enough to reach live data
 would hand a shell to every lens turn, and that privilege belongs in a workflow file
 a person wrote and placed themselves.
 

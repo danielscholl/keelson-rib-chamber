@@ -184,8 +184,8 @@ they have exactly three tools of it: `Read`, `Glob`, `Grep`.
 `allowed_tools` is an SDK-level whitelist rather than a rib-tool opt-in, so a node
 naming only its emit tool cannot open a file either. That is how the advertised entry
 point once came to compose from the subject string alone, honestly reporting nothing
-it could not see. Read access unlocks the common case — a lens over a repo, a report,
-a facts file — while shell, network, and every other rib tool stay out.
+it could not see. Read access unlocks the common case (a lens over a repo, a report,
+a facts file), while shell, network, and every other rib tool stay out.
 
 The floor stops there on purpose. A lens over **live or external** data is not a
 reason to widen it: that lens names a [refresh workflow of its
