@@ -69,6 +69,7 @@ export function buildLensesIndexBoard(
 // means absent on the card.
 function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
   const title = lens.board.title || lens.id;
+  const pinned = lens.pinned === true;
   // by-Mind first, then freshness — the maintainer reads ahead of "how stale".
   const fields = [
     ...(lens.maintainingMind ? [{ label: "by", value: lens.maintainingMind }] : []),
@@ -77,7 +78,14 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
   return {
     title,
     dot: dotFor(lens.maintainingMind, tones),
-    ...(lens.scope ? { pill: { label: lens.scope, tone: "info" as CanvasTone } } : {}),
+    // The pin reads ahead of the scope: it says where the lens IS, which is what the
+    // operator is scanning this index for. Only one pill fits, so a pinned lens wears
+    // that rather than its authored kind.
+    ...(pinned
+      ? { pill: { label: "pinned", tone: "accent" as CanvasTone } }
+      : lens.scope
+        ? { pill: { label: lens.scope, tone: "info" as CanvasTone } }
+        : {}),
     fields,
     ...(lens.reason ? { reason: { label: "changed", text: lens.reason } } : {}),
     actions: [
@@ -88,7 +96,8 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
         payload: { id: lens.id },
       },
       // Only a refresh-backed (living) lens offers the on-demand re-compose;
-      // a plain lens changes by re-authoring, so the verb would mislead.
+      // a plain lens changes by re-authoring, so the verb would mislead. It is also
+      // the ONLY re-compose an unpinned lens has — its cadence lives on the panel.
       ...(lens.refresh
         ? [
             {
@@ -99,6 +108,15 @@ function cardFor(lens: LensRecord, tones: Map<string, CanvasTone>) {
             },
           ]
         : []),
+      // One verb, label swapped, carrying the TARGET state — so a card rendered before
+      // someone else's pin can't toggle against state it isn't showing.
+      {
+        type: "pin-lens",
+        label: pinned ? "Unpin" : "Pin",
+        glyph: "⊙",
+        tone: "accent" as CanvasTone,
+        payload: { id: lens.id, pinned: !pinned },
+      },
       {
         type: "retire-lens",
         label: "Retire lens…",

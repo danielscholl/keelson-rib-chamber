@@ -210,28 +210,98 @@ describe("lens registry", () => {
     };
   }
 
-  test("registers the snapshot key and a grouped surface region on first publish", async () => {
+  test("a PINNED publish registers the snapshot key and a grouped surface region", async () => {
     const { sm, broadcasts, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    const { key } = await reg.publish("findings", board("Findings"));
+    const { key } = await reg.publish("findings", board("Findings"), true);
     expect(key).toBe(lensKey("findings"));
     expect(keys()).toContain(lensKey("findings"));
     expect(region.calls).toHaveLength(1);
     expect(region.calls[0]?.surfaceId).toBe(CHAMBER_SURFACE_ID);
     expect(region.calls[0]?.region.key).toBe(lensKey("findings"));
-    expect(region.calls[0]?.region.group).toBe("lens");
-    // The region carries the zone title so the merge labels the "Lenses" lane.
-    expect(region.calls[0]?.region.groupTitle).toBe("Lenses");
+    // The group is PER-ID so each pinned lens is the only member of its group: the host
+    // chunks per group, so each forms a one-column row, which the surface renders full
+    // width. A shared "lens" group would chunk them 3-across instead.
+    expect(region.calls[0]?.region.group).toBe("lens:findings");
+    // One shared zone title across those per-id groups is what folds the consecutive
+    // rows back under a single "Pinned" header.
+    expect(region.calls[0]?.region.groupTitle).toBe("Pinned");
+    // Folded on arrival: a pinned lens is a heartbeat strip until you open it.
+    expect(region.calls[0]?.region.collapsed).toBe(true);
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("findings"), view: board("Findings") });
+  });
+
+  // The predicate this whole feature turns on. Drop `&& pinned` from register() and an
+  // unpinned lens sprouts the panel it was authored to not have.
+  test("an UNPINNED publish registers the key and no region — the exhibit's shape", async () => {
+    const { sm, broadcasts, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    const { key } = await reg.publish("findings", board("Findings"), false);
+    expect(key).toBe(lensKey("findings"));
+    // The key is what lens-open focuses, so an unpinned lens is still fully readable in
+    // the drawer — dropping it with the panel would leave every index card opening a
+    // dead key.
+    expect(keys()).toContain(lensKey("findings"));
+    expect(region.calls).toHaveLength(0);
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("findings"), view: board("Findings") });
+  });
+
+  // The `entry.pinned === pinned` term in rewireRegion's early-out, from the side that
+  // is easy to get wrong: a `boolean | undefined` entry compared against a passed
+  // `false` never matches, so every re-author would churn a region that isn't there.
+  test("re-authoring an unpinned lens never touches the region seam", async () => {
+    const { sm } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A1"), false);
+    await reg.publish("a", board("A2"), false);
+    expect(region.calls).toHaveLength(0);
+    expect(region.unregisters()).toBe(0);
+  });
+
+  test("pinning an existing lens adds its panel; unpinning drops it and keeps the key", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"), false);
+    expect(region.calls).toHaveLength(0);
+
+    expect(reg.setPin("a", true)).toBe(true);
+    expect(region.calls).toHaveLength(1);
+    expect([...region.active]).toEqual([lensKey("a")]);
+
+    expect(reg.setPin("a", false)).toBe(true);
+    expect([...region.active]).toEqual([]);
+    // The record and its key outlive the panel: Open must keep working once unpinned.
+    expect(keys()).toContain(lensKey("a"));
+  });
+
+  test("setPin is idempotent and refuses what has no panel to swap", async () => {
+    const { sm } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"), true);
+    expect(region.calls).toHaveLength(1);
+    // A re-pin of a pinned lens must not churn the region.
+    expect(reg.setPin("a", true)).toBe(true);
+    expect(region.calls).toHaveLength(1);
+    // An exhibit holds a key and no panel at any pin state — the region predicate is the
+    // only thing standing between a room's deliverable and permanent surface.
+    await reg.publish("verdict", board("Verdict"), false, undefined, "exhibit");
+    expect(reg.setPin("verdict", true)).toBe(false);
+    expect(region.calls).toHaveLength(1);
+    // Nothing live under that id at all.
+    expect(reg.setPin("ghost", true)).toBe(false);
   });
 
   test("re-authoring the same id updates the panel without re-registering", async () => {
     const { sm, broadcasts } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A1"));
-    await reg.publish("a", board("A2"));
+    await reg.publish("a", board("A1"), true);
+    await reg.publish("a", board("A2"), true);
     expect(region.calls).toHaveLength(1); // region added once, not per publish
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A2") });
   });
@@ -240,12 +310,12 @@ describe("lens registry", () => {
     const { sm, broadcasts } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
     // The seed compose on register, then the authored board.
     expect(broadcasts).toHaveLength(2);
     // A cadence refresh that found nothing to change: re-composing would restamp the
     // frame and read as "updated just now" over numbers nothing re-measured.
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
     expect(broadcasts).toHaveLength(2);
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
   });
@@ -254,10 +324,10 @@ describe("lens registry", () => {
     const { sm, broadcasts } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
-    await reg.publish("a", board("A2"));
+    await reg.publish("a", board("A"), true);
+    await reg.publish("a", board("A2"), true);
     // A revert differs from the LIVE board, so it is a change like any other.
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
     expect(broadcasts).toHaveLength(4);
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
   });
@@ -267,17 +337,17 @@ describe("lens registry", () => {
     const region = fakeRegisterRegion();
     const { store } = fakeLensStore();
     const reg = createLensRegistry(sm, region.register, store);
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
     // publish() persists only after the live publish succeeds, so a store that throws
     // leaves the panel on "B" while disk still says "A".
     const saveLens = store.saveLens;
     store.saveLens = () => Promise.reject(new Error("disk full"));
-    await expect(reg.publish("a", board("B"))).rejects.toThrow("disk full");
+    await expect(reg.publish("a", board("B"), true)).rejects.toThrow("disk full");
     store.saveLens = saveLens;
     // The refresh workflow re-emits the STORED board. It must reach the surface:
     // skipping on the stored board would call this unchanged and strand "B" on the
     // panel with no later refresh able to converge it.
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
   });
 
@@ -285,13 +355,13 @@ describe("lens registry", () => {
     const { sm, broadcasts, failNextRecompose } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
     // The broadcast of B fails, so the panel is still showing A.
     failNextRecompose();
-    await expect(reg.publish("a", board("B"))).rejects.toThrow("broadcast down");
+    await expect(reg.publish("a", board("B"), true)).rejects.toThrow("broadcast down");
     // The refresh turn retries the same board. Skipping here would persist B while
     // the panel stayed on A, with no later refresh able to converge them.
-    await reg.publish("a", board("B"));
+    await reg.publish("a", board("B"), true);
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("B") });
   });
 
@@ -299,16 +369,16 @@ describe("lens registry", () => {
     const { sm, broadcasts, holdNextRecompose } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
 
     // B enters the pump and stalls inside its compose; C then lands, coalesces onto
     // that in-flight compose (publish returns without composing), and the pump's
     // dirty loop is what actually puts C on the key. So B resolves LAST while C is
     // what the panel shows.
     const open = holdNextRecompose();
-    const bPublish = reg.publish("a", board("B"));
+    const bPublish = reg.publish("a", board("B"), true);
     await new Promise((r) => setTimeout(r, 0));
-    await reg.publish("a", board("C"));
+    await reg.publish("a", board("C"), true);
     open();
     await bPublish;
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("C") });
@@ -316,7 +386,7 @@ describe("lens registry", () => {
     // A refresh re-emits B, the board the store still holds. It must reach the key:
     // a tracker that recorded B (the last publish to resolve) would skip here and
     // leave C on the panel with nothing able to converge it.
-    await reg.publish("a", board("B"));
+    await reg.publish("a", board("B"), true);
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("B") });
   });
 
@@ -324,7 +394,7 @@ describe("lens registry", () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    for (const id of ["a", "b", "c", "d"]) await reg.publish(id, board(id));
+    for (const id of ["a", "b", "c", "d"]) await reg.publish(id, board(id), true);
     expect(keys()).toEqual(["a", "b", "c", "d"].map(lensKey));
     expect(region.calls.map((c) => c.region.key)).toEqual(["a", "b", "c", "d"].map(lensKey));
   });
@@ -341,11 +411,11 @@ describe("lens registry", () => {
       title: "Dup",
       sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
     } as unknown as CanvasBoardView;
-    await expect(reg.publish("bad", dupColumns)).rejects.toThrow();
+    await expect(reg.publish("bad", dupColumns, true)).rejects.toThrow();
     expect(keys()).toEqual([]);
     expect(region.calls).toHaveLength(0);
     // A later valid lens still registers cleanly at its own key.
-    await reg.publish("good", board("Good"));
+    await reg.publish("good", board("Good"), true);
     expect(keys()).toEqual([lensKey("good")]);
   });
 
@@ -353,14 +423,14 @@ describe("lens registry", () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
-    await reg.publish("b", board("B"));
+    await reg.publish("a", board("A"), true);
+    await reg.publish("b", board("B"), true);
     reg.dispose();
     expect(keys()).toEqual([]);
     expect(region.unregisters()).toBe(2);
     // The keys are free, so a fresh registry on the same manager re-registers cleanly.
     const reg2 = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await expect(reg2.publish("a", board("A"))).resolves.toEqual({ key: lensKey("a") });
+    await expect(reg2.publish("a", board("A"), true)).resolves.toEqual({ key: lensKey("a") });
   });
 
   test("concurrent publishes of the same new id register the key once, both resolving", async () => {
@@ -371,8 +441,8 @@ describe("lens registry", () => {
     // workflow seam and a room turn-tool) must not both reach sm.register and trip its
     // duplicate-key guard — the second finds the entry and just republishes.
     const [a, b] = await Promise.all([
-      reg.publish("dup", board("A")),
-      reg.publish("dup", board("B")),
+      reg.publish("dup", board("A"), true),
+      reg.publish("dup", board("B"), true),
     ]);
     expect(a.key).toBe(lensKey("dup"));
     expect(b.key).toBe(lensKey("dup"));
@@ -389,7 +459,7 @@ describe("lens registry", () => {
       },
       fakeLensStore().store,
     );
-    await expect(reg.publish("x", board("X"))).rejects.toThrow(/region limit/);
+    await expect(reg.publish("x", board("X"), true)).rejects.toThrow(/region limit/);
     expect(keys()).toEqual([]); // no leaked snapshot key
   });
 
@@ -397,8 +467,8 @@ describe("lens registry", () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
-    await reg.publish("b", board("B"));
+    await reg.publish("a", board("A"), true);
+    await reg.publish("b", board("B"), true);
     reg.remove("a");
     expect(keys()).toEqual([lensKey("b")]); // a's snapshot key dropped, b's kept
     expect([...region.active]).toEqual([lensKey("b")]); // a's region dropped, b's kept
@@ -409,7 +479,7 @@ describe("lens registry", () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A"), true);
     expect(() => reg.remove("never")).not.toThrow();
     expect(keys()).toEqual([lensKey("a")]); // the existing lens is untouched
     expect(region.unregisters()).toBe(0);
@@ -419,11 +489,11 @@ describe("lens registry", () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A1"));
+    await reg.publish("a", board("A1"), true);
     reg.remove("a");
     // A leaked snapshot key would trip the manager's duplicate-key guard; a leaked
     // region would double-count — re-publishing cleanly proves both handles fired.
-    await expect(reg.publish("a", board("A2"))).resolves.toEqual({ key: lensKey("a") });
+    await expect(reg.publish("a", board("A2"), true)).resolves.toEqual({ key: lensKey("a") });
     expect(keys()).toEqual([lensKey("a")]);
     expect([...region.active]).toEqual([lensKey("a")]);
   });
@@ -432,8 +502,8 @@ describe("lens registry", () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
-    await reg.publish("a", board("A"));
-    await reg.publish("b", board("B"));
+    await reg.publish("a", board("A"), true);
+    await reg.publish("b", board("B"), true);
     reg.remove("a");
     reg.dispose();
     expect(keys()).toEqual([]);
@@ -446,7 +516,7 @@ describe("lens registry", () => {
     const region = fakeRegisterRegion();
     const { store, saved } = fakeLensStore();
     const reg = createLensRegistry(sm, region.register, store);
-    await reg.publish("x", board("X"));
+    await reg.publish("x", board("X"), true);
     expect(saved.get("x")).toEqual(board("X"));
   });
 
@@ -460,7 +530,7 @@ describe("lens registry", () => {
       title: "Dup",
       sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
     } as unknown as CanvasBoardView;
-    await expect(reg.publish("bad", dupColumns)).rejects.toThrow();
+    await expect(reg.publish("bad", dupColumns, true)).rejects.toThrow();
     expect(saved.size).toBe(0); // an unrenderable board never reaches disk
   });
 });

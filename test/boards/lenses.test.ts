@@ -167,7 +167,7 @@ describe("buildLensesIndexBoard cards", () => {
 
   test("Retire follows — a destructive overflow action with a simple confirm", () => {
     const actions = cards(buildLensesIndexBoard([lens({ id: "release-risks" })]))[0]?.actions ?? [];
-    expect(actions).toHaveLength(2);
+    expect(actions).toHaveLength(3);
     const retire = actions.find((a) => a.type === "retire-lens");
     expect(retire).toMatchObject({
       type: "retire-lens",
@@ -181,6 +181,41 @@ describe("buildLensesIndexBoard cards", () => {
     expect(retire?.confirm?.subject).toBeUndefined();
     expect(retire?.confirm?.confirmLabel).toBe("Retire");
     expect(retire?.confirm?.cancelLabel).toBe("Cancel");
+  });
+
+  test("Pin swaps to Unpin on a pinned lens, carrying the TARGET state either way", () => {
+    const unpinned = cards(buildLensesIndexBoard([lens({ id: "release-risks" })]))[0];
+    const pin = unpinned?.actions?.find((a) => a.type === "pin-lens");
+    expect(pin).toMatchObject({
+      type: "pin-lens",
+      label: "Pin",
+      glyph: "⊙",
+      tone: "accent",
+      // The target, not the current state: a card rendered before someone else's pin
+      // must not toggle against state it isn't showing.
+      payload: { id: "release-risks", pinned: true },
+    });
+    // Pinning is not destructive — no confirm, no overflow.
+    expect(pin?.destructive).toBeUndefined();
+    expect(pin?.confirm).toBeUndefined();
+
+    const pinned = cards(buildLensesIndexBoard([lens({ id: "release-risks", pinned: true })]))[0];
+    expect(pinned?.actions?.find((a) => a.type === "pin-lens")).toMatchObject({
+      label: "Unpin",
+      payload: { id: "release-risks", pinned: false },
+    });
+  });
+
+  test("a pinned lens wears the pinned pill, ahead of its authored scope", () => {
+    const plain = cards(buildLensesIndexBoard([lens({ id: "a", scope: "status board" })]))[0];
+    expect(plain?.pill).toEqual({ label: "status board", tone: "info" });
+
+    // Where the lens IS outranks what kind it is: only one pill fits, and the pin is
+    // what the operator scans this index for.
+    const pinned = cards(
+      buildLensesIndexBoard([lens({ id: "a", scope: "status board", pinned: true })]),
+    )[0];
+    expect(pinned?.pill).toEqual({ label: "pinned", tone: "accent" });
   });
 
   test("the id rides the serialized board on both action payloads (guards collect-lenses toContain)", () => {
@@ -201,6 +236,7 @@ describe("buildLensesIndexBoard living lenses", () => {
     expect(living?.actions?.map((a) => a.type)).toEqual([
       "lens-open",
       "refresh-lens",
+      "pin-lens",
       "retire-lens",
     ]);
     const refresh = living?.actions?.find((a) => a.type === "refresh-lens");
@@ -212,6 +248,6 @@ describe("buildLensesIndexBoard living lenses", () => {
     expect(refresh?.destructive).toBeUndefined();
 
     const plain = cards(buildLensesIndexBoard([lens({ id: "static" })]))[0];
-    expect(plain?.actions?.map((a) => a.type)).toEqual(["lens-open", "retire-lens"]);
+    expect(plain?.actions?.map((a) => a.type)).toEqual(["lens-open", "pin-lens", "retire-lens"]);
   });
 });

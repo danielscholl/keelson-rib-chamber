@@ -611,7 +611,7 @@ describe("board lens regression", () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
 
-    const { key } = await reg.publish("release-risks", board("Release Risks"));
+    const { key } = await reg.publish("release-risks", board("Release Risks"), true);
 
     expect(key).toBe(lensKey("release-risks"));
     expect(key).toBe("rib:chamber:lens:release-risks");

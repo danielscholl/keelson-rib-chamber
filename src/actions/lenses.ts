@@ -103,6 +103,53 @@ export function lensOpenAction(action: RibAction): RibActionResult {
   return { ok: true, data: { effect: "open-canvas", key: lensKey(got.id), title: got.id } };
 }
 
+// Pin or unpin a lens's Chamber panel: the index card's toggle and the panel head's
+// Unpin verb both land here, carrying the target state so a stale card can't toggle
+// against state it isn't showing. Operator-only — deliberately absent from
+// chamber_emit_lens and from FRAME_SAFE_ACTIONS, since an authoring Mind claiming
+// surface is the clutter this exists to remove.
+export async function pinLensAction(action: RibAction): Promise<RibActionResult> {
+  const got = lensActionId(action, "pin-lens");
+  if ("error" in got) return { ok: false, error: got.error };
+  const { id } = got;
+  const pinned = ((action.payload ?? {}) as Record<string, unknown>).pinned;
+  if (typeof pinned !== "boolean") {
+    return { ok: false, error: "pin-lens requires payload { id, pinned: boolean }" };
+  }
+  const registry = getLensRegistry();
+  if (!registry) return { ok: false, error: "pin unavailable (region seam absent)" };
+  // Read-modify-write, like the note write-back: serialize it so a pin can't lose-update
+  // against a concurrent note or witness stamp.
+  const apply = async (): Promise<RibActionResult> => {
+    try {
+      await awaitLensReconcile();
+      const record = await createFileLensStore(lensesDir()).loadLens(id);
+      if (!record) return { ok: false, error: `lens '${id}' not found` };
+      if (isExhibit(record)) {
+        return { ok: false, error: `'${id}' is an exhibit — exhibits have no panel` };
+      }
+      if ((record.pinned === true) === pinned) return { ok: true, data: { id, pinned } };
+      // Spread the loaded record so its updatedAt rides through unchanged: a pin changes
+      // no content, and the brief and digest gates fingerprint on `${id}=${updatedAt}`,
+      // so letting the store re-stamp would buy two paid turns for a lens that says
+      // exactly what it said before (and jump it up a newest-first index it didn't earn).
+      await createFileLensStore(lensesDir()).saveLens({ ...record, pinned });
+      // Live half second: the record is the durable truth, so a registry with no entry
+      // for this id (its region registration failed at boot) still converges on restart.
+      registry.setPin(id, pinned);
+      // The card's label and pill changed, so its index is stale. NOT chamber-roster —
+      // "Live views" counts standing lenses regardless of panel — and NOT the brief
+      // gate: a free layout toggle must never promote a paid briefing turn.
+      await refreshWorkflow("chamber-lenses").catch(() => {});
+      await refreshStandingPanels();
+      return { ok: true, data: { id, pinned } };
+    } catch (e) {
+      return { ok: false, error: errText(e) };
+    }
+  };
+  return enqueueLensWrite(apply);
+}
+
 export function lensHtmlAction(action: RibAction): RibActionResult {
   const payload = action.payload;
   if (
@@ -170,12 +217,14 @@ export async function lensNoteAction(action: RibAction): Promise<RibActionResult
       await awaitLensReconcile();
       const record = await createFileLensStore(lensesDir()).loadLens(id);
       if (!record) return { ok: false, error: `lens '${id}' not found` };
-      // Round-trip the provenance, the kind, and the refresh backing (lensProvenance
-      // picks every provenance field), so an annotated exhibit can't come back as a
-      // lens with no source room and an annotated living lens keeps its wiring.
+      // Round-trip the provenance, the kind, the pin, and the refresh backing
+      // (lensProvenance picks every provenance field), so an annotated exhibit can't come
+      // back as a lens with no source room, and an annotated lens keeps its wiring and
+      // its panel — a note must never unpin what it annotates.
       const { key } = await registry.publish(
         id,
         appendLensNote(record.board, note),
+        record.pinned === true,
         lensProvenance(record),
         isExhibit(record) ? "exhibit" : "lens",
         record.refresh,

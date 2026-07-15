@@ -155,7 +155,7 @@ describe("lens registry — kind-routed shelves", () => {
   test("an exhibit publish registers its key and NO panel", async () => {
     const f = fakeSeams();
     const registry = createLensRegistry(f.sm, f.registerRegion, f.store);
-    await registry.publish("assessment", board("Assessment"), { reason: "gist" }, "exhibit");
+    await registry.publish("assessment", board("Assessment"), false, { reason: "gist" }, "exhibit");
     // An exhibit is a room's deliverable, reached from the room that tabled it — it earns
     // no standing panel. The KEY still registers: it is what lens-open focuses, so the
     // room board's Tabled cards read it.
@@ -165,22 +165,23 @@ describe("lens registry — kind-routed shelves", () => {
     expect(f.saved).toEqual([{ id: "assessment", kind: "exhibit", sourceRoom: undefined }]);
   });
 
-  test("a lens publish keeps the Lenses shelf and gains the collapse chevron", async () => {
+  test("a pinned lens publish takes the Pinned shelf and arrives collapsed", async () => {
     const f = fakeSeams();
     const registry = createLensRegistry(f.sm, f.registerRegion, f.store);
-    await registry.publish("morning-brief", board("Morning Brief"));
+    await registry.publish("morning-brief", board("Morning Brief"), true);
     const region = f.regions[0];
-    expect(region?.group).toBe("lens");
-    expect(region?.groupTitle).toBe("Lenses");
+    expect(region?.group).toBe("lens:morning-brief");
+    expect(region?.groupTitle).toBe("Pinned");
     expect(region?.glyph).toEqual({ char: "✦", tone: "accent" });
     expect(region?.collapsible).toBe(true);
+    expect(region?.collapsed).toBe(true);
     expect(f.saved).toEqual([{ id: "morning-brief", kind: "lens", sourceRoom: undefined }]);
   });
 
   test("reregister restores an exhibit's key without re-saving (boot preserves updatedAt)", async () => {
     const f = fakeSeams();
     const registry = createLensRegistry(f.sm, f.registerRegion, f.store);
-    await registry.reregister("assessment", board("Assessment"), "exhibit");
+    await registry.reregister("assessment", board("Assessment"), false, "exhibit");
     // Boot brings the key back so a tabled exhibit is openable across a restart, and
     // still no panel.
     expect(f.sm.keys()).toContain(lensKey("assessment"));
@@ -193,9 +194,9 @@ describe("lens registry — kind-routed shelves", () => {
     // exhibit, rather than leaving a stale Lenses panel behind it.
     const f = fakeSeams();
     const registry = createLensRegistry(f.sm, f.registerRegion, f.store);
-    await registry.publish("crosser", board("Crosser"));
+    await registry.publish("crosser", board("Crosser"), true);
     expect(f.regions).toHaveLength(1);
-    await registry.reregister("crosser", board("Crosser"), "exhibit");
+    await registry.reregister("crosser", board("Crosser"), false, "exhibit");
     expect(f.regions).toHaveLength(0);
     expect(f.sm.keys()).toContain(lensKey("crosser"));
   });

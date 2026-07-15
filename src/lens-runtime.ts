@@ -97,11 +97,14 @@ function reconcileLensPanels(registry: LensRegistry): void {
     }
     for (const rec of records) {
       try {
-        // Kind and refresh ride through so an exhibit's panel comes back on its
-        // own shelf and a living lens comes back with its re-compose wiring.
+        // Kind, pin, and refresh ride through so an exhibit comes back panel-less, a
+        // pinned lens comes back on the surface, and a living lens comes back with its
+        // re-compose wiring. The record is authoritative for the pin — reading it here
+        // is what lets a lens whose region registration failed heal on the next boot.
         await registry.reregister(
           rec.id,
           rec.board,
+          rec.pinned === true,
           isExhibit(rec) ? "exhibit" : "lens",
           rec.refresh,
         );

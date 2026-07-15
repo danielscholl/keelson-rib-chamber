@@ -154,7 +154,7 @@ function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
         name: "chamber-lenses",
         mutates_checkout: false,
         description:
-          'Use when: you want a single index of the living lenses Minds have authored. Triggers: "show the lenses", "list lenses", "what lenses exist". Does: reads the persisted lenses from the Chamber data home and publishes a living-views index (one card per lens, each with Open and a Retire control) to the Chamber Lenses canvas. NOT for: authoring a lens (the chamber-lens workflow) or viewing one (each lens has its own live panel; Open focuses it).',
+          'Use when: you want a single index of the living lenses Minds have authored. Triggers: "show the lenses", "list lenses", "what lenses exist". Does: reads the persisted lenses from the Chamber data home and publishes a living-views index (one card per lens, each with Open, a Pin toggle, and a Retire control) to the Chamber Lenses canvas. NOT for: authoring a lens (the chamber-lens workflow) or viewing one (Open opens it in the drawer).',
         nodes: [
           {
             id: "collect",
@@ -267,7 +267,7 @@ function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
         name: "chamber-lens",
         mutates_checkout: false,
         description:
-          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject — onto the Chamber surface. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as its own Chamber lens panel (no hand-coded UI). NOT for: the standing Chamber Briefing (the rib-driven banner), genesis-ing agents, or running a room.',
+          'Use when: have an agent author a one-screen LENS — a custom canvas board on a subject. Triggers: "author a lens", "show a board on X", "/workflow run chamber-lens <subject>". Does: one agent turn composes a canvas board for the subject and publishes it as a lens (no hand-coded UI), where it lands in the Chamber Lenses index and opens in the drawer. NOT for: the standing Chamber Briefing (the rib-driven banner), genesis-ing agents, or running a room.',
         nodes: [
           {
             id: "compose",
@@ -291,7 +291,7 @@ function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
         name: LENS_REFRESH_WORKFLOW,
         mutates_checkout: false,
         description:
-          'Use when: re-compose a LIVING lens so its content is current — the refresh backing behind a lens authored with refresh set. Triggers: a lens panel\'s cadence or Refresh action (input `lens` = the lens id); "/workflow run chamber-lens-refresh" with inputs lens=<id>. Does: one agent turn re-reads the persisted lens and re-emits a fresh board under the same id via chamber_emit_lens. NOT for: authoring a new lens (chamber-lens), exhibits (a tabled deliverable never refreshes), or the standing Chamber Briefing.',
+          "Use when: re-compose a LIVING lens so its content is current — the refresh backing behind a lens authored with refresh set. Triggers: the Refresh action on a lens's index card, or a PINNED lens panel's cadence (input `lens` = the lens id); \"/workflow run chamber-lens-refresh\" with inputs lens=<id>. Does: one agent turn re-reads the persisted lens and re-emits a fresh board under the same id via chamber_emit_lens. NOT for: authoring a new lens (chamber-lens), exhibits (a tabled deliverable never refreshes), or the standing Chamber Briefing.",
         inputs: { lens: { description: "the lens id to re-compose", required: true } },
         nodes: [
           {
