@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.42.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.41.0...v0.42.0) (2026-07-15)
+
+
+### Added
+
+* **rooms:** add HTML summary action for room outcomes ([#291](https://github.com/danielscholl/keelson-rib-chamber/issues/291)) ([2653826](https://github.com/danielscholl/keelson-rib-chamber/commit/2653826d1b084e337c3109e737b636cf0707a3aa))
+* **rooms:** give a room card a toned exhibit field ([#288](https://github.com/danielscholl/keelson-rib-chamber/issues/288)) ([9a38ece](https://github.com/danielscholl/keelson-rib-chamber/commit/9a38ece214fa765b29ee2476e2fa7fc49d1cbd36))
+
+
+### Fixed
+
+* **brief:** drop deleted-room chips from briefing ([#286](https://github.com/danielscholl/keelson-rib-chamber/issues/286)) ([054b0c4](https://github.com/danielscholl/keelson-rib-chamber/commit/054b0c4d635a025c6bf5e525c7e6ca650bb95e69))
+* **exhibits:** a cross-room re-table steals an exhibit and overwrites its board ([#287](https://github.com/danielscholl/keelson-rib-chamber/issues/287)) ([82e2398](https://github.com/danielscholl/keelson-rib-chamber/commit/82e239858079d4fc317882a6f8ee7c2f876994f8))
+* **room:** retry empty turns and mark no-text output ([#290](https://github.com/danielscholl/keelson-rib-chamber/issues/290)) ([34bc67a](https://github.com/danielscholl/keelson-rib-chamber/commit/34bc67a396b1a3c72d92535cbc3fd2c7ca52cde9))
+
 ## [0.41.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.40.2...v0.41.0) (2026-07-14)
 
 
