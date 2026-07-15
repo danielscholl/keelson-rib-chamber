@@ -33,14 +33,14 @@ describe("chamber-lens-html workflow", () => {
     expect(wf?.validate).toBeUndefined();
   });
 
-  test("is a single prompt node scoped to chamber_emit_lens_html", () => {
+  test("is a single prompt node scoped to chamber_emit_lens_html plus read-only file access", () => {
     const nodes =
       (htmlLens()?.definition as { nodes?: Array<Record<string, unknown>> })?.nodes ?? [];
     expect(nodes).toHaveLength(1);
     const n = node();
     expect(typeof n?.prompt).toBe("string");
     expect(n?.bash).toBeUndefined();
-    expect(n?.allowed_tools).toEqual(["chamber_emit_lens_html"]);
+    expect(n?.allowed_tools).toEqual(["chamber_emit_lens_html", "Read", "Glob", "Grep"]);
   });
 
   test("does NOT set fail_on_tool_error — a rejected palette is the in-turn retry signal", () => {

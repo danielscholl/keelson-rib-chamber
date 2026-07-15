@@ -158,6 +158,32 @@ describe("rib-chamber", () => {
     expect(names).toContain("chamber-lens");
   });
 
+  it("grounds every bundled lens author in files, and nothing more", () => {
+    // The privilege floor, pinned as a floor: allowed_tools is an SDK-level
+    // whitelist, so these lists are the whole world each turn can reach. Read access
+    // unlocks the common case (a lens over a repo, a report, a facts file); shell,
+    // network, and every other rib tool stay out, because live data is the custom
+    // refresh workflow's job — not a reason to widen the bundled path.
+    const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
+    for (const name of ["chamber-lens", "chamber-lens-refresh", "chamber-lens-html"]) {
+      const def = wfs.find((w) => (w.definition as { name?: string }).name === name)
+        ?.definition as { nodes?: { allowed_tools?: string[] }[] };
+      const allowed = def?.nodes?.[0]?.allowed_tools ?? [];
+      expect(allowed).toContain("Read");
+      expect(allowed).toContain("Glob");
+      expect(allowed).toContain("Grep");
+      for (const forbidden of ["Bash", "Write", "Edit", "WebFetch", "WebSearch"]) {
+        expect(allowed).not.toContain(forbidden);
+      }
+      // Only the workflow's own write seam (plus the refresh's read seam) is a rib
+      // tool here: a lens author must not inherit genesis, rooms, or exhibits.
+      const ribTools = allowed.filter((t) => t.startsWith("chamber_"));
+      expect(
+        ribTools.every((t) => /^chamber_(emit_lens|emit_lens_html|list_lenses)$/.test(t)),
+      ).toBe(true);
+    }
+  });
+
   it("contributes the chamber-lens-refresh re-author, unbound, with a required lens input", () => {
     const wfs = rib.contributeWorkflows?.({} as RibContext) ?? [];
     const refresh = wfs.find(
@@ -173,7 +199,15 @@ describe("rib-chamber", () => {
     };
     expect(def.inputs?.lens?.required).toBe(true);
     expect(def.nodes?.[0]?.prompt).toContain("$inputs.lens");
-    expect(def.nodes?.[0]?.allowed_tools).toEqual(["chamber_list_lenses", "chamber_emit_lens"]);
+    // Read-only grounding beside the write seam: a refresh with no file access can
+    // only restate the board it already wrote under a fresh timestamp.
+    expect(def.nodes?.[0]?.allowed_tools).toEqual([
+      "chamber_list_lenses",
+      "chamber_emit_lens",
+      "Read",
+      "Glob",
+      "Grep",
+    ]);
   });
 
   it("withholds chamber_emit_lens when the registerRegion seam is absent (fail closed)", () => {

@@ -21,6 +21,15 @@ export const DIGEST_TOOL_NAME = "chamber_emit_digest";
 // also the default backing resolveLensRefresh assigns a living lens.
 export const LENS_REFRESH_WORKFLOW = "chamber-lens-refresh";
 
+// The read-only grounding the bundled lens authors carry beside their write seam.
+// allowed_tools is an SDK-level whitelist rather than just a rib-tool opt-in, so a
+// node naming only its emit tool could not open a file either — which left the
+// advertised entry point composing from the subject string alone. Files only: no
+// shell, no network, no rib tools. Live or external data still needs a refresh
+// workflow of the operator's own; widening this floor far enough to reach that would
+// hand every bundled lens turn a shell, which is the trade it deliberately refuses.
+const LENS_READ_TOOLS = ["Read", "Glob", "Grep"];
+
 // Absolute path to the roster collector, resolved at module load so the workflow
 // node runs the right file regardless of the run's (nominal) cwd. fileURLToPath
 // (not URL.pathname) decodes %20 etc. so an install path with a space resolves;
@@ -267,7 +276,7 @@ function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
             // should fail loudly if the publish errors, not report SUCCEEDED with
             // no lens rendered.
             fail_on_tool_error: true,
-            allowed_tools: [LENS_TOOL_NAME],
+            allowed_tools: [LENS_TOOL_NAME, ...LENS_READ_TOOLS],
           },
         ],
       },
@@ -291,7 +300,7 @@ function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
             // Fail closed like chamber-lens: a rejected emit must fail the run,
             // not report SUCCEEDED with a stale panel.
             fail_on_tool_error: true,
-            allowed_tools: ["chamber_list_lenses", LENS_TOOL_NAME],
+            allowed_tools: ["chamber_list_lenses", LENS_TOOL_NAME, ...LENS_READ_TOOLS],
           },
         ],
       },
@@ -313,7 +322,7 @@ function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
             // Deliberately NO fail_on_tool_error: a rejected palette or blocked
             // external resource is the retry signal — the turn reads the isError
             // report, fixes the markup, and emits again within the same node.
-            allowed_tools: [HTML_LENS_TOOL_NAME],
+            allowed_tools: [HTML_LENS_TOOL_NAME, ...LENS_READ_TOOLS],
           },
         ],
       },
