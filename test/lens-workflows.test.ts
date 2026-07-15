@@ -5,7 +5,7 @@ import { join } from "node:path";
 import rib from "../src/index.ts";
 import { discoverLensWorkflows, lensWorkflowName } from "../src/lens-workflows.ts";
 import { lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
-import { isChamberLensWorkflow } from "../src/workflows.ts";
+import { isChamberWorkflow } from "../src/workflows.ts";
 
 let root: string;
 
@@ -89,6 +89,16 @@ describe("lens workflow discovery", () => {
     expect(def.mutates_checkout).toBe(true);
   });
 
+  // Neither true nor false: defaulting it to false could strip a lock the operator
+  // wanted, so the file is refused by name instead. The harness would reject the
+  // definition anyway, but only with a warning that never names the file.
+  test("refuses a mutates_checkout that is neither true nor false", async () => {
+    await writeFile(join(root, "bad.yaml"), `${WF}mutates_checkout: "false"\n`);
+    await writeFile(join(root, "good.yaml"), WF);
+    const { names } = discoverLensWorkflows(root);
+    expect(names).toEqual(new Set(["chamber-lens-good"]));
+  });
+
   test("ignores a non-workflow file", async () => {
     await writeFile(join(root, "notes.md"), "not a workflow");
     await writeFile(join(root, "facts.yaml"), WF);
@@ -148,12 +158,17 @@ describe("the rib contributes the operator's lens workflows", () => {
     expect(names).toContain("chamber-roster");
   });
 
-  // isChamberLensWorkflow drives the emit reply's caveat, so it must reflect what was
-  // actually discovered — an author hearing nothing reads as a backing that works.
-  test("a discovered workflow is one chamber vouches for; an arbitrary name is not", () => {
-    expect(isChamberLensWorkflow("chamber-lens-release-status")).toBe(true);
-    expect(isChamberLensWorkflow("chamber-lens-refresh")).toBe(true);
-    expect(isChamberLensWorkflow("some-other-workflow")).toBe(false);
+  // isChamberWorkflow drives the emit reply's caveat, so it must answer the host's
+  // question — "does this name carry rib provenance?" — which EVERY contribution
+  // satisfies, not just the lens-shaped ones. Vouching for too few cries wolf over a
+  // backing that would have run fine.
+  test("vouches for every workflow chamber contributes, not just the lens ones", () => {
+    expect(isChamberWorkflow("chamber-lens-release-status")).toBe(true);
+    expect(isChamberWorkflow("chamber-lens-refresh")).toBe(true);
+    expect(isChamberWorkflow("chamber-lens-html")).toBe(true);
+    expect(isChamberWorkflow("chamber-roster")).toBe(true);
+    expect(isChamberWorkflow("chamber-digest")).toBe(true);
+    expect(isChamberWorkflow("some-other-workflow")).toBe(false);
   });
 
   test("an empty dir leaves the bundled contributions alone", async () => {
@@ -161,6 +176,6 @@ describe("the rib contributes the operator's lens workflows", () => {
     const names = contributedNames();
     expect(names).toContain("chamber-lens-refresh");
     expect(names.filter((n) => n.startsWith("chamber-lens-release"))).toEqual([]);
-    expect(isChamberLensWorkflow("chamber-lens-release-status")).toBe(false);
+    expect(isChamberWorkflow("chamber-lens-release-status")).toBe(false);
   });
 });

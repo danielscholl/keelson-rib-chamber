@@ -48,15 +48,17 @@ function shQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-// The names the operator's own lens producers were contributed under, captured at
-// activation. The emit tool reads this to tell an author that a named workflow is not
-// one chamber contributed — the one moment that reaches them, since the host's
-// refresh seam is fail-soft and a backing it won't run is otherwise a silent 409 on
-// every tick.
-let discoveredLensWorkflows: ReadonlySet<string> = new Set();
+// Every workflow name chamber handed the catalog, bundled and operator-authored
+// alike, captured at activation. The emit tool reads this to tell an author their
+// refresh backing won't run — the one moment that reaches them, since the host's
+// refresh seam is fail-soft and an unrunnable backing is otherwise a silent 409 on
+// every tick. The question it answers is the host's gate ("does this name carry rib
+// provenance?"), which any contribution satisfies — so this must be the WHOLE set,
+// not the lens-shaped part of it, or the caveat cries wolf over a backing that runs.
+let contributedWorkflows: ReadonlySet<string> = new Set();
 
-export function isChamberLensWorkflow(name: string): boolean {
-  return name === LENS_REFRESH_WORKFLOW || discoveredLensWorkflows.has(name);
+export function isChamberWorkflow(name: string): boolean {
+  return contributedWorkflows.has(name);
 }
 
 // The producer: an agent turn (not a deterministic collector) emits the board,
@@ -67,10 +69,16 @@ export function isChamberLensWorkflow(name: string): boolean {
 // workflows write the rib data home and publish snapshots, never a project
 // checkout, so the host's per-project mutation lock must not serialize them.
 export function contributeChamberWorkflows(): readonly RibWorkflowContribution[] {
-  const discovered = discoverLensWorkflows(lensWorkflowsDir());
-  discoveredLensWorkflows = discovered.names;
+  const contributions = buildChamberWorkflows();
+  // Derived from what is actually returned, so a workflow added below is vouched for
+  // without anyone remembering to list it twice.
+  contributedWorkflows = new Set(contributions.map((c) => (c.definition as { name: string }).name));
+  return contributions;
+}
+
+function buildChamberWorkflows(): readonly RibWorkflowContribution[] {
   return [
-    ...discovered.contributions,
+    ...discoverLensWorkflows(lensWorkflowsDir()).contributions,
     {
       // The roster producer: a deterministic collector that reads the
       // genesis-authored Minds from the data home and emits a board of cards.

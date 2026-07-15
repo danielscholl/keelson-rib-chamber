@@ -31,7 +31,7 @@ import {
 } from "../lens-runtime.ts";
 import { isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
 import { refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
-import { isChamberLensWorkflow, LENS_REFRESH_WORKFLOW } from "../workflows.ts";
+import { isChamberWorkflow, LENS_REFRESH_WORKFLOW } from "../workflows.ts";
 import { emitResult } from "./util.ts";
 
 // Lens publish seam: the chamber-lens workflow's prompt node composes a canvas
@@ -142,7 +142,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
           // more — another rib may legitimately own the named one — so this is a
           // caveat in the reply, the one place the author can hear it, not a reject.
           const unvouchedWorkflow =
-            parsed.data.refresh?.workflow && !isChamberLensWorkflow(parsed.data.refresh.workflow)
+            parsed.data.refresh?.workflow && !isChamberWorkflow(parsed.data.refresh.workflow)
               ? parsed.data.refresh.workflow
               : undefined;
           const { key } = await registry.publish(

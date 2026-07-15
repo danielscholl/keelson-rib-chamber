@@ -50,11 +50,17 @@ export function discoverLensWorkflows(root: string): {
       const name = lensWorkflowName(slug);
       // Same default the bundled contributions declare outright: a lens producer
       // re-derives and re-emits, so it must not take a project's mutation lock and
-      // serialize against real work. An operator who means the opposite says so.
-      const mutates = (parsed as { mutates_checkout?: unknown }).mutates_checkout ?? false;
+      // serialize against real work. An operator who means the opposite says so —
+      // and one who says it in a way that is neither true nor false is asked rather
+      // than guessed at, since defaulting a muddled `true` to false would strip a
+      // lock they wanted.
+      const declared = (parsed as { mutates_checkout?: unknown }).mutates_checkout;
+      if (declared !== undefined && typeof declared !== "boolean") {
+        throw new Error("mutates_checkout must be true or false");
+      }
       // No bindSnapshotKey: these republish through chamber_emit_lens rather than to
       // a bound key, the unbound case the host's /refresh region leg covers.
-      contributions.push({ definition: { ...parsed, name, mutates_checkout: mutates } });
+      contributions.push({ definition: { ...parsed, name, mutates_checkout: declared ?? false } });
       names.add(name);
     } catch (e) {
       console.error(`[rib-chamber] lens workflow '${file}' skipped: ${errText(e)}`);
