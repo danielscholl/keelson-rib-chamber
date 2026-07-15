@@ -39,6 +39,12 @@ describe("renderTranscript", () => {
     expect(renderTranscript([])).toBe("");
   });
 
+  test("renders an empty agent turn with the room board's no-text marker", () => {
+    expect(renderTranscript([entry({ from: "sable-ward", parts: [{ text: "  " }] })])).toBe(
+      "sable-ward: (no text)",
+    );
+  });
+
   test("strips a trailing control directive from rendered history", () => {
     const rendered = renderTranscript([
       entry({

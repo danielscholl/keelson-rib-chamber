@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { CanvasBoardView } from "@keelson/shared";
 import { createRoomDriver } from "../../src/room.ts";
 import type { Mind, Room, RoomConfig, RoomStrategyName, TurnEntry } from "../../src/types.ts";
@@ -174,6 +174,53 @@ describe("room driver — step", () => {
     expect(room?.turnIndex).toBe(1);
   });
 
+  test("a clean empty turn retries once before committing and counting", async () => {
+    const h = harness([{ text: "" }, { text: "from retry" }]);
+    await h.driver.start({ ...START, turnBudget: 2 });
+    await h.driver.step("demo");
+    const transcript = await h.store.loadTranscript("demo");
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.parts[0]?.text).toBe("from retry");
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(1);
+    expect(h.turns.requests).toHaveLength(2);
+  });
+
+  test("a persistently empty turn retries once, then commits and counts once", async () => {
+    const h = harness([{ text: "" }]);
+    await h.driver.start({ ...START, turnBudget: 2 });
+    await h.driver.step("demo");
+    const transcript = await h.store.loadTranscript("demo");
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.parts[0]?.text).toBe("");
+    expect((await h.store.loadRoom("demo"))?.turnIndex).toBe(1);
+    expect(h.turns.requests).toHaveLength(2);
+  });
+
+  test("an empty turn that reached a tool is NOT retried — the tool already ran", async () => {
+    // Re-running the attempt re-runs its tools; Edit/Write/Bash in a coding room are
+    // not idempotent, so a tool-using turn commits empty rather than double-applying.
+    const h = harness([
+      {
+        text: "",
+        emits: [{ type: "tool_use", id: "t1", toolName: "Edit", toolInput: { path: "a.ts" } }],
+      },
+      { text: "from retry" },
+    ]);
+    await h.driver.start({ ...START, turnBudget: 2 });
+    await h.driver.step("demo");
+    expect(h.turns.requests).toHaveLength(1);
+    const transcript = await h.store.loadTranscript("demo");
+    expect(transcript[0]?.parts[0]?.text).toBe("");
+  });
+
+  test("empty-turn retries are capped per room, not paid per turn", async () => {
+    const h = harness([{ text: "" }]);
+    await h.driver.start({ ...START, turnBudget: 8 });
+    for (let i = 0; i < 5; i++) await h.driver.step("demo");
+    // 5 turns; only the first 3 bought a retry — 5 + MAX_EMPTY_TURN_RETRIES.
+    expect(h.turns.requests).toHaveLength(8);
+  });
+
   test("prompt carries prior transcript text", async () => {
     const h = harness([{ text: "first" }, { text: "second" }]);
     await h.driver.start(START);
@@ -207,6 +254,7 @@ describe("room driver — step", () => {
     await h.driver.step("demo");
     expect((await h.store.loadRoom("demo"))?.status).toBe("active");
     expect(await h.store.loadTranscript("demo")).toHaveLength(1);
+    expect(h.turns.requests).toHaveLength(1);
   });
 });
 
@@ -339,6 +387,7 @@ describe("room driver — stop / abort", () => {
     await h.turns.started;
     await h.driver.stop("demo");
     await stepP;
+    expect(h.turns.requests).toHaveLength(1);
     expect((await h.store.loadRoom("demo"))?.status).toBe("stopped");
     const t = await h.store.loadTranscript("demo");
     expect(t.some((e) => e.aborted)).toBe(true);
@@ -1414,6 +1463,23 @@ describe("room driver — open-floor", () => {
     await startOf(h.driver);
     await h.driver.step("of"); // a speaks, nominates itself
     await h.driver.step("of"); // self rejected -> leastSpoken -> b
+    expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b"]);
+  });
+
+  test("a persistently empty turn logs the least-spoken fallback", async () => {
+    const h = ofHarness([{ text: "" }, { text: "" }, { text: "b1" }]);
+    await startOf(h.driver);
+    await h.driver.step("of");
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await h.driver.step("of");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("[rib-chamber]");
+      expect(String(warn.mock.calls[0]?.[0])).toContain("room 'of'");
+      expect(String(warn.mock.calls[0]?.[0])).toContain("least-spoken 'b'");
+    } finally {
+      warn.mockRestore();
+    }
     expect((await h.store.loadTranscript("of")).map((e) => e.from)).toEqual(["a", "b"]);
   });
 

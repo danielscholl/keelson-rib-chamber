@@ -129,6 +129,11 @@ export interface RoomInjectInput {
   text?: string;
 }
 
+// How many empty turns a room may re-run before it stops paying for the retry and
+// commits the empty turn instead. A room whose provider answers empty every turn is
+// producing nothing; retrying all the way to turnBudget would just double its bill.
+const MAX_EMPTY_TURN_RETRIES = 3;
+
 // The result of driving one turn. The auto-advance loop only needs "keep going?"
 // (it stops on "ended"), but a second stepper — the planned chat-tool room
 // controls — must tell the serial-gate no-op apart from a closed room, which a
@@ -221,6 +226,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   const cachedExhibits = new Map<MindSlug, readonly LensRecord[]>();
 
   const controllers = new Map<MindSlug, AbortController>();
+  // Empty-turn retries spent by each room. The retry is itself a billed call, so a
+  // provider that answers empty every turn would otherwise double a room's paid
+  // ceiling — turnBudget bounds TURNS, not calls. Capped per room, not per turn.
+  const emptyRetries = new Map<MindSlug, number>();
   // Rooms with a turn in flight. The serial gate: one turn at a time per room, so
   // two fire-and-return room-next calls cannot race the same turnIndex.
   const inFlight = new Set<MindSlug>();
@@ -278,6 +287,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     transcripts.delete(slug);
     generations.delete(slug);
     cachedExhibits.delete(slug);
+    emptyRetries.delete(slug);
   }
 
   // Per-room serialization for the load-modify-save commit sections. A director
@@ -769,36 +779,60 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
             ...(deps.readTools ?? []).filter((t) => !declared.some((d) => d.name === t.name)),
           ]
         : declared;
-      const turn = deps.runAgentTurn({
-        system,
-        prompt,
-        abortSignal: controller.signal,
-        ...(cwd ? { cwd } : {}),
-        ...(tools.length > 0 ? { tools } : {}),
-        ...(confineRoot ? { allowedDirectories: [confineRoot] } : {}),
-        ...(mind.model ? { model: mind.model } : {}),
-        ...(mind.provider ? { provider: mind.provider } : {}),
-      });
-      // The drain doubles as the exhibit witness: a tool_use chunk naming the
-      // table-exhibit seam proves THIS room's turn tabled that id, so the rib can
-      // stamp sourceRoom without trusting the agent to name its own room.
-      const tabledIds: string[] = [];
-      try {
-        // Draining the stream could drive throttled partial publishes later; for
-        // now the result is the source of truth.
-        for await (const chunk of turn.stream) {
-          if (chunk.type !== "tool_use" || chunk.toolName !== EXHIBIT_TOOL_NAME) continue;
-          const rawId = chunk.toolInput?.id;
-          if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
+      const runAttempt = async () => {
+        const turn = deps.runAgentTurn({
+          system,
+          prompt,
+          abortSignal: controller.signal,
+          ...(cwd ? { cwd } : {}),
+          ...(tools.length > 0 ? { tools } : {}),
+          ...(confineRoot ? { allowedDirectories: [confineRoot] } : {}),
+          ...(mind.model ? { model: mind.model } : {}),
+          ...(mind.provider ? { provider: mind.provider } : {}),
+        });
+        // The drain doubles as the exhibit witness: a tool_use chunk naming the
+        // table-exhibit seam proves THIS room's turn tabled that id, so the rib can
+        // stamp sourceRoom without trusting the agent to name its own room.
+        const tabledIds: string[] = [];
+        // ANY tool_use, not just the exhibit seam: a turn that reached a tool already
+        // ran it server-side, so re-running the attempt would re-apply it — Edit/Write
+        // /Bash in a coding room are not idempotent.
+        let sawToolUse = false;
+        try {
+          // Draining the stream could drive throttled partial publishes later; for
+          // now the result is the source of truth.
+          for await (const chunk of turn.stream) {
+            if (chunk.type === "tool_use") sawToolUse = true;
+            if (chunk.type !== "tool_use" || chunk.toolName !== EXHIBIT_TOOL_NAME) continue;
+            const rawId = chunk.toolInput?.id;
+            if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
+          }
+        } catch {
+          // a stream error surfaces via result.status below
         }
-      } catch {
-        // a stream error surfaces via result.status below
+        const result = await turn.result;
+        // Stamp even on an aborted/errored result: the tool already ran server-side
+        // when its tool_use chunk streamed, so the record exists either way (the
+        // stamp itself load-checks and skips a record the emit never persisted).
+        if (tabledIds.length > 0) deps.onExhibitsTabled?.(tabledIds, room);
+        return { result, sawToolUse };
+      };
+      let { result, sawToolUse } = await runAttempt();
+      const spentRetries = emptyRetries.get(room.slug) ?? 0;
+      if (
+        !disposed &&
+        !controller.signal.aborted &&
+        !sawToolUse &&
+        spentRetries < MAX_EMPTY_TURN_RETRIES &&
+        result.status === "ok" &&
+        result.text.trim().length === 0
+      ) {
+        emptyRetries.set(room.slug, spentRetries + 1);
+        console.warn(
+          `[rib-chamber] empty turn from '${mind.slug}' in room '${room.slug}'; retrying once`,
+        );
+        ({ result } = await runAttempt());
       }
-      const result = await turn.result;
-      // Stamp even on an aborted/errored result: the tool already ran server-side
-      // when its tool_use chunk streamed, so the record exists either way (the
-      // stamp itself load-checks and skips a record the emit never persisted).
-      if (tabledIds.length > 0) deps.onExhibitsTabled?.(tabledIds, room);
       aborted = result.status === "aborted" || controller.signal.aborted;
       errored = result.status === "error" || result.status === "timeout";
       text =
@@ -1193,8 +1227,9 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // Tier 2: the last speaker's nomination, if it names a valid OTHER participant
     // under the anti-monopoly cap. Self-nominations and over-cap picks fall through.
     const lastAgent = [...transcript].reverse().find((e) => e.role === "agent");
+    const lastText = lastAgent?.parts.map((p) => p.text).join("\n");
     if (lastAgent) {
-      const nom = parseNomination(lastAgent.parts.map((p) => p.text).join("\n"));
+      const nom = parseNomination(lastText ?? "");
       if (nom?.action === "nominate" && nom.slug) {
         const cap = room.config?.maxSpeakerRepeats ?? DEFAULT_MAX_SPEAKER_REPEATS;
         if (
@@ -1207,7 +1242,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       }
     }
     // Tier 3: the pure strategy seeds the first speaker / rotates by leastSpoken.
-    return openFloor({ room, transcript });
+    const fallback = openFloor({ room, transcript });
+    if (lastAgent && lastText?.trim().length === 0 && fallback.kind === "speak") {
+      console.warn(
+        `[rib-chamber] empty open-floor turn from '${lastAgent.from}' in room '${room.slug}'; falling back to least-spoken '${fallback.mind}'`,
+      );
+    }
+    return fallback;
   }
 
   async function runBudgetSynthesisIfExhausted(

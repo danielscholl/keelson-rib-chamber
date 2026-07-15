@@ -43,7 +43,10 @@ export function renderTranscript(
   const omitted = Math.max(0, transcript.length - limit);
   const rendered = transcript
     .slice(-limit)
-    .map((entry) => `${entry.from}: ${stripControlJson(entry.parts.map((p) => p.text).join("\n"))}`)
+    .map((entry) => {
+      const text = stripControlJson(entry.parts.map((p) => p.text).join("\n"));
+      return `${entry.from}: ${text.trim().length > 0 ? text : "(no text)"}`;
+    })
     .join("\n\n");
   if (omitted === 0) return rendered;
   const marker = `…(${omitted} earlier turn${omitted === 1 ? "" : "s"} omitted)`;
