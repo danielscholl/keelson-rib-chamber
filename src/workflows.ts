@@ -4,7 +4,8 @@ import { expectView } from "@keelson/shared";
 import { DIGEST_KEY, LENSES_KEY, ROOMS_KEY, ROSTER_KEY } from "./keys.ts";
 import { LENS_TOOL_NAME } from "./lens.ts";
 import { HTML_LENS_TOOL_NAME } from "./lens-html.ts";
-import { chamberDataHome } from "./paths.ts";
+import { discoverLensWorkflows } from "./lens-workflows.ts";
+import { chamberDataHome, lensWorkflowsDir } from "./paths.ts";
 import {
   DIGEST_WF_PROMPT,
   GENESIS_WF_PROMPT,
@@ -47,6 +48,17 @@ function shQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+// The names the operator's own lens producers were contributed under, captured at
+// activation. The emit tool reads this to tell an author that a named workflow is not
+// one chamber contributed — the one moment that reaches them, since the host's
+// refresh seam is fail-soft and a backing it won't run is otherwise a silent 409 on
+// every tick.
+let discoveredLensWorkflows: ReadonlySet<string> = new Set();
+
+export function isChamberLensWorkflow(name: string): boolean {
+  return name === LENS_REFRESH_WORKFLOW || discoveredLensWorkflows.has(name);
+}
+
 // The producer: an agent turn (not a deterministic collector) emits the board,
 // which the executor promotes to structured output and the rib binding
 // publishes fail-closed via `validate`. This is the "an agent authors a lens"
@@ -55,7 +67,10 @@ function shQuote(value: string): string {
 // workflows write the rib data home and publish snapshots, never a project
 // checkout, so the host's per-project mutation lock must not serialize them.
 export function contributeChamberWorkflows(): readonly RibWorkflowContribution[] {
+  const discovered = discoverLensWorkflows(lensWorkflowsDir());
+  discoveredLensWorkflows = discovered.names;
   return [
+    ...discovered.contributions,
     {
       // The roster producer: a deterministic collector that reads the
       // genesis-authored Minds from the data home and emits a board of cards.

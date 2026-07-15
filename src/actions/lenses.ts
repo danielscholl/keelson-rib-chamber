@@ -84,9 +84,10 @@ export async function retireHtmlLensAction(action: RibAction): Promise<RibAction
 }
 
 // Re-compose a living lens on demand: the Refresh verb on a refresh-backed
-// lens's index card. Fires the record's named workflow with input `lens` = the
-// id — the same run the panel's cadence fires — and returns as soon as the run
-// is started; the re-emit republishes the panel and its index card.
+// lens's index card. Fires the record's named workflow on the same inputs the
+// panel's cadence fires it on — lensRefreshInputs is shared with regionFor so the
+// two agree and the harness collapses them onto one run — and returns as soon as
+// the run is started; the re-emit republishes the panel and its index card.
 export async function refreshLensAction(action: RibAction): Promise<RibActionResult> {
   const got = lensActionId(action, "refresh-lens");
   if ("error" in got) return { ok: false, error: got.error };
@@ -107,7 +108,10 @@ export async function refreshLensAction(action: RibAction): Promise<RibActionRes
         error: `lens '${id}' has no refresh backing — re-author it with chamber_emit_lens refresh: {}`,
       };
     }
-    await hostRefreshWorkflow(record.refresh.workflow, lensRefreshInputs(id));
+    await hostRefreshWorkflow(
+      record.refresh.workflow,
+      lensRefreshInputs(id, record.refresh.inputs),
+    );
     return { ok: true, data: { id, workflow: record.refresh.workflow } };
   } catch (e) {
     return { ok: false, error: errText(e) };

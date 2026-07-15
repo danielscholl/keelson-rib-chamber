@@ -35,6 +35,15 @@ export function htmlLensesDir(): string {
   return join(chamberDataHome(), "lenses-html");
 }
 
+// Operator-authored workflows the rib contributes to the catalog, so a lens can name
+// one as its refresh backing: the harness auto-refreshes only a workflow with rib
+// provenance, which a file in the global workflows dir can never have. Chamber
+// vouches for whatever lands here — a human putting it here is the trust boundary,
+// since the name itself arrives from agent-authored lens data.
+export function lensWorkflowsDir(): string {
+  return join(chamberDataHome(), "lens-workflows");
+}
+
 // Recursive mkdir doubles as a writability probe — idempotent if the dir exists
 // (genesis creates it anyway), and fails only when the path isn't writable.
 export async function isChamberDataHomeWritable(): Promise<boolean> {

@@ -31,6 +31,10 @@ export function stableHash(s: string): string {
 
 // Guard against path traversal: a slug becomes a directory name under the data
 // home, so reject anything that isn't a bare kebab token (no `/`, `..`, etc.).
+export function isSafeSlug(slug: string): boolean {
+  return SAFE_SLUG.test(slug);
+}
+
 export function assertSafeSlug(slug: string): void {
-  if (!SAFE_SLUG.test(slug)) throw new Error(`unsafe mind slug: ${JSON.stringify(slug)}`);
+  if (!isSafeSlug(slug)) throw new Error(`unsafe mind slug: ${JSON.stringify(slug)}`);
 }

@@ -39,16 +39,74 @@ Re-authoring the same subject is the manual way to keep a lens fresh. A lens can
 keep itself current. Pass a `refresh` object when you author it, and the panel becomes
 a **living lens** that re-composes on a cadence:
 
-- `refresh: { workflow?, cadenceMs? }` makes the panel re-run a catalog workflow on
-  cadence, feeding it the lens id. `workflow` defaults to `chamber-lens-refresh` (the
-  bundled re-author), and `cadenceMs` defaults to one hour, floored at 30 seconds.
+- `refresh: { workflow?, cadenceMs?, inputs? }` makes the panel re-run a workflow on
+  cadence, feeding it the lens id plus any `inputs` you name. `workflow` defaults to
+  `chamber-lens-refresh` (the bundled re-author), and `cadenceMs` defaults to one
+  hour, floored at 30 seconds.
 - On a re-author, omitting `refresh` keeps the existing backing, an object patches it
   (an omitted field keeps its prior value), and `refresh: null` clears it.
 
-A living lens also carries an on-demand **Refresh** verb on its panel head, so you can
-force a re-compose between cadence ticks. Each refresh is a paid agent turn, so the
-default cadence leans quiet. For how a refresh turn re-reads and re-emits the board,
-see [A living lens re-composes itself](../../concepts/lenses/#a-living-lens-re-composes-itself).
+A living lens also gains an on-demand **Refresh** verb on its card in the Lenses
+index, so you can force a re-compose between cadence ticks. Each refresh is a paid
+agent turn, so the default cadence leans quiet. For how a refresh turn re-reads and
+re-emits the board, see
+[A living lens re-composes itself](../../concepts/lenses/#a-living-lens-re-composes-itself).
+
+## Back a lens with real data
+
+The bundled re-author re-composes from the board it already wrote, so a lens that
+reports live numbers needs a refresh workflow that goes and derives them. Write one,
+and put it where Chamber can contribute it:
+
+```bash
+# The filename becomes the workflow's name: chamber-lens-<filename>.
+$EDITOR ~/.keelson/rib-chamber/lens-workflows/dod-entitlements.yaml
+
+# Contributions are collected at startup, so a new file needs a restart.
+keelson stop && keelson start
+```
+
+A typical one derives its facts in a `bash` node and re-emits the lens in a `prompt`
+node, with the lens pointing `refresh` back at it so each tick repeats the whole loop:
+
+```yaml
+description: Re-derive the entitlements DoD facts and re-emit the lens
+nodes:
+  - id: derive
+    bash: dod-facts.py --service "$KEELSON_INPUTS_service"
+  - id: compose
+    prompt: |
+      Facts: $derive.output
+      Re-emit the lens with chamber_emit_lens, id $KEELSON_INPUTS_lens.
+    allowed_tools: [chamber_emit_lens]
+```
+
+Then author the lens against it:
+
+```
+chamber_emit_lens {
+  id: "dod-entitlements",
+  board: {...},
+  refresh: {
+    workflow: "chamber-lens-dod-entitlements",
+    inputs: { service: "entitlements" },
+    cadenceMs: 21600000,
+  },
+}
+```
+
+`inputs` are the workflow's own parameters, so the id stays a name for the subject
+rather than an argument to parse back out. They arrive as `KEELSON_INPUTS_<key>`,
+beside `KEELSON_INPUTS_lens`, which always holds the lens id.
+
+Why this directory rather than the workflows dir you already have: the harness runs a
+panel's refresh only for a **rib-contributed** workflow, because `refresh.workflow`
+arrives from agent-authored data and letting it name any file on disk would let a Mind
+schedule arbitrary code. Chamber vouches for what is in `lens-workflows/`, and you
+putting it there is the trust boundary: a `bash` node runs as written, so treat the
+directory like anything else you would run yourself. If you name a workflow Chamber
+does not contribute, the emit's reply says so, and nothing else will, because the
+refresh is refused silently.
 
 ## Provenance on the index card
 

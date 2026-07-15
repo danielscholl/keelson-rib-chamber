@@ -25,6 +25,19 @@ gate with a conditional agent turn.
 | `chamber-lens-refresh` | prompt turn | `refresh` | none | re-emits an existing living lens |
 | `chamber-lens-html` | prompt turn | `compose` | none | a per-subject HTML lens panel |
 
+## The operator's own lens producers
+
+Chamber also contributes one workflow per file in `{keelson-home}/rib-chamber/lens-workflows/`,
+named `chamber-lens-{filename}`. These are the supported way to back a lens with real
+data, because the harness runs a panel's refresh only for a rib-contributed workflow
+and refuses one from the general catalog. The filename decides the name, overriding
+the file's own `name:` field; a file that is unreadable, unparseable, or not named as
+a bare kebab token is skipped with a warning rather than costing the operator the
+others. Contributions are collected once at startup.
+
+See [Back a lens with real data](../../guides/author-a-lens/#back-a-lens-with-real-data)
+for the recipe and the trust boundary.
+
 ## The collectors
 
 The three index workflows are deterministic. Each has a single `bash` node that

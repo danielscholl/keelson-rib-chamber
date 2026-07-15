@@ -22,17 +22,21 @@ relative to that home.
 │   └── {id}/
 │       ├── lens.html
 │       └── meta.json
+├── lens-workflows/
+│   └── {name}.yaml
 ├── room-draft.json
 ├── digest.json
 ├── brief-watermark.json
 └── pending-genesis.json
 ```
 
-The four subdirectories hold one entry per Mind, room, board lens, and HTML
-lens. Three of the JSON files at the home root are durable singletons: the
-Convene draft, the standing digest, and the briefing watermark. The fourth,
-`pending-genesis.json`, is a transient marker that exists only while a genesis
-is in flight.
+The first four subdirectories hold one entry per Mind, room, board lens, and HTML
+lens. The fifth is the operator's, not the rib's: Chamber never writes there, and
+contributes each workflow it finds as `chamber-lens-{name}` so a lens may name it as
+a refresh backing (see [Workflows](../workflows/#the-operators-own-lens-producers)).
+Three of the JSON files at the home root are durable singletons: the Convene draft,
+the standing digest, and the briefing watermark. The fourth, `pending-genesis.json`,
+is a transient marker that exists only while a genesis is in flight.
 
 ## A Mind
 
@@ -185,11 +189,16 @@ Two more optional fields follow different rules: `kind: "exhibit"` marks a
 tabled deliverable (absent means lens; `sourceRoom` beside it is the producing
 room's slug, driver-witnessed and never agent-supplied), and `refresh`, a
 living lens's re-compose backing shaped
-`{ "workflow": "chamber-lens-refresh", "cadenceMs": 3600000 }`. It is
-PRESERVED when a re-author omits it, PATCHED field-by-field when a re-author
-supplies an object (only an explicit `refresh: null` clears it), and lens-only
-(an exhibit save strips it). A malformed or fractional-cadence `refresh` block
-folds to absent on read rather than hiding the record.
+`{ "workflow": "chamber-lens-refresh", "cadenceMs": 3600000, "inputs": { "service": "entitlements" } }`.
+It is PRESERVED when a re-author omits it, PATCHED field-by-field when a
+re-author supplies an object (only an explicit `refresh: null` clears it), and
+lens-only (an exhibit save strips it). `inputs` are the producer's own
+parameters, reaching the workflow beside `lens` (the id, which wins on a clash);
+an empty object is stored as no inputs at all. A `refresh` block that is
+malformed, carries a fractional cadence, or carries a non-string input folds to
+absent on read rather than hiding the record. Each of those is a value the
+harness's region schema would reject at registration, taking the panel down with
+it.
 
 ## An HTML lens
 

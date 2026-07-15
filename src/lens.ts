@@ -40,11 +40,18 @@ export const DEFAULT_LENS_REFRESH_CADENCE_MS = 3_600_000;
 // Exported so the emit schema's floor and this clamp share one value.
 export const MIN_REFRESH_CADENCE_MS = 30_000;
 
-// The refresh invocation contract: the workflow input naming the lens. One
-// builder so the region's cadence wiring and the on-demand Refresh verb can't
-// drift from the $inputs.lens interpolation in the re-author prompt.
-export function lensRefreshInputs(id: string): Record<string, string> {
-  return { lens: id };
+// The refresh invocation contract: the record's own inputs plus the workflow input
+// naming the lens. One builder so the region's cadence wiring and the on-demand
+// Refresh verb can't drift from the $inputs.lens interpolation in the re-author
+// prompt — and so they agree byte for byte, since the harness de-dupes concurrent
+// runs on their inputs and two spellings would race instead of collapsing.
+// `lens` is assigned last: it is the one input the contract guarantees, so a
+// stored input of that name must not be able to shadow it.
+export function lensRefreshInputs(
+  id: string,
+  inputs?: Record<string, string>,
+): Record<string, string> {
+  return { ...inputs, lens: id };
 }
 
 // The seed a panel renders before its board publishes: a valid, titled board so a
@@ -105,8 +112,15 @@ export function destructiveHeadAction(type: string, verb: string, noun: string, 
   };
 }
 
+// Whether a re-author left the backing alone — rewireRegion's early-out, so an
+// unwatched field here means a changed backing keeps the region's stale wiring
+// until a restart. `inputs` compares structurally because it reaches the region
+// as workflowArgs; resolveLensRefresh drops an empty one so absent and {} are
+// the same backing, as they are to lensRefreshInputs.
 function sameRefresh(a?: LensRefresh, b?: LensRefresh): boolean {
-  return a?.workflow === b?.workflow && a?.cadenceMs === b?.cadenceMs;
+  return (
+    a?.workflow === b?.workflow && a?.cadenceMs === b?.cadenceMs && jsonEqual(a?.inputs, b?.inputs)
+  );
 }
 
 // Structural JSON-value equality: key order is insignificant and an explicit
@@ -228,7 +242,7 @@ export function createLensRegistry(
       ...(refresh
         ? {
             workflow: refresh.workflow,
-            workflowArgs: lensRefreshInputs(id),
+            workflowArgs: lensRefreshInputs(id, refresh.inputs),
             cadenceMs: Math.max(
               MIN_REFRESH_CADENCE_MS,
               Math.round(refresh.cadenceMs ?? DEFAULT_LENS_REFRESH_CADENCE_MS),
