@@ -118,6 +118,16 @@ describe("buildRoomSummaryHtml", () => {
     expect(html).toContain("• Met: it ships in prod.");
   });
 
+  // A capped document ends in flattenMarkdown's own "— continues —" note, which would then
+  // read as the room's closing move. The page has no schema cap, so it renders whole.
+  test("a very long close renders whole, never truncated into a footer", () => {
+    const body = `We agreed on the gate.\n\n${"word ".repeat(30_000)}\n\nNext: land the flag.`;
+    const html = buildRoomSummaryHtml(room, { title: "Ship it", body }, minds, [], []);
+    expect(html).not.toContain("continues");
+    expect(html).not.toContain("full text");
+    expect(html).toContain("Next: land the flag.");
+  });
+
   test.each([
     "<script>alert(1)</script>",
     "<img src=x onerror=alert(1)>",

@@ -2,11 +2,6 @@ import type { LensRecord } from "../lens-store.ts";
 import { type DecisionMarker, flattenMarkdown, type OutcomeSplit } from "../room-text.ts";
 import type { Mind, Room } from "../types.ts";
 
-// The document renders as pre-wrapped plain text, so a Mind's markdown is flattened rather
-// than shown as literal `###`/`**` syntax. Bounded well above any real close: unlike a board
-// field there is no schema cap here, so the cut only exists to keep a runaway turn finite.
-const DOCUMENT_MAX = 100_000;
-
 function esc(value: string): string {
   return value.replace(
     /[&<>"']/g,
@@ -77,7 +72,10 @@ export function buildRoomSummaryHtml(
       ? tabled.map((record) => `<li>${esc(record.board.title || record.id)}</li>`).join("")
       : "<li>No exhibits were tabled.</li>";
 
-  const documentText = flattenMarkdown(outcome.body, DOCUMENT_MAX);
+  // Flattened, not capped: flattenMarkdown's cut exists for a board field's schema limit,
+  // which an HTML page has none of. Left in, its continuation note would become the
+  // document's last paragraph — and so be rendered below as the room's closing move.
+  const documentText = flattenMarkdown(outcome.body, Number.POSITIVE_INFINITY);
   // The closing paragraph only earns its own panel when it is not the whole document —
   // a one-paragraph close would otherwise print verbatim twice under two headings.
   const next = closingText(documentText);
