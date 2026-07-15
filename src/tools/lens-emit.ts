@@ -323,6 +323,20 @@ export function makeTableExhibitTool(store: LensStore, registry: LensRegistry): 
             );
             return;
           }
+          // An exhibit another room already owns: refuse before the publish, which is
+          // last-writer-wins. The driver's witness stamp runs after the write and can
+          // only repair sourceRoom, never restore the board this would have replaced.
+          // Absent room identity we cannot tell a legitimate same-room re-table from a
+          // collision, so an unidentified caller may not touch an owned exhibit.
+          const callerRoom = ctx.turnContext?.roomSlug;
+          if (existing?.sourceRoom && existing.sourceRoom !== callerRoom) {
+            emitResult(
+              ctx,
+              `chamber_table_exhibit: '${id}' is owned by another room — pick another id`,
+              true,
+            );
+            return;
+          }
           const { key } = await registry.publish(
             id,
             parsed.data.board,
