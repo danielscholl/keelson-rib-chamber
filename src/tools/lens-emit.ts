@@ -7,6 +7,7 @@ import {
   validateCategoricalPalette,
   z,
 } from "@keelson/shared";
+import { BOARD_COMPOSITION_CONTRACT } from "../board-guidance.ts";
 import { evaluateBriefGate } from "../brief-gate.ts";
 import {
   canonicalLensId,
@@ -62,7 +63,8 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
   return {
     name: LENS_TOOL_NAME,
     description:
-      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs? }` names a catalog workflow the panel re-runs on cadence with input `lens` = this id (the workflow re-composes and re-emits the lens; default workflow chamber-lens-refresh, default cadence 1h). Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit.',
+      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs? }` names a catalog workflow the panel re-runs on cadence with input `lens` = this id (the workflow re-composes and re-emits the lens; default workflow chamber-lens-refresh, default cadence 1h). Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit. ' +
+      BOARD_COMPOSITION_CONTRACT,
     inputSchema: lensEmitSchema,
     state_changing: true,
     execute(input, ctx) {
@@ -293,7 +295,8 @@ export function makeTableExhibitTool(store: LensStore, registry: LensRegistry): 
   return {
     name: EXHIBIT_TOOL_NAME,
     description:
-      "Table an exhibit: publish a canvas `board` DELIVERABLE your discussion produced, where it lands in the Tabled section of your room's own board — a point-in-time record (an assessment, a plan, a findings summary), kept until the exhibit or its room is deleted. `id` is a short, stable kebab-case identifier for the deliverable; `board` is the canvas board view; optional `reason` is a one-line gist of what the exhibit holds. Call it once when the discussion has converged on something worth keeping. NOT for a standing view you intend to keep updating — author that with chamber_emit_lens.",
+      "Table an exhibit: publish a canvas `board` DELIVERABLE your discussion produced, where it lands in the Tabled section of your room's own board — a point-in-time record (an assessment, a plan, a findings summary), kept until the exhibit or its room is deleted. `id` is a short, stable kebab-case identifier for the deliverable; `board` is the canvas board view; optional `reason` is a one-line gist of what the exhibit holds. Call it once when the discussion has converged on something worth keeping. NOT for a standing view you intend to keep updating — author that with chamber_emit_lens. " +
+      BOARD_COMPOSITION_CONTRACT,
     inputSchema: exhibitEmitSchema,
     state_changing: true,
     execute(input, ctx) {

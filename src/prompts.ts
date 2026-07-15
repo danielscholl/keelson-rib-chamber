@@ -1,4 +1,5 @@
 import { buildCanvasArtifactGuidance } from "@keelson/shared";
+import { buildBoardCompositionGuidance } from "./board-guidance.ts";
 import { capabilityVocabulary } from "./capabilities.ts";
 
 // The briefing turn's prompt: an agent authors a canvas `board` rendered on the
@@ -58,11 +59,11 @@ Compose ONE canvas board about the subject. Be honest — do NOT invent data you
 
 The board shape:
   { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
-Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
-Use 2-4 Section kinds, in a sensible order:
-  - stats: { "kind":"stats", "title"?:string, "items":[{ "label":string, "value":string|number, "sub"?:string, "tone"?:Tone }] }
-  - rows:  { "kind":"rows", "title"?:string, "items":[{ "text":string, "glyph"?:Tone, "trailing"?:string }] }
-  - cards: { "kind":"cards", "title"?:string, "items":[{ "title":string, "pill"?:{ "label":string, "tone"?:Tone }, "fields"?:[{ "label"?:string, "value":string|number }], "footnote"?:string }] }
+Tone is one of: ok, warn, error, neutral, info, caution, brand, accent. The chamber_emit_lens input schema carries every section kind's exact fields — read it there rather than guessing.
+
+${buildBoardCompositionGuidance()}
+
+Use as many sections as the subject earns and no more — typically 2-4.
 
 Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, reason? }:
   - id: a short, stable, kebab-case identifier for this subject (e.g. "release-risks") — re-authoring the same subject reuses its panel.

@@ -11,6 +11,7 @@ import type {
   ToolDefinition,
 } from "@keelson/shared";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
+import { BOARD_COMPOSITION_CONTRACT } from "../src/board-guidance.ts";
 import { readDigest } from "../src/digest-store.ts";
 import rib, { MAX_ACTIVE_ROOMS } from "../src/index.ts";
 import { listLenses } from "../src/lens-store.ts";
@@ -187,6 +188,20 @@ afterAll(async () => {
 
 describe("chamber room-control chat tools", () => {
   let openedSlug = "";
+
+  // A room turn tables an exhibit mid-discussion, so the tool description is the only
+  // seam that can carry composition guidance to it — there is no prompt to inject into.
+  it("carries the board composition contract on both board-authoring tools", () => {
+    for (const name of ["chamber_emit_lens", "chamber_table_exhibit"]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.description).toContain(BOARD_COMPOSITION_CONTRACT);
+    }
+    // The html lens authors markup, not a board: its own guidance is the canvas
+    // artifact contract, so the board forms would be noise.
+    expect(tools.find((t) => t.name === "chamber_emit_lens_html")?.description).not.toContain(
+      BOARD_COMPOSITION_CONTRACT,
+    );
+  });
 
   it("registers the always-on seams (genesis/digest + list/cleanup), plus the lens and room tools with their seams", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
