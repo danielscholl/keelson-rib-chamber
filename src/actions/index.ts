@@ -26,6 +26,7 @@ import {
   roomOpenAction,
   roomStartAction,
   roomStopAction,
+  roomSummaryAction,
 } from "./rooms.ts";
 
 // The only chamber verbs an untrusted HTML-lens iframe may reach (origin
@@ -74,6 +75,8 @@ export function dispatchChamberAction(
       return roomDeleteAction(action);
     case "room-open":
       return roomOpenAction(action);
+    case "room-summary":
+      return roomSummaryAction(action);
     case "outcome-copy":
       return outcomeCopyAction(action);
     case "outcome-explore":

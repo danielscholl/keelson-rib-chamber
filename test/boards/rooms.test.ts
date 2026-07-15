@@ -88,6 +88,33 @@ describe("buildRoomsIndexBoard active + closed", () => {
     expect(closedCard?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);
   });
 
+  test("only a marked closed room gains one Summary action between Open and Delete", () => {
+    const board = buildRoomsIndexBoard(
+      [
+        room({ slug: "live", status: "active", outcomeAt: "2026-01-01T00:05:00.000Z" }),
+        room({ slug: "marked", status: "done", outcomeAt: "2026-01-01T00:05:00.000Z" }),
+        room({ slug: "legacy", status: "done" }),
+      ],
+      [],
+      [],
+      new Set(["live", "marked"]),
+    );
+    const [activeCard, markedCard, legacyCard] = cards(board);
+    expect(activeCard?.actions?.map((action) => action.type)).toEqual(["room-open"]);
+    expect(markedCard?.actions?.map((action) => action.type)).toEqual([
+      "room-open",
+      "room-summary",
+      "room-delete",
+    ]);
+    expect(markedCard?.actions?.[1]).toEqual({
+      type: "room-summary",
+      label: "Summary",
+      glyph: "☰",
+      payload: { slug: "marked" },
+    });
+    expect(legacyCard?.actions?.map((action) => action.type)).toEqual(["room-open", "room-delete"]);
+  });
+
   test("a stopped room Deletes — only an ACTIVE room withholds it", () => {
     const board = buildRoomsIndexBoard([room({ slug: "halted", status: "stopped" })]);
     expect(cards(board)[0]?.actions?.map((a) => a.type)).toEqual(["room-open", "room-delete"]);

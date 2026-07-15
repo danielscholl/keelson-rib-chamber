@@ -108,7 +108,9 @@ describe("room driver — budget exhaustion synthesis", () => {
     expect(transcript.map((e) => e.from)).toEqual(["author", "reviewer"]);
     expect(transcript).toHaveLength(2);
     expect(h.turns.requests.at(-1)?.prompt).not.toContain("Synthesize the discussion");
-    expect((await h.store.loadRoom("review"))?.status).toBe("done");
+    const room = await h.store.loadRoom("review");
+    expect(room?.status).toBe("done");
+    expect(room?.outcomeAt).toBeUndefined();
   });
 
   for (const c of cases) {
@@ -131,7 +133,9 @@ describe("room driver — budget exhaustion synthesis", () => {
       expect(transcript).toHaveLength(c.turnBudget + 1);
       expect(transcript.at(-1)?.parts[0]?.text).toBe("summary");
       expect(h.turns.requests.at(-1)?.prompt).toContain("Synthesize the discussion");
-      expect((await h.store.loadRoom(c.name))?.status).toBe("done");
+      const room = await h.store.loadRoom(c.name);
+      expect(room?.status).toBe("done");
+      expect(room?.outcomeAt).toBe("2026-01-01T00:00:00.000Z");
     });
   }
 });

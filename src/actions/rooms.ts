@@ -1,7 +1,9 @@
 import type { RibAction, RibActionResult } from "@keelson/shared";
 import { asNonEmptyString, asStringArray, errText } from "@keelson/shared";
 import { buildRoomBoard } from "../boards/room.ts";
-import { roomViewKey } from "../keys.ts";
+import { buildRoomSummaryHtml } from "../boards/room-summary.ts";
+import { roomSummaryKey, roomViewKey } from "../keys.ts";
+import { htmlLensStructuralError, htmlStringValidator } from "../lens-html.ts";
 import { deleteRoomExhibits, tabledExhibitsFor } from "../lens-runtime.ts";
 import { readMinds } from "../minds-store.ts";
 import { mindsDir, roomsDir } from "../paths.ts";
@@ -18,14 +20,14 @@ import {
   isSafeSlug,
   isValidParticipant,
   noteRoomDeleted,
+  publishRoomSummary,
   publishRoomView,
   ROOM_DISABLED,
   startRoom,
   stopRoom,
 } from "../room-lifecycle.ts";
 import { createFileRoomStore, deriveRoomName } from "../room-store.ts";
-import type { OutcomeSplit } from "../room-text.ts";
-import { splitOutcome } from "../room-text.ts";
+import { type OutcomeSplit, parseDecisionMarkers, splitOutcome } from "../room-text.ts";
 import { stripControlJson } from "../routing.ts";
 import {
   refreshPresence,
@@ -291,16 +293,44 @@ export async function roomOpenAction(action: RibAction): Promise<RibActionResult
 // silently degrading, since both outcome actions are refused without one.
 async function loadRoomOutcome(
   slug: string,
-): Promise<{ room: Room; outcome: OutcomeSplit } | { error: string }> {
+): Promise<{ room: Room; outcome: OutcomeSplit; debate: string } | { error: string }> {
   const store = createFileRoomStore(roomsDir());
   const room = await store.loadRoom(slug);
   if (!room) return { error: `room '${slug}' not found` };
   const transcript = await store.loadTranscript(slug);
   const last = [...transcript].reverse().find((e) => e.role === "agent");
   const text = last ? stripControlJson(last.parts.map((p) => p.text).join("\n")) : "";
-  const { outcome } = splitOutcome(text);
+  const { debate, outcome } = splitOutcome(text);
   if (!outcome) return { error: `room '${slug}' has no synthesized outcome document yet` };
-  return { room, outcome };
+  return { room, outcome, debate };
+}
+
+export async function roomSummaryAction(action: RibAction): Promise<RibActionResult> {
+  const resolved = requireRoomSlug(action);
+  if ("error" in resolved) return resolved.error;
+  try {
+    const found = await loadRoomOutcome(resolved.slug);
+    if ("error" in found) return { ok: false, error: found.error };
+    const key = roomSummaryKey(resolved.slug);
+    const html = buildRoomSummaryHtml(
+      found.room,
+      found.outcome,
+      await readMinds(mindsDir()),
+      parseDecisionMarkers(found.debate),
+      await tabledExhibitsFor(resolved.slug),
+    );
+    htmlStringValidator(key)(html);
+    const structuralError = htmlLensStructuralError(html);
+    if (structuralError) return { ok: false, error: structuralError };
+    const published = await publishRoomSummary(resolved.slug, html, found.room.name);
+    if (!published) return { ok: false, error: "room summary unavailable on this harness" };
+    return {
+      ok: true,
+      data: { effect: "open-canvas", key, title: found.room.name },
+    };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
 }
 
 // Copy the room's outcome document as markdown. The outcome card's field sets

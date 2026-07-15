@@ -9,8 +9,11 @@ import type {
   RibContext,
   SnapshotManager,
 } from "@keelson/shared";
+import { roomSummaryAction } from "../src/actions/rooms.ts";
 import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
+import { roomSummaryKey } from "../src/keys.ts";
+import { htmlLensStructuralError } from "../src/lens-html.ts";
 import { createFileLensStore, listLenses } from "../src/lens-store.ts";
 import { scaffoldMind } from "../src/minds-store.ts";
 import {
@@ -993,7 +996,7 @@ describe("room adapter — project targeting", () => {
   });
 });
 
-describe("room adapter — outcome-copy / outcome-explore", () => {
+describe("room adapter — outcome-copy / outcome-explore / room-summary", () => {
   // Neither action touches the driver or a snapshot manager — both read the
   // room straight off disk — so a bare makeCtx() with no run/sm is enough.
   const OUTCOME_TEXT = [
@@ -1035,6 +1038,60 @@ describe("room adapter — outcome-copy / outcome-explore", () => {
     });
   }
 
+  it("room-summary publishes valid HTML and declares its exact key without a paid turn", async () => {
+    const snap = fakeSnapshotManager();
+    const turns = scriptedRunAgentTurn([]);
+    registerTools(makeCtx({ run: turns.run, sm: snap.sm }));
+    await seedRoomWithOutcome("summarize-me");
+    const key = roomSummaryKey("summarize-me");
+
+    const res = await onAction(
+      { type: "room-summary", payload: { slug: "summarize-me" } },
+      makeCtx(),
+    );
+
+    expect(res).toEqual({
+      ok: true,
+      data: { effect: "open-canvas", key, title: "Outcome room" },
+    });
+    expect(turns.requests).toHaveLength(0);
+    expect(rib.views).toContainEqual({ key, canvasKind: "html", title: "Outcome room" });
+    expect(snap.registered).toContain(key);
+    const frame = (await snap.sm.recompose(key)) as { data?: unknown } | undefined;
+    expect(typeof frame?.data).toBe("string");
+    expect(htmlLensStructuralError(frame?.data as string)).toBeUndefined();
+    expect(frame?.data).toContain("Pinned Design");
+    await rib.dispose?.();
+    expect(rib.views?.some((view) => view.key === key)).toBe(false);
+    expect(snap.live()).not.toContain(key);
+  });
+
+  it("room-summary fails closed when the summary publisher is unavailable", async () => {
+    await seedRoomWithOutcome("summary-unavailable");
+    await rib.dispose?.();
+
+    const res = await roomSummaryAction({
+      type: "room-summary",
+      payload: { slug: "summary-unavailable" },
+    });
+
+    expect(res).toEqual({ ok: false, error: "room summary unavailable on this harness" });
+  });
+
+  it("room-summary is refused when relayed from an HTML frame", async () => {
+    await seedRoomWithOutcome("frame-summary");
+
+    const res = await onAction(
+      { type: "room-summary", payload: { slug: "frame-summary" }, origin: "canvas-html" },
+      makeCtx(),
+    );
+
+    expect(res).toEqual({
+      ok: false,
+      error: "'room-summary' is not permitted from an HTML lens",
+    });
+  });
+
   it("outcome-copy returns the reconstructed markdown document verbatim", async () => {
     await seedRoomWithOutcome("copy-me");
     const res = await onAction({ type: "outcome-copy", payload: { slug: "copy-me" } }, makeCtx());
@@ -1060,9 +1117,13 @@ describe("room adapter — outcome-copy / outcome-explore", () => {
     expect(data.seed.systemPrompt.length).toBeLessThanOrEqual(8000);
   });
 
-  for (const type of ["outcome-copy", "outcome-explore"]) {
+  for (const type of ["outcome-copy", "outcome-explore", "room-summary"]) {
     it(`${type} fails closed on an unknown room`, async () => {
-      const res = await onAction({ type, payload: { slug: "ghost-room" } }, makeCtx());
+      const action = { type, payload: { slug: "ghost-room" } };
+      const res =
+        type === "room-summary"
+          ? await roomSummaryAction(action)
+          : await onAction(action, makeCtx());
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.error).toContain("not found");
     });
@@ -1089,13 +1150,21 @@ describe("room adapter — outcome-copy / outcome-explore", () => {
         parts: [{ text: "just ordinary debate, no document yet" }],
         at: "2026-01-01T00:00:01.000Z",
       });
-      const res = await onAction({ type, payload: { slug: "no-outcome" } }, makeCtx());
+      const action = { type, payload: { slug: "no-outcome" } };
+      const res =
+        type === "room-summary"
+          ? await roomSummaryAction(action)
+          : await onAction(action, makeCtx());
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.error).toContain("no synthesized outcome document yet");
     });
 
     it(`${type} requires payload { slug }`, async () => {
-      const res = await onAction({ type, payload: {} }, makeCtx());
+      const action = { type, payload: {} };
+      const res =
+        type === "room-summary"
+          ? await roomSummaryAction(action)
+          : await onAction(action, makeCtx());
       expect(res.ok).toBe(false);
     });
   }

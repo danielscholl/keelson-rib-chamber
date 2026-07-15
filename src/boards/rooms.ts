@@ -22,6 +22,7 @@ export function buildRoomsIndexBoard(
   rooms: readonly Room[],
   minds: readonly Mind[] = [],
   lenses: readonly LensRecord[] = [],
+  outcomeSlugs: ReadonlySet<string> = new Set(),
 ): CanvasBoardView {
   const active = rooms.filter((r) => r.status === "active");
   const closed = rooms.filter((r) => r.status !== "active");
@@ -41,7 +42,9 @@ export function buildRoomsIndexBoard(
       : [
           {
             kind: "cards",
-            items: ordered.map((r) => cardFor(r, bySlug, tabledByRoom.get(r.slug) ?? [])),
+            items: ordered.map((r) =>
+              cardFor(r, bySlug, tabledByRoom.get(r.slug) ?? [], outcomeSlugs),
+            ),
           },
         ];
 
@@ -77,7 +80,12 @@ function personFor(slug: string, bySlug: ReadonlyMap<string, Mind>): CanvasPerso
 // frozen transcript, a live room's streams turns as they land (roomOpenAction picks the
 // key). Only a closed room adds the destructive Delete (overflow, a confirm dialog): the
 // handler refuses a live room, so offering it would only promise a refusal.
-function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly LensRecord[]) {
+function cardFor(
+  room: Room,
+  bySlug: ReadonlyMap<string, Mind>,
+  tabled: readonly LensRecord[],
+  outcomeSlugs: ReadonlySet<string>,
+) {
   const tone = statusTone(room.status);
   const cappedTurnIndex = Math.min(room.turnIndex, room.turnBudget);
   const card = {
@@ -118,7 +126,14 @@ function cardFor(room: Room, bySlug: ReadonlyMap<string, Mind>, tabled: readonly
     ],
   };
   if (room.status === "active") return { ...card, actions: [openAction(room)] };
-  return { ...card, actions: [openAction(room), deleteAction(room, tabled)] };
+  return {
+    ...card,
+    actions: [
+      openAction(room),
+      ...(outcomeSlugs.has(room.slug) ? [summaryAction(room)] : []),
+      deleteAction(room, tabled),
+    ],
+  };
 }
 
 // The room's shape named for the meta line: the strategy in plain words, plus the
@@ -148,6 +163,15 @@ function openAction(room: Room) {
     type: "room-open",
     label: "Open",
     glyph: "↗",
+    payload: { slug: room.slug },
+  };
+}
+
+function summaryAction(room: Room) {
+  return {
+    type: "room-summary",
+    label: "Summary",
+    glyph: "☰",
     payload: { slug: room.slug },
   };
 }

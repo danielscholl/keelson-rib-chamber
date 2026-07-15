@@ -14,3 +14,7 @@ export const DIGEST_KEY = "rib:chamber:digest";
 export function roomViewKey(slug: string): string {
   return `rib:chamber:room-view:${slug}`;
 }
+
+export function roomSummaryKey(slug: string): string {
+  return `rib:chamber:room-summary:${slug}`;
+}
