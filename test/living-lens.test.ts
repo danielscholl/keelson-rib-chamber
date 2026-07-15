@@ -139,13 +139,13 @@ describe("living-lens region wiring", () => {
   it("the region's workflowArgs carry the refresh's own inputs plus the lens id", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("dod", board("DoD"), undefined, "lens", {
-      workflow: "chamber-lens-dod",
-      inputs: { service: "entitlements" },
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+      workflow: "chamber-lens-release",
+      inputs: { repo: "acme/widget" },
     });
-    expect(region.current(lensKey("dod"))?.workflowArgs).toEqual({
-      service: "entitlements",
-      lens: "dod",
+    expect(region.current(lensKey("metrics"))?.workflowArgs).toEqual({
+      repo: "acme/widget",
+      lens: "metrics",
     });
   });
 
@@ -154,11 +154,11 @@ describe("living-lens region wiring", () => {
   it("a stored input cannot shadow the lens id", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("dod", board("DoD"), undefined, "lens", {
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
       workflow: "w1",
       inputs: { lens: "somewhere-else" },
     });
-    expect(region.current(lensKey("dod"))?.workflowArgs).toEqual({ lens: "dod" });
+    expect(region.current(lensKey("metrics"))?.workflowArgs).toEqual({ lens: "metrics" });
   });
 
   // sameRefresh gates the rewire, so an inputs-only edit it can't see would leave the
@@ -166,19 +166,19 @@ describe("living-lens region wiring", () => {
   it("an inputs-only change rewires the region", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("dod", board("DoD"), undefined, "lens", {
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
       workflow: "w1",
-      inputs: { service: "entitlements" },
+      inputs: { repo: "acme/widget" },
     });
     expect(region.calls).toHaveLength(1);
-    await reg.publish("dod", board("DoD"), undefined, "lens", {
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
       workflow: "w1",
       inputs: { service: "storage" },
     });
     expect(region.calls).toHaveLength(2);
-    expect(region.current(lensKey("dod"))?.workflowArgs).toEqual({
+    expect(region.current(lensKey("metrics"))?.workflowArgs).toEqual({
       service: "storage",
-      lens: "dod",
+      lens: "metrics",
     });
   });
 
@@ -286,11 +286,11 @@ describe("lens store refresh round-trip", () => {
         id: "goodin",
         board: board("Good"),
         updatedAt: "2026-01-01T00:00:00.000Z",
-        refresh: { workflow: "chamber-lens-x", inputs: { service: "entitlements" } },
+        refresh: { workflow: "chamber-lens-x", inputs: { repo: "acme/widget" } },
       }),
     );
     const record = await createFileLensStore(root).loadLens("goodin");
-    expect(record?.refresh?.inputs).toEqual({ service: "entitlements" });
+    expect(record?.refresh?.inputs).toEqual({ repo: "acme/widget" });
   });
 });
 
@@ -505,13 +505,13 @@ describe("living-lens emit + verbs", () => {
   it("names a workflow chamber contributed and hears no caveat", async () => {
     await mkdir(lensWorkflowsDir(), { recursive: true });
     await writeFile(
-      join(lensWorkflowsDir(), "dod.yaml"),
+      join(lensWorkflowsDir(), "release.yaml"),
       "description: derive\nnodes:\n  - id: n\n    prompt: p\n",
     );
     rib.contributeWorkflows?.({} as Parameters<NonNullable<typeof rib.contributeWorkflows>>[0]);
     const t = makeToolCtx();
     await tool("chamber_emit_lens").execute(
-      { id: "dod", board: board("DoD"), refresh: { workflow: "chamber-lens-dod" } },
+      { id: "metrics", board: board("Metrics"), refresh: { workflow: "chamber-lens-release" } },
       t.ctx,
     );
     expect(JSON.parse(t.out()).note).toBeUndefined();
@@ -523,21 +523,21 @@ describe("living-lens emit + verbs", () => {
     const t1 = makeToolCtx();
     await tool("chamber_emit_lens").execute(
       {
-        id: "dod",
-        board: board("DoD"),
-        refresh: { workflow: "chamber-lens-dod", inputs: { service: "entitlements" } },
+        id: "metrics",
+        board: board("Metrics"),
+        refresh: { workflow: "chamber-lens-release", inputs: { repo: "acme/widget" } },
       },
       t1.ctx,
     );
-    expect((await store.loadLens("dod"))?.refresh?.inputs).toEqual({ service: "entitlements" });
+    expect((await store.loadLens("metrics"))?.refresh?.inputs).toEqual({ repo: "acme/widget" });
     // A cadence-only re-author keeps them — a refresh turn re-emitting its board has
     // no reason to know it must re-state the parameters it was invoked with.
     const t2 = makeToolCtx();
     await tool("chamber_emit_lens").execute(
-      { id: "dod", board: board("DoD 2"), refresh: { cadenceMs: 600_000 } },
+      { id: "metrics", board: board("Metrics 2"), refresh: { cadenceMs: 600_000 } },
       t2.ctx,
     );
-    expect((await store.loadLens("dod"))?.refresh?.inputs).toEqual({ service: "entitlements" });
+    expect((await store.loadLens("metrics"))?.refresh?.inputs).toEqual({ repo: "acme/widget" });
   });
 
   // An empty object reaches the region as the same workflowArgs an absent one does,
@@ -598,17 +598,20 @@ describe("living-lens emit + verbs", () => {
     const t = makeToolCtx();
     await tool("chamber_emit_lens").execute(
       {
-        id: "dod",
-        board: board("DoD"),
-        refresh: { workflow: "chamber-lens-dod", inputs: { service: "entitlements" } },
+        id: "metrics",
+        board: board("Metrics"),
+        refresh: { workflow: "chamber-lens-release", inputs: { repo: "acme/widget" } },
       },
       t.ctx,
     );
     refreshCalls = [];
-    const res = await onAction({ type: "refresh-lens", payload: { id: "dod" } }, {} as RibContext);
+    const res = await onAction(
+      { type: "refresh-lens", payload: { id: "metrics" } },
+      {} as RibContext,
+    );
     expect(res.ok).toBe(true);
     expect(refreshCalls).toEqual([
-      { name: "chamber-lens-dod", inputs: { service: "entitlements", lens: "dod" } },
+      { name: "chamber-lens-release", inputs: { repo: "acme/widget", lens: "metrics" } },
     ]);
   });
 

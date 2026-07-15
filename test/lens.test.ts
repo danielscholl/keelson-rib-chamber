@@ -51,16 +51,16 @@ describe("lensRefreshInputs", () => {
   });
 
   test("merges the backing's own inputs alongside the id", () => {
-    expect(lensRefreshInputs("dod", { service: "entitlements" })).toEqual({
-      service: "entitlements",
-      lens: "dod",
+    expect(lensRefreshInputs("metrics", { repo: "acme/widget" })).toEqual({
+      repo: "acme/widget",
+      lens: "metrics",
     });
   });
 
   // `lens` is the one input the refresh contract guarantees its producer, and the
   // inputs beside it come from agent-authored lens data.
   test("a stored input cannot shadow the lens id", () => {
-    expect(lensRefreshInputs("dod", { lens: "somewhere-else" })).toEqual({ lens: "dod" });
+    expect(lensRefreshInputs("metrics", { lens: "somewhere-else" })).toEqual({ lens: "metrics" });
   });
 });
 

@@ -112,57 +112,36 @@ And each refresh is a paid agent turn, so the cadence defaults lean quiet: the
 panel refreshes while you're watching, not overnight (the server heartbeat
 deliberately skips per-lens regions).
 
-## A data lens needs a workflow of its own
+## A data lens names a workflow of its own
 
 The bundled `chamber-lens-refresh` can only re-compose from the board it already
 wrote. That is enough for a lens that interprets a subject, and not enough for one
-that *measures* something: to re-derive real numbers, a lens needs a refresh
-workflow that goes and gets them.
+that *measures* something: to re-derive its numbers, a lens needs a refresh workflow
+that goes and gets them.
 
 Which raises the question of what a lens is allowed to name. `refresh.workflow` is
 agent-authored data, so if a lens could name any workflow on the machine, a Mind
 could point one at arbitrary code and have the panel run it on a cadence. The
 harness closes that off: it runs a panel's refresh **only for a workflow a rib
-contributed**, and refuses anything from the general catalog. A workflow file you
-drop in the global workflows dir can never qualify, however correct it is.
+contributed**, and refuses anything from the general catalog. A workflow file in
+the global workflows dir can never qualify, however correct it is.
 
 So Chamber contributes them for you. A workflow file placed in its
-`lens-workflows/` directory is contributed to the catalog as
-`chamber-lens-<filename>`, which a lens may then name:
+`lens-workflows/` directory is contributed as `chamber-lens-<filename>`, which a
+lens may then name. The filename decides the name, overriding whatever the file's
+own `name:` field says. Chamber vouches for these files, and the trust boundary is
+that *you* put them there: a workflow's `bash` nodes run as written, so the
+directory deserves the same care as anything else you would run yourself.
+Contributions are collected once at startup, so a newly added file needs a
+`keelson stop && keelson start` before its cadence works. Naming a workflow Chamber
+does not contribute earns a caveat in the emit's reply, which is the only place you
+would hear about it: the refresh itself is refused silently.
 
-```
-~/.keelson/rib-chamber/lens-workflows/dod-entitlements.yaml
-   →  contributed as  chamber-lens-dod-entitlements
-```
-
-The filename decides the name, overriding whatever the file's own `name:` field
-says. Chamber vouches for these files, and the trust boundary is that *you* put
-them there: a workflow's `bash` nodes run as written, so this directory deserves
-the same care as anything else you would run yourself. Contributions are collected
-once at startup, so a newly added file needs a `keelson stop && keelson start`
-before its cadence works. Naming a workflow Chamber does not contribute earns a
-caveat in the emit's reply, which is the only place you would hear about it: the
-refresh itself fails silently.
-
-`refresh.inputs` carries the producer's own parameters, so the lens id can be
-chosen for what the subject *is* rather than for what its workflow needs to parse
-back out of it:
-
-```
-chamber_emit_lens {
-  id: "dod-entitlements",
-  board: {...},
-  refresh: {
-    workflow: "chamber-lens-dod-entitlements",
-    inputs: { service: "entitlements" },
-    cadenceMs: 21600000,
-  },
-}
-```
-
-Those reach the workflow alongside `lens` (the lens id), which always wins: it is
-the one input the refresh contract guarantees, so a stored input of that name
-cannot take it over.
+`refresh.inputs` carries that workflow's own parameters, so a lens id can be chosen
+for what the subject *is* rather than for what its producer needs to parse back out
+of it. They reach the workflow as `KEELSON_INPUTS_<key>`, alongside `lens` (the lens
+id), which always wins: it is the one input the refresh contract guarantees, so a
+stored input of that name cannot take it over.
 
 ## Provenance the card carries
 

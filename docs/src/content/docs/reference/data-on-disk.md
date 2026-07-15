@@ -189,7 +189,7 @@ Two more optional fields follow different rules: `kind: "exhibit"` marks a
 tabled deliverable (absent means lens; `sourceRoom` beside it is the producing
 room's slug, driver-witnessed and never agent-supplied), and `refresh`, a
 living lens's re-compose backing shaped
-`{ "workflow": "chamber-lens-refresh", "cadenceMs": 3600000, "inputs": { "service": "entitlements" } }`.
+`{ "workflow": "chamber-lens-refresh", "cadenceMs": 3600000, "inputs": { "repo": "acme/widget" } }`.
 It is PRESERVED when a re-author omits it, PATCHED field-by-field when a
 re-author supplies an object (only an explicit `refresh: null` clears it), and
 lens-only (an exhibit save strips it). `inputs` are the producer's own
