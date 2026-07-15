@@ -175,11 +175,11 @@ export interface LensRegistry {
 interface LensEntry {
   key: string;
   publisher: { publish(board: CanvasBoardView): Promise<void> };
-  // The last board this entry actually got onto the key — liveRegister's comparand for
-  // skipping an identical republish. NOT the publisher's `latest`, which is assigned
-  // before the compose it feeds and so still advances when that compose throws: a
-  // retry would then skip and strand the panel a board behind.
-  published?: CanvasBoardView;
+  // What a compose actually put on the key — liveRegister's comparand for skipping an
+  // identical republish. The publisher owns it because only its pump knows which board
+  // a compose read; a board this side merely handed to publish() may have thrown, or
+  // been coalesced into someone else's compose that landed a different one.
+  published: () => CanvasBoardView | undefined;
   unregisterSnapshot: () => void;
   // Absent for an exhibit: it holds a key but no panel (see regionFor).
   unregisterRegion?: () => void;
@@ -245,7 +245,7 @@ export function createLensRegistry(
   // guard; the second finds the entry and just republishes.
   function register(id: string, kind: LensKind, refresh?: LensRefresh): LensEntry {
     const key = lensKey(id);
-    const { publisher, latest } = createCoalescingPublisher(
+    const { publisher, latest, published } = createCoalescingPublisher(
       () => sm.recompose(key),
       emptyLensBoard(),
     );
@@ -267,6 +267,7 @@ export function createLensRegistry(
     const entry: LensEntry = {
       key,
       publisher,
+      published,
       unregisterSnapshot,
       ...(unregisterRegion ? { unregisterRegion } : {}),
       kind,
@@ -336,12 +337,9 @@ export function createLensRegistry(
     // "updated" a panel head reads — with freshness the content never earned. The
     // comparand is what reached the SURFACE, never the stored record: skipping on the
     // record would strand a panel whose save failed, with no later refresh able to
-    // converge it. Marked only after the publish resolves, so a failed broadcast
-    // leaves the entry re-publishable rather than falsely settled.
-    if (!entry.published || !boardsEqual(entry.published, board)) {
-      await entry.publisher.publish(board);
-      entry.published = board;
-    }
+    // converge it.
+    const onSurface = entry.published();
+    if (!onSurface || !boardsEqual(onSurface, board)) await entry.publisher.publish(board);
     return { key: entry.key };
   }
 

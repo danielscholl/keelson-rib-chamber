@@ -64,10 +64,17 @@ turn:
   card, labeled "by".
 
 The card also shows an "updated" time. That value is stamped by the server, never
-supplied by the turn, and it tracks the **board**: a re-author that leaves the
-board structurally unchanged keeps the old time rather than claiming a fresh one.
-So the card answers "how current is this information", not "when did a turn last
-run".
+supplied by the turn, and it records exactly one thing: when the **board** last
+changed. A re-author that leaves the board structurally unchanged keeps the old
+time rather than claiming a fresh one.
+
+Read it for what it is. It is not a "last checked" time, and it cannot be: a
+refresh that genuinely re-measures and finds the same numbers keeps the old stamp,
+so a current board can read as old. That is the deliberate trade. The card cannot
+tell a real re-measurement from a cosmetic re-emit, and of the two possible lies,
+"nothing has changed since then" is the safer one. A lens that needs to assert when
+its data was gathered should say so in the board itself, as a "data as of" line it
+composes.
 
 The `chamber-lens` workflow prompt asks the turn for `id`, `board`, `scope`, and
 `reason`, so a lens authored through the workflow usually carries no

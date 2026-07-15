@@ -98,8 +98,10 @@ cadence while the surface is open, and on demand from the **Refresh** verb its
 index card gains. The workflow re-reads the record and re-emits a board under the
 same id. If that board actually changed, the panel's "updated Xm ago" clock and the
 index card's freshness advance with it; if the refresh found nothing to change, the
-re-emit is a no-op and the clock holds. A lens whose content is a measurement must
-not read as current because a turn ran, only because something was re-measured.
+re-emit is a no-op and the clock holds. So the clock tracks the board, not the
+turn: a lens whose content is a measurement must never read as current merely
+because a refresh ran. The cost of that is a board which was re-measured and did
+not move reads as old, which is the safer of the two available errors.
 
 Two rules keep the backing honest. Re-authoring the lens **without** `refresh`
 preserves the existing backing (the refresh turn itself re-emits the board and

@@ -119,6 +119,10 @@ describe("lens registry", () => {
     // Arms a one-shot recompose failure, so a test can leave the live key behind the
     // board its publish requested (the publisher assigns `latest` before composing).
     let failOnce = false;
+    // Holds the next recompose open, so a test can land a second publish inside the
+    // pump's await and drive the coalescing path deterministically.
+    let gate: Promise<void> | undefined;
+    let openGate: (() => void) | undefined;
     const sm = {
       register(key: string, compose: () => unknown, opts?: { validate?: (d: unknown) => unknown }) {
         if (composers.has(key)) throw new Error(`duplicate key ${key}`);
@@ -133,6 +137,11 @@ describe("lens registry", () => {
         if (failOnce) {
           failOnce = false;
           throw new Error("broadcast down");
+        }
+        if (gate) {
+          const held = gate;
+          gate = undefined;
+          await held;
         }
         const composed = await composers.get(key)?.();
         const view = validators.get(key)?.(composed) ?? composed;
@@ -149,6 +158,12 @@ describe("lens registry", () => {
       keys: () => [...composers.keys()],
       failNextRecompose: () => {
         failOnce = true;
+      },
+      holdNextRecompose: () => {
+        gate = new Promise<void>((r) => {
+          openGate = r;
+        });
+        return () => openGate?.();
       },
     };
   }
@@ -256,6 +271,31 @@ describe("lens registry", () => {
     await expect(reg.publish("a", board("B"))).rejects.toThrow("broadcast down");
     // The refresh turn retries the same board. Skipping here would persist B while
     // the panel stayed on A, with no later refresh able to converge them.
+    await reg.publish("a", board("B"));
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("B") });
+  });
+
+  test("a publish coalesced into another's compose leaves the tracker on what the key really shows", async () => {
+    const { sm, broadcasts, holdNextRecompose } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"));
+
+    // B enters the pump and stalls inside its compose; C then lands, coalesces onto
+    // that in-flight compose (publish returns without composing), and the pump's
+    // dirty loop is what actually puts C on the key. So B resolves LAST while C is
+    // what the panel shows.
+    const open = holdNextRecompose();
+    const bPublish = reg.publish("a", board("B"));
+    await new Promise((r) => setTimeout(r, 0));
+    await reg.publish("a", board("C"));
+    open();
+    await bPublish;
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("C") });
+
+    // A refresh re-emits B, the board the store still holds. It must reach the key:
+    // a tracker that recorded B (the last publish to resolve) would skip here and
+    // leave C on the panel with nothing able to converge it.
     await reg.publish("a", board("B"));
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("B") });
   });
