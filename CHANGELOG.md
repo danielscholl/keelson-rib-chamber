@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.44.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.43.0...v0.44.0) (2026-07-15)
+
+
+### Added
+
+* **lens:** bring the HTML lens to parity with the canvas one ([#307](https://github.com/danielscholl/keelson-rib-chamber/issues/307)) ([3cbc886](https://github.com/danielscholl/keelson-rib-chamber/commit/3cbc88662b60a0258301c71269078211e9c6b8cd))
+* **lens:** ground the bundled lens authors in read-only file access ([#308](https://github.com/danielscholl/keelson-rib-chamber/issues/308)) ([e68f9b0](https://github.com/danielscholl/keelson-rib-chamber/commit/e68f9b041dea1a84fd1afb6d77cc91f42d19e105))
+* **lens:** make a lens's own refresh workflow reachable ([#306](https://github.com/danielscholl/keelson-rib-chamber/issues/306)) ([66f0f97](https://github.com/danielscholl/keelson-rib-chamber/commit/66f0f97a1cb9e6ca20686956326db0a76ccaa1a7))
+
+
+### Fixed
+
+* **lens:** hold provenance and freshness across an unchanged refresh ([#304](https://github.com/danielscholl/keelson-rib-chamber/issues/304)) ([409ae35](https://github.com/danielscholl/keelson-rib-chamber/commit/409ae3562f321fbf65e6292881cdd4b830ed8a7e))
+
 ## [0.43.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.42.0...v0.43.0) (2026-07-15)
 
 
