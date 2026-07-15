@@ -784,6 +784,11 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           system,
           prompt,
           abortSignal: controller.signal,
+          // The room this turn speaks for, carried opaquely to its tools so the
+          // exhibit seam can refuse another room's id BEFORE it overwrites the
+          // board. The witness below only lands once the stream drains, so it can
+          // repair provenance but never restore content.
+          turnContext: { roomSlug: room.slug },
           ...(cwd ? { cwd } : {}),
           ...(tools.length > 0 ? { tools } : {}),
           ...(confineRoot ? { allowedDirectories: [confineRoot] } : {}),

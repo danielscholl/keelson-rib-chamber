@@ -277,10 +277,12 @@ export function makeRetireLensTool(): ToolDefinition {
 }
 
 // Exhibit publish seam — the room driver's turn tool: a discussion tables its
-// deliverable (an assessment, a plan, a findings board) as a point-in-time record
-// on the Exhibits shelf. Deliberately NO sourceRoom input: the room driver stamps
-// the producing room after WITNESSING this tool fire in a turn it ran (see
-// stampExhibitSources), so provenance can't be claimed, only observed.
+// deliverable (an assessment, a plan, a findings board) as a point-in-time record.
+// Deliberately NO sourceRoom input: the room is read from the turn's `turnContext`,
+// which the DRIVER sets, so provenance is still observed rather than claimed — a Mind
+// cannot name its own room. That read is the primary source and it lands in this same
+// write, so an exhibit is owned the instant it exists; the driver's post-hoc witness
+// (stampExhibitSources) is the fallback for a host predating the turnContext seam.
 const exhibitEmitSchema = z.object({
   id: z.string().min(1).max(64),
   board: canvasBoardViewSchema,
@@ -323,12 +325,32 @@ export function makeTableExhibitTool(store: LensStore, registry: LensRegistry): 
             );
             return;
           }
+          // An exhibit another room already owns: refuse before the publish, which is
+          // last-writer-wins. The driver's witness stamp runs after the write and can
+          // only repair sourceRoom, never restore the board this would have replaced.
+          // Absent room identity we cannot tell a legitimate same-room re-table from a
+          // collision, so an unidentified caller may not touch an owned exhibit.
+          const callerRoom =
+            typeof ctx.turnContext?.roomSlug === "string" ? ctx.turnContext.roomSlug : undefined;
+          if (existing?.sourceRoom && existing.sourceRoom !== callerRoom) {
+            emitResult(
+              ctx,
+              `chamber_table_exhibit: '${id}' is owned by another room — pick another id`,
+              true,
+            );
+            return;
+          }
           const { key } = await registry.publish(
             id,
             parsed.data.board,
-            // A re-table keeps the witnessed source until the driver re-stamps it
-            // (the record is rewritten whole, so an omitted field would clear it).
-            { reason: parsed.data.reason, sourceRoom: existing?.sourceRoom },
+            // Claim the room in THIS load-check-publish, which is serialized on the lens
+            // write chain. Leaving the first table unowned until the driver's stamp — which
+            // waits for the whole turn stream to drain — opens a window where another room
+            // publishes the same id over it and the late stamp then claims that room's
+            // content. The slug is the DRIVER's, never the agent's, so provenance is still
+            // observed rather than claimed. Falls back to the stamp when the host predates
+            // the turnContext seam.
+            { reason: parsed.data.reason, sourceRoom: existing?.sourceRoom ?? callerRoom },
             "exhibit",
           );
           // Mirror the lens emit's freshness path: the new exhibit appears in its

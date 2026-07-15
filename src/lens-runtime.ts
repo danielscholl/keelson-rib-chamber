@@ -178,7 +178,7 @@ export function stampExhibitSources(rawIds: readonly string[], room: Room): void
     await lensReconcileInFlight?.catch(() => {});
     const store = createFileLensStore(lensesDir());
     let stamped = false;
-    // Tracked apart from `stamped`: a RE-table of an id this room already owns writes
+    // Tracked apart from `stamped`: a re-table of an id this room already owns writes
     // nothing here, but its content changed, so the room's board is stale either way.
     let owned = false;
     for (const rawId of rawIds) {
@@ -187,10 +187,19 @@ export function stampExhibitSources(rawIds: readonly string[], room: Room): void
       try {
         const record = await store.loadLens(id);
         if (!record || !isExhibit(record)) continue;
-        owned = true;
-        if (record.sourceRoom === source) continue;
+        if (record.sourceRoom === source) {
+          owned = true;
+          continue;
+        }
+        if (record.sourceRoom) {
+          console.error(
+            `[rib-chamber] exhibit '${id}' owned by room '${record.sourceRoom}' — refusing re-parent to '${source}'`,
+          );
+          continue;
+        }
         await store.saveLens({ ...record, sourceRoom: source });
         stamped = true;
+        owned = true;
       } catch (e) {
         console.error(`[rib-chamber] exhibit '${id}' source stamp failed: ${errText(e)}`);
       }

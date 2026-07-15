@@ -221,6 +221,16 @@ describe("room driver — step", () => {
     expect(h.turns.requests).toHaveLength(8);
   });
 
+  test("the turn carries its room on turnContext — the exhibit seam's only identity", async () => {
+    // The bridge the collision guard rides. The exhibit-tool tests inject turnContext
+    // directly, so without this assertion dropping it here leaves them green while
+    // production silently loses the guard.
+    const h = harness([{ text: "reply" }]);
+    await h.driver.start(START);
+    await h.driver.step("demo");
+    expect(h.turns.requests[0]?.turnContext).toEqual({ roomSlug: "demo" });
+  });
+
   test("prompt carries prior transcript text", async () => {
     const h = harness([{ text: "first" }, { text: "second" }]);
     await h.driver.start(START);

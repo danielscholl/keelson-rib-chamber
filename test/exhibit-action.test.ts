@@ -53,12 +53,13 @@ const actionCtx = {
   }),
 } as unknown as RibContext;
 
-function makeToolCtx() {
+function makeToolCtx(roomSlug?: string) {
   const chunks: MessageChunk[] = [];
   const ctx: ToolContext = {
     cwd: ".",
     emit: (c) => chunks.push(c),
     abortSignal: new AbortController().signal,
+    ...(roomSlug ? { turnContext: { roomSlug } } : {}),
   };
   return {
     ctx,
@@ -173,6 +174,31 @@ describe("chamber_table_exhibit tool", () => {
     expect(rec?.sourceRoom).toBeUndefined();
   });
 
+  it("a first table claims the caller's room in the same write", async () => {
+    // Leaving it unowned until the driver's stamp — which waits for the whole turn
+    // stream to drain — lets another room publish over it in the window, and the late
+    // stamp then claims that room's content.
+    const t = makeToolCtx("sample-review");
+    await tool("chamber_table_exhibit").execute(
+      { id: "assessment", board: board("Assessment") },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.sourceRoom).toBe("sample-review");
+  });
+
+  it("a second room cannot publish over an id the first room just claimed", async () => {
+    const a = makeToolCtx("room-a");
+    await tool("chamber_table_exhibit").execute({ id: "findings", board: board("A") }, a.ctx);
+    const b = makeToolCtx("room-b");
+    await tool("chamber_table_exhibit").execute({ id: "findings", board: board("B") }, b.ctx);
+    expect(b.errored()).toBe(true);
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.board.title).toBe("A");
+    expect(rec?.sourceRoom).toBe("room-a");
+  });
+
   it("rejects an id with no usable characters", async () => {
     const t = makeToolCtx();
     await tool("chamber_table_exhibit").execute({ id: "!!!", board: board("X") }, t.ctx);
@@ -194,9 +220,9 @@ describe("chamber_table_exhibit tool", () => {
     expect(rec?.board.title).toBe("morning-brief");
   });
 
-  it("a re-table preserves the witnessed sourceRoom", async () => {
+  it("a re-table by the owning room preserves the witnessed sourceRoom", async () => {
     await seedExhibit("assessment", "sample-review");
-    const t = makeToolCtx();
+    const t = makeToolCtx("sample-review");
     await tool("chamber_table_exhibit").execute(
       { id: "assessment", board: board("Assessment v2") },
       t.ctx,
@@ -205,6 +231,47 @@ describe("chamber_table_exhibit tool", () => {
     const [rec] = await listLenses(lensesDir());
     expect(rec?.board.title).toBe("Assessment v2");
     expect(rec?.sourceRoom).toBe("sample-review");
+  });
+
+  it("refuses an exhibit another room owns, without touching its board", async () => {
+    await seedExhibit("assessment", "sample-review");
+    const t = makeToolCtx("other-room");
+    await tool("chamber_table_exhibit").execute(
+      { id: "assessment", board: board("Stolen") },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("owned by another room");
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.board.title).toBe("assessment");
+    expect(rec?.sourceRoom).toBe("sample-review");
+  });
+
+  it("refuses an owned exhibit when the caller carries no room identity", async () => {
+    // The seam is registered globally, so a caller outside any room reaches it too.
+    // Without identity we cannot tell a same-room re-table from a collision.
+    await seedExhibit("assessment", "sample-review");
+    const t = makeToolCtx();
+    await tool("chamber_table_exhibit").execute(
+      { id: "assessment", board: board("Stolen") },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(true);
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.board.title).toBe("assessment");
+    expect(rec?.sourceRoom).toBe("sample-review");
+  });
+
+  it("an unowned exhibit is still re-tabled by a caller with no room identity", async () => {
+    await seedExhibit("assessment");
+    const t = makeToolCtx();
+    await tool("chamber_table_exhibit").execute(
+      { id: "assessment", board: board("Assessment v2") },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.board.title).toBe("Assessment v2");
   });
 });
 
