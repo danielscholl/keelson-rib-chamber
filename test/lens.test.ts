@@ -8,6 +8,7 @@ import {
   createLensRegistry,
   emptyLensBoard,
   lensKey,
+  lensRefreshInputs,
 } from "../src/lens.ts";
 import type { LensStore } from "../src/lens-store.ts";
 
@@ -41,6 +42,25 @@ describe("lens keys + placeholder", () => {
 
   test("emptyLensBoard is a renderable board view", () => {
     expect(() => expectView(lensKey("x"), "board")(emptyLensBoard())).not.toThrow();
+  });
+});
+
+describe("lensRefreshInputs", () => {
+  test("passes the lens id alone when the backing carries no inputs", () => {
+    expect(lensRefreshInputs("release-risks")).toEqual({ lens: "release-risks" });
+  });
+
+  test("merges the backing's own inputs alongside the id", () => {
+    expect(lensRefreshInputs("metrics", { repo: "acme/widget" })).toEqual({
+      repo: "acme/widget",
+      lens: "metrics",
+    });
+  });
+
+  // `lens` is the one input the refresh contract guarantees its producer, and the
+  // inputs beside it come from agent-authored lens data.
+  test("a stored input cannot shadow the lens id", () => {
+    expect(lensRefreshInputs("metrics", { lens: "somewhere-else" })).toEqual({ lens: "metrics" });
   });
 });
 

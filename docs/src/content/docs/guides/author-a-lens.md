@@ -39,16 +39,33 @@ Re-authoring the same subject is the manual way to keep a lens fresh. A lens can
 keep itself current. Pass a `refresh` object when you author it, and the panel becomes
 a **living lens** that re-composes on a cadence:
 
-- `refresh: { workflow?, cadenceMs? }` makes the panel re-run a catalog workflow on
-  cadence, feeding it the lens id. `workflow` defaults to `chamber-lens-refresh` (the
-  bundled re-author), and `cadenceMs` defaults to one hour, floored at 30 seconds.
+- `refresh: { workflow?, cadenceMs?, inputs? }` makes the panel re-run a workflow on
+  cadence, feeding it the lens id plus any `inputs` you name. `workflow` defaults to
+  `chamber-lens-refresh` (the bundled re-author), and `cadenceMs` defaults to one
+  hour, floored at 30 seconds.
 - On a re-author, omitting `refresh` keeps the existing backing, an object patches it
   (an omitted field keeps its prior value), and `refresh: null` clears it.
 
-A living lens also carries an on-demand **Refresh** verb on its panel head, so you can
-force a re-compose between cadence ticks. Each refresh is a paid agent turn, so the
-default cadence leans quiet. For how a refresh turn re-reads and re-emits the board,
-see [A living lens re-composes itself](../../concepts/lenses/#a-living-lens-re-composes-itself).
+A living lens also gains an on-demand **Refresh** verb on its card in the Lenses
+index, so you can force a re-compose between cadence ticks. The default cadence leans
+quiet because the bundled re-author spends an agent turn on every tick; a workflow of
+your own costs whatever you built it out of, down to nothing if it is deterministic.
+For how a refresh turn re-reads and re-emits the board, see
+[A living lens re-composes itself](../../concepts/lenses/#a-living-lens-re-composes-itself).
+
+## Name a workflow the panel can actually run
+
+The bundled re-author re-composes from the board it already wrote, so a lens whose
+content is a measurement needs a refresh workflow of its own. One constraint decides
+where that workflow can live: the harness runs a panel's refresh only for a
+**rib-contributed** workflow, so a file in the global workflows dir will never drive
+a cadence, however correct it is.
+
+Chamber contributes yours for you. A workflow file in
+`{keelson-home}/rib-chamber/lens-workflows/` becomes `chamber-lens-{filename}`, which
+a lens may then name. See
+[A data lens names a workflow of its own](../../concepts/lenses/#a-data-lens-names-a-workflow-of-its-own)
+for the rule, the trust boundary, and why the constraint exists.
 
 ## Provenance on the index card
 

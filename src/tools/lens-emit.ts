@@ -30,8 +30,9 @@ import {
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
 import { isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
+import { MAX_REFRESH_WORKFLOW_NAME } from "../lens-workflows.ts";
 import { refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
-import { LENS_REFRESH_WORKFLOW } from "../workflows.ts";
+import { isChamberWorkflow, LENS_REFRESH_WORKFLOW } from "../workflows.ts";
 import { emitResult } from "./util.ts";
 
 // Lens publish seam: the chamber-lens workflow's prompt node composes a canvas
@@ -56,10 +57,17 @@ const lensEmitSchema = z.object({
   // null clears it. An object PATCHES the prior backing: an omitted field keeps
   // its prior value, `workflow` bottoming out at the bundled chamber-lens-refresh
   // re-author; the floor/ceiling keep a typo'd cadence from thrashing turns.
+  // `inputs` are the producer's own parameters, so a data lens's id need not double
+  // as its workflow's argument.
   refresh: z
     .object({
-      workflow: z.string().min(1).max(64).optional(),
+      workflow: z.string().min(1).max(MAX_REFRESH_WORKFLOW_NAME).optional(),
       cadenceMs: z.number().int().min(MIN_REFRESH_CADENCE_MS).max(86_400_000).optional(),
+      // Checked here as well as at the store fold: the fold is the degradation path
+      // for a hand-edited record, and without a schema check a live emit would fail
+      // closed against the region's workflowArgs — naming a field the author never
+      // wrote — instead of against the one they did.
+      inputs: z.record(z.string().min(1).max(64), z.string().max(512)).optional(),
     })
     .nullable()
     .optional(),
@@ -69,7 +77,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
   return {
     name: LENS_TOOL_NAME,
     description:
-      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). On a re-author, omitting `scope` or `maintainingMind` KEEPS the lens\'s existing value (pass null to clear one) — you need not re-state them; omitting `reason` clears it, since it describes a single authoring. Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs? }` names a catalog workflow the panel re-runs on cadence with input `lens` = this id (the workflow re-composes and re-emits the lens; default workflow chamber-lens-refresh, default cadence 1h). Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit. ' +
+      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). On a re-author, omitting `scope` or `maintainingMind` KEEPS the lens\'s existing value (pass null to clear one) — you need not re-state them; omitting `reason` clears it, since it describes a single authoring. Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs?, inputs? }` names a workflow the panel re-runs on cadence with input `lens` = this id, plus any `inputs` you give (the workflow re-composes and re-emits the lens; default workflow chamber-lens-refresh, default cadence 1h). Use `inputs` for the producer\'s own parameters rather than encoding them in the id. The harness runs only a RIB-CONTRIBUTED workflow on a panel\'s cadence: chamber contributes chamber-lens-refresh plus one `chamber-lens-<filename>` per workflow file the operator has placed in chamber\'s lens-workflows dir — a workflow in the general catalog is refused and the panel silently never re-composes. Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit. ' +
       BOARD_COMPOSITION_CONTRACT,
     inputSchema: lensEmitSchema,
     state_changing: true,
@@ -129,11 +137,13 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             : boardsEqual(prior.board, parsed.data.board)
               ? prior.updatedAt
               : new Date(Math.max(Date.now(), Date.parse(prior.updatedAt) + 1)).toISOString();
-          // The harness refresh seam is fail-soft (an unknown workflow warns
-          // server-side and resolves), so an emit that names a custom workflow
-          // gets a caveat in its reply — the one place the author can hear it.
-          const customWorkflow =
-            parsed.data.refresh?.workflow && parsed.data.refresh.workflow !== LENS_REFRESH_WORKFLOW
+          // The host refreshes only a workflow with RIB provenance, and its refresh
+          // seam is fail-soft, so a backing it won't run is otherwise a silent 409 on
+          // every tick. Chamber can vouch for the workflows it contributed and no
+          // more — another rib may legitimately own the named one — so this is a
+          // caveat in the reply, the one place the author can hear it, not a reject.
+          const unvouchedWorkflow =
+            parsed.data.refresh?.workflow && !isChamberWorkflow(parsed.data.refresh.workflow)
               ? parsed.data.refresh.workflow
               : undefined;
           const { key } = await registry.publish(
@@ -160,9 +170,9 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             JSON.stringify({
               ok: true,
               key,
-              ...(customWorkflow
+              ...(unvouchedWorkflow
                 ? {
-                    note: `refresh runs workflow '${customWorkflow}' — if that workflow is not in the catalog, the panel silently never re-composes`,
+                    note: `refresh names '${unvouchedWorkflow}', which chamber does not contribute — unless another rib does, the harness will refuse to run it and the panel will never re-compose. A workflow file in the chamber lens-workflows dir is contributed as 'chamber-lens-<filename>'.`,
                   }
                 : {}),
             }),
@@ -182,15 +192,23 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
 // a cadence-only re-author can't silently swap a bespoke refresh workflow for
 // the bundled default.
 function resolveLensRefresh(
-  input: { workflow?: string; cadenceMs?: number } | null | undefined,
+  input:
+    | { workflow?: string; cadenceMs?: number; inputs?: Record<string, string> }
+    | null
+    | undefined,
   prior: LensRefresh | undefined,
 ): LensRefresh | undefined {
   if (input === undefined) return prior;
   if (input === null) return undefined;
   const cadenceMs = input.cadenceMs ?? prior?.cadenceMs;
+  // An empty inputs object is no inputs: it reaches the region as the same
+  // workflowArgs an absent one does, so storing it would only make sameRefresh
+  // read a backing change that isn't one.
+  const inputs = input.inputs ?? prior?.inputs;
   return {
     workflow: input.workflow ?? prior?.workflow ?? LENS_REFRESH_WORKFLOW,
     ...(cadenceMs !== undefined ? { cadenceMs } : {}),
+    ...(inputs && Object.keys(inputs).length > 0 ? { inputs } : {}),
   };
 }
 

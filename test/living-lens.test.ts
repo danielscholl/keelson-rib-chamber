@@ -14,7 +14,7 @@ import rib from "../src/index.ts";
 import { createLensRegistry, DEFAULT_LENS_REFRESH_CADENCE_MS, lensKey } from "../src/lens.ts";
 import { createFileHtmlLensStore } from "../src/lens-html-store.ts";
 import { createFileLensStore, type LensStore } from "../src/lens-store.ts";
-import { htmlLensesDir, lensesDir, setChamberDataHome } from "../src/paths.ts";
+import { htmlLensesDir, lensesDir, lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
 
 const onAction = rib.onAction;
 if (!onAction) throw new Error("rib is missing onAction");
@@ -136,6 +136,52 @@ describe("living-lens region wiring", () => {
     expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens"]);
   });
 
+  it("the region's workflowArgs carry the refresh's own inputs plus the lens id", async () => {
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+      workflow: "chamber-lens-release",
+      inputs: { repo: "acme/widget" },
+    });
+    expect(region.current(lensKey("metrics"))?.workflowArgs).toEqual({
+      repo: "acme/widget",
+      lens: "metrics",
+    });
+  });
+
+  // `lens` is what the refresh contract guarantees the producer, so a stored input
+  // of that name must not be able to take it over.
+  it("a stored input cannot shadow the lens id", async () => {
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+      workflow: "w1",
+      inputs: { lens: "somewhere-else" },
+    });
+    expect(region.current(lensKey("metrics"))?.workflowArgs).toEqual({ lens: "metrics" });
+  });
+
+  // sameRefresh gates the rewire, so an inputs-only edit it can't see would leave the
+  // live region firing the producer on stale args until a restart.
+  it("an inputs-only change rewires the region", async () => {
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+      workflow: "w1",
+      inputs: { repo: "acme/widget" },
+    });
+    expect(region.calls).toHaveLength(1);
+    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+      workflow: "w1",
+      inputs: { service: "storage" },
+    });
+    expect(region.calls).toHaveLength(2);
+    expect(region.current(lensKey("metrics"))?.workflowArgs).toEqual({
+      service: "storage",
+      lens: "metrics",
+    });
+  });
+
   it("a refresh-only change rewires the region even though the board is untouched", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
@@ -212,6 +258,39 @@ describe("lens store refresh round-trip", () => {
     // Degrades to a non-refreshing panel, not a region registration that throws
     // and takes the whole panel with it.
     expect(record?.refresh).toBeUndefined();
+  });
+
+  // Same exposure as the cadence: inputs reach the region as workflowArgs, which the
+  // harness types string→string on a strict schema.
+  it("folds a non-string refresh input to absent, keeping the lens", async () => {
+    await mkdir(join(root, "badin"), { recursive: true });
+    await writeFile(
+      join(root, "badin", "lens.json"),
+      JSON.stringify({
+        id: "badin",
+        board: board("Bad"),
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        refresh: { workflow: "chamber-lens-x", inputs: { service: 7 } },
+      }),
+    );
+    const record = await createFileLensStore(root).loadLens("badin");
+    expect(record?.id).toBe("badin");
+    expect(record?.refresh).toBeUndefined();
+  });
+
+  it("keeps a well-formed refresh.inputs on the way in", async () => {
+    await mkdir(join(root, "goodin"), { recursive: true });
+    await writeFile(
+      join(root, "goodin", "lens.json"),
+      JSON.stringify({
+        id: "goodin",
+        board: board("Good"),
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        refresh: { workflow: "chamber-lens-x", inputs: { repo: "acme/widget" } },
+      }),
+    );
+    const record = await createFileLensStore(root).loadLens("goodin");
+    expect(record?.refresh?.inputs).toEqual({ repo: "acme/widget" });
   });
 });
 
@@ -394,8 +473,9 @@ describe("living-lens emit + verbs", () => {
       },
       t1.ctx,
     );
-    // Naming a custom workflow earns a caveat: the harness seam is fail-soft, so
-    // a missing workflow would otherwise be a silent no-op forever.
+    // Naming a workflow chamber doesn't contribute earns a caveat: the host runs only
+    // a rib-contributed one, and its refresh seam is fail-soft, so the backing would
+    // otherwise 409 on every tick with nothing said.
     expect(JSON.parse(t1.out()).note).toContain("osdu-refresh");
     // Cadence-only re-author keeps the bespoke workflow (not the bundled default).
     const t2 = makeToolCtx();
@@ -417,6 +497,59 @@ describe("living-lens emit + verbs", () => {
       workflow: "other-refresh",
       cadenceMs: 600_000,
     });
+  });
+
+  // The caveat's whole job is to separate a backing the harness will run from one it
+  // won't, so a workflow the operator placed in chamber's dir must earn silence —
+  // otherwise the warning cries wolf on the one path that actually works.
+  it("names a workflow chamber contributed and hears no caveat", async () => {
+    await mkdir(lensWorkflowsDir(), { recursive: true });
+    await writeFile(
+      join(lensWorkflowsDir(), "release.yaml"),
+      "description: derive\nnodes:\n  - id: n\n    prompt: p\n",
+    );
+    rib.contributeWorkflows?.({} as Parameters<NonNullable<typeof rib.contributeWorkflows>>[0]);
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "metrics", board: board("Metrics"), refresh: { workflow: "chamber-lens-release" } },
+      t.ctx,
+    );
+    expect(JSON.parse(t.out()).note).toBeUndefined();
+    await rm(lensWorkflowsDir(), { recursive: true, force: true });
+  });
+
+  it("refresh.inputs round-trip and PATCH like their sibling fields", async () => {
+    const store = createFileLensStore(lensesDir());
+    const t1 = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      {
+        id: "metrics",
+        board: board("Metrics"),
+        refresh: { workflow: "chamber-lens-release", inputs: { repo: "acme/widget" } },
+      },
+      t1.ctx,
+    );
+    expect((await store.loadLens("metrics"))?.refresh?.inputs).toEqual({ repo: "acme/widget" });
+    // A cadence-only re-author keeps them — a refresh turn re-emitting its board has
+    // no reason to know it must re-state the parameters it was invoked with.
+    const t2 = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "metrics", board: board("Metrics 2"), refresh: { cadenceMs: 600_000 } },
+      t2.ctx,
+    );
+    expect((await store.loadLens("metrics"))?.refresh?.inputs).toEqual({ repo: "acme/widget" });
+  });
+
+  // An empty object reaches the region as the same workflowArgs an absent one does,
+  // so storing it would only make the rewire gate read a backing change that isn't.
+  it("an empty refresh.inputs is stored as no inputs at all", async () => {
+    const store = createFileLensStore(lensesDir());
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "brief", board: board("Brief"), refresh: { workflow: "chamber-lens-x", inputs: {} } },
+      t.ctx,
+    );
+    expect((await store.loadLens("brief"))?.refresh).toEqual({ workflow: "chamber-lens-x" });
   });
 
   it("chamber_list_lenses returns boards only on a single-lens fetch", async () => {
@@ -454,6 +587,32 @@ describe("living-lens emit + verbs", () => {
     );
     expect(res.ok).toBe(true);
     expect(refreshCalls).toEqual([{ name: "chamber-lens-refresh", inputs: { lens: "brief" } }]);
+  });
+
+  // The verb and the panel's cadence must invoke the producer identically — the
+  // harness collapses concurrent runs by their inputs, so two spellings would race
+  // each other instead of de-duping. Asserted literally on both sides (the region's
+  // workflowArgs above), so a builder change that breaks the contract fails both
+  // rather than letting them agree on the same wrong thing.
+  it("refresh-lens fires on the same inputs the region's cadence carries", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      {
+        id: "metrics",
+        board: board("Metrics"),
+        refresh: { workflow: "chamber-lens-release", inputs: { repo: "acme/widget" } },
+      },
+      t.ctx,
+    );
+    refreshCalls = [];
+    const res = await onAction(
+      { type: "refresh-lens", payload: { id: "metrics" } },
+      {} as RibContext,
+    );
+    expect(res.ok).toBe(true);
+    expect(refreshCalls).toEqual([
+      { name: "chamber-lens-release", inputs: { repo: "acme/widget", lens: "metrics" } },
+    ]);
   });
 
   it("refresh-lens refuses a plain lens, an exhibit, and a missing id — with steering", async () => {

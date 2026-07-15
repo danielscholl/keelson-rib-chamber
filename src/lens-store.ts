@@ -16,9 +16,12 @@ export type LensKind = "lens" | "exhibit";
 // A lens's re-compose backing: the catalog workflow the panel's refresh runs
 // (with input `lens` = the record id) and how often. Lens-only — an exhibit is
 // its moment and never refreshes, so the exhibit emit carries no such field.
+// `inputs` are the producer's own parameters, so a lens id can be chosen for what
+// the subject is rather than for what its workflow needs to parse back out of it.
 export interface LensRefresh {
   workflow: string;
   cadenceMs?: number;
+  inputs?: Record<string, string>;
 }
 
 export interface LensRecord {
@@ -212,7 +215,10 @@ async function parseLensJson(path: string): Promise<LensRecord | undefined> {
   }
 }
 
-function isValidRefresh(value: unknown): boolean {
+// Exported so every seam that folds a stored refresh shares one predicate: a second
+// hand-maintained copy would drift from the harness's region schema, which is what
+// makes the fold load-bearing rather than cosmetic.
+export function isValidRefresh(value: unknown): boolean {
   if (value === undefined) return true;
   if (typeof value !== "object" || value === null) return false;
   const r = value as Record<string, unknown>;
@@ -220,9 +226,17 @@ function isValidRefresh(value: unknown): boolean {
   // Integer only: the harness region schema rejects a fractional cadence at
   // registration, which would take the whole panel down — the exact failure
   // this fold exists to degrade past.
-  return (
-    r.cadenceMs === undefined || (typeof r.cadenceMs === "number" && Number.isInteger(r.cadenceMs))
-  );
+  if (
+    r.cadenceMs !== undefined &&
+    !(typeof r.cadenceMs === "number" && Number.isInteger(r.cadenceMs))
+  ) {
+    return false;
+  }
+  // Same exposure for inputs: they become the region's workflowArgs, which the
+  // harness types as a string→string record on a strict schema.
+  if (r.inputs === undefined) return true;
+  if (typeof r.inputs !== "object" || r.inputs === null || Array.isArray(r.inputs)) return false;
+  return Object.values(r.inputs as Record<string, unknown>).every((v) => typeof v === "string");
 }
 
 function isLensRecord(value: unknown): value is LensRecord {
