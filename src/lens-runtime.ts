@@ -2,7 +2,7 @@ import type { RibContext, SnapshotManager } from "@keelson/shared";
 import { errText } from "@keelson/shared";
 import { evaluateBriefGate } from "./brief-gate.ts";
 import { canonicalLensId, createLensRegistry, type LensRegistry, lensKey } from "./lens.ts";
-import { createHtmlLensRegistry, type HtmlLensRegistry } from "./lens-html.ts";
+import { createHtmlLensRegistry, type HtmlLensRegistry, htmlLensKey } from "./lens-html.ts";
 import { createFileHtmlLensStore, listHtmlLenses } from "./lens-html-store.ts";
 import {
   createFileLensStore,
@@ -132,7 +132,10 @@ function reconcileHtmlLensPanels(registry: HtmlLensRegistry): void {
     }
     for (const rec of records) {
       try {
-        await registry.reregister(rec.id, rec.html, rec.title);
+        // The refresh backing rides through, as it does for a canvas lens: it is
+        // region wiring built at registration, so dropping it here would cost every
+        // living HTML lens its cadence on every restart — silently.
+        await registry.reregister(rec.id, rec.html, rec.title, rec.refresh);
       } catch (e) {
         console.error(`[rib-chamber] html lens '${rec.id}' re-registration failed: ${errText(e)}`);
       }
@@ -313,6 +316,40 @@ export async function deleteRecordOfKind(
   }
 }
 
+// One HTML-lens delete backs both its verbs — the panel's head ⋯ action and
+// chamber_retire_lens — mirroring deleteRecordOfKind's role for the canvas store.
+// Delete the record, then release the live key + region + views entry. No index
+// refresh: HTML lenses live in their own store, which no collector reads.
+export async function deleteHtmlLensRecord(
+  rawId: string,
+): Promise<{ ok: true; id: string; key: string } | { ok: false; error: string }> {
+  const id = canonicalLensId(rawId);
+  if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(rawId)}` };
+  try {
+    // Let any in-flight boot re-registration finish first (mirrors
+    // deleteRecordOfKind awaiting the lens reconcile): a retire landing
+    // mid-reconcile must not race a reregister into resurrecting the panel.
+    await awaitHtmlLensReconcile();
+    try {
+      await createFileHtmlLensStore(htmlLensesDir()).delete(id);
+    } catch (e) {
+      // The record is already gone but a panel may still be live (external
+      // tamper): releasing it lets the verb converge instead of stranding a
+      // ghost panel no second retire could ever remove.
+      if (/not found/.test(errText(e)) && getHtmlLensRegistry()?.remove(id)) {
+        await refreshStandingPanels();
+        return { ok: true, id, key: htmlLensKey(id) };
+      }
+      throw e;
+    }
+    getHtmlLensRegistry()?.remove(id);
+    await refreshStandingPanels();
+    return { ok: true, id, key: htmlLensKey(id) };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
 // Wire the lens + HTML-lens registries against the current seams, mirroring the
 // singleton discipline of the room driver: build once, reuse on a later registerTools,
 // and rebuild against a new manager (or a fresh registerRegion) on a re-bootstrap
@@ -325,22 +362,24 @@ export function bindLensRuntime(seams: {
   registerRegion?: RibContext["registerRegion"];
   declareView: (id: string, title?: string) => () => void;
   republishRoom?: (slug: string) => Promise<void>;
-}): { lensStore: ReturnType<typeof createFileLensStore> } {
+}): {
+  lensStore: ReturnType<typeof createFileLensStore>;
+  htmlLensStore: ReturnType<typeof createFileHtmlLensStore>;
+} {
   const { sm, registerRegion, declareView } = seams;
   republishRoom = seams.republishRoom;
   const lensStore = createFileLensStore(lensesDir());
+  // Hoisted beside lensStore, not built inside the rebuild branch below: the emit
+  // tool takes it (its refresh preserve-on-omit is a read-modify-write), and the
+  // reuse path — the common second registerTools — never enters that branch.
+  const htmlLensStore = createFileHtmlLensStore(htmlLensesDir());
   if (!sm || !registerRegion) {
     htmlLensRegistry?.dispose();
     htmlLensRegistry = undefined;
     htmlLensSm = undefined;
     htmlLensRegisterRegion = undefined;
   } else if (!htmlLensRegistry || sm !== htmlLensSm || registerRegion !== htmlLensRegisterRegion) {
-    const next = createHtmlLensRegistry(
-      sm,
-      registerRegion,
-      createFileHtmlLensStore(htmlLensesDir()),
-      declareView,
-    );
+    const next = createHtmlLensRegistry(sm, registerRegion, htmlLensStore, declareView);
     htmlLensRegistry?.dispose();
     htmlLensRegistry = next;
     htmlLensSm = sm;
@@ -365,7 +404,7 @@ export function bindLensRuntime(seams: {
     // Fail-soft per entry — one bad lens can't break boot.
     reconcileLensPanels(next);
   }
-  return { lensStore };
+  return { lensStore, htmlLensStore };
 }
 
 // Tear down the lens runtime: drain any in-flight lens write-back AND both boot

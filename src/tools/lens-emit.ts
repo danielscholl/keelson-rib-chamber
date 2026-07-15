@@ -23,14 +23,18 @@ import {
   type HtmlLensRegistry,
   htmlLensStructuralError,
 } from "../lens-html.ts";
+import { createFileHtmlLensStore, type HtmlLensStore } from "../lens-html-store.ts";
 import {
+  awaitHtmlLensReconcile,
   awaitLensReconcile,
+  deleteHtmlLensRecord,
   deleteRecordOfKind,
   enqueueLensWrite,
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
-import { isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
+import { createFileLensStore, isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
 import { MAX_REFRESH_WORKFLOW_NAME } from "../lens-workflows.ts";
+import { htmlLensesDir, lensesDir } from "../paths.ts";
 import { refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
 import { isChamberWorkflow, LENS_REFRESH_WORKFLOW } from "../workflows.ts";
 import { emitResult } from "./util.ts";
@@ -186,30 +190,62 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
   };
 }
 
-// Resolve an emit's refresh input against the prior record: absent preserves
-// (a refresh turn re-emitting the board must not strip its own backing), null
-// clears, and an object PATCHES — each omitted field keeps its prior value, so
-// a cadence-only re-author can't silently swap a bespoke refresh workflow for
-// the bundled default.
-function resolveLensRefresh(
-  input:
-    | { workflow?: string; cadenceMs?: number; inputs?: Record<string, string> }
-    | null
-    | undefined,
-  prior: LensRefresh | undefined,
-): LensRefresh | undefined {
-  if (input === undefined) return prior;
-  if (input === null) return undefined;
+type RefreshInput = { workflow?: string; cadenceMs?: number; inputs?: Record<string, string> };
+
+// Patch an emit's refresh fields over the prior backing — each omitted field keeps
+// its prior value, so a cadence-only re-author can't silently swap a bespoke refresh
+// workflow for something else. `workflow` is left absent when neither names one: the
+// two species disagree about what that means, so each resolver below decides.
+function patchLensRefresh(input: RefreshInput, prior: LensRefresh | undefined): RefreshInput {
+  const workflow = input.workflow ?? prior?.workflow;
   const cadenceMs = input.cadenceMs ?? prior?.cadenceMs;
   // An empty inputs object is no inputs: it reaches the region as the same
   // workflowArgs an absent one does, so storing it would only make sameRefresh
   // read a backing change that isn't one.
   const inputs = input.inputs ?? prior?.inputs;
   return {
-    workflow: input.workflow ?? prior?.workflow ?? LENS_REFRESH_WORKFLOW,
+    ...(workflow !== undefined ? { workflow } : {}),
     ...(cadenceMs !== undefined ? { cadenceMs } : {}),
     ...(inputs && Object.keys(inputs).length > 0 ? { inputs } : {}),
   };
+}
+
+// Resolve an emit's refresh input against the prior record: absent preserves
+// (a refresh turn re-emitting the board must not strip its own backing), null
+// clears, and an object patches — bottoming out at the bundled generic re-author,
+// which can re-compose any canvas lens from its stored board.
+function resolveLensRefresh(
+  input: RefreshInput | null | undefined,
+  prior: LensRefresh | undefined,
+): LensRefresh | undefined {
+  if (input === undefined) return prior;
+  if (input === null) return undefined;
+  const patched = patchLensRefresh(input, prior);
+  return { ...patched, workflow: patched.workflow ?? LENS_REFRESH_WORKFLOW };
+}
+
+// The HTML twin, differing in one way: there is no default workflow, so a backing
+// that names none is refused rather than filled in. Nothing generic could re-compose
+// an HTML lens — the canvas default works by re-reading the prior board through
+// chamber_list_lenses, and a 262K page cannot come back through a 16K tool result;
+// re-authoring one from the subject alone would instead redesign the page every tick,
+// never landing on identical markup, so the freshness skip would never fire and each
+// tick would buy a paid turn for a page that says what it said before. A living HTML
+// lens is therefore one an operator's own producer keeps current.
+function resolveHtmlLensRefresh(
+  input: RefreshInput | null | undefined,
+  prior: LensRefresh | undefined,
+): { refresh?: LensRefresh } | { error: string } {
+  if (input === undefined) return { refresh: prior };
+  if (input === null) return {};
+  const patched = patchLensRefresh(input, prior);
+  if (patched.workflow === undefined) {
+    return {
+      error:
+        "refresh must name a `workflow` — an HTML lens has no generic re-author to fall back on. Point it at a workflow that re-derives the page and emits it, which chamber contributes as 'chamber-lens-<filename>' for each workflow file in its lens-workflows dir.",
+    };
+  }
+  return { refresh: { ...patched, workflow: patched.workflow } };
 }
 
 // The resolveLensRefresh twin, for the durable provenance fields: absent preserves
@@ -228,9 +264,23 @@ const lensHtmlEmitSchema = z.object({
   html: z.string().min(1).max(262144),
   id: z.string().min(1).max(64).optional(),
   title: z.string().min(1).max(80).optional(),
+  // The canvas seam's field, with the canvas seam's rules (absent preserves, null
+  // clears, an object patches) — except `workflow` has no default here, and the
+  // legacy id-less canvas cannot take one at all (see resolveHtmlLensRefresh).
+  refresh: z
+    .object({
+      workflow: z.string().min(1).max(MAX_REFRESH_WORKFLOW_NAME).optional(),
+      cadenceMs: z.number().int().min(MIN_REFRESH_CADENCE_MS).max(86_400_000).optional(),
+      inputs: z.record(z.string().min(1).max(64), z.string().max(512)).optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
-export function makeEmitLensHtmlTool(registry: HtmlLensRegistry): ToolDefinition {
+export function makeEmitLensHtmlTool(
+  registry: HtmlLensRegistry,
+  store: HtmlLensStore,
+): ToolDefinition {
   return {
     name: HTML_LENS_TOOL_NAME,
     // The shared canvas contract IS the description (one source of truth with the
@@ -240,80 +290,152 @@ export function makeEmitLensHtmlTool(registry: HtmlLensRegistry): ToolDefinition
       "`id` is a short, stable kebab-case identifier for the subject (re-emitting the same id updates the same panel, and the lens persists across restarts);",
       "omit it to target the single shared legacy canvas instead. `title` (optional) names the panel head.",
       "`id` plays the role the contract below calls `name`.",
+      "Optional `refresh` makes it a LIVING page: `{ workflow, cadenceMs?, inputs? }` names a workflow the panel re-runs on cadence with input `lens` = this id, plus any `inputs` you give (default cadence 1h).",
+      "Unlike a canvas lens, `workflow` is REQUIRED — there is no generic re-author for a page, so a living HTML lens is one whose own producer re-derives it.",
+      "The harness runs only a RIB-CONTRIBUTED workflow on a panel's cadence: chamber contributes one `chamber-lens-<filename>` per workflow file the operator has placed in chamber's lens-workflows dir — a workflow in the general catalog is refused and the panel silently never re-composes.",
+      "Omitting `refresh` on a re-emit keeps the existing backing; an object PATCHES it; `refresh: null` removes it.",
       CANVAS_PUBLISH_CONTRACT,
     ].join(" "),
     inputSchema: lensHtmlEmitSchema,
     state_changing: true,
-    async execute(input, ctx) {
-      const parsed = lensHtmlEmitSchema.safeParse(input);
-      if (!parsed.success) {
-        emitResult(ctx, `chamber_emit_lens_html: ${parsed.error.message}`, true);
-        return;
-      }
-      const { html, title } = parsed.data;
-      const structural = htmlLensStructuralError(html);
-      if (structural !== undefined) {
-        emitResult(ctx, `chamber_emit_lens_html: ${structural}`, true);
-        return;
-      }
-      // Fail-closed palette gate (the canvas_publish contract): a declared
-      // categorical palette that hard-fails CVD/contrast rejects the emit with the
-      // per-check report so the turn fixes the colors and retries.
-      const palettes = declaredHtmlPalettes(html);
-      for (const mode of ["dark", "light"] as const) {
-        const palette = palettes[mode];
-        if (!palette) continue;
-        let report: ReturnType<typeof validateCategoricalPalette>;
-        try {
-          report = validateCategoricalPalette(palette, { mode });
-        } catch (e) {
-          emitResult(ctx, `chamber_emit_lens_html: data-palette-${mode}: ${errText(e)}`, true);
-          return;
-        }
-        if (!report.ok) {
-          emitResult(
-            ctx,
-            `chamber_emit_lens_html: the declared ${mode} palette fails validation — fix the colors (prefer the keelson series slots) and emit again:\n${formatPaletteReport(report)}`,
-            true,
-          );
-          return;
-        }
-      }
-      let id: string | undefined;
-      if (parsed.data.id !== undefined) {
-        id = canonicalLensId(parsed.data.id);
-        if (!id) {
-          emitResult(ctx, "chamber_emit_lens_html: id has no usable characters", true);
-          return;
-        }
-      }
-      try {
-        const { key } = await registry.publish(html, {
-          ...(id !== undefined ? { id } : {}),
-          ...(title !== undefined ? { title } : {}),
-        });
-        // No chamber-lenses/roster/brief refresh here (unlike chamber_emit_lens):
-        // HTML lenses persist in their own store, which those collectors don't
-        // read, so refreshing them would be inert.
-        emitResult(ctx, JSON.stringify({ ok: true, key }));
-      } catch (e) {
-        emitResult(ctx, `chamber_emit_lens_html failed: ${errText(e)}`, true);
-      }
+    execute(input, ctx) {
+      // Serialized on the lens write chain (like the canvas emit): the refresh
+      // preserve-vs-clear resolution is a read-modify-write of the record, so two
+      // concurrent re-emits of one id could otherwise lose-update its backing.
+      const apply = async (): Promise<void> => {
+        await emitHtmlLens(input, ctx, registry, store);
+      };
+      return enqueueLensWrite(apply);
     },
   };
 }
 
-const lensRetireSchema = z.object({ id: z.string().min(1).max(64) });
+async function emitHtmlLens(
+  input: unknown,
+  ctx: Parameters<ToolDefinition["execute"]>[1],
+  registry: HtmlLensRegistry,
+  store: HtmlLensStore,
+): Promise<void> {
+  const parsed = lensHtmlEmitSchema.safeParse(input);
+  if (!parsed.success) {
+    emitResult(ctx, `chamber_emit_lens_html: ${parsed.error.message}`, true);
+    return;
+  }
+  const { html, title } = parsed.data;
+  const structural = htmlLensStructuralError(html);
+  if (structural !== undefined) {
+    emitResult(ctx, `chamber_emit_lens_html: ${structural}`, true);
+    return;
+  }
+  // Fail-closed palette gate (the canvas_publish contract): a declared
+  // categorical palette that hard-fails CVD/contrast rejects the emit with the
+  // per-check report so the turn fixes the colors and retries.
+  const palettes = declaredHtmlPalettes(html);
+  for (const mode of ["dark", "light"] as const) {
+    const palette = palettes[mode];
+    if (!palette) continue;
+    let report: ReturnType<typeof validateCategoricalPalette>;
+    try {
+      report = validateCategoricalPalette(palette, { mode });
+    } catch (e) {
+      emitResult(ctx, `chamber_emit_lens_html: data-palette-${mode}: ${errText(e)}`, true);
+      return;
+    }
+    if (!report.ok) {
+      emitResult(
+        ctx,
+        `chamber_emit_lens_html: the declared ${mode} palette fails validation — fix the colors (prefer the keelson series slots) and emit again:\n${formatPaletteReport(report)}`,
+        true,
+      );
+      return;
+    }
+  }
+  let id: string | undefined;
+  if (parsed.data.id !== undefined) {
+    id = canonicalLensId(parsed.data.id);
+    if (!id) {
+      emitResult(ctx, "chamber_emit_lens_html: id has no usable characters", true);
+      return;
+    }
+  }
+  // A backing is wiring on a persisted lens's own region, and the legacy id-less
+  // canvas is neither: it has no record to carry one and no id to name in the run.
+  // Silently dropping it would read as a living page that never re-composes.
+  if (parsed.data.refresh && id === undefined) {
+    emitResult(
+      ctx,
+      "chamber_emit_lens_html: refresh needs an `id` — the shared legacy canvas has no persisted lens to refresh",
+      true,
+    );
+    return;
+  }
+  try {
+    await awaitHtmlLensReconcile();
+    const existing = id !== undefined ? await store.load(id) : undefined;
+    const resolved = resolveHtmlLensRefresh(parsed.data.refresh, existing?.refresh);
+    if ("error" in resolved) {
+      emitResult(ctx, `chamber_emit_lens_html: ${resolved.error}`, true);
+      return;
+    }
+    // Freshness is the page's, the canvas emit's rule: a re-emit that left the markup
+    // alone holds its prior stamp, so a producer re-deriving unchanged data on cadence
+    // reports the freshness it earned rather than the tick it ran on. No strictly-ahead
+    // stamp on a change (unlike the canvas twin) — no gate fingerprints this store.
+    const prior =
+      existing && Number.isFinite(Date.parse(existing.updatedAt)) ? existing : undefined;
+    const updatedAt = prior?.html === html ? prior?.updatedAt : undefined;
+    // The host refreshes only a workflow with RIB provenance, and its refresh seam is
+    // fail-soft, so a backing it won't run is otherwise a silent 409 on every tick.
+    // Chamber can vouch for the workflows it contributed and no more (see the canvas twin).
+    const unvouched =
+      resolved.refresh && !isChamberWorkflow(resolved.refresh.workflow)
+        ? resolved.refresh.workflow
+        : undefined;
+    const { key } = await registry.publish(html, {
+      ...(id !== undefined ? { id } : {}),
+      ...(title !== undefined ? { title } : {}),
+      ...(resolved.refresh ? { refresh: resolved.refresh } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    });
+    // No chamber-lenses/roster/brief refresh here (unlike chamber_emit_lens):
+    // HTML lenses persist in their own store, which those collectors don't
+    // read, so refreshing them would be inert.
+    emitResult(
+      ctx,
+      JSON.stringify({
+        ok: true,
+        key,
+        ...(unvouched
+          ? {
+              note: `refresh names '${unvouched}', which chamber does not contribute — unless another rib does, the harness will refuse to run it and the panel will never re-compose. A workflow file in the chamber lens-workflows dir is contributed as 'chamber-lens-<filename>'.`,
+            }
+          : {}),
+      }),
+    );
+  } catch (e) {
+    emitResult(ctx, `chamber_emit_lens_html failed: ${errText(e)}`, true);
+  }
+}
+
+const lensRetireSchema = z.object({
+  id: z.string().min(1).max(64),
+  kind: z.enum(["canvas", "html"]).optional(),
+});
 
 // Lens retire seam: delete a lens's persisted record AND drop its live panel +
 // snapshot key, so an agent can retire a lens it (or another Mind) authored.
 // Mirrors the chamber-genesis refresh path: fail-closed on an unknown id
 // (deleteLens throws), then refresh the lenses index AFTER success only.
+//
+// The two species are separate lenses in separate stores, so one id may name both.
+// `kind` picks; without it the id resolves to whichever store holds it, and an id in
+// BOTH is refused rather than guessed — this is a destructive, unrecoverable verb, so
+// the one thing it must not do is delete the lens the caller didn't mean.
 export function makeRetireLensTool(): ToolDefinition {
   return {
     name: "chamber_retire_lens",
     description:
-      "Retire a lens: permanently remove a lens you (or another Mind) authored — its persisted record AND its live Chamber panel. `id` is the lens's stable kebab-case identifier (the same id chamber_emit_lens used). Fails closed if no such lens exists.",
+      'Retire a lens: permanently remove a lens you (or another Mind) authored — its persisted record AND its live Chamber panel. `id` is the lens\'s stable kebab-case identifier (the same id chamber_emit_lens or chamber_emit_lens_html used). Optional `kind` names the species: "canvas" (an authored board) or "html" (a designed page). The two are separate lenses, so one id can name both; omit `kind` and the id resolves to whichever exists, but if both do you must say which. Fails closed if no such lens exists.',
     inputSchema: lensRetireSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -322,18 +444,60 @@ export function makeRetireLensTool(): ToolDefinition {
         emitResult(ctx, `chamber_retire_lens: ${parsed.error.message}`, true);
         return;
       }
-      const res = await deleteRecordOfKind(
-        parsed.data.id,
-        "lens",
-        (id) => `'${id}' is an exhibit — use chamber_delete_exhibit`,
-      );
+      const res = await retireLensOfKind(parsed.data.id, parsed.data.kind);
       if (!res.ok) {
         emitResult(ctx, `chamber_retire_lens: ${res.error}`, true);
         return;
       }
-      emitResult(ctx, JSON.stringify({ ok: true, key: res.key }));
+      emitResult(ctx, JSON.stringify({ ok: true, kind: res.kind, key: res.key }));
     },
   };
+}
+
+// Route a retire to the store that owns the id. An explicit kind goes straight there.
+// Absent, the canvas store stays the default — so an id it holds behaves exactly as it
+// did before this tool learned the other species, including the exhibit steer — and the
+// html store answers only for an id the canvas store has no LENS for.
+async function retireLensOfKind(
+  rawId: string,
+  kind: "canvas" | "html" | undefined,
+): Promise<{ ok: true; kind: string; key: string } | { ok: false; error: string }> {
+  const canvasRetire = async (): Promise<
+    { ok: true; kind: string; key: string } | { ok: false; error: string }
+  > => {
+    const res = await deleteRecordOfKind(
+      rawId,
+      "lens",
+      (id) => `'${id}' is an exhibit — use chamber_delete_exhibit`,
+    );
+    return res.ok ? { ok: true, kind: "canvas", key: res.key } : res;
+  };
+  if (kind === "canvas") return canvasRetire();
+  const htmlRetire = async (): Promise<
+    { ok: true; kind: string; key: string } | { ok: false; error: string }
+  > => {
+    const res = await deleteHtmlLensRecord(rawId);
+    return res.ok ? { ok: true, kind: "html", key: res.key } : res;
+  };
+  if (kind === "html") return htmlRetire();
+  const id = canonicalLensId(rawId);
+  if (!id) return { ok: false, error: `unsafe lens id: ${JSON.stringify(rawId)}` };
+  const [canvasRecord, htmlRecord] = await Promise.all([
+    createFileLensStore(lensesDir())
+      .loadLens(id)
+      .catch(() => undefined),
+    createFileHtmlLensStore(htmlLensesDir())
+      .load(id)
+      .catch(() => undefined),
+  ]);
+  const canvasHit = canvasRecord !== undefined && !isExhibit(canvasRecord);
+  if (canvasHit && htmlRecord !== undefined) {
+    return {
+      ok: false,
+      error: `'${id}' names BOTH a canvas lens and an html lens — pass kind: "canvas" or kind: "html" to say which to retire`,
+    };
+  }
+  return htmlRecord !== undefined && !canvasHit ? htmlRetire() : canvasRetire();
 }
 
 // Exhibit publish seam — the room driver's turn tool: a discussion tables its

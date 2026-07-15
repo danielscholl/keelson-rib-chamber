@@ -116,8 +116,9 @@ export function destructiveHeadAction(type: string, verb: string, noun: string, 
 // unwatched field here means a changed backing keeps the region's stale wiring
 // until a restart. `inputs` compares structurally because it reaches the region
 // as workflowArgs; resolveLensRefresh drops an empty one so absent and {} are
-// the same backing, as they are to lensRefreshInputs.
-function sameRefresh(a?: LensRefresh, b?: LensRefresh): boolean {
+// the same backing, as they are to lensRefreshInputs. Shared with the HTML twin's
+// rewire so the two species can't drift on what counts as a changed backing.
+export function sameRefresh(a?: LensRefresh, b?: LensRefresh): boolean {
   return (
     a?.workflow === b?.workflow && a?.cadenceMs === b?.cadenceMs && jsonEqual(a?.inputs, b?.inputs)
   );

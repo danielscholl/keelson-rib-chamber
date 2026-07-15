@@ -1,28 +1,39 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
+import { isValidRefresh, type LensRefresh } from "./lens-store.ts";
 import { deleteRecordDir, isNodeError } from "./record-dir.ts";
 
 // A persisted HTML lens: the authored page markup plus a server-stamped
 // freshness time and an optional human title for the panel head. Mirrors the
 // board-lens LensRecord, split across two files on disk — lens.html carries the
 // raw markup (kept out of JSON so a large page never round-trips an encoder),
-// meta.json carries {id, title?, updatedAt}.
+// meta.json carries {id, title?, updatedAt, refresh?}.
 export interface HtmlLensRecord {
   id: string;
   html: string;
   title?: string;
   updatedAt: string;
+  refresh?: LensRefresh;
 }
 
 interface HtmlLensMeta {
   id: string;
   title?: string;
   updatedAt: string;
+  refresh?: LensRefresh;
 }
 
 export interface HtmlLensStore {
-  save(record: { id: string; html: string; title?: string }): Promise<void>;
+  // `updatedAt` overrides the store's stamp, the LensStore.saveLens rule: a
+  // re-emit that left the page alone holds the freshness it already had.
+  save(record: {
+    id: string;
+    html: string;
+    title?: string;
+    refresh?: LensRefresh;
+    updatedAt?: string;
+  }): Promise<void>;
   load(id: string): Promise<HtmlLensRecord | undefined>;
   delete(id: string): Promise<void>;
 }
@@ -46,9 +57,11 @@ export function createFileHtmlLensStore(root: string): HtmlLensStore {
       const meta: HtmlLensMeta = {
         id: record.id,
         ...(record.title ? { title: record.title } : {}),
-        // The store owns the clock (mirrors saveLens): stamp updatedAt at save,
-        // overwriting on re-author so freshness is honest.
-        updatedAt: new Date().toISOString(),
+        // The store owns the clock (mirrors saveLens) unless the caller supplied a
+        // stamp: stamp updatedAt at save, overwriting on re-author so freshness is
+        // honest.
+        updatedAt: record.updatedAt ?? new Date().toISOString(),
+        ...(record.refresh ? { refresh: record.refresh } : {}),
       };
       // Unique temp then rename (atomic on the same filesystem) so a crash
       // mid-write can't leave a torn file. html first, meta second: meta.json is
@@ -134,6 +147,10 @@ async function parseHtmlLens(root: string, id: string): Promise<HtmlLensRecord |
     html,
     updatedAt: meta.updatedAt,
     ...(meta.title ? { title: meta.title } : {}),
+    // Dropped rather than trusted when it wouldn't survive region registration:
+    // a hand-edited backing then costs the lens its cadence, never its panel
+    // (the createFileLensStore fold, same predicate).
+    ...(isValidRefresh(meta.refresh) && meta.refresh ? { refresh: meta.refresh } : {}),
   };
 }
 
