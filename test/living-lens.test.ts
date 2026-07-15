@@ -352,12 +352,23 @@ describe("living-lens emit + verbs", () => {
     await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t2.ctx);
     expect(t2.errored()).toBe(false);
     expect((await store.loadLens("brief"))?.updatedAt).toBe(first);
-    // updatedAt is ISO-millisecond: let the clock move, or the negative control could
-    // hold the same stamp for the wrong reason.
-    await new Promise((r) => setTimeout(r, 5));
     const t3 = makeToolCtx();
     await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief 2") }, t3.ctx);
     expect((await store.loadLens("brief"))?.updatedAt).not.toBe(first);
+  });
+
+  it("a changed board always outruns the prior stamp, even within one millisecond", async () => {
+    const store = createFileLensStore(lensesDir());
+    // The gates compare updatedAt as an exact string, and the store's stamp is only
+    // millisecond-resolution — so two writes landing in the same tick would leave the
+    // fingerprint unmoved and lose a real edit. Seeding the prior ahead of the clock
+    // forces that collision deterministically instead of racing it.
+    const ahead = new Date(Date.now() + 1000).toISOString();
+    await store.saveLens({ id: "brief", board: board("Brief"), updatedAt: ahead });
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief 2") }, t.ctx);
+    const next = (await store.loadLens("brief"))?.updatedAt ?? "";
+    expect(Date.parse(next)).toBeGreaterThan(Date.parse(ahead));
   });
 
   it("an unparseable prior updatedAt is re-stamped, not held", async () => {

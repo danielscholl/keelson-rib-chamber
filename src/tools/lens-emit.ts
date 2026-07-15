@@ -115,17 +115,20 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             ),
             reason: parsed.data.reason,
           };
-          // An unchanged board holds its freshness: the brief and digest gates both
-          // fingerprint on updatedAt, so re-stamping it buys two paid turns for a lens
-          // that says what it said before. Only a parseable prior may be held —
-          // listLenses skips a record whose updatedAt won't Date.parse, and the next
-          // re-author's stamp is what heals one.
-          const heldUpdatedAt =
-            existing &&
-            boardsEqual(existing.board, parsed.data.board) &&
-            Number.isFinite(Date.parse(existing.updatedAt))
-              ? existing.updatedAt
-              : undefined;
+          // Freshness is the board's. An unchanged board holds the prior stamp (the
+          // brief and digest gates fingerprint on it, so re-stamping buys two paid
+          // turns for a lens that says what it said before); a changed board must
+          // outrun that stamp, since those gates compare it exactly and the store's
+          // clock only has millisecond resolution. An unparseable prior gets neither:
+          // listLenses skips such a record, and the store's fresh stamp is what heals
+          // it.
+          const prior =
+            existing && Number.isFinite(Date.parse(existing.updatedAt)) ? existing : undefined;
+          const updatedAt = !prior
+            ? undefined
+            : boardsEqual(prior.board, parsed.data.board)
+              ? prior.updatedAt
+              : new Date(Math.max(Date.now(), Date.parse(prior.updatedAt) + 1)).toISOString();
           // The harness refresh seam is fail-soft (an unknown workflow warns
           // server-side and resolves), so an emit that names a custom workflow
           // gets a caveat in its reply — the one place the author can hear it.
@@ -139,7 +142,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             provenance,
             "lens",
             refresh,
-            heldUpdatedAt,
+            updatedAt,
           );
           // Re-run the bound chamber-lenses collector so a newly-authored lens appears
           // in the index promptly instead of waiting on cadence (mirrors genesis
