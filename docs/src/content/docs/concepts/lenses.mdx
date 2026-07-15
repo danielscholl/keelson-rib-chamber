@@ -144,6 +144,15 @@ of it. They reach the workflow as `KEELSON_INPUTS_<key>`, alongside `lens` (the 
 id), which always wins: it is the one input the refresh contract guarantees, so a
 stored input of that name cannot take it over.
 
+Both species take a backing on these same terms, with one asymmetry: an HTML lens's
+`refresh` **must** name its `workflow`. There is no default for a page, because
+nothing generic could re-compose one. The bundled canvas re-author works by reading
+the prior board back through `chamber_list_lenses`, and a designed page is far past
+what a tool result can carry; a page re-authored from its subject alone would instead
+redesign itself on every tick, never landing on identical markup, so its clock would
+read "just now" forever and each tick would buy a turn for a page that says what it
+said before. A living HTML lens is one its own producer re-derives.
+
 ## Provenance the card carries
 
 A lens can record who authored it and why, so the Lenses index reads as a living
@@ -172,10 +181,19 @@ exception: it describes one authoring, so omitting it clears it.
 - **As an HTML canvas.** A Mind (or any tool call) can invoke `chamber_emit_lens_html`
   with a literal HTML string, rendered in a sandboxed iframe on the Chamber surface
   under the Lenses group. With an `id` it is per-subject and persisted like a board
-  lens; without one it lands on the legacy fixed key `rib:chamber:lens-html`,
-  in-memory only, and re-publishing replaces that single shared panel. An HTML lens
-  has no index card, so its panel-head **⋯ → Retire lens…** is its one delete path
-  (the sandboxed iframe rightly can't reach destructive verbs).
+  lens, and it takes the same `refresh` backing, so a designed page can be living too.
+  Without an `id` it lands on the legacy fixed key `rib:chamber:lens-html`, in-memory
+  only, and re-publishing replaces that single shared panel; having no record, it
+  takes no backing. An HTML lens has no index card, so its panel-head
+  **⋯ → Retire lens…** is its one *surface* delete path (the sandboxed iframe rightly
+  can't reach destructive verbs).
+
+The two species are separate lenses in separate stores, sharing nothing but the id
+string. So one id can name both a board and a page, which is the natural pairing when
+a subject wants a structured view and a designed report. `chamber_list_lenses` returns
+both, marking each row's `kind` so the two are told apart, and `chamber_retire_lens`
+takes an optional `kind` for the same reason: an id naming both must say which, since
+a retire cannot be undone.
 
 ## Exhibits: the deliverable sibling
 

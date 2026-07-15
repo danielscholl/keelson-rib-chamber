@@ -1,19 +1,17 @@
 import type { CanvasBoardView, RibAction, RibActionResult } from "@keelson/shared";
 import { asNonEmptyString, errText } from "@keelson/shared";
 import { canonicalLensId, lensKey, lensRefreshInputs } from "../lens.ts";
-import { HTML_LENS_KEY, htmlLensKey } from "../lens-html.ts";
-import { createFileHtmlLensStore } from "../lens-html-store.ts";
+import { HTML_LENS_KEY } from "../lens-html.ts";
 import {
-  awaitHtmlLensReconcile,
   awaitLensReconcile,
+  deleteHtmlLensRecord,
   deleteRecordOfKind,
   enqueueLensWrite,
-  getHtmlLensRegistry,
   getLensRegistry,
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
 import { createFileLensStore, isExhibit, lensProvenance } from "../lens-store.ts";
-import { htmlLensesDir, lensesDir } from "../paths.ts";
+import { lensesDir } from "../paths.ts";
 import { getHostRefreshWorkflow, refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
 
 export async function retireLensAction(action: RibAction): Promise<RibActionResult> {
@@ -50,37 +48,13 @@ function lensActionId(action: RibAction, verb: string): { id: string } | { error
   return { id };
 }
 
-// Retire an HTML lens: the head ⋯ verb on its panel — the only delete path an
-// HTML lens has (its sandboxed iframe can't reach destructive actions and it
-// carries no index card). Deletes the persisted record, then releases the live
-// key + region + views entry.
+// Retire an HTML lens: the head ⋯ verb on its panel, and one of the two surfaces
+// deleteHtmlLensRecord backs (chamber_retire_lens is the other).
 export async function retireHtmlLensAction(action: RibAction): Promise<RibActionResult> {
   const got = lensActionId(action, "retire-lens-html");
   if ("error" in got) return { ok: false, error: got.error };
-  const { id } = got;
-  try {
-    // Let any in-flight boot re-registration finish first (mirrors
-    // deleteRecordOfKind awaiting the lens reconcile): a retire landing
-    // mid-reconcile must not race a reregister into resurrecting the panel.
-    await awaitHtmlLensReconcile();
-    try {
-      await createFileHtmlLensStore(htmlLensesDir()).delete(id);
-    } catch (e) {
-      // The record is already gone but a panel may still be live (external
-      // tamper): releasing it lets the verb converge instead of stranding a
-      // ghost panel no second retire could ever remove.
-      if (/not found/.test(errText(e)) && getHtmlLensRegistry()?.remove(id)) {
-        await refreshStandingPanels();
-        return { ok: true, data: { id, key: htmlLensKey(id) } };
-      }
-      throw e;
-    }
-    getHtmlLensRegistry()?.remove(id);
-    await refreshStandingPanels();
-    return { ok: true, data: { id, key: htmlLensKey(id) } };
-  } catch (e) {
-    return { ok: false, error: errText(e) };
-  }
+  const res = await deleteHtmlLensRecord(got.id);
+  return res.ok ? { ok: true, data: { id: res.id, key: res.key } } : res;
 }
 
 // Re-compose a living lens on demand: the Refresh verb on a refresh-backed

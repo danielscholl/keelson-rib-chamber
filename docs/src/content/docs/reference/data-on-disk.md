@@ -215,8 +215,12 @@ lenses-html/{id}/
 
 `lens.html` carries the authored markup verbatim, kept out of JSON so a large
 page never round-trips an encoder. `meta.json` is the `HtmlLensMeta`,
-`{ id, title?, updatedAt }`: `title` names the panel head and is written only
-when set, and `updatedAt` is server-stamped on every write. The store writes
+`{ id, title?, updatedAt, refresh? }`: `title` names the panel head and is written
+only when set; `refresh` is the same `{ workflow, cadenceMs?, inputs? }` backing a
+board lens carries, and is likewise dropped on load if malformed, so a hand-edited
+record costs the lens its cadence rather than its panel. `updatedAt` is
+server-stamped on every write that changed the page, and held across one that did
+not. The store writes
 `lens.html` first and `meta.json` second, because `meta.json` is the commit
 record. A load or list skips any directory that has no `meta.json`, so a crash
 between the two writes leaves an invisible partial rather than a half-written

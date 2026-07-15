@@ -6,10 +6,11 @@ import { chamberFingerprint, readChamberRecords } from "../chamber-state.ts";
 import { writeDigest } from "../digest-store.ts";
 import { slugify } from "../genesis.ts";
 import { canonicalLensId } from "../lens.ts";
+import { listHtmlLenses } from "../lens-html-store.ts";
 import { deleteRoomExhibits } from "../lens-runtime.ts";
 import { isExhibit, listLenses } from "../lens-store.ts";
 import { type MindRecord, readMinds, retireMind, scaffoldMind } from "../minds-store.ts";
-import { lensesDir, mindsDir, roomsDir } from "../paths.ts";
+import { htmlLensesDir, lensesDir, mindsDir, roomsDir } from "../paths.ts";
 import { isRoomActive, noteRoomDeleted } from "../room-lifecycle.ts";
 import { createFileRoomStore, listRooms } from "../room-store.ts";
 import {
@@ -267,7 +268,7 @@ export function makeListLensesTool(): ToolDefinition {
   return {
     name: "chamber_list_lenses",
     description:
-      "List the Chamber's living lenses (agent-authored canvas boards), newest first: each lens's id, when it was last updated, any refresh backing, and any provenance (scope, maintaining Mind, reason). Pass { id } to fetch ONE lens in full — the matching record then also carries its `board` (the current composition), which a refresh turn re-composes from. Read-only. NOT for authoring a lens (run the chamber-lens workflow), retiring one (chamber_retire_lens), or the tabled deliverables (chamber_list_exhibits).",
+      'List the Chamber\'s living lenses, newest first: each lens\'s id, its `kind` ("canvas" for an agent-authored board, "html" for a designed page), when it was last updated, any refresh backing, and any provenance (scope, maintaining Mind, reason). The two kinds are separate lenses in separate stores, so one id can name both — read `kind` rather than assuming a row is a board. Pass { id } to fetch ONE lens in full — a matching canvas record then also carries its `board` (the current composition), which a refresh turn re-composes from. An html row never carries its markup (a page is far past the tool-result limit); read it on its panel. Read-only. NOT for authoring a lens (run the chamber-lens or chamber-lens-html workflow), retiring one (chamber_retire_lens), or the tabled deliverables (chamber_list_exhibits).',
     inputSchema: listLensesSchema,
     state_changing: false,
     async execute(input, ctx) {
@@ -291,8 +292,9 @@ export function makeListLensesTool(): ToolDefinition {
         const lenses = (await listLenses(lensesDir())).filter(
           (l) => !isExhibit(l) && (wanted === undefined || l.id === wanted),
         );
-        const rows = lenses.map((l) => ({
+        const rows: Record<string, unknown>[] = lenses.map((l) => ({
           id: l.id,
+          kind: "canvas",
           updatedAt: l.updatedAt,
           ...(l.refresh ? { refresh: l.refresh } : {}),
           ...(l.scope ? { scope: l.scope } : {}),
@@ -303,12 +305,46 @@ export function makeListLensesTool(): ToolDefinition {
           // one composition at a time.
           ...(wanted !== undefined ? { board: l.board } : {}),
         }));
+        // The other species, from its own store. Read fail-soft, unlike the canvas
+        // list above: an unreadable html store must not fail a canvas lens's refresh
+        // turn, whose whole job is the board it already has in hand.
+        const htmlLenses = (
+          await listHtmlLenses(htmlLensesDir()).catch((e) => {
+            console.error(`[rib-chamber] html lens list failed: ${errText(e)}`);
+            return [];
+          })
+        ).filter((l) => wanted === undefined || l.id === wanted);
+        for (const l of htmlLenses) {
+          rows.push({
+            id: l.id,
+            kind: "html",
+            updatedAt: l.updatedAt,
+            ...(l.title ? { title: l.title } : {}),
+            ...(l.refresh ? { refresh: l.refresh } : {}),
+          });
+        }
+        // One newest-first order across both stores, so the merged list reads as one
+        // shelf rather than two concatenated ones (an unparseable date sorts last
+        // rather than poisoning the comparison). On a single-id fetch the canvas row
+        // leads regardless of age: it is the only row carrying a `board`, and
+        // emitJsonList drops TRAILING rows to fit the cap — so a big board behind an
+        // html row of the same id would leave the refresh turn, whose whole purpose is
+        // that board, holding nothing but an omitted count.
+        rows.sort((a, b) => {
+          if (wanted !== undefined && a.kind !== b.kind) return a.kind === "canvas" ? -1 : 1;
+          return dateKey(b.updatedAt) - dateKey(a.updatedAt);
+        });
         emitJsonList(ctx, "lenses", rows);
       } catch (e) {
         emitResult(ctx, `chamber_list_lenses failed: ${errText(e)}`, true);
       }
     },
   };
+}
+
+function dateKey(value: unknown): number {
+  const ms = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
 }
 
 export function makeListExhibitsTool(): ToolDefinition {

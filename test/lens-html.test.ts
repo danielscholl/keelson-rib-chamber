@@ -516,6 +516,35 @@ describe("HTML lens boot re-registration", () => {
       rib.views?.some((v) => v.key === htmlLensKey("vintage") && v.canvasKind === "html"),
     ).toBe(true);
   });
+
+  test("a living html lens comes back with its refresh wiring, not just its markup", async () => {
+    // The reconcile is the only path that rebuilds a panel's region after a restart, so
+    // dropping refresh here would cost every living html lens its cadence on every
+    // restart — silently, since nothing re-reads the record to notice.
+    await createFileHtmlLensStore(htmlLensesDir()).save({
+      id: "living",
+      html: "<h1>L</h1>",
+      refresh: { workflow: "chamber-lens-living", cadenceMs: 60_000, inputs: { env: "prod" } },
+    });
+
+    await rib.dispose?.();
+    const harness = fakeSnapshotManager();
+    const regions = new Map<string, RibSurfaceRegion>();
+    const ctx = {
+      ...makeCtx(harness.sm),
+      registerRegion: (_surfaceId: string, region: RibSurfaceRegion) => {
+        regions.set(region.key, region);
+        return () => regions.delete(region.key);
+      },
+    } as unknown as RibContext;
+    registerTools(ctx);
+    await waitForKey(harness.keys, htmlLensKey("living"));
+
+    const wired = regions.get(htmlLensKey("living"));
+    expect(wired?.workflow).toBe("chamber-lens-living");
+    expect(wired?.cadenceMs).toBe(60_000);
+    expect(wired?.workflowArgs).toEqual({ env: "prod", lens: "living" });
+  });
 });
 
 describe("HTML lens rib wiring", () => {

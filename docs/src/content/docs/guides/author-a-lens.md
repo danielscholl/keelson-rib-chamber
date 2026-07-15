@@ -67,6 +67,10 @@ a lens may then name. See
 [A data lens names a workflow of its own](../../concepts/lenses/#a-data-lens-names-a-workflow-of-its-own)
 for the rule, the trust boundary, and why the constraint exists.
 
+An HTML lens takes the same backing, with one difference: its `refresh` must name a
+`workflow`. There is no bundled re-author for a page to fall back on, so a living
+HTML lens is always one your own producer keeps current.
+
 ## Provenance on the index card
 
 A lens can carry three optional provenance fields, all supplied by the authoring
