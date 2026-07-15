@@ -27,7 +27,7 @@ import {
   stopRoom,
 } from "../room-lifecycle.ts";
 import { createFileRoomStore, deriveRoomName } from "../room-store.ts";
-import { type OutcomeSplit, parseDecisionMarkers, splitOutcome } from "../room-text.ts";
+import { type OutcomeSplit, parseDecisionMarkers, readOutcome } from "../room-text.ts";
 import { stripControlJson } from "../routing.ts";
 import {
   refreshPresence,
@@ -287,10 +287,17 @@ export async function roomOpenAction(action: RibAction): Promise<RibActionResult
   }
 }
 
-// Load a room's synthesized outcome document (the last agent turn, split at its
-// own `---`/`##` boundary — see room-text.ts). An error names why there isn't
-// one yet (no such room, or a room that hasn't produced a document) rather than
-// silently degrading, since both outcome actions are refused without one.
+// The title a close carries when it authored none of its own — generic on purpose:
+// buildRoomSummaryHtml already leads with room.name, and naming the document after the
+// room would say the same thing twice without adding a claim the room never made.
+const FALLBACK_OUTCOME_TITLE = "Closing summary";
+
+// Load a room's outcome document from its closing turn (see readOutcome). `outcomeAt` is
+// the driver's own record that a synthesis turn ran, so it — not the turn's formatting —
+// decides whether there is an outcome to read; a room without it can still offer one the
+// old way, by carrying the explicit `---`/`##` boundary, so the room board's outcome card
+// and these verbs can't disagree about what exists. An error names why there isn't one
+// rather than silently degrading, since all three outcome actions are refused without one.
 async function loadRoomOutcome(
   slug: string,
 ): Promise<{ room: Room; outcome: OutcomeSplit; debate: string } | { error: string }> {
@@ -300,7 +307,10 @@ async function loadRoomOutcome(
   const transcript = await store.loadTranscript(slug);
   const last = [...transcript].reverse().find((e) => e.role === "agent");
   const text = last ? stripControlJson(last.parts.map((p) => p.text).join("\n")) : "";
-  const { debate, outcome } = splitOutcome(text);
+  const { debate, outcome } = readOutcome(text, {
+    synthesized: Boolean(room.outcomeAt),
+    fallbackTitle: FALLBACK_OUTCOME_TITLE,
+  });
   if (!outcome) return { error: `room '${slug}' has no synthesized outcome document yet` };
   return { room, outcome, debate };
 }

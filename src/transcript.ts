@@ -181,6 +181,12 @@ export function buildSynthesisPrompt(input: {
   const hasCriteria = input.grounding?.criteria.some((c) => c.trim().length > 0) ?? false;
   const base =
     "Synthesize the discussion into a concise closing summary — areas of agreement, open disagreements, and the recommendation.";
+  // Asks for the title the outcome surfaces render, and deliberately NOT for a `---` rule
+  // ahead of it: the room board splits the closing turn at a `---`/`##` boundary and keeps
+  // only the text before it in the debate feed, so a close that opened with one would leave
+  // an empty row there (see boards/room.ts textFor).
+  const shape =
+    " Open with a `## ` heading naming the outcome in a few words, then the summary beneath it.";
   const criteriaSection =
     " Include an `### Acceptance criteria` section with exactly one Markdown bullet (`- `) per criterion, in the brief's order, each restating the criterion and whether the outcome met, partially met, or diverged from it.";
   const foldFidelity =
@@ -188,8 +194,8 @@ export function buildSynthesisPrompt(input: {
   const tail = " Speak in your own voice. Do not emit any routing JSON.";
   parts.push(
     hasCriteria
-      ? base + criteriaSection + (input.fidelityChecked ? foldFidelity : "") + tail
-      : base + tail,
+      ? base + shape + criteriaSection + (input.fidelityChecked ? foldFidelity : "") + tail
+      : base + shape + tail,
   );
   return parts.join("\n\n");
 }

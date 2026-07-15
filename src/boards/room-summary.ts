@@ -1,5 +1,5 @@
 import type { LensRecord } from "../lens-store.ts";
-import type { DecisionMarker, OutcomeSplit } from "../room-text.ts";
+import { type DecisionMarker, flattenMarkdown, type OutcomeSplit } from "../room-text.ts";
 import type { Mind, Room } from "../types.ts";
 
 function esc(value: string): string {
@@ -16,14 +16,6 @@ function esc(value: string): string {
         }) as const
       )[char as "&" | "<" | ">" | '"' | "'"],
   );
-}
-
-function closingText(body: string): string {
-  const paragraphs = body
-    .split(/\n\s*\n/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return paragraphs.at(-1) ?? body;
 }
 
 export function buildRoomSummaryHtml(
@@ -55,21 +47,35 @@ export function buildRoomSummaryHtml(
       )}</span></li>`;
     })
     .join("");
-  const disagreements =
-    decisions.length > 0
-      ? decisions
-          .map(
-            (decision) =>
-              `<li><strong>Q${decision.question} · ${esc(decision.title)}</strong><p>${esc(
-                decision.gist || "No disagreement detail was recorded.",
-              )}</p></li>`,
-          )
-          .join("")
-      : "<li>No disagreement markers were recorded.</li>";
+  // Only rendered when the room actually pinned decisions. A room that never adopted the
+  // marker convention has its disagreements in the document's own prose, so a standing
+  // "none recorded" panel would answer "where did they disagree?" with a negative nobody
+  // checked — next to a document that often names the disagreement outright.
+  const disagreements = decisions
+    .map(
+      (decision) =>
+        `<li><strong>Q${decision.question} · ${esc(decision.title)}</strong><p>${esc(
+          decision.gist || "No disagreement detail was recorded.",
+        )}</p></li>`,
+    )
+    .join("");
   const produced =
     tabled.length > 0
       ? tabled.map((record) => `<li>${esc(record.board.title || record.id)}</li>`).join("")
       : "<li>No exhibits were tabled.</li>";
+
+  // Flattened, not capped: flattenMarkdown's cut exists for a board field's schema limit,
+  // which an HTML page has none of — the close renders whole rather than trailing off into
+  // a continuation note on the one surface meant to be read instead of the transcript.
+  const documentText = flattenMarkdown(outcome.body, Number.POSITIVE_INFINITY);
+  const disagreementsSection =
+    disagreements === ""
+      ? ""
+      : `
+      <section>
+        <h2>Where they disagreed</h2>
+        <ul>${disagreements}</ul>
+      </section>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -121,7 +127,6 @@ export function buildRoomSummaryHtml(
     section { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
     section.wide { grid-column: 1 / -1; }
     h2 { font-size: 0.82rem; letter-spacing: 0.08em; margin: 0 0 14px; text-transform: uppercase; }
-    h3 { font-size: 1.25rem; margin: 0; }
     ul { list-style: none; margin: 0; padding: 0; }
     li { border-top: 1px solid var(--line); padding: 10px 0; }
     li:first-child { border-top: 0; padding-top: 0; }
@@ -136,7 +141,7 @@ export function buildRoomSummaryHtml(
       padding: 18px;
       white-space: pre-wrap;
     }
-    .question, .next { margin: 0; white-space: pre-wrap; }
+    .question { margin: 0; white-space: pre-wrap; }
     @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -158,20 +163,11 @@ export function buildRoomSummaryHtml(
       </section>
       <section class="wide">
         <h2>What was decided</h2>
-        <h3>${esc(outcome.title)}</h3>
-        <div class="document">${esc(outcome.body)}</div>
-      </section>
-      <section>
-        <h2>Where they disagreed</h2>
-        <ul>${disagreements}</ul>
-      </section>
+        <div class="document">${esc(documentText)}</div>
+      </section>${disagreementsSection}
       <section>
         <h2>Produced</h2>
         <ul>${produced}</ul>
-      </section>
-      <section class="wide">
-        <h2>Open items / next move</h2>
-        <p class="next">${esc(closingText(outcome.body))}</p>
       </section>
     </div>
   </main>

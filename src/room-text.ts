@@ -227,6 +227,38 @@ export function splitOutcome(text: string): { debate: string; outcome?: OutcomeS
   return { debate: text.slice(0, last.index).trim(), outcome: { title, body } };
 }
 
+// The synthesis turn read as the room's outcome document. Distinct from splitOutcome,
+// which the room board needs strict — there a boundary-less turn must stay whole in the
+// debate feed, so no-match-means-nothing is the right degradation. Here the closing turn
+// IS the document: `synthesized` carries the driver's own record that it ran one
+// (room.outcomeAt), so a plain-prose close reads as the document rather than as nothing,
+// and a mid-debate turn still can't be mistaken for a close.
+//
+// An opening `## Title` wins over a `---` boundary further down: the synthesis prompt asks
+// the closer to open with one, which makes any later rule an aside INSIDE the document —
+// the mirror of the aside splitOutcome's own last-boundary rule guards against.
+const OPENING_TITLE = /^##\s+([^\n]+)\n+([\s\S]+)$/;
+
+export function readOutcome(
+  text: string,
+  opts: { synthesized: boolean; fallbackTitle: string },
+): { debate: string; outcome?: OutcomeSplit } {
+  const trimmed = text.trim();
+  if (!trimmed) return { debate: "" };
+  if (opts.synthesized) {
+    const titled = OPENING_TITLE.exec(trimmed);
+    const title = titled?.[1]?.trim();
+    const body = titled?.[2]?.trim();
+    if (title && body) return { debate: "", outcome: { title, body } };
+  }
+  const split = splitOutcome(trimmed);
+  if (split.outcome) return split;
+  if (opts.synthesized) {
+    return { debate: "", outcome: { title: opts.fallbackTitle, body: trimmed } };
+  }
+  return { debate: trimmed };
+}
+
 const OUTCOME_QUESTION = /\*\*Q(\d+)\s*—/g;
 
 // Distinct question numbers the outcome document itself restates — the

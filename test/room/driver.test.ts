@@ -1290,7 +1290,9 @@ describe("room driver — group-chat moderate", () => {
       { text: direct("b") },
       { text: "b1" },
       { text: '{"action":"close"}' },
-      { text: "", status: "error" }, // the synth turn errors
+      // A failed turn carries its error as the entry's text (see runOneTurn), so the text
+      // is non-empty — being errored is the only thing that disqualifies it as an outcome.
+      { text: "Model overloaded", status: "error" },
     ]);
     await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
     await h.driver.step("gc");
@@ -1299,6 +1301,77 @@ describe("room driver — group-chat moderate", () => {
     const t = await h.store.loadTranscript("gc");
     expect(t[t.length - 1]?.from).toBe("s");
     expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    // ...but leaves no outcome behind: offering a Summary here would publish "Model
+    // overloaded" as what the room decided.
+    expect((await h.store.loadRoom("gc"))?.outcomeAt).toBeUndefined();
+  });
+
+  test("a synthesis turn that returns no text closes the room without an outcome", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+      { text: "   " }, // the synth turn succeeds but says nothing
+    ]);
+    await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    expect((await h.store.loadRoom("gc"))?.outcomeAt).toBeUndefined();
+  });
+
+  test("a synthesis turn that is only a routing directive closes the room without an outcome", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+      { text: '{"action":"close"}' }, // the synth turn succeeds but leaves no readable text
+    ]);
+    await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    expect((await h.store.loadRoom("gc"))?.outcomeAt).toBeUndefined();
+  });
+
+  test("a synthesis turn stopped mid-stream closes the room without an outcome", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+      { text: "half a docum", status: "aborted" }, // an operator stop landed mid-synthesis
+    ]);
+    await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    expect((await h.store.loadRoom("gc"))?.outcomeAt).toBeUndefined();
+  });
+
+  test("a synthesis turn that produces text stamps the outcome marker", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+      { text: "## Ship it\n\nAgreed." },
+    ]);
+    await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    const t = await h.store.loadTranscript("gc");
+    expect((await h.store.loadRoom("gc"))?.outcomeAt).toBe(t[t.length - 1]?.at);
   });
 
   test("a gated close with no synthesizer ends the room without an extra turn", async () => {

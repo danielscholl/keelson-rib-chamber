@@ -18,6 +18,7 @@ import {
   parseNomination,
   roundOf,
   speakerCounts,
+  stripControlJson,
 } from "./routing.ts";
 import { getStrategy } from "./strategies/index.ts";
 import { magentic } from "./strategies/magentic.ts";
@@ -1414,7 +1415,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
             turnIndex: current.turnIndex + 1,
             round: await roundAfter(room.slug, current),
             status: "done",
-            outcomeAt: synthesisEntry.at,
+            // The room closes either way; only a turn that actually produced text leaves an
+            // outcome behind. Judge that on the same stripped text loadRoomOutcome reads —
+            // a turn that is nothing but a trailing routing directive reads as empty there,
+            // so stamping outcomeAt for it would offer a summary with no outcome to show.
+            ...(!turn.aborted && !turn.errored && stripControlJson(turn.text).trim().length > 0
+              ? { outcomeAt: synthesisEntry.at }
+              : {}),
           });
         });
       }

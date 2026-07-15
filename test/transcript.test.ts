@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readOutcome } from "../src/room-text.ts";
 import {
   buildFidelityPrompt,
   buildManagerPrompt,
@@ -434,6 +435,55 @@ describe("buildSynthesisPrompt grounding fold", () => {
     expect(prompt).toContain("Synthesize the discussion");
     expect(prompt).not.toContain("fidelity check");
     expect(prompt).not.toContain("### Acceptance criteria");
+  });
+});
+
+// buildSynthesisPrompt is the producer and readOutcome is the consumer of the same closing
+// text; nothing else in this suite ties them together, so a prompt edit that stops matching
+// what the reader accepts must fail here.
+describe("buildSynthesisPrompt → readOutcome round trip", () => {
+  const read = (text: string) =>
+    readOutcome(text, { synthesized: true, fallbackTitle: "Closing summary" });
+
+  test("the prompt asks for a heading the reader accepts as the title", () => {
+    const prompt = buildSynthesisPrompt({ topic: "Decide", transcript: [] });
+    expect(prompt).toContain("`## `");
+    // What a Mind that follows those instructions actually writes.
+    const compliant = "## Ship behind a flag\n\nAgreement is clear. Recommendation: ship.";
+    expect(read(compliant).outcome).toEqual({
+      title: "Ship behind a flag",
+      body: "Agreement is clear. Recommendation: ship.",
+    });
+  });
+
+  test("a grounded close keeps its criteria section inside the document body", () => {
+    const prompt = buildSynthesisPrompt({ grounding: GROUNDING, transcript: [] });
+    expect(prompt).toContain("`## `");
+    expect(prompt).toContain("### Acceptance criteria");
+    const compliant = [
+      "## Ship behind a flag",
+      "",
+      "Agreement is clear.",
+      "",
+      "### Acceptance criteria",
+      "- Met: it ships.",
+    ].join("\n");
+    const { outcome } = read(compliant);
+    expect(outcome?.title).toBe("Ship behind a flag");
+    expect(outcome?.body).toContain("### Acceptance criteria");
+  });
+
+  // The prompt must never ask for the boundary: boards/room.ts splits the closing turn at
+  // a `---`/`##` rule and keeps only the text BEFORE it in the debate feed, so a close that
+  // opened with one would leave a "(no text)" row behind on every future room.
+  test("the prompt does not ask for a --- boundary", () => {
+    for (const prompt of [
+      buildSynthesisPrompt({ topic: "Decide", transcript: [] }),
+      buildSynthesisPrompt({ grounding: GROUNDING, transcript: [] }),
+      buildSynthesisPrompt({ grounding: GROUNDING, fidelityChecked: true, transcript: [] }),
+    ]) {
+      expect(prompt).not.toContain("---");
+    }
   });
 });
 

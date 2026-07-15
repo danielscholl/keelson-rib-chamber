@@ -7,6 +7,7 @@ import {
   outcomeReceipt,
   parseDecisionMarkers,
   parseOutcomeQuestions,
+  readOutcome,
   splitOutcome,
   sumTurnUsage,
   topicContractTail,
@@ -223,6 +224,81 @@ describe("splitOutcome", () => {
   test("parseOutcomeQuestions counts distinct restated questions", () => {
     const split = splitOutcome(lastTurn);
     expect(parseOutcomeQuestions(split.outcome?.body ?? "")).toEqual([1, 2]);
+  });
+
+  // readOutcome's contract is deliberately the OPPOSITE of splitOutcome's on the same
+  // boundary-less input: the board must leave such a turn in the debate feed, while a
+  // recorded close IS the document. Kept adjacent so the divergence reads as intended.
+  describe("readOutcome", () => {
+    const opts = { synthesized: true, fallbackTitle: "Closing summary" } as const;
+
+    test("a plain-prose close is the document, under the fallback title", () => {
+      // The shape every real room actually closes with: no boundary, no opening heading.
+      expect(readOutcome("just an ordinary closing turn, no document here.", opts)).toEqual({
+        debate: "",
+        outcome: {
+          title: "Closing summary",
+          body: "just an ordinary closing turn, no document here.",
+        },
+      });
+    });
+
+    test("an opening ## heading is the authored title", () => {
+      expect(readOutcome("\n\n## Ship it\n\nBody.", opts)).toEqual({
+        debate: "",
+        outcome: { title: "Ship it", body: "Body." },
+      });
+    });
+
+    test("an opening heading wins over a --- rule further down", () => {
+      // The synthesis prompt asks for the opening title, so a later rule is an aside
+      // INSIDE the document — taking it as the boundary would silently return only the
+      // appendix and drop the decision the room actually reached.
+      const doc = [
+        "## Adopt the deploy-time gate",
+        "",
+        "Agreement: the room converged. Open disagreement: rollback.",
+        "",
+        "---",
+        "",
+        "## Appendix: rejected alternatives",
+        "",
+        "We rejected the runtime flag.",
+      ].join("\n");
+      const { outcome } = readOutcome(doc, opts);
+      expect(outcome?.title).toBe("Adopt the deploy-time gate");
+      expect(outcome?.body).toContain("the room converged");
+      expect(outcome?.body).toContain("Appendix: rejected alternatives");
+    });
+
+    test("the legacy --- / ## document still wins when the close opens with prose", () => {
+      expect(readOutcome(lastTurn, opts).outcome?.title).toBe(
+        "Pinned Design — #144 rollback for stopped/failed coordinator runs",
+      );
+    });
+
+    test("an h3 section heading is not mistaken for the title", () => {
+      expect(readOutcome("### Acceptance criteria\n- one", opts)).toEqual({
+        debate: "",
+        outcome: { title: "Closing summary", body: "### Acceptance criteria\n- one" },
+      });
+    });
+
+    test("no outcome from an empty close", () => {
+      expect(readOutcome("   \n\n ", opts).outcome).toBeUndefined();
+    });
+
+    // Without the driver's own record that a close ran, only the explicit boundary makes a
+    // turn a document — otherwise a mid-debate turn would read as the room's conclusion.
+    test("un-synthesized: ordinary debate is not an outcome", () => {
+      const unsynthesized = { synthesized: false, fallbackTitle: "Closing summary" } as const;
+      expect(readOutcome("mid-debate remark", unsynthesized)).toEqual({
+        debate: "mid-debate remark",
+      });
+      expect(readOutcome(lastTurn, unsynthesized).outcome?.title).toBe(
+        "Pinned Design — #144 rollback for stopped/failed coordinator runs",
+      );
+    });
   });
 
   test("outcomeReceipt reads the document's own section headings", () => {
