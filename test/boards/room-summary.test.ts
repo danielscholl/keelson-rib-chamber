@@ -84,24 +84,25 @@ describe("buildRoomSummaryHtml", () => {
     expect(html).toContain("Rollout boundary");
   });
 
-  test("a one-paragraph close is not printed twice under two headings", () => {
+  test("the closing document is printed exactly once", () => {
     const body = "Agreement: ship it. Recommendation: behind a flag.";
     const html = buildRoomSummaryHtml(room, { title: "Ship it", body }, minds, [], []);
     expect(html).toContain(body);
-    expect(html).not.toContain("Open items / next move");
     expect(html.split(body).length - 1).toBe(1);
   });
 
-  test("a multi-paragraph close keeps its closing move as its own panel", () => {
+  test("a compliant grounded close does not relabel its criteria section", () => {
     const html = buildRoomSummaryHtml(
       room,
-      { title: "Ship it", body: "We agreed on the gate.\n\nNext: land the flag by Friday." },
+      {
+        title: "Ship it",
+        body: "## Ship behind a flag\n\nAgreement is clear.\n\n### Acceptance criteria\n- Met: it ships.",
+      },
       minds,
       [],
       [],
     );
-    expect(html).toContain("Open items / next move");
-    expect(html).toContain("Next: land the flag by Friday.");
+    expect(html).not.toContain("Open items / next move");
   });
 
   test("renders the document as readable text, never literal markdown syntax", () => {
@@ -118,8 +119,8 @@ describe("buildRoomSummaryHtml", () => {
     expect(html).toContain("• Met: it ships in prod.");
   });
 
-  // A capped document ends in flattenMarkdown's own "— continues —" note, which would then
-  // read as the room's closing move. The page has no schema cap, so it renders whole.
+  // The page has no schema cap, so the close renders whole rather than ending in
+  // flattenMarkdown's own "— continues —" note.
   test("a very long close renders whole, never truncated into a footer", () => {
     const body = `We agreed on the gate.\n\n${"word ".repeat(30_000)}\n\nNext: land the flag.`;
     const html = buildRoomSummaryHtml(room, { title: "Ship it", body }, minds, [], []);

@@ -1038,10 +1038,8 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
     });
   }
 
-  // The shape every room in the field actually closes with: the driver recorded a synthesis
-  // turn (outcomeAt), and that turn is plain prose — no `---`/`##` boundary, because no
-  // prompt asks for one. Every fixture above hand-writes a boundary instead, which is how a
-  // Summary button that errored on 100% of real rooms shipped green.
+  // A real close is plain prose carrying no `---`/`##` boundary, because the
+  // synthesis prompt does not ask for one.
   const FIELD_TEXT =
     "Agreement is clear: prioritize the root-managed Tomcat **10.1.54 → 10.1.55** same-line bump.\n\n### Acceptance criteria\n- Met: the bump is evidenced.";
 
@@ -1092,9 +1090,8 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
     expect(frame?.data).not.toContain("### Acceptance criteria");
   });
 
-  // The bug this whole change exists to kill: the index offers a Summary from `outcomeAt`
-  // while the action decided for itself whether an outcome existed, so the button was shown
-  // on every closed room and errored on every one. A button that is offered must resolve.
+  // The rooms index offers a Summary from `outcomeAt`, so any room whose card
+  // offers one must be able to produce one. A button that is offered must resolve.
   it("every room whose card offers a Summary can produce one", async () => {
     registerTools(makeCtx({ run: scriptedRunAgentTurn([]).run, sm: fakeSnapshotManager().sm }));
     const cases = [

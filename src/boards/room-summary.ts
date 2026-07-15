@@ -18,14 +18,6 @@ function esc(value: string): string {
   );
 }
 
-function closingText(body: string): string {
-  const paragraphs = body
-    .split(/\n\s*\n/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return paragraphs.at(-1) ?? body;
-}
-
 export function buildRoomSummaryHtml(
   room: Room,
   outcome: OutcomeSplit,
@@ -73,20 +65,9 @@ export function buildRoomSummaryHtml(
       : "<li>No exhibits were tabled.</li>";
 
   // Flattened, not capped: flattenMarkdown's cut exists for a board field's schema limit,
-  // which an HTML page has none of. Left in, its continuation note would become the
-  // document's last paragraph — and so be rendered below as the room's closing move.
+  // which an HTML page has none of — the close renders whole rather than trailing off into
+  // a continuation note on the one surface meant to be read instead of the transcript.
   const documentText = flattenMarkdown(outcome.body, Number.POSITIVE_INFINITY);
-  // The closing paragraph only earns its own panel when it is not the whole document —
-  // a one-paragraph close would otherwise print verbatim twice under two headings.
-  const next = closingText(documentText);
-  const nextSection =
-    next === documentText
-      ? ""
-      : `
-      <section class="wide">
-        <h2>Open items / next move</h2>
-        <p class="next">${esc(next)}</p>
-      </section>`;
   const disagreementsSection =
     disagreements === ""
       ? ""
@@ -160,7 +141,7 @@ export function buildRoomSummaryHtml(
       padding: 18px;
       white-space: pre-wrap;
     }
-    .question, .next { margin: 0; white-space: pre-wrap; }
+    .question { margin: 0; white-space: pre-wrap; }
     @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -187,7 +168,7 @@ export function buildRoomSummaryHtml(
       <section>
         <h2>Produced</h2>
         <ul>${produced}</ul>
-      </section>${nextSection}
+      </section>
     </div>
   </main>
 </body>

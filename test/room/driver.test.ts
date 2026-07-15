@@ -1323,6 +1323,23 @@ describe("room driver — group-chat moderate", () => {
     expect((await h.store.loadRoom("gc"))?.outcomeAt).toBeUndefined();
   });
 
+  test("a synthesis turn that is only a routing directive closes the room without an outcome", async () => {
+    const h = gcHarness([
+      { text: direct("a") },
+      { text: "a1" },
+      { text: direct("b") },
+      { text: "b1" },
+      { text: '{"action":"close"}' },
+      { text: '{"action":"close"}' }, // the synth turn succeeds but leaves no readable text
+    ]);
+    await startGc(h.driver, { moderator: "m", synthesizer: "s" }, 10);
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    await h.driver.step("gc");
+    expect((await h.store.loadRoom("gc"))?.status).toBe("done");
+    expect((await h.store.loadRoom("gc"))?.outcomeAt).toBeUndefined();
+  });
+
   test("a synthesis turn stopped mid-stream closes the room without an outcome", async () => {
     const h = gcHarness([
       { text: direct("a") },

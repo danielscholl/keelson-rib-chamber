@@ -438,10 +438,9 @@ describe("buildSynthesisPrompt grounding fold", () => {
   });
 });
 
-// The producer and the consumer, tested together. Both halves were green for months while
-// the outcome was unreadable in every real room, because each was only ever checked against
-// its own hand-written fixture: the prompt asked for one shape and the reader parsed for
-// another that nothing ever emitted. These tests fail if the two ever drift apart again.
+// buildSynthesisPrompt is the producer and readOutcome is the consumer of the same closing
+// text; nothing else in this suite ties them together, so a prompt edit that stops matching
+// what the reader accepts must fail here.
 describe("buildSynthesisPrompt → readOutcome round trip", () => {
   const read = (text: string) =>
     readOutcome(text, { synthesized: true, fallbackTitle: "Closing summary" });
