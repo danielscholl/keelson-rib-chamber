@@ -10,8 +10,33 @@ import { isSafeSlug } from "./genesis.ts";
 // somewhere a stray global file won't land on.
 const LENS_WORKFLOW_PREFIX = "chamber-lens-";
 
+// A lens can only name a backing its emit schema accepts, so a name past that cap is
+// one nothing can ever attach to. Exported so the schema's limit and this bound stay
+// one value (the MIN_REFRESH_CADENCE_MS precedent).
+export const MAX_REFRESH_WORKFLOW_NAME = 64;
+const MAX_SLUG = MAX_REFRESH_WORKFLOW_NAME - LENS_WORKFLOW_PREFIX.length;
+
 export function lensWorkflowName(slug: string): string {
   return `${LENS_WORKFLOW_PREFIX}${slug}`;
+}
+
+// Whether the file's shape is one the harness will actually keep. Chamber cannot run
+// the host's full validator (no @keelson/workflows dependency — the reason
+// RibWorkflowContribution.definition is `unknown`), so this is the cheap floor, not a
+// mirror of it: it exists because a definition the catalog silently drops leaves the
+// lens naming it with a backing that 409s, and a rejection here names the file where
+// the host's warning would not.
+function shapeError(def: Record<string, unknown>): string | undefined {
+  if (typeof def.description !== "string" || def.description.length === 0) {
+    return "needs a description";
+  }
+  if (!Array.isArray(def.nodes) || def.nodes.length === 0) return "needs a non-empty nodes list";
+  // Neither true nor false is refused rather than guessed at: coercing a muddled
+  // "true" to false would strip a mutation lock the operator asked for.
+  if (def.mutates_checkout !== undefined && typeof def.mutates_checkout !== "boolean") {
+    return "mutates_checkout must be true or false";
+  }
+  return undefined;
 }
 
 // Read the operator's lens workflows off disk and hand them to the harness as rib
@@ -23,7 +48,15 @@ export function lensWorkflowName(slug: string): string {
 // The FILENAME is authoritative, overriding whatever `name:` the YAML carries — the
 // same rule the lens store applies to its own record dirs. Fail-soft per file: one
 // malformed workflow must not cost the operator the rest.
-export function discoverLensWorkflows(root: string): {
+//
+// `reserved` are the names the bundled contributions already hold. A collision is not
+// a merge: the catalog keeps one definition per name, so the bundled one would win and
+// the operator's file would vanish without a word — their lens then silently running
+// chamber's re-author instead of the derivation they wrote.
+export function discoverLensWorkflows(
+  root: string,
+  reserved: ReadonlySet<string> = new Set(),
+): {
   contributions: RibWorkflowContribution[];
   names: ReadonlySet<string>;
 } {
@@ -35,11 +68,23 @@ export function discoverLensWorkflows(root: string): {
   } catch {
     return { contributions, names };
   }
+  const skip = (file: string, why: string): void => {
+    console.error(`[rib-chamber] lens workflow '${file}' skipped: ${why}`);
+  };
   for (const file of files.sort()) {
     const slug = file.replace(/\.ya?ml$/, "");
     if (slug === file) continue;
     if (!isSafeSlug(slug)) {
-      console.error(`[rib-chamber] lens workflow '${file}' skipped: name is not a kebab token`);
+      skip(file, "name is not a kebab token");
+      continue;
+    }
+    if (slug.length > MAX_SLUG) {
+      skip(file, `name is over ${MAX_SLUG} characters, so no lens could name it`);
+      continue;
+    }
+    const name = lensWorkflowName(slug);
+    if (reserved.has(name)) {
+      skip(file, `'${name}' is a bundled chamber workflow — rename the file`);
       continue;
     }
     try {
@@ -47,23 +92,21 @@ export function discoverLensWorkflows(root: string): {
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         throw new Error("not a YAML mapping");
       }
-      const name = lensWorkflowName(slug);
-      // Same default the bundled contributions declare outright: a lens producer
-      // re-derives and re-emits, so it must not take a project's mutation lock and
-      // serialize against real work. An operator who means the opposite says so —
-      // and one who says it in a way that is neither true nor false is asked rather
-      // than guessed at, since defaulting a muddled `true` to false would strip a
-      // lock they wanted.
-      const declared = (parsed as { mutates_checkout?: unknown }).mutates_checkout;
-      if (declared !== undefined && typeof declared !== "boolean") {
-        throw new Error("mutates_checkout must be true or false");
+      const bad = shapeError(parsed as Record<string, unknown>);
+      if (bad) {
+        skip(file, bad);
+        continue;
       }
       // No bindSnapshotKey: these republish through chamber_emit_lens rather than to
-      // a bound key, the unbound case the host's /refresh region leg covers.
-      contributions.push({ definition: { ...parsed, name, mutates_checkout: declared ?? false } });
+      // a bound key, the unbound case the host's /refresh region leg covers. And no
+      // mutates_checkout default: an omission means the host's own default applies.
+      // The bundled workflows opt out because chamber knows they only touch its data
+      // home; these are the operator's bash, and chamber has no such invariant to
+      // claim on their behalf.
+      contributions.push({ definition: { ...parsed, name } });
       names.add(name);
     } catch (e) {
-      console.error(`[rib-chamber] lens workflow '${file}' skipped: ${errText(e)}`);
+      skip(file, errText(e));
     }
   }
   return { contributions, names };

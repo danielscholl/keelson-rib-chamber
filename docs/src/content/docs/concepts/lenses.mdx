@@ -108,9 +108,10 @@ preserves the existing backing (the refresh turn itself re-emits the board and
 must not strip its own wiring), and a `refresh` object PATCHES it: an omitted
 field keeps its prior value, so a cadence-only re-author cannot swap a bespoke
 workflow for the default. Only `refresh: null` removes the backing.
-And each refresh is a paid agent turn, so the cadence defaults lean quiet: the
-panel refreshes while you're watching, not overnight (the server heartbeat
-deliberately skips per-lens regions).
+And a refresh through the bundled re-author is a paid agent turn, so the cadence
+defaults lean quiet: the panel refreshes while you're watching, not overnight (the
+server heartbeat deliberately skips per-lens regions). A workflow of your own costs
+whatever it is made of, which need not be a turn at all.
 
 ## A data lens names a workflow of its own
 

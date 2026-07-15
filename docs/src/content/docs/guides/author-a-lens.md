@@ -47,9 +47,10 @@ a **living lens** that re-composes on a cadence:
   (an omitted field keeps its prior value), and `refresh: null` clears it.
 
 A living lens also gains an on-demand **Refresh** verb on its card in the Lenses
-index, so you can force a re-compose between cadence ticks. Each refresh is a paid
-agent turn, so the default cadence leans quiet. For how a refresh turn re-reads and
-re-emits the board, see
+index, so you can force a re-compose between cadence ticks. The default cadence leans
+quiet because the bundled re-author spends an agent turn on every tick; a workflow of
+your own costs whatever you built it out of, down to nothing if it is deterministic.
+For how a refresh turn re-reads and re-emits the board, see
 [A living lens re-composes itself](../../concepts/lenses/#a-living-lens-re-composes-itself).
 
 ## Name a workflow the panel can actually run

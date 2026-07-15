@@ -61,6 +61,19 @@ export function isChamberWorkflow(name: string): boolean {
   return contributedWorkflows.has(name);
 }
 
+export function contributeChamberWorkflows(): readonly RibWorkflowContribution[] {
+  const bundled = bundledChamberWorkflows();
+  const nameOf = (c: RibWorkflowContribution): string => (c.definition as { name: string }).name;
+  // The bundled names are what a discovered file may not take: the catalog keeps one
+  // definition per name, so a collision would drop the operator's file silently.
+  const discovered = discoverLensWorkflows(lensWorkflowsDir(), new Set(bundled.map(nameOf)));
+  const contributions = [...discovered.contributions, ...bundled];
+  // Derived from what is actually returned, so a workflow added below is vouched for
+  // without anyone remembering to list it twice.
+  contributedWorkflows = new Set(contributions.map(nameOf));
+  return contributions;
+}
+
 // The producer: an agent turn (not a deterministic collector) emits the board,
 // which the executor promotes to structured output and the rib binding
 // publishes fail-closed via `validate`. This is the "an agent authors a lens"
@@ -68,17 +81,8 @@ export function isChamberWorkflow(name: string): boolean {
 // Every contributed workflow declares mutates_checkout: false — chamber
 // workflows write the rib data home and publish snapshots, never a project
 // checkout, so the host's per-project mutation lock must not serialize them.
-export function contributeChamberWorkflows(): readonly RibWorkflowContribution[] {
-  const contributions = buildChamberWorkflows();
-  // Derived from what is actually returned, so a workflow added below is vouched for
-  // without anyone remembering to list it twice.
-  contributedWorkflows = new Set(contributions.map((c) => (c.definition as { name: string }).name));
-  return contributions;
-}
-
-function buildChamberWorkflows(): readonly RibWorkflowContribution[] {
+function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
   return [
-    ...discoverLensWorkflows(lensWorkflowsDir()).contributions,
     {
       // The roster producer: a deterministic collector that reads the
       // genesis-authored Minds from the data home and emits a board of cards.

@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import rib from "../src/index.ts";
-import { discoverLensWorkflows, lensWorkflowName } from "../src/lens-workflows.ts";
+import {
+  discoverLensWorkflows,
+  lensWorkflowName,
+  MAX_REFRESH_WORKFLOW_NAME,
+} from "../src/lens-workflows.ts";
 import { lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
 import { isChamberWorkflow } from "../src/workflows.ts";
 
@@ -74,11 +78,18 @@ describe("lens workflow discovery", () => {
     expect(contributions[0]!.bindSnapshotKey).toBeUndefined();
   });
 
-  // The host locks on `mutates_checkout !== false`, so an operator who omitted it
-  // would have their lens producer serialize against real work in the project the
-  // run resolves to. Every other chamber contribution declares it outright.
-  test("defaults mutates_checkout to false, like the bundled contributions", async () => {
+  // The bundled workflows opt out of the mutation lock because chamber knows they
+  // only touch its own data home. An operator's file is arbitrary bash, so chamber
+  // has no such invariant to claim for it: an omission stays an omission and the
+  // host's own (locking) default applies.
+  test("leaves an omitted mutates_checkout to the host's default", async () => {
     await writeFile(join(root, "facts.yaml"), WF);
+    const def = discoverLensWorkflows(root).contributions[0]!.definition as Record<string, unknown>;
+    expect("mutates_checkout" in def).toBe(false);
+  });
+
+  test("an operator who opts out of the lock keeps that", async () => {
+    await writeFile(join(root, "facts.yaml"), `${WF}mutates_checkout: false\n`);
     const def = discoverLensWorkflows(root).contributions[0]!.definition as Record<string, unknown>;
     expect(def.mutates_checkout).toBe(false);
   });
@@ -123,6 +134,42 @@ describe("lens workflow discovery", () => {
   // kebab token would make one the catalog can't carry.
   test("skips a filename that is not a kebab token", async () => {
     await writeFile(join(root, "Not A Slug.yaml"), WF);
+    await writeFile(join(root, "good.yaml"), WF);
+    const { names } = discoverLensWorkflows(root);
+    expect(names).toEqual(new Set(["chamber-lens-good"]));
+  });
+
+  // The catalog keeps one definition per name, so a collision drops the operator's
+  // file with no signal — their lens would then run chamber's bundled re-author
+  // instead of the derivation they wrote.
+  test("refuses a filename that would collide with a bundled workflow", async () => {
+    await writeFile(join(root, "refresh.yaml"), WF);
+    await writeFile(join(root, "html.yaml"), WF);
+    await writeFile(join(root, "good.yaml"), WF);
+    const reserved = new Set(["chamber-lens-refresh", "chamber-lens-html"]);
+    const { names } = discoverLensWorkflows(root, reserved);
+    expect(names).toEqual(new Set(["chamber-lens-good"]));
+  });
+
+  // chamber_emit_lens caps refresh.workflow at MAX_REFRESH_WORKFLOW_NAME, so a longer
+  // name is one no lens could ever attach to.
+  test("refuses a stem too long for any lens to name", async () => {
+    const tooLong = "a".repeat(MAX_REFRESH_WORKFLOW_NAME - "chamber-lens-".length + 1);
+    await writeFile(join(root, `${tooLong}.yaml`), WF);
+    await writeFile(join(root, "good.yaml"), WF);
+    const { names } = discoverLensWorkflows(root);
+    expect(names).toEqual(new Set(["chamber-lens-good"]));
+    // The longest name that still fits is kept.
+    const longest = "a".repeat(MAX_REFRESH_WORKFLOW_NAME - "chamber-lens-".length);
+    await writeFile(join(root, `${longest}.yaml`), WF);
+    expect(discoverLensWorkflows(root).names.has(`chamber-lens-${longest}`)).toBe(true);
+  });
+
+  // A file the host would drop must not be vouched for: suppressing the emit caveat
+  // for a definition the catalog never accepted recreates the silent 409.
+  test("refuses a definition the host would drop, so it is never vouched for", async () => {
+    await writeFile(join(root, "nonodes.yaml"), "description: d\nnodes: []\n");
+    await writeFile(join(root, "nodesc.yaml"), "nodes:\n  - id: n\n    bash: echo\n");
     await writeFile(join(root, "good.yaml"), WF);
     const { names } = discoverLensWorkflows(root);
     expect(names).toEqual(new Set(["chamber-lens-good"]));

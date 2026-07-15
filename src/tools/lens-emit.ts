@@ -30,6 +30,7 @@ import {
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
 import { isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
+import { MAX_REFRESH_WORKFLOW_NAME } from "../lens-workflows.ts";
 import { refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
 import { isChamberWorkflow, LENS_REFRESH_WORKFLOW } from "../workflows.ts";
 import { emitResult } from "./util.ts";
@@ -60,7 +61,7 @@ const lensEmitSchema = z.object({
   // as its workflow's argument.
   refresh: z
     .object({
-      workflow: z.string().min(1).max(64).optional(),
+      workflow: z.string().min(1).max(MAX_REFRESH_WORKFLOW_NAME).optional(),
       cadenceMs: z.number().int().min(MIN_REFRESH_CADENCE_MS).max(86_400_000).optional(),
       // Checked here as well as at the store fold: the fold is the degradation path
       // for a hand-edited record, and without a schema check a live emit would fail
