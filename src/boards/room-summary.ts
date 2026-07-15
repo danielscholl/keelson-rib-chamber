@@ -1,6 +1,11 @@
 import type { LensRecord } from "../lens-store.ts";
-import type { DecisionMarker, OutcomeSplit } from "../room-text.ts";
+import { type DecisionMarker, flattenMarkdown, type OutcomeSplit } from "../room-text.ts";
 import type { Mind, Room } from "../types.ts";
+
+// The document renders as pre-wrapped plain text, so a Mind's markdown is flattened rather
+// than shown as literal `###`/`**` syntax. Bounded well above any real close: unlike a board
+// field there is no schema cap here, so the cut only exists to keep a runaway turn finite.
+const DOCUMENT_MAX = 100_000;
 
 function esc(value: string): string {
   return value.replace(
@@ -55,21 +60,43 @@ export function buildRoomSummaryHtml(
       )}</span></li>`;
     })
     .join("");
-  const disagreements =
-    decisions.length > 0
-      ? decisions
-          .map(
-            (decision) =>
-              `<li><strong>Q${decision.question} · ${esc(decision.title)}</strong><p>${esc(
-                decision.gist || "No disagreement detail was recorded.",
-              )}</p></li>`,
-          )
-          .join("")
-      : "<li>No disagreement markers were recorded.</li>";
+  // Only rendered when the room actually pinned decisions. A room that never adopted the
+  // marker convention has its disagreements in the document's own prose, so a standing
+  // "none recorded" panel would answer "where did they disagree?" with a negative nobody
+  // checked — next to a document that often names the disagreement outright.
+  const disagreements = decisions
+    .map(
+      (decision) =>
+        `<li><strong>Q${decision.question} · ${esc(decision.title)}</strong><p>${esc(
+          decision.gist || "No disagreement detail was recorded.",
+        )}</p></li>`,
+    )
+    .join("");
   const produced =
     tabled.length > 0
       ? tabled.map((record) => `<li>${esc(record.board.title || record.id)}</li>`).join("")
       : "<li>No exhibits were tabled.</li>";
+
+  const documentText = flattenMarkdown(outcome.body, DOCUMENT_MAX);
+  // The closing paragraph only earns its own panel when it is not the whole document —
+  // a one-paragraph close would otherwise print verbatim twice under two headings.
+  const next = closingText(documentText);
+  const nextSection =
+    next === documentText
+      ? ""
+      : `
+      <section class="wide">
+        <h2>Open items / next move</h2>
+        <p class="next">${esc(next)}</p>
+      </section>`;
+  const disagreementsSection =
+    disagreements === ""
+      ? ""
+      : `
+      <section>
+        <h2>Where they disagreed</h2>
+        <ul>${disagreements}</ul>
+      </section>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -121,7 +148,6 @@ export function buildRoomSummaryHtml(
     section { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
     section.wide { grid-column: 1 / -1; }
     h2 { font-size: 0.82rem; letter-spacing: 0.08em; margin: 0 0 14px; text-transform: uppercase; }
-    h3 { font-size: 1.25rem; margin: 0; }
     ul { list-style: none; margin: 0; padding: 0; }
     li { border-top: 1px solid var(--line); padding: 10px 0; }
     li:first-child { border-top: 0; padding-top: 0; }
@@ -158,21 +184,12 @@ export function buildRoomSummaryHtml(
       </section>
       <section class="wide">
         <h2>What was decided</h2>
-        <h3>${esc(outcome.title)}</h3>
-        <div class="document">${esc(outcome.body)}</div>
-      </section>
-      <section>
-        <h2>Where they disagreed</h2>
-        <ul>${disagreements}</ul>
-      </section>
+        <div class="document">${esc(documentText)}</div>
+      </section>${disagreementsSection}
       <section>
         <h2>Produced</h2>
         <ul>${produced}</ul>
-      </section>
-      <section class="wide">
-        <h2>Open items / next move</h2>
-        <p class="next">${esc(closingText(outcome.body))}</p>
-      </section>
+      </section>${nextSection}
     </div>
   </main>
 </body>

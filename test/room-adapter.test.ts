@@ -1038,6 +1038,84 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
     });
   }
 
+  // The shape every room in the field actually closes with: the driver recorded a synthesis
+  // turn (outcomeAt), and that turn is plain prose — no `---`/`##` boundary, because no
+  // prompt asks for one. Every fixture above hand-writes a boundary instead, which is how a
+  // Summary button that errored on 100% of real rooms shipped green.
+  const FIELD_TEXT =
+    "Agreement is clear: prioritize the root-managed Tomcat **10.1.54 → 10.1.55** same-line bump.\n\n### Acceptance criteria\n- Met: the bump is evidenced.";
+
+  async function seedClosedRoom(
+    slug: string,
+    over: { status?: Room["status"]; outcomeAt?: string; text?: string } = {},
+  ): Promise<void> {
+    const store = createFileRoomStore(roomsDir());
+    await store.saveRoom({
+      slug,
+      name: "Field room",
+      strategy: "sequential",
+      participants: ["alice", "bob"],
+      status: over.status ?? "done",
+      turnBudget: 1,
+      turnIndex: 1,
+      round: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      ...(over.outcomeAt ? { outcomeAt: over.outcomeAt } : {}),
+    } satisfies Room);
+    await store.appendTranscript(slug, {
+      messageId: "m1",
+      roomSlug: slug,
+      turnIndex: 0,
+      from: "bob",
+      role: "agent",
+      parts: [{ text: over.text ?? FIELD_TEXT }],
+      at: "2026-01-01T00:05:00.000Z",
+    });
+  }
+
+  it("room-summary reads a boundary-less close, the shape every real room produces", async () => {
+    const snap = fakeSnapshotManager();
+    registerTools(makeCtx({ run: scriptedRunAgentTurn([]).run, sm: snap.sm }));
+    await seedClosedRoom("field-room", { outcomeAt: "2026-01-01T00:05:00.000Z" });
+
+    const res = await onAction(
+      { type: "room-summary", payload: { slug: "field-room" } },
+      makeCtx(),
+    );
+
+    expect(res.ok).toBe(true);
+    const frame = (await snap.sm.recompose(roomSummaryKey("field-room"))) as { data?: string };
+    expect(htmlLensStructuralError(frame?.data as string)).toBeUndefined();
+    expect(frame?.data).toContain("Closing summary");
+    expect(frame?.data).toContain("prioritize the root-managed Tomcat");
+    // The markdown is flattened, never shown as literal syntax.
+    expect(frame?.data).not.toContain("### Acceptance criteria");
+  });
+
+  // The bug this whole change exists to kill: the index offers a Summary from `outcomeAt`
+  // while the action decided for itself whether an outcome existed, so the button was shown
+  // on every closed room and errored on every one. A button that is offered must resolve.
+  it("every room whose card offers a Summary can produce one", async () => {
+    registerTools(makeCtx({ run: scriptedRunAgentTurn([]).run, sm: fakeSnapshotManager().sm }));
+    const cases = [
+      { slug: "agree-done", status: "done" as const, outcomeAt: "2026-01-01T00:05:00.000Z" },
+      { slug: "agree-stopped", status: "stopped" as const, outcomeAt: "2026-01-01T00:05:00.000Z" },
+      { slug: "agree-unmarked", status: "done" as const, outcomeAt: undefined },
+      { slug: "agree-active", status: "active" as const, outcomeAt: "2026-01-01T00:05:00.000Z" },
+    ];
+    for (const c of cases) {
+      await seedClosedRoom(c.slug, {
+        status: c.status,
+        ...(c.outcomeAt ? { outcomeAt: c.outcomeAt } : {}),
+      });
+      // The collector's own predicate (bin/collect-rooms.ts) — duplicated on purpose, so
+      // this fails loudly if the button's gate ever gains or drops a clause.
+      const offersSummary = c.status !== "active" && Boolean(c.outcomeAt);
+      const res = await roomSummaryAction({ type: "room-summary", payload: { slug: c.slug } });
+      if (offersSummary) expect(res.ok).toBe(true);
+    }
+  });
+
   it("room-summary publishes valid HTML and declares its exact key without a paid turn", async () => {
     const snap = fakeSnapshotManager();
     const turns = scriptedRunAgentTurn([]);

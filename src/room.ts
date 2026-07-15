@@ -1414,7 +1414,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
             turnIndex: current.turnIndex + 1,
             round: await roundAfter(room.slug, current),
             status: "done",
-            outcomeAt: synthesisEntry.at,
+            // The room closes either way; only a turn that actually produced text leaves an
+            // outcome behind. Stamping an aborted/errored/empty close would offer a summary
+            // whose whole content is an error string — the same "no usable artifact" test
+            // runFidelityCheck applies to its own paid turn, plus the abort case that path
+            // returns on before it gets there.
+            ...(!turn.aborted && !turn.errored && turn.text.trim().length > 0
+              ? { outcomeAt: synthesisEntry.at }
+              : {}),
           });
         });
       }
