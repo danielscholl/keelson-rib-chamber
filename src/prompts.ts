@@ -55,6 +55,8 @@ export const LENS_WF_PROMPT = `You are authoring a LENS for Keelson's Chamber �
 
 Subject: $ARGUMENTS
 
+You can READ FILES (Read, Glob, Grep) — if the subject names or implies one (a repo, a report, a data file), go read it and compose from what it says. You cannot run commands or reach live/external data: if the subject needs that, compose from what you CAN see and say plainly in the board what is unevidenced. A lens that must re-derive live data is authored with a refresh workflow of its own instead.
+
 Compose ONE canvas board about the subject. Be honest — do NOT invent data you cannot see; if the subject is abstract, lay out its structure, parts, or status rather than fabricating metrics.
 
 The board shape:
@@ -80,9 +82,9 @@ export const LENS_REFRESH_WF_PROMPT = `You are REFRESHING an existing LENS for K
 
 Lens id: $inputs.lens
 
-First call chamber_list_lenses with { "id": "$inputs.lens" } — the matching record carries the prior board, the composition you are refreshing. If no such lens exists, reply with one short line saying so and STOP; do not author a new lens.
+First call chamber_list_lenses with { "id": "$inputs.lens" } — the matching record carries the prior board, the composition you are refreshing (read the row whose kind is "canvas"). If no such lens exists, reply with one short line saying so and STOP; do not author a new lens.
 
-Re-compose the SAME subject with fresh eyes: keep the board's shape and intent, update what changed, drop what no longer holds. Be honest — do NOT invent data you cannot see; if nothing changed, re-emit the board as it stands.
+Re-compose the SAME subject with fresh eyes: keep the board's shape and intent, update what changed, drop what no longer holds. You can READ FILES (Read, Glob, Grep), so if the board rests on one, re-read it rather than restating what the prior board said. You cannot run commands or reach live/external data — a lens whose numbers come from there names its own refresh workflow instead of this one, so do not guess at what you cannot check. Be honest — do NOT invent data you cannot see; if nothing changed, re-emit the board as it stands.
 
 Then call the chamber_emit_lens tool EXACTLY ONCE with { id, board, scope?, maintainingMind?, reason? }:
   - id: the SAME id — this updates the existing panel.
@@ -101,6 +103,8 @@ Subject: $ARGUMENTS
 ${buildCanvasArtifactGuidance()}
 
 (In this run canvas_publish and canvas_design_guide are NOT available — the guidance above is the full contract; publish with the chamber_emit_lens_html tool instead.)
+
+You can READ FILES (Read, Glob, Grep) — if the subject names or implies one (a repo, a report, a data file), go read it and compose from what it says. You cannot run commands or reach live/external data: if the subject needs that, compose from what you CAN see and say plainly on the page what is unevidenced. A page that must re-derive live data is kept current by a refresh workflow of its own instead.
 
 Compose ONE page about the subject. Be honest — do NOT invent data you cannot see; if the subject is abstract, lay out its structure, parts, or status rather than fabricating metrics.
 

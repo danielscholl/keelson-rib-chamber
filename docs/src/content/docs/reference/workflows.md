@@ -129,7 +129,10 @@ using the slug value the tool returned. It has:
 `chamber-lens` is one `prompt` node, `compose`. The turn composes a canvas board
 for a subject and publishes it by calling `chamber_emit_lens`. It has:
 
-- `allowed_tools: [LENS_TOOL_NAME]`, the lens publish tool (`chamber_emit_lens`).
+- `allowed_tools: [chamber_emit_lens, Read, Glob, Grep]`: the lens publish tool,
+  plus read-only file access so the turn can compose from a repo, a report, or a
+  data file rather than from the subject string alone. No shell, no network, and no
+  other rib tool (see [The grounding floor](#the-grounding-floor)).
 - `fail_on_tool_error: true`, so a publish that fails the board validation fails
   the run rather than reporting success with nothing rendered.
 - No `bindSnapshotKey`. The per-subject key (`rib:chamber:lens:{id}`) is chosen
@@ -151,7 +154,8 @@ lens](../../concepts/lenses/#a-living-lens-re-composes-itself): the default
 `refresh.workflow` a lens gets when its emit sets `refresh` without naming one.
 It runs with a required input, `lens` (the record id); the panel's cadence and
 the index card's Refresh verb both fire it that way. One `prompt` node,
-`refresh`, with `allowed_tools: [chamber_list_lenses, chamber_emit_lens]`: the
+`refresh`, with `allowed_tools: [chamber_list_lenses, chamber_emit_lens, Read,
+Glob, Grep]`: the
 turn fetches the record with `chamber_list_lenses { id }` (the single-lens
 fetch carries the prior board), re-composes the same subject, and re-emits
 under the same id (omitting `refresh`, `scope` and `maintainingMind`, all of
@@ -165,10 +169,30 @@ the panel-refresh route because a lens region declares it.
 `chamber-lens-html` is the chamber-lens sibling: one `prompt` node, `compose`,
 whose turn composes a designed, self-contained HTML page for a subject and
 publishes it with `chamber_emit_lens_html`, rendered in a sandboxed iframe. It
+carries the same read-only grounding as `chamber-lens`
+(`allowed_tools: [chamber_emit_lens_html, Read, Glob, Grep]`). It
 deliberately sets NO `fail_on_tool_error`: a rejected palette or a blocked
 external resource is the retry signal: the turn reads the error report, fixes
 the markup, and emits again within the same node. Like `chamber-lens` it has no
 `bindSnapshotKey`; the per-subject key is chosen at run time by the tool.
+
+## The grounding floor
+
+The three lens authors above are the only bundled workflows with file access, and
+they have exactly three tools of it: `Read`, `Glob`, `Grep`.
+
+`allowed_tools` is an SDK-level whitelist rather than a rib-tool opt-in, so a node
+naming only its emit tool cannot open a file either. That is how the advertised entry
+point once came to compose from the subject string alone, honestly reporting nothing
+it could not see. Read access unlocks the common case — a lens over a repo, a report,
+a facts file — while shell, network, and every other rib tool stay out.
+
+The floor stops there on purpose. A lens over **live or external** data is not a
+reason to widen it: that lens names a [refresh workflow of its
+own](../../concepts/lenses/#a-data-lens-names-a-workflow-of-its-own), where a `bash`
+node the operator wrote does the deriving. Loosening the bundled path far enough to
+reach live data would hand a shell to every lens turn, which is the trade this
+declines.
 
 ## The Briefing is not a workflow
 
