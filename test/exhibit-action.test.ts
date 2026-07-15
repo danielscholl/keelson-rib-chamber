@@ -174,6 +174,31 @@ describe("chamber_table_exhibit tool", () => {
     expect(rec?.sourceRoom).toBeUndefined();
   });
 
+  it("a first table claims the caller's room in the same write", async () => {
+    // Leaving it unowned until the driver's stamp — which waits for the whole turn
+    // stream to drain — lets another room publish over it in the window, and the late
+    // stamp then claims that room's content.
+    const t = makeToolCtx("sample-review");
+    await tool("chamber_table_exhibit").execute(
+      { id: "assessment", board: board("Assessment") },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.sourceRoom).toBe("sample-review");
+  });
+
+  it("a second room cannot publish over an id the first room just claimed", async () => {
+    const a = makeToolCtx("room-a");
+    await tool("chamber_table_exhibit").execute({ id: "findings", board: board("A") }, a.ctx);
+    const b = makeToolCtx("room-b");
+    await tool("chamber_table_exhibit").execute({ id: "findings", board: board("B") }, b.ctx);
+    expect(b.errored()).toBe(true);
+    const [rec] = await listLenses(lensesDir());
+    expect(rec?.board.title).toBe("A");
+    expect(rec?.sourceRoom).toBe("room-a");
+  });
+
   it("rejects an id with no usable characters", async () => {
     const t = makeToolCtx();
     await tool("chamber_table_exhibit").execute({ id: "!!!", board: board("X") }, t.ctx);

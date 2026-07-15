@@ -328,7 +328,8 @@ export function makeTableExhibitTool(store: LensStore, registry: LensRegistry): 
           // only repair sourceRoom, never restore the board this would have replaced.
           // Absent room identity we cannot tell a legitimate same-room re-table from a
           // collision, so an unidentified caller may not touch an owned exhibit.
-          const callerRoom = ctx.turnContext?.roomSlug;
+          const callerRoom =
+            typeof ctx.turnContext?.roomSlug === "string" ? ctx.turnContext.roomSlug : undefined;
           if (existing?.sourceRoom && existing.sourceRoom !== callerRoom) {
             emitResult(
               ctx,
@@ -340,9 +341,14 @@ export function makeTableExhibitTool(store: LensStore, registry: LensRegistry): 
           const { key } = await registry.publish(
             id,
             parsed.data.board,
-            // A re-table keeps the witnessed source until the driver re-stamps it
-            // (the record is rewritten whole, so an omitted field would clear it).
-            { reason: parsed.data.reason, sourceRoom: existing?.sourceRoom },
+            // Claim the room in THIS load-check-publish, which is serialized on the lens
+            // write chain. Leaving the first table unowned until the driver's stamp — which
+            // waits for the whole turn stream to drain — opens a window where another room
+            // publishes the same id over it and the late stamp then claims that room's
+            // content. The slug is the DRIVER's, never the agent's, so provenance is still
+            // observed rather than claimed. Falls back to the stamp when the host predates
+            // the turnContext seam.
+            { reason: parsed.data.reason, sourceRoom: existing?.sourceRoom ?? callerRoom },
             "exhibit",
           );
           // Mirror the lens emit's freshness path: the new exhibit appears in its
