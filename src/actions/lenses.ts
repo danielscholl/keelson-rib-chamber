@@ -1,7 +1,8 @@
 import type { CanvasBoardView, RibAction, RibActionResult } from "@keelson/shared";
 import { asNonEmptyString, errText } from "@keelson/shared";
 import { canonicalLensId, lensKey, lensRefreshInputs } from "../lens.ts";
-import { HTML_LENS_KEY } from "../lens-html.ts";
+import { HTML_LENS_KEY, htmlLensKey } from "../lens-html.ts";
+import { createFileHtmlLensStore } from "../lens-html-store.ts";
 import {
   awaitLensReconcile,
   deleteHtmlLensRecord,
@@ -10,8 +11,8 @@ import {
   getLensRegistry,
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
-import { createFileLensStore, isExhibit, lensProvenance } from "../lens-store.ts";
-import { lensesDir } from "../paths.ts";
+import { createFileLensStore, isExhibit, type LensRecord, lensProvenance } from "../lens-store.ts";
+import { htmlLensesDir, lensesDir } from "../paths.ts";
 import { getHostRefreshWorkflow, refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
 
 export async function retireLensAction(action: RibAction): Promise<RibActionResult> {
@@ -48,6 +49,22 @@ function lensActionId(action: RibAction, verb: string): { id: string } | { error
   return { id };
 }
 
+// Which species a card's verb is aimed at. The two stores hold separate id spaces, so
+// an unqualified id is ambiguous once HTML lenses share the index. Absent means canvas:
+// every payload minted before the field, and every non-index caller, means the board
+// store. Anything else is rejected rather than folded — lens-open is frame-safe, so a
+// garbled kind must fail closed rather than resolve to some other lens's key.
+type LensSpecies = "canvas" | "html";
+
+function lensSpecies(action: RibAction): { species: LensSpecies } | { error: string } {
+  const raw = ((action.payload ?? {}) as Record<string, unknown>).kind;
+  if (raw === undefined) return { species: "canvas" };
+  if (raw !== "canvas" && raw !== "html") {
+    return { error: `unknown lens kind: ${JSON.stringify(raw)}` };
+  }
+  return { species: raw };
+}
+
 // Retire an HTML lens: the head ⋯ verb on its panel, and one of the two surfaces
 // deleteHtmlLensRecord backs (chamber_retire_lens is the other).
 export async function retireHtmlLensAction(action: RibAction): Promise<RibActionResult> {
@@ -66,14 +83,22 @@ export async function refreshLensAction(action: RibAction): Promise<RibActionRes
   const got = lensActionId(action, "refresh-lens");
   if ("error" in got) return { ok: false, error: got.error };
   const { id } = got;
+  const species = lensSpecies(action);
+  if ("error" in species) return { ok: false, error: species.error };
   const hostRefreshWorkflow = getHostRefreshWorkflow();
   if (!hostRefreshWorkflow) {
     return { ok: false, error: "workflow refresh unavailable on this harness" };
   }
   try {
-    const record = await createFileLensStore(lensesDir()).loadLens(id);
+    // Each species keeps its own store, so the kind picks which one holds the backing.
+    // The record is loaded (not just its refresh) so an absent lens and a lens with no
+    // backing stay distinguishable — they want different things from the operator.
+    const record =
+      species.species === "html"
+        ? await createFileHtmlLensStore(htmlLensesDir()).load(id)
+        : await createFileLensStore(lensesDir()).loadLens(id);
     if (!record) return { ok: false, error: `lens '${id}' not found` };
-    if (isExhibit(record)) {
+    if (species.species === "canvas" && isExhibit(record as LensRecord)) {
       return { ok: false, error: `'${id}' is an exhibit — exhibits don't refresh` };
     }
     if (!record.refresh) {
@@ -93,14 +118,19 @@ export async function refreshLensAction(action: RibAction): Promise<RibActionRes
 }
 
 // Open a lens: return the host open-canvas effect focusing the lens's live board in
-// the drawer. A lens is live-published the whole time it exists, so its snapshot key
-// always resolves — no deferral (unlike a closed room). Non-destructive and
-// side-effect-free; fails closed on a missing/unsafe id (canonicalLensId rejects
-// garbage) so a stale/garbled payload can't open a bad key.
+// the drawer. This is the ONLY way to read an unpinned lens, and the same verb an
+// exhibit's card dispatches — one handler, one effect, one drawer. A lens is
+// live-published the whole time it exists, pinned or not, so its snapshot key always
+// resolves — no deferral (unlike a closed room). Non-destructive and side-effect-free;
+// fails closed on a missing/unsafe id (canonicalLensId rejects garbage) so a
+// stale/garbled payload can't open a bad key.
 export function lensOpenAction(action: RibAction): RibActionResult {
   const got = lensActionId(action, "lens-open");
   if ("error" in got) return { ok: false, error: got.error };
-  return { ok: true, data: { effect: "open-canvas", key: lensKey(got.id), title: got.id } };
+  const species = lensSpecies(action);
+  if ("error" in species) return { ok: false, error: species.error };
+  const key = species.species === "html" ? htmlLensKey(got.id) : lensKey(got.id);
+  return { ok: true, data: { effect: "open-canvas", key, title: got.id } };
 }
 
 // Pin or unpin a lens's Chamber panel: the index card's toggle and the panel head's

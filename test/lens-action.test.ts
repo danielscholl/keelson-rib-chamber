@@ -153,6 +153,33 @@ describe("lens-open onAction", () => {
     expect(res.ok).toBe(false);
     expect("error" in res && res.error).toMatch(/unsafe lens id/);
   });
+
+  // The two species keep separate key namespaces, so the kind is what routes the open.
+  it("kind: html focuses the html key; absent kind stays canvas", async () => {
+    const html = await onAction(
+      { type: "lens-open", payload: { id: "alpha", kind: "html" } },
+      actionCtx,
+    );
+    expect(html).toEqual({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:chamber:lens-html:alpha", title: "alpha" },
+    });
+    // Absent means canvas — every payload minted before the field, and every caller
+    // outside the index, means the board store.
+    const canvas = await onAction({ type: "lens-open", payload: { id: "alpha" } }, actionCtx);
+    expect(canvas).toMatchObject({ data: { key: "rib:chamber:lens:alpha" } });
+  });
+
+  // lens-open is frame-safe, so a garbled kind must fail closed rather than fold to a
+  // default that focuses some other lens's key.
+  it("fails closed on an unknown kind", async () => {
+    const res = await onAction(
+      { type: "lens-open", payload: { id: "alpha", kind: "sneaky" } },
+      actionCtx,
+    );
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/unknown lens kind/);
+  });
 });
 
 describe("lens-note onAction", () => {
