@@ -277,10 +277,12 @@ export function makeRetireLensTool(): ToolDefinition {
 }
 
 // Exhibit publish seam — the room driver's turn tool: a discussion tables its
-// deliverable (an assessment, a plan, a findings board) as a point-in-time record
-// on the Exhibits shelf. Deliberately NO sourceRoom input: the room driver stamps
-// the producing room after WITNESSING this tool fire in a turn it ran (see
-// stampExhibitSources), so provenance can't be claimed, only observed.
+// deliverable (an assessment, a plan, a findings board) as a point-in-time record.
+// Deliberately NO sourceRoom input: the room is read from the turn's `turnContext`,
+// which the DRIVER sets, so provenance is still observed rather than claimed — a Mind
+// cannot name its own room. That read is the primary source and it lands in this same
+// write, so an exhibit is owned the instant it exists; the driver's post-hoc witness
+// (stampExhibitSources) is the fallback for a host predating the turnContext seam.
 const exhibitEmitSchema = z.object({
   id: z.string().min(1).max(64),
   board: canvasBoardViewSchema,
