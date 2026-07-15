@@ -172,9 +172,13 @@ is a single board record.
 ```
 
 This is a `LensRecord`. `id` and `board` are required. `updatedAt` is
-server-stamped on every write, never agent-supplied. `scope`,
-`maintainingMind`, and `reason` are optional provenance: each is spread in only
-when present, so re-authoring a lens without a field clears the prior value.
+server-stamped and never agent-supplied; it tracks the **board**, so a re-author
+that leaves the board byte-identical writes the prior stamp back rather than
+minting a new one (an unchanged re-author also skips the panel's re-broadcast).
+`scope`, `maintainingMind`, and `reason` are optional provenance. `scope` and
+`maintainingMind` are durable: omitting one on a re-author PRESERVES the prior
+value and only an explicit `null` clears it. `reason` describes a single
+authoring, so it is spread in only when present and omitting it clears it.
 Two more optional fields follow different rules: `kind: "exhibit"` marks a
 tabled deliverable (absent means lens; `sourceRoom` beside it is the producing
 room's slug, driver-witnessed and never agent-supplied), and `refresh`, a
@@ -236,8 +240,10 @@ happened since the last one.
 ```
 
 `ackedEndedRooms` is the ended-room slugs the briefing has already covered.
-`lensFingerprints` maps each lens `id` to its `updatedAt`, so a new or
-re-authored lens reads as changed. `briefPromoted` tracks whether the banner
+`lensFingerprints` maps each lens `id` to its `updatedAt`, so a new lens — or one
+whose board actually changed — reads as changed. Because `updatedAt` tracks the
+board, a cadence refresh that re-emits the same board leaves the fingerprint alone
+and buys no briefing turn. `briefPromoted` tracks whether the banner
 currently holds a promoted briefing (`true`) or the quiet board (`false`). A
 missing or torn file reads as empty, so a cold start treats everything as new
 and unpromoted.

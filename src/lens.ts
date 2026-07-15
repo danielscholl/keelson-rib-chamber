@@ -109,6 +109,31 @@ function sameRefresh(a?: LensRefresh, b?: LensRefresh): boolean {
   return a?.workflow === b?.workflow && a?.cadenceMs === b?.cadenceMs;
 }
 
+// Structural JSON-value equality: key order is insignificant and an explicit
+// undefined reads as absent, since one side may have been through disk and the other
+// not. Sound for boards because canvasBoardViewSchema has no defaults or transforms,
+// so a parsed board is structurally its input.
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, i) => jsonEqual(item, b[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const aKeys = Object.keys(ao).filter((k) => ao[k] !== undefined);
+  const bKeys = Object.keys(bo).filter((k) => bo[k] !== undefined);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((k) => jsonEqual(ao[k], bo[k]));
+}
+
+// Whether a re-author actually changed the board. Drives both halves of lens
+// freshness: the live skip below, and the emit holding the record's updatedAt.
+export function boardsEqual(a: CanvasBoardView, b: CanvasBoardView): boolean {
+  return jsonEqual(a, b);
+}
+
 // Publishes a Mind-authored board to its per-subject lens key, registering the key
 // and a matching surface region the first time an id is seen; re-authoring the same
 // id updates the existing panel in place. Holds the snapshot + region handles per id
@@ -122,12 +147,15 @@ export interface LensRegistry {
   // the store for the index card; the live key + region are board-only, so
   // reregister omits it. `refresh` is the RESOLVED backing to persist and wire —
   // the caller owns preserve-vs-clear semantics against the prior record.
+  // `updatedAt` overrides the store's stamp: a re-author that left the board
+  // untouched holds the record's prior freshness rather than earning a new one.
   publish(
     id: string,
     board: CanvasBoardView,
     provenance?: LensProvenance,
     kind?: LensKind,
     refresh?: LensRefresh,
+    updatedAt?: string,
   ): Promise<{ key: string }>;
   // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving, so
   // the authored updatedAt is preserved (a restart must not reset every lens's
@@ -147,6 +175,9 @@ export interface LensRegistry {
 interface LensEntry {
   key: string;
   publisher: { publish(board: CanvasBoardView): Promise<void> };
+  // The board on the live key — liveRegister's comparand for skipping an identical
+  // republish.
+  latest: () => CanvasBoardView;
   unregisterSnapshot: () => void;
   // Absent for an exhibit: it holds a key but no panel (see regionFor).
   unregisterRegion?: () => void;
@@ -234,6 +265,7 @@ export function createLensRegistry(
     const entry: LensEntry = {
       key,
       publisher,
+      latest,
       unregisterSnapshot,
       ...(unregisterRegion ? { unregisterRegion } : {}),
       kind,
@@ -278,8 +310,8 @@ export function createLensRegistry(
 
   // The live half of publish: validate the board, register the key + region if new
   // (re-wiring the region if the shelf config changed), seed the cache, and push the
-  // board. Shared by publish (which then persists) and reregister (boot, which must
-  // NOT persist — see reregister).
+  // board unless it is already the live one. Shared by publish (which then persists)
+  // and reregister (boot, which must NOT persist — see reregister).
   async function liveRegister(
     id: string,
     board: CanvasBoardView,
@@ -299,17 +331,30 @@ export function createLensRegistry(
     } else {
       rewireRegion(id, entry, kind, refresh);
     }
-    await entry.publisher.publish(board);
+    // Re-broadcasting an identical board would restamp the frame's composedAt — the
+    // "updated" a panel head reads — with freshness the content never earned. The
+    // comparand is the LIVE board, never the stored one: this is the surface, so a
+    // skip cannot strand it out of step with disk (a new entry holds only the seed,
+    // so a real board always publishes).
+    if (!boardsEqual(entry.latest(), board)) await entry.publisher.publish(board);
     return { key: entry.key };
   }
 
   return {
-    async publish(id, board, provenance, kind = "lens", refresh) {
+    async publish(id, board, provenance, kind = "lens", refresh, updatedAt) {
       const result = await liveRegister(id, board, kind, refresh);
       // Persist only AFTER the live validate + publish succeed, so a board we
       // can't render never reaches disk (fail-closed); the store stamps updatedAt
-      // and carries the provenance through (absent fields stay absent).
-      await store.saveLens({ id, board, kind, ...(refresh ? { refresh } : {}), ...provenance });
+      // unless the caller held the prior one, and carries the provenance through
+      // (absent fields stay absent).
+      await store.saveLens({
+        id,
+        board,
+        kind,
+        ...(refresh ? { refresh } : {}),
+        ...(updatedAt ? { updatedAt } : {}),
+        ...provenance,
+      });
       return result;
     },
     // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving:

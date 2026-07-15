@@ -10,6 +10,7 @@ import {
 import { BOARD_COMPOSITION_CONTRACT } from "../board-guidance.ts";
 import { evaluateBriefGate } from "../brief-gate.ts";
 import {
+  boardsEqual,
   canonicalLensId,
   EXHIBIT_TOOL_NAME,
   LENS_TOOL_NAME,
@@ -39,11 +40,16 @@ import { emitResult } from "./util.ts";
 // fail-closed (the key's expectView guard) before it is broadcast. scope /
 // maintainingMind / reason are the index card's optional PROVENANCE — the agent
 // supplies what it can name (never fabricated); each is omitted when absent.
+// scope and maintainingMind are durable identity, so they take the same
+// absent-preserves / null-clears rule as refresh — a custom refresh workflow has no
+// reason to know it must re-state them. reason describes ONE authoring, so omitting
+// it clears: carrying it forward would caption the next revision with the last
+// one's story.
 const lensEmitSchema = z.object({
   id: z.string().min(1).max(64),
   board: canvasBoardViewSchema,
-  scope: z.string().min(1).max(40).optional(),
-  maintainingMind: z.string().min(1).max(40).optional(),
+  scope: z.string().min(1).max(40).nullable().optional(),
+  maintainingMind: z.string().min(1).max(40).nullable().optional(),
   reason: z.string().min(1).max(120).optional(),
   // The lens's re-compose backing. Absent PRESERVES an existing lens's config —
   // a refresh turn re-emitting the board must not strip its own backing — and
@@ -63,7 +69,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
   return {
     name: LENS_TOOL_NAME,
     description:
-      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs? }` names a catalog workflow the panel re-runs on cadence with input `lens` = this id (the workflow re-composes and re-emits the lens; default workflow chamber-lens-refresh, default cadence 1h). Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit. ' +
+      'Author a lens: render a canvas `board` you compose onto the Chamber surface, where it shows live as its own panel with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same panel); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board\'s kind, e.g. "status board" / "timeline" / "checklist"), `maintainingMind` (YOUR own Mind name/slug, the lens\'s maintainer), `reason` (a short note on what changed in this authoring). On a re-author, omitting `scope` or `maintainingMind` KEEPS the lens\'s existing value (pass null to clear one) — you need not re-state them; omitting `reason` clears it, since it describes a single authoring. Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs? }` names a catalog workflow the panel re-runs on cadence with input `lens` = this id (the workflow re-composes and re-emits the lens; default workflow chamber-lens-refresh, default cadence 1h). Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: "lens-note"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit. ' +
       BOARD_COMPOSITION_CONTRACT,
     inputSchema: lensEmitSchema,
     state_changing: true,
@@ -86,7 +92,6 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
           emitResult(ctx, "chamber_emit_lens: id has no usable characters", true);
           return;
         }
-        const { scope, maintainingMind, reason } = parsed.data;
         try {
           await awaitLensReconcile();
           // The two species share one id space, so the LENS verb must not overwrite
@@ -102,6 +107,25 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             return;
           }
           const refresh = resolveLensRefresh(parsed.data.refresh, existing?.refresh);
+          const provenance = {
+            scope: resolveProvenanceField(parsed.data.scope, existing?.scope),
+            maintainingMind: resolveProvenanceField(
+              parsed.data.maintainingMind,
+              existing?.maintainingMind,
+            ),
+            reason: parsed.data.reason,
+          };
+          // An unchanged board holds its freshness: the brief and digest gates both
+          // fingerprint on updatedAt, so re-stamping it buys two paid turns for a lens
+          // that says what it said before. Only a parseable prior may be held —
+          // listLenses skips a record whose updatedAt won't Date.parse, and the next
+          // re-author's stamp is what heals one.
+          const heldUpdatedAt =
+            existing &&
+            boardsEqual(existing.board, parsed.data.board) &&
+            Number.isFinite(Date.parse(existing.updatedAt))
+              ? existing.updatedAt
+              : undefined;
           // The harness refresh seam is fail-soft (an unknown workflow warns
           // server-side and resolves), so an emit that names a custom workflow
           // gets a caveat in its reply — the one place the author can hear it.
@@ -112,9 +136,10 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
           const { key } = await registry.publish(
             id,
             parsed.data.board,
-            { scope, maintainingMind, reason },
+            provenance,
             "lens",
             refresh,
+            heldUpdatedAt,
           );
           // Re-run the bound chamber-lenses collector so a newly-authored lens appears
           // in the index promptly instead of waiting on cadence (mirrors genesis
@@ -164,6 +189,18 @@ function resolveLensRefresh(
     workflow: input.workflow ?? prior?.workflow ?? LENS_REFRESH_WORKFLOW,
     ...(cadenceMs !== undefined ? { cadenceMs } : {}),
   };
+}
+
+// The resolveLensRefresh twin, for the durable provenance fields: absent preserves
+// the prior, null clears. saveLens drops an undefined, so a cleared field leaves no
+// key on the record.
+function resolveProvenanceField(
+  input: string | null | undefined,
+  prior: string | undefined,
+): string | undefined {
+  if (input === undefined) return prior;
+  if (input === null) return undefined;
+  return input;
 }
 
 const lensHtmlEmitSchema = z.object({

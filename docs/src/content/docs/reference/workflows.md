@@ -141,7 +141,8 @@ the index card's Refresh verb both fire it that way. One `prompt` node,
 `refresh`, with `allowed_tools: [chamber_list_lenses, chamber_emit_lens]`: the
 turn fetches the record with `chamber_list_lenses { id }` (the single-lens
 fetch carries the prior board), re-composes the same subject, and re-emits
-under the same id (omitting `refresh` so the backing survives).
+under the same id (omitting `refresh`, `scope` and `maintainingMind`, all of
+which survive an omit).
 `fail_on_tool_error: true` like chamber-lens, and no `bindSnapshotKey` (the
 emit tool republishes the per-subject key itself); the harness admits it to
 the panel-refresh route because a lens region declares it.

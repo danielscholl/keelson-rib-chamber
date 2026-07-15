@@ -140,6 +140,51 @@ describe("lens registry", () => {
     expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A2") });
   });
 
+  test("an identical re-author does not re-broadcast — the panel's freshness is the board's", async () => {
+    const { sm, broadcasts } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"));
+    // The seed compose on register, then the authored board.
+    expect(broadcasts).toHaveLength(2);
+    // A cadence refresh that found nothing to change: re-composing would restamp the
+    // frame and read as "updated just now" over numbers nothing re-measured.
+    await reg.publish("a", board("A"));
+    expect(broadcasts).toHaveLength(2);
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
+  });
+
+  test("broadcasts every real change, including a revert to a board published before", async () => {
+    const { sm, broadcasts } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createLensRegistry(sm, region.register, fakeLensStore().store);
+    await reg.publish("a", board("A"));
+    await reg.publish("a", board("A2"));
+    // A revert differs from the LIVE board, so it is a change like any other.
+    await reg.publish("a", board("A"));
+    expect(broadcasts).toHaveLength(4);
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
+  });
+
+  test("a re-author of the stored board still converges a panel a failed save left ahead", async () => {
+    const { sm, broadcasts } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const { store } = fakeLensStore();
+    const reg = createLensRegistry(sm, region.register, store);
+    await reg.publish("a", board("A"));
+    // publish() persists only after the live publish succeeds, so a store that throws
+    // leaves the panel on "B" while disk still says "A".
+    const saveLens = store.saveLens;
+    store.saveLens = () => Promise.reject(new Error("disk full"));
+    await expect(reg.publish("a", board("B"))).rejects.toThrow("disk full");
+    store.saveLens = saveLens;
+    // The refresh workflow re-emits the STORED board. It must reach the surface:
+    // skipping on the stored board would call this unchanged and strand "B" on the
+    // panel with no later refresh able to converge it.
+    await reg.publish("a", board("A"));
+    expect(broadcasts.at(-1)).toEqual({ key: lensKey("a"), view: board("A") });
+  });
+
   test("authors distinct subjects as distinct panels with no eviction", async () => {
     const { sm, keys } = fakeSnapshotManager();
     const region = fakeRegisterRegion();
