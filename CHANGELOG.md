@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.45.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.44.0...v0.45.0) (2026-07-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lens:** index lenses by default, pin them to the surface ([#312](https://github.com/danielscholl/keelson-rib-chamber/issues/312))
+
+### Added
+
+* **lens:** index lenses by default, pin them to the surface ([#312](https://github.com/danielscholl/keelson-rib-chamber/issues/312)) ([7d776de](https://github.com/danielscholl/keelson-rib-chamber/commit/7d776de7228249cf7d640af8bc3c4ac7eeb7daf3))
+
 ## [0.44.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.43.0...v0.44.0) (2026-07-15)
 
 
