@@ -31,15 +31,12 @@ describe("Briefing view + gate wiring", () => {
 });
 
 describe("Chamber surface (attention chrome)", () => {
-  test("the rib declares one valid Chamber surface with a subtitle", () => {
+  test("the rib declares one valid Chamber surface with a bare tab (no subtitle/heading)", () => {
     expect(rib.surfaces).toHaveLength(1);
     const surface = rib.surfaces?.[0];
     expect(surface?.id).toBe("chamber");
     expect(surface?.title).toBe("Chamber");
-    // #284-p2 chrome: a static subtitle under the surface title.
-    expect(surface?.subtitle).toBe(
-      "Author Minds · convene Rooms · keep Lenses · table Exhibits · read the Briefing",
-    );
+    expect(surface?.subtitle).toBeUndefined();
     expect(ribSurfaceDescriptorSchema.safeParse(surface).success).toBe(true);
   });
 
