@@ -51,12 +51,13 @@ function fakeLensStore() {
 }
 
 function fakeHtmlLensStore() {
-  const saved = new Map<string, { html: string; title?: string }>();
+  const saved = new Map<string, { html: string; title?: string; pinned?: boolean }>();
   const store: HtmlLensStore = {
     async save(record) {
       saved.set(record.id, {
         html: record.html,
         ...(record.title ? { title: record.title } : {}),
+        ...(record.pinned ? { pinned: true } : {}),
       });
     },
     async load(id) {
@@ -67,6 +68,7 @@ function fakeHtmlLensStore() {
             html: rec.html,
             updatedAt: "1970-01-01T00:00:00.000Z",
             ...(rec.title ? { title: rec.title } : {}),
+            ...(rec.pinned ? { pinned: true } : {}),
           }
         : undefined;
     },
@@ -106,12 +108,19 @@ function fakeSnapshotManager() {
 
 function fakeRegisterRegion() {
   const calls: { surfaceId: string; region: RibSurfaceRegion }[] = [];
+  // Tracks what is LIVE, not merely what was ever added — the pin tests turn on the
+  // difference between a region that was registered and one still on the surface.
+  const active = new Map<string, RibSurfaceRegion>();
   return {
     register: (surfaceId: string, region: RibSurfaceRegion) => {
       calls.push({ surfaceId, region });
-      return () => undefined;
+      active.set(region.key, region);
+      return () => {
+        active.delete(region.key);
+      };
     },
     calls,
+    active,
   };
 }
 
@@ -169,7 +178,11 @@ describe("HTML lens registry", () => {
     const reg = createHtmlLensRegistry(sm, region.register, store.store, views.declare);
     const html = "<h1>Release risks</h1>";
 
-    const { key } = await reg.publish(html, { id: "release-risks", title: "Release Risks" });
+    const { key } = await reg.publish(html, {
+      pinned: true,
+      id: "release-risks",
+      title: "Release Risks",
+    });
 
     expect(key).toBe(htmlLensKey("release-risks"));
     expect(key).toBe("rib:chamber:lens-html:release-risks");
@@ -178,11 +191,18 @@ describe("HTML lens registry", () => {
     expect(region.calls[0]?.region).toMatchObject({
       key,
       title: "Release Risks",
-      group: "lens",
-      groupTitle: "Lenses",
+      // Per-id group + one shared zone title, as the canvas twin does: a pinned page
+      // is the only member of its group, so it forms a full-width row in Pinned.
+      group: "lens:release-risks",
+      groupTitle: "Pinned",
+      collapsed: true,
     });
     expect(broadcasts.at(-1)).toEqual({ key, view: html });
-    expect(store.saved.get("release-risks")).toEqual({ html, title: "Release Risks" });
+    expect(store.saved.get("release-risks")).toEqual({
+      html,
+      title: "Release Risks",
+      pinned: true,
+    });
     expect(views.declared).toEqual([{ id: "release-risks", title: "Release Risks" }]);
   });
 
@@ -193,13 +213,13 @@ describe("HTML lens registry", () => {
     const views = fakeDeclareView();
     const reg = createHtmlLensRegistry(sm, region.register, store.store, views.declare);
 
-    await reg.publish("<p>v1</p>", { id: "status" });
-    await reg.publish("<p>v2</p>", { id: "status" });
+    await reg.publish("<p>v1</p>", { pinned: true, id: "status" });
+    await reg.publish("<p>v2</p>", { pinned: true, id: "status" });
 
     expect(region.calls).toHaveLength(1);
     expect(views.declared).toHaveLength(1);
     expect(broadcasts.at(-1)).toEqual({ key: htmlLensKey("status"), view: "<p>v2</p>" });
-    expect(store.saved.get("status")).toEqual({ html: "<p>v2</p>" });
+    expect(store.saved.get("status")).toEqual({ html: "<p>v2</p>", pinned: true });
   });
 
   test("distinct subjects land on distinct keys, untitled panels fall back to the id", async () => {
@@ -212,8 +232,8 @@ describe("HTML lens registry", () => {
       fakeDeclareView().declare,
     );
 
-    await reg.publish("<p>a</p>", { id: "alpha" });
-    await reg.publish("<p>b</p>", { id: "beta" });
+    await reg.publish("<p>a</p>", { pinned: true, id: "alpha" });
+    await reg.publish("<p>b</p>", { pinned: true, id: "beta" });
 
     expect(keys().sort()).toEqual([htmlLensKey("alpha"), htmlLensKey("beta")]);
     expect(region.calls.map((c) => c.region.title)).toEqual(["alpha", "beta"]);
@@ -229,12 +249,69 @@ describe("HTML lens registry", () => {
       fakeDeclareView().declare,
     );
 
-    const { key } = await reg.reregister("persisted", "<p>from disk</p>", "Persisted");
+    const { key } = await reg.reregister("persisted", "<p>from disk</p>", true, "Persisted");
 
     expect(key).toBe(htmlLensKey("persisted"));
     expect(keys()).toEqual([key]);
     expect(broadcasts.at(-1)).toEqual({ key, view: "<p>from disk</p>" });
     expect(store.saved.size).toBe(0);
+  });
+
+  // The trap that has no canvas twin. A canvas lens needs no views entry (board is the
+  // default kind), but the host resolves an HTML lens's canvas kind by EXACT match
+  // against the rib's views — so an unpin that dropped the entry along with the region
+  // would leave Open rendering raw markup through the board pipeline. Unpin must go
+  // nowhere near release(), which takes key + region + views entry all at once.
+  test("unpinning drops ONLY the region — the key and the views entry outlive it", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const views = fakeDeclareView();
+    const reg = createHtmlLensRegistry(
+      sm,
+      region.register,
+      fakeHtmlLensStore().store,
+      views.declare,
+    );
+    await reg.publish("<p>x</p>", { pinned: true, id: "subject" });
+    expect(region.active.size).toBe(1);
+
+    expect(reg.setPin("subject", false)).toBe(true);
+    expect(region.active.size).toBe(0);
+    // Both must survive, or the lens becomes unreadable rather than merely unpanelled.
+    expect(keys()).toEqual([htmlLensKey("subject")]);
+    expect(views.declared).toEqual([{ id: "subject", title: undefined }]);
+
+    // And it pins back, from the index card — the only affordance left once the head
+    // went with the panel.
+    expect(reg.setPin("subject", true)).toBe(true);
+    expect(region.active.size).toBe(1);
+  });
+
+  // release() calls unregisterRegion unguarded; an unpinned entry has none, so a retire
+  // of one would throw on its way to removing the record.
+  test("retiring an unpinned lens does not throw", async () => {
+    const { sm, keys } = fakeSnapshotManager();
+    const reg = createHtmlLensRegistry(
+      sm,
+      fakeRegisterRegion().register,
+      fakeHtmlLensStore().store,
+      fakeDeclareView().declare,
+    );
+    await reg.publish("<p>x</p>", { id: "subject" });
+    expect(reg.remove("subject")).toBe(true);
+    expect(keys()).toEqual([]);
+  });
+
+  // The legacy id-less canvas has no record to hold a pin and no index card to pin it
+  // back from, so defaulting it to unpinned would make it permanently invisible with
+  // nothing able to recover it.
+  test("the legacy id-less canvas is always panelled, pin or no pin", async () => {
+    const { sm } = fakeSnapshotManager();
+    const region = fakeRegisterRegion();
+    const reg = createHtmlLensRegistry(sm, region.register, fakeHtmlLensStore().store);
+    await reg.publish("<p>legacy</p>");
+    expect(region.active.size).toBe(1);
+    expect(region.calls[0]?.region.key).toBe(HTML_LENS_KEY);
   });
 
   test("dispose releases keys, regions, and per-subject views entries", async () => {
@@ -246,7 +323,7 @@ describe("HTML lens registry", () => {
       fakeHtmlLensStore().store,
       views.declare,
     );
-    await reg.publish("<p>x</p>", { id: "subject" });
+    await reg.publish("<p>x</p>", { pinned: true, id: "subject" });
     await reg.publish("<p>y</p>");
     expect(keys()).toHaveLength(2);
 
@@ -520,10 +597,12 @@ describe("HTML lens boot re-registration", () => {
   test("a living html lens comes back with its refresh wiring, not just its markup", async () => {
     // The reconcile is the only path that rebuilds a panel's region after a restart, so
     // dropping refresh here would cost every living html lens its cadence on every
-    // restart — silently, since nothing re-reads the record to notice.
+    // restart — silently, since nothing re-reads the record to notice. Pinned, because
+    // the refresh wiring IS the region's: only a pinned lens has one to carry it.
     await createFileHtmlLensStore(htmlLensesDir()).save({
       id: "living",
       html: "<h1>L</h1>",
+      pinned: true,
       refresh: { workflow: "chamber-lens-living", cadenceMs: 60_000, inputs: { env: "prod" } },
     });
 

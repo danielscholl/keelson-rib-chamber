@@ -252,7 +252,28 @@ describe("buildLensesIndexBoard both species", () => {
       kind: "html",
     });
     // Retire is the html verb, not the canvas one — separate stores, separate deletes.
-    expect(card?.actions?.map((a) => a.type)).toEqual(["lens-open", "retire-lens-html"]);
+    expect(card?.actions?.map((a) => a.type)).toEqual([
+      "lens-open",
+      "pin-lens",
+      "retire-lens-html",
+    ]);
+  });
+
+  // The card is the ONLY way to pin an HTML lens back: its panel head is the only other
+  // affordance it has, and unpinning takes the head away with the panel. Without this
+  // verb, unpin would be a one-way door.
+  test("an HTML lens's Pin verb names its species, and swaps to Unpin when pinned", () => {
+    const unpinned = cards(buildLensesIndexBoard([], [], [htmlLens()]))[0];
+    expect(unpinned?.actions?.find((a) => a.type === "pin-lens")).toMatchObject({
+      label: "Pin",
+      payload: { id: "designed-page", kind: "html", pinned: true },
+    });
+    const pinned = cards(buildLensesIndexBoard([], [], [htmlLens({ pinned: true })]))[0];
+    expect(pinned?.pill).toEqual({ label: "pinned", tone: "accent" });
+    expect(pinned?.actions?.find((a) => a.type === "pin-lens")).toMatchObject({
+      label: "Unpin",
+      payload: { id: "designed-page", kind: "html", pinned: false },
+    });
   });
 
   test("the species rides a field, so one subject authored as both never reads as a duplicate", () => {
@@ -280,15 +301,14 @@ describe("buildLensesIndexBoard both species", () => {
     ]);
   });
 
-  test("an HTML lens offers Refresh only with a backing, and never a Pin", () => {
+  test("an HTML lens offers Refresh only with a backing", () => {
     const living = cards(
       buildLensesIndexBoard([], [], [htmlLens({ refresh: { workflow: "chamber-lens-html" } })]),
     )[0];
-    // An HTML lens still holds its panel unconditionally, so a Pin verb would promise
-    // a state it has no way to reach.
     expect(living?.actions?.map((a) => a.type)).toEqual([
       "lens-open",
       "refresh-lens",
+      "pin-lens",
       "retire-lens-html",
     ]);
     expect(living?.actions?.find((a) => a.type === "refresh-lens")?.payload).toEqual({

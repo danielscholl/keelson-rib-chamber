@@ -123,12 +123,12 @@ export function destructiveHeadAction(type: string, verb: string, noun: string, 
 // mirror of destructiveHeadAction's reasoning (a record should be puttable away from
 // the panel itself without hunting the index), minus the confirm: unpinning destroys
 // nothing, and the lens keeps its key, its card, and its Open.
-export function unpinHeadAction(id: string) {
+export function unpinHeadAction(id: string, kind: "canvas" | "html" = "canvas") {
   return {
     type: "pin-lens",
     label: "Unpin from Chamber",
     glyph: "⊙",
-    payload: { id, pinned: false },
+    payload: { id, kind, pinned: false },
   };
 }
 

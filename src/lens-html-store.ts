@@ -15,6 +15,10 @@ export interface HtmlLensRecord {
   title?: string;
   updatedAt: string;
   refresh?: LensRefresh;
+  // Whether this lens holds a panel on the Chamber surface — operator-owned and absent
+  // by default, mirroring LensRecord.pinned. Never authored: the emit schema has no
+  // such field, so a designed page cannot claim the surface it renders onto.
+  pinned?: boolean;
 }
 
 interface HtmlLensMeta {
@@ -22,6 +26,7 @@ interface HtmlLensMeta {
   title?: string;
   updatedAt: string;
   refresh?: LensRefresh;
+  pinned?: boolean;
 }
 
 export interface HtmlLensStore {
@@ -33,6 +38,7 @@ export interface HtmlLensStore {
     title?: string;
     refresh?: LensRefresh;
     updatedAt?: string;
+    pinned?: boolean;
   }): Promise<void>;
   load(id: string): Promise<HtmlLensRecord | undefined>;
   delete(id: string): Promise<void>;
@@ -62,6 +68,8 @@ export function createFileHtmlLensStore(root: string): HtmlLensStore {
         // honest.
         updatedAt: record.updatedAt ?? new Date().toISOString(),
         ...(record.refresh ? { refresh: record.refresh } : {}),
+        // Written only when true, so unpinned stays the absent default (saveLens's rule).
+        ...(record.pinned ? { pinned: true } : {}),
       };
       // Unique temp then rename (atomic on the same filesystem) so a crash
       // mid-write can't leave a torn file. html first, meta second: meta.json is
@@ -151,6 +159,9 @@ async function parseHtmlLens(root: string, id: string): Promise<HtmlLensRecord |
     // a hand-edited backing then costs the lens its cadence, never its panel
     // (the createFileLensStore fold, same predicate).
     ...(isValidRefresh(meta.refresh) && meta.refresh ? { refresh: meta.refresh } : {}),
+    // Folded, not rejected (the createFileLensStore rule): a bad pin can't take a panel
+    // down, so a hand-edit typo costs the pin, never the record.
+    ...(meta.pinned === true ? { pinned: true } : {}),
   };
 }
 

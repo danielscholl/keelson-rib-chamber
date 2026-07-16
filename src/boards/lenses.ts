@@ -41,7 +41,7 @@ function htmlEntry(lens: HtmlLensRecord): IndexEntry {
     species: "html",
     title: lens.title || lens.id,
     updatedAt: lens.updatedAt,
-    pinned: false,
+    pinned: lens.pinned === true,
     ...(lens.refresh ? { refresh: lens.refresh } : {}),
   };
 }
@@ -173,19 +173,16 @@ function cardFor(entry: IndexEntry, tones: Map<string, CanvasTone>) {
           ]
         : []),
       // One verb, label swapped, carrying the TARGET state — so a card rendered before
-      // someone else's pin can't toggle against state it isn't showing. Canvas only for
-      // now: an HTML lens still holds its panel unconditionally.
-      ...(html
-        ? []
-        : [
-            {
-              type: "pin-lens",
-              label: pinned ? "Unpin" : "Pin",
-              glyph: "⊙",
-              tone: "accent" as CanvasTone,
-              payload: { id, pinned: !pinned },
-            },
-          ]),
+      // someone else's pin can't toggle against state it isn't showing. This card is
+      // the only way to pin an HTML lens BACK: its panel head is the only other
+      // affordance it has, and unpinning takes the head with the panel.
+      {
+        type: "pin-lens",
+        label: pinned ? "Unpin" : "Pin",
+        glyph: "⊙",
+        tone: "accent" as CanvasTone,
+        payload: { id, kind: species, pinned: !pinned },
+      },
       {
         type: html ? "retire-lens-html" : "retire-lens",
         label: "Retire lens…",

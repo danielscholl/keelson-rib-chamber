@@ -413,10 +413,16 @@ async function emitHtmlLens(
       ...(title !== undefined ? { title } : {}),
       ...(resolved.refresh ? { refresh: resolved.refresh } : {}),
       ...(updatedAt ? { updatedAt } : {}),
+      // The operator's pin, carried from the prior record — the emit schema has no such
+      // field. Omitting it here would drop it, and a living page re-emits on its own
+      // cadence, so a pinned one would unpin itself (the canvas twin's trap, verbatim).
+      ...(existing?.pinned ? { pinned: true } : {}),
     });
-    // No chamber-lenses/roster/brief refresh here (unlike chamber_emit_lens):
-    // HTML lenses persist in their own store, which those collectors don't
-    // read, so refreshing them would be inert.
+    // The lenses index reads BOTH stores, so a newly authored page needs the same prompt
+    // collector re-run its canvas twin does — otherwise its only card waits on cadence.
+    // Fail-soft, like every collector refresh. Still no roster/brief: the pulse counts
+    // board lenses, and a designed page is not briefing substance.
+    await refreshWorkflow("chamber-lenses").catch(() => {});
     emitResult(
       ctx,
       JSON.stringify({

@@ -4,10 +4,12 @@ import { canonicalLensId, lensKey, lensRefreshInputs } from "../lens.ts";
 import { HTML_LENS_KEY, htmlLensKey } from "../lens-html.ts";
 import { createFileHtmlLensStore } from "../lens-html-store.ts";
 import {
+  awaitHtmlLensReconcile,
   awaitLensReconcile,
   deleteHtmlLensRecord,
   deleteRecordOfKind,
   enqueueLensWrite,
+  getHtmlLensRegistry,
   getLensRegistry,
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
@@ -142,28 +144,41 @@ export async function pinLensAction(action: RibAction): Promise<RibActionResult>
   const got = lensActionId(action, "pin-lens");
   if ("error" in got) return { ok: false, error: got.error };
   const { id } = got;
+  const species = lensSpecies(action);
+  if ("error" in species) return { ok: false, error: species.error };
   const pinned = ((action.payload ?? {}) as Record<string, unknown>).pinned;
   if (typeof pinned !== "boolean") {
     return { ok: false, error: "pin-lens requires payload { id, pinned: boolean }" };
   }
-  const registry = getLensRegistry();
+  const html = species.species === "html";
+  const registry = html ? getHtmlLensRegistry() : getLensRegistry();
   if (!registry) return { ok: false, error: "pin unavailable (region seam absent)" };
   // Read-modify-write, like the note write-back: serialize it so a pin can't lose-update
   // against a concurrent note or witness stamp.
   const apply = async (): Promise<RibActionResult> => {
     try {
-      await awaitLensReconcile();
-      const record = await createFileLensStore(lensesDir()).loadLens(id);
-      if (!record) return { ok: false, error: `lens '${id}' not found` };
-      if (isExhibit(record)) {
-        return { ok: false, error: `'${id}' is an exhibit — exhibits have no panel` };
+      await (html ? awaitHtmlLensReconcile() : awaitLensReconcile());
+      // Each write below spreads the loaded record so its updatedAt rides through
+      // unchanged: a pin changes no content, and the brief and digest gates fingerprint
+      // on `${id}=${updatedAt}`, so letting the store re-stamp would buy two paid turns
+      // for a lens that says exactly what it said before (and jump it up a newest-first
+      // index it didn't earn).
+      if (html) {
+        const store = createFileHtmlLensStore(htmlLensesDir());
+        const record = await store.load(id);
+        if (!record) return { ok: false, error: `lens '${id}' not found` };
+        if ((record.pinned === true) === pinned) return { ok: true, data: { id, pinned } };
+        await store.save({ ...record, pinned });
+      } else {
+        const store = createFileLensStore(lensesDir());
+        const record = await store.loadLens(id);
+        if (!record) return { ok: false, error: `lens '${id}' not found` };
+        if (isExhibit(record)) {
+          return { ok: false, error: `'${id}' is an exhibit — exhibits have no panel` };
+        }
+        if ((record.pinned === true) === pinned) return { ok: true, data: { id, pinned } };
+        await store.saveLens({ ...record, pinned });
       }
-      if ((record.pinned === true) === pinned) return { ok: true, data: { id, pinned } };
-      // Spread the loaded record so its updatedAt rides through unchanged: a pin changes
-      // no content, and the brief and digest gates fingerprint on `${id}=${updatedAt}`,
-      // so letting the store re-stamp would buy two paid turns for a lens that says
-      // exactly what it said before (and jump it up a newest-first index it didn't earn).
-      await createFileLensStore(lensesDir()).saveLens({ ...record, pinned });
       // Live half second: the record is the durable truth, so a registry with no entry
       // for this id (its region registration failed at boot) still converges on restart.
       registry.setPin(id, pinned);
