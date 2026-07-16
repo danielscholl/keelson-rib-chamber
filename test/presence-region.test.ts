@@ -215,16 +215,25 @@ describe("Chamber panel collapse — the bench folds its own region", () => {
     expect(header()?.collapsed).toBe(false);
   });
 
-  it("assembling a bench folds the panel and nudges the client", async () => {
+  it("assembling a bench folds the panel; losing the cast re-opens it, each nudging the client", async () => {
     const { compose, nudges } = await bench(["Jarvis"]);
     await compose();
     expect(header()?.collapsed).toBe(false);
-    const before = nudges.count;
+
+    const beforeFold = nudges.count;
     await scaffoldMind(mindsDir(), record("mycroft", "Mycroft", 1), "soul");
     await compose();
     expect(header()?.collapsed).toBe(true);
     // The client caches the manifest, so the flip is worthless unless it is told.
-    expect(nudges.count).toBeGreaterThan(before);
+    expect(nudges.count).toBeGreaterThan(beforeFold);
+
+    // And back: retiring down to one Mind makes the bench a setup screen again, so the
+    // panel has to re-open. Folding is not a latch.
+    const beforeUnfold = nudges.count;
+    await rm(join(mindsDir(), "mycroft"), { recursive: true, force: true });
+    await compose();
+    expect(header()?.collapsed).toBe(false);
+    expect(nudges.count).toBeGreaterThan(beforeUnfold);
   });
 
   it("re-composing an unchanged bench nudges nobody", async () => {
