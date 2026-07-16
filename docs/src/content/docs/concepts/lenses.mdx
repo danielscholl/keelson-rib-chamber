@@ -9,7 +9,7 @@ import { Image } from "astro:assets";
 import lensShot from "../../../assets/screenshots/lens.png";
 
 A **lens** is a standing view a Mind authors itself. One agent turn composes a
-canvas board and publishes it, and it renders with no hand-coded UI — in the drawer
+canvas board and publishes it, and it renders with no hand-coded UI: in the drawer
 from its index card, or as a live panel on the Chamber surface once you pin it. The
 view is produced by an agent, not written by hand. It is a distinctive durable output
 of Chamber: the reasoning does not just leave a transcript, it leaves a live board
@@ -71,29 +71,30 @@ fact that it rendered cleanly.
 ## Indexed by default, pinned by choice
 
 Each lens is keyed by a short subject id, and lands as a card in the **Lenses**
-index. **Open** reads it in the drawer — the same verb, and the same code path, an
-exhibit's card uses. Re-authoring the same subject updates that lens in place rather
-than adding another. By default a lens changes only when a Mind or workflow authors
-the same id again. One exception: if a lens was authored with a `lens-note` action
-attached, an operator can append a note to it without re-authoring the full board.
+index. **Open** reads it in the drawer, using the same verb (and the same code path)
+an exhibit's card uses. Re-authoring the same subject updates that lens in place
+rather than adding another. By default a lens changes only when a Mind or workflow
+authors the same id again. One exception: if a lens was authored with a `lens-note`
+action attached, an operator can append a note to it without re-authoring the full
+board.
 
 A lens takes surface on the Chamber page only when you **Pin** it, which promotes it
-to a full-width row — collapsed to its head strip, so a standing view costs one row
-of height until you expand it. Unpin puts it away; the record, its card, and its
-Open are untouched. Pinning is the **operator's** alone: it is not on
-`chamber_emit_lens` and not reachable from an HTML lens's iframe, because a page that
-could pin itself is exactly the clutter this prevents. The rib sets no limit on how
-many lenses may be pinned; the harness enforces a per-surface ceiling.
+to a full-width row, collapsed to its head strip, so a standing view costs one row of
+height until you expand it. Unpin puts it away; the record, its card, and its Open are
+untouched. Pinning is the **operator's** alone: it is not on `chamber_emit_lens` and
+not reachable from an HTML lens's iframe, because a page that could pin itself is
+exactly the clutter this prevents. The rib sets no limit on how many lenses may be
+pinned; the harness enforces a per-surface ceiling.
 
 A pinned panel carries **Unpin from Chamber** and **Retire lens…** in its head's
 **⋯** menu, so it can be put away from itself without hunting the index; Retire
-confirms first. Once unpinned there is no head, so the index card carries every verb
-— and is the only way to pin a lens back. An exhibit has no panel at any pin state:
+confirms first. Once unpinned there is no head, so the index card carries every verb,
+and it is the only way to pin a lens back. An exhibit has no panel at any pin state:
 its verbs ride the card in its room's Tabled section.
 
 :::note[Upgrading]
-Lenses authored before pinning existed arrive **unpinned** — the record simply has no
-`pinned` field, and absent means unpinned. The Chamber surface clears itself on
+Lenses authored before pinning existed arrive **unpinned**, because the record simply
+has no `pinned` field and absent means unpinned. The Chamber surface clears itself on
 upgrade, and you pin back the one or two you actually want on screen.
 :::
 
@@ -112,18 +113,18 @@ input `lens` = the lens id.
 
 What fires it depends on where the lens is:
 
-- **Pinned** — on its cadence, while the Chamber surface is open in a browser. The
+- **Pinned**: on its cadence, while the Chamber surface is open in a browser. The
   cadence wiring lives on the panel, and a lens region carries per-lens arguments,
   which the server heartbeat deliberately skips. So a living lens ticks while you are
   looking at the page, not in the background.
-- **Unpinned** — on demand only, from the **Refresh** verb its index card gains.
+- **Unpinned**: on demand only, from the **Refresh** verb its index card gains.
 
 That coupling is deliberate rather than incidental. **Each tick is a billed agent
-turn**, so before pinning existed, every living lens was paying for one every hour
-the Chamber tab sat open — whether or not anyone had read it, and folding the panel
-did not stop it. Pinning is what bounds that spend to the views you chose to keep in
-front of you. A refresh backing is still worth setting on a lens you have not pinned;
-it just will not tick on its own until someone does. If that board actually changed, the panel's "updated Xm ago" clock and the
+turn**, so before pinning existed, every living lens was paying for one every hour the
+Chamber tab sat open, whether or not anyone had read it, and folding the panel did not
+stop it. Pinning is what bounds that spend to the views you chose to keep in front of
+you. A refresh backing is still worth setting on a lens you have not pinned; it just
+will not tick on its own until someone does. If that board actually changed, the panel's "updated Xm ago" clock and the
 index card's freshness advance with it; if the refresh found nothing to change, the
 re-emit is a no-op and the clock holds. So the clock tracks the board, not the
 turn: a lens whose content is a measurement must never read as current merely

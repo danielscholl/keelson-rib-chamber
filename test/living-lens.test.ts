@@ -355,14 +355,10 @@ describe("living-lens emit + verbs", () => {
     tools = registerTools(makeCtx(fakeSnapshotManager()));
   });
 
-  // THE trap this feature is shaped around. Every publish REBUILDS the record — the
-  // emit hand-builds its provenance and saveLens writes only the keys it is handed — so
-  // a `pinned` the emit forgets to carry is dropped. A living lens re-authors on its own
-  // cadence, which means a pinned one would silently unpin ITSELF within the hour, and
-  // the operator would watch their panel vanish for no reason they could name.
-  //
-  // This cannot be caught below the tool: the rebuild lives in the tool, not the
-  // registry. Drop `existing?.pinned === true` from lens-emit's publish and this fails.
+  // An emit rebuilds the record and saveLens writes only the keys it is handed, so a
+  // pin the emit fails to carry is dropped — and a living lens re-authors on its own
+  // cadence, so a pinned one would unpin itself within the hour. Only a test through
+  // the tool sees this; the rebuild is not in the registry.
   it("a re-author preserves the operator's pin — the emit never unpins what it rewrites", async () => {
     const store = createFileLensStore(lensesDir());
     const t = makeToolCtx();
@@ -379,8 +375,8 @@ describe("living-lens emit + verbs", () => {
     expect(after?.pinned).toBe(true);
   });
 
-  // Same rebuild, same drop, different door: the note write-back also republishes the
-  // whole record. Adding a note must not cost you your panel.
+  // The note write-back republishes the whole record too: adding a note must not cost
+  // the operator their panel.
   it("a note write-back preserves the pin", async () => {
     const store = createFileLensStore(lensesDir());
     const t = makeToolCtx();
@@ -408,6 +404,27 @@ describe("living-lens emit + verbs", () => {
     expect((await store.loadLens("brief"))?.updatedAt).toBe(before);
     await onAction({ type: "pin-lens", payload: { id: "brief", pinned: false } }, {} as RibContext);
     expect((await store.loadLens("brief"))?.updatedAt).toBe(before);
+  });
+
+  // A lens whose boot re-registration failed has a record and no live entry — the one
+  // state that cannot heal itself, since reconcile is fail-soft per record and only
+  // runs at boot. Reporting the pin done over a missing panel would strand it there
+  // until a restart, and a durable early-out would make every retry do the same.
+  it("pinning reconciles a lens the boot re-registration never registered", async () => {
+    const sm = fakeSnapshotManager();
+    tools = registerTools(makeCtx(sm));
+    // Land the record AFTER boot, so nothing ever registered it: the strand.
+    await createFileLensStore(lensesDir()).saveLens({ id: "orphan", board: board("Orphan") });
+    expect(sm.keys()).not.toContain(lensKey("orphan"));
+
+    const res = await onAction(
+      { type: "pin-lens", payload: { id: "orphan", pinned: true } },
+      {} as RibContext,
+    );
+    expect(res.ok).toBe(true);
+    // Converged now rather than at the next boot: a reported pin means a live lens.
+    expect(sm.keys()).toContain(lensKey("orphan"));
+    expect((await createFileLensStore(lensesDir()).loadLens("orphan"))?.pinned).toBe(true);
   });
 
   it("pin-lens refreshes the index but never the roster pulse", async () => {

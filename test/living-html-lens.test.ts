@@ -360,11 +360,9 @@ describe("living-html-lens emit", () => {
     tools = registerTools(makeCtx(fakeSnapshotManager()));
   });
 
-  // The canvas twin's trap, verbatim, on the second species: a publish rebuilds the
-  // record and the store writes only what it is handed, so a pin the emit forgets to
-  // carry is dropped — and a living page re-emits on its own cadence, so a pinned one
-  // would unpin itself. Only a test through the TOOL can see this; the rebuild is not
-  // in the registry.
+  // An emit rebuilds the record and the store writes only what it is handed, so a pin
+  // the emit fails to carry is dropped — and a living page re-emits on its own cadence,
+  // so a pinned one would unpin itself.
   it("a re-emit preserves the operator's pin", async () => {
     const store = createFileHtmlLensStore(htmlLensesDir());
     await emitHtml({ id: "designed", html: page("v1") });

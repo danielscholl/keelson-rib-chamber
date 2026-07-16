@@ -104,9 +104,14 @@ export async function refreshLensAction(action: RibAction): Promise<RibActionRes
       return { ok: false, error: `'${id}' is an exhibit — exhibits don't refresh` };
     }
     if (!record.refresh) {
+      // Species-specific remediation: a page has no generic re-author, so `refresh: {}`
+      // — which the canvas emit fills in with chamber-lens-refresh — is refused there.
       return {
         ok: false,
-        error: `lens '${id}' has no refresh backing — re-author it with chamber_emit_lens refresh: {}`,
+        error:
+          species.species === "html"
+            ? `lens '${id}' has no refresh backing — re-emit it with chamber_emit_lens_html refresh: { workflow: "chamber-lens-<name>" }`
+            : `lens '${id}' has no refresh backing — re-author it with chamber_emit_lens refresh: {}`,
       };
     }
     await hostRefreshWorkflow(
@@ -163,12 +168,27 @@ export async function pinLensAction(action: RibAction): Promise<RibActionResult>
       // on `${id}=${updatedAt}`, so letting the store re-stamp would buy two paid turns
       // for a lens that says exactly what it said before (and jump it up a newest-first
       // index it didn't earn).
+      //
+      // The live half ALWAYS runs, even when the record already says what was asked. A
+      // lens whose region registration failed has a record and no entry, so a durable
+      // early-out would report success over a missing panel and leave every retry doing
+      // the same — the one state that cannot heal itself before a restart. setPin
+      // returning false is exactly that case (an exhibit is refused above), so re-register
+      // from the record and converge now.
       if (html) {
         const store = createFileHtmlLensStore(htmlLensesDir());
         const record = await store.load(id);
         if (!record) return { ok: false, error: `lens '${id}' not found` };
-        if ((record.pinned === true) === pinned) return { ok: true, data: { id, pinned } };
-        await store.save({ ...record, pinned });
+        if ((record.pinned === true) !== pinned) await store.save({ ...record, pinned });
+        if (!registry.setPin(id, pinned)) {
+          await getHtmlLensRegistry()?.reregister(
+            id,
+            record.html,
+            pinned,
+            record.title,
+            record.refresh,
+          );
+        }
       } else {
         const store = createFileLensStore(lensesDir());
         const record = await store.loadLens(id);
@@ -176,12 +196,11 @@ export async function pinLensAction(action: RibAction): Promise<RibActionResult>
         if (isExhibit(record)) {
           return { ok: false, error: `'${id}' is an exhibit — exhibits have no panel` };
         }
-        if ((record.pinned === true) === pinned) return { ok: true, data: { id, pinned } };
-        await store.saveLens({ ...record, pinned });
+        if ((record.pinned === true) !== pinned) await store.saveLens({ ...record, pinned });
+        if (!registry.setPin(id, pinned)) {
+          await getLensRegistry()?.reregister(id, record.board, pinned, "lens", record.refresh);
+        }
       }
-      // Live half second: the record is the durable truth, so a registry with no entry
-      // for this id (its region registration failed at boot) still converges on restart.
-      registry.setPin(id, pinned);
       // The card's label and pill changed, so its index is stale. NOT chamber-roster —
       // "Live views" counts standing lenses regardless of panel — and NOT the brief
       // gate: a free layout toggle must never promote a paid briefing turn.

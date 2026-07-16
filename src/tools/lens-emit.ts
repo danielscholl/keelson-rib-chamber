@@ -303,11 +303,13 @@ export function makeEmitLensHtmlTool(
     // The shared canvas contract IS the description (one source of truth with the
     // host's canvas_publish); the chamber-specific routing rides ahead of it.
     description: [
-      "Author an HTML lens: publish a designed, self-contained HTML page as its own live panel on the Chamber surface.",
-      "`id` is a short, stable kebab-case identifier for the subject (re-emitting the same id updates the same panel, and the lens persists across restarts);",
-      "omit it to target the single shared legacy canvas instead. `title` (optional) names the panel head.",
+      "Author an HTML lens: publish a designed, self-contained HTML page, rendered with no hand-coded UI.",
+      "It lands in the Chamber Lenses index, where the operator reads it with Open (it renders in the drawer) and may PIN it to keep it on the Chamber surface as a panel; pinning is the operator's choice alone and is not yours to set.",
+      "`id` is a short, stable kebab-case identifier for the subject (re-emitting the same id updates the same lens, and it persists across restarts);",
+      "omit it to target the single shared legacy canvas instead. `title` (optional) names the panel head and the index card.",
       "`id` plays the role the contract below calls `name`.",
-      "Optional `refresh` makes it a LIVING page: `{ workflow, cadenceMs?, inputs? }` names a workflow the panel re-runs on cadence with input `lens` = this id, plus any `inputs` you give (default cadence 1h).",
+      "Optional `refresh` makes it a LIVING page: `{ workflow, cadenceMs?, inputs? }` names a workflow that re-derives it with input `lens` = this id, plus any `inputs` you give (default cadence 1h).",
+      "It runs on that cadence only while the lens is PINNED and the Chamber surface is open — the cadence is the panel's. An unpinned page re-composes when the operator hits Refresh on its index card, so a backing is still worth setting; it just will not tick on its own until someone pins it.",
       "Unlike a canvas lens, `workflow` is REQUIRED — there is no generic re-author for a page, so a living HTML lens is one whose own producer re-derives it.",
       "The harness runs only a RIB-CONTRIBUTED workflow on a panel's cadence: chamber contributes one `chamber-lens-<filename>` per workflow file the operator has placed in chamber's lens-workflows dir — a workflow in the general catalog is refused and the panel silently never re-composes.",
       "Omitting `refresh` on a re-emit keeps the existing backing; an object PATCHES it; `refresh: null` removes it.",

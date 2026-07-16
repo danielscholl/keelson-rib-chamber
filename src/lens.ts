@@ -270,17 +270,10 @@ export function createLensRegistry(
   // refresh-backed lens also carries the region's re-compose wiring: the named workflow
   // runs with input `lens` = this id, on the emit's cadence (clamped to the host floor).
   //
-  // The three layout fields lean on shipping harness behavior rather than a region
-  // field that does not exist (surfaceRegionSchema is strict — a speculative one throws
-  // and register()'s catch would take the whole emit down):
-  //   - a per-id `group` puts one region in each group, and the host chunks per group,
-  //     so each pinned lens forms a one-column row — which the surface's flex rule
-  //     renders full width.
-  //   - one shared `groupTitle` across those groups makes the host's zone merge fold
-  //     the consecutive rows under a single "Pinned" header (and stops colliding with
-  //     the Lenses index panel's own title).
-  //   - dynamic regions append after the static rows, so the zone lands under Rooms
-  //     and Lenses on its own.
+  // The `group` is per-id so each pinned lens is the only member of its own group: the
+  // host chunks regions per group, so a shared one would render them three-across
+  // instead of a row each. One shared `groupTitle` is what folds those rows back under
+  // a single zone header.
   function regionFor(id: string, refresh?: LensRefresh): RibSurfaceRegion {
     return {
       key: lensKey(id),

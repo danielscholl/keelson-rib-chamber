@@ -175,13 +175,13 @@ without navigating.
 `pin-lens` carries the **target** state rather than toggling, so a card rendered
 before someone else's pin can't act on state it isn't showing. It is operator-only:
 deliberately absent from `chamber_emit_lens`, from the MCP tools, and from
-`FRAME_SAFE_ACTIONS` — an authoring Mind claiming main-surface real estate is the
+`FRAME_SAFE_ACTIONS`, since an authoring Mind claiming main-surface real estate is the
 clutter pinning exists to remove.
 
 `retire-lens` and `retire-lens-html` also ride each pinned lens panel's head **⋯**
 menu (`headActions` on the region), alongside a non-destructive **Unpin from
 Chamber**, so a panel can be put away from itself without hunting the index. Once
-unpinned there is no head, so the index card is what carries every verb — and is the
+unpinned there is no head, so the index card is what carries every verb, and it is the
 only way to pin a lens back. `delete-exhibit` has no such menu: an exhibit holds no
 panel at any pin state, so its delete rides the card in its room's Tabled section.
 
