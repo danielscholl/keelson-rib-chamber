@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.45.0...v0.46.0) (2026-07-16)
+
+
+### Added
+
+* **surface:** drop the Chamber surface subtitle for a bare tab ([#315](https://github.com/danielscholl/keelson-rib-chamber/issues/315)) ([544b02d](https://github.com/danielscholl/keelson-rib-chamber/commit/544b02dcd8a95f9cd841e2f2e36bfa6549a86c2a))
+
 ## [0.45.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.44.0...v0.45.0) (2026-07-16)
 
 
