@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.46.0...v0.47.0) (2026-07-16)
+
+
+### Added
+
+* **surface:** fold the Chamber panel once the bench is assembled ([#317](https://github.com/danielscholl/keelson-rib-chamber/issues/317)) ([940ee23](https://github.com/danielscholl/keelson-rib-chamber/commit/940ee23d04fff764e7da4d37fe1cac4aad286d23))
+
 ## [0.46.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.45.0...v0.46.0) (2026-07-16)
 
 
