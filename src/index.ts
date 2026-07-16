@@ -124,9 +124,6 @@ const rib: Rib = {
     {
       id: CHAMBER_SURFACE_ID,
       title: "Chamber",
-      // No subtitle and no heading: the nav tab already names the surface, and the host
-      // renders no page-identity header for a surface that carries neither those nor a
-      // project chip. Chamber's panels carry their own identity.
       // Chamber panels are an authoring console, not snapshot cards to lift into chat,
       // so drop the host's per-region explore/select/expand chrome. Board actions
       // (Enter a Mind, room controls) still flow — only the head-strip icons go.

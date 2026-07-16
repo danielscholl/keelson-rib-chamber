@@ -36,7 +36,6 @@ describe("Chamber surface (attention chrome)", () => {
     const surface = rib.surfaces?.[0];
     expect(surface?.id).toBe("chamber");
     expect(surface?.title).toBe("Chamber");
-    // The tab names the surface; no subtitle sets a page-identity header.
     expect(surface?.subtitle).toBeUndefined();
     expect(ribSurfaceDescriptorSchema.safeParse(surface).success).toBe(true);
   });
