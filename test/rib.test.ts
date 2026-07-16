@@ -43,11 +43,9 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:room");
   });
 
-  it("declares the surface subtitle and collapsible index columns (#284-p2 chrome)", () => {
+  it("declares a bare tab (no subtitle) and collapsible index columns", () => {
     const surface = rib.surfaces?.[0];
-    expect(surface?.subtitle).toBe(
-      "Author Minds · convene Rooms · keep Lenses · table Exhibits · read the Briefing",
-    );
+    expect(surface?.subtitle).toBeUndefined();
     const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns);
     expect(cols.find((c) => c.key === "rib:chamber:rooms")?.collapsible).toBe(true);
     expect(cols.find((c) => c.key === "rib:chamber:lenses")?.collapsible).toBe(true);
