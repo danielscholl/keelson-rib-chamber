@@ -148,6 +148,11 @@ export function resolveMindByNameOrId(minds: readonly Mind[], input: string): st
 // draft-set/convene mutation. Fail closed on an older harness (no snapshot manager).
 let presenceSm: SnapshotManager | undefined;
 let presenceUnregister: (() => void) | undefined;
+let setChamberCollapsed: ((collapsed: boolean) => void) | undefined;
+
+// A bench with a cast to convene is assembled; below that the panel is still the thing
+// you came to use (there is nobody to convene yet), so it must not open folded.
+const ASSEMBLED_MINDS = 2;
 
 async function composePresenceBoard(): Promise<CanvasView> {
   const [minds, rooms, pending, draft] = await Promise.all([
@@ -156,6 +161,9 @@ async function composePresenceBoard(): Promise<CanvasView> {
     readPendingGeneses(),
     readDraft().catch(() => ({ selected: new Set<string>() })),
   ]);
+  // Ride the panel's own compose rather than re-reading the bench: this already runs at
+  // bind and on every roster mutation, which is exactly when assembly can change.
+  setChamberCollapsed?.(minds.length >= ASSEMBLED_MINDS);
   const projects: ConveneProject[] = (getProjects?.() ?? []).map((p) => ({
     id: p.id,
     name: p.name,
@@ -261,9 +269,13 @@ export function bindRuntime(seams: {
   refreshWorkflow?: RibContext["refreshWorkflow"];
   getProjects?: RibContext["getProjects"];
   sm?: SnapshotManager;
+  // Injected so the panel's compose can fold its own surface region without this
+  // module reaching into the rib's surface literal (as declareView is for lenses).
+  setChamberCollapsed?: (collapsed: boolean) => void;
 }): void {
   hostRefreshWorkflow = seams.refreshWorkflow;
   getProjects = seams.getProjects;
+  setChamberCollapsed = seams.setChamberCollapsed;
   const sm = seams.sm;
   // The Chamber panel: an in-process board (reads the bench + rooms + the pending
   // marker + the convene draft, and needs getProjects for the folded-in composer)
@@ -308,6 +320,7 @@ export async function disposeRuntime(): Promise<void> {
   await clearPendingGenesis().catch(() => {});
   hostRefreshWorkflow = undefined;
   getProjects = undefined;
+  setChamberCollapsed = undefined;
   presenceUnregister?.();
   presenceUnregister = undefined;
   presenceSm = undefined;

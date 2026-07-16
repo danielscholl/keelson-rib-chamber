@@ -113,6 +113,20 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     expect(board.header?.status?.label).toBe("1 mind convenes here");
   });
 
+  // The panel's compose is what folds its own surface region, so the flag can only
+  // track the bench if composing is what sets it. The retire above dropped the bench
+  // to one Mind, so the panel must have re-opened itself.
+  it("an assembled bench folds the Chamber panel; a bench below a cast re-opens it", async () => {
+    const header = () => rib.surfaces?.[0]?.layout.header;
+    expect(header()?.collapsible).toBe(true);
+    // One Mind left after the retire: nobody to convene, so the panel is still the
+    // thing you came to use.
+    expect(header()?.collapsed).toBe(false);
+    await scaffoldMind(mindsDir(), record("moneypenny", "Moneypenny", 2), "soul");
+    await composers.get(PRESENCE_KEY)?.();
+    expect(header()?.collapsed).toBe(true);
+  });
+
   it("lens Refresh still reports the missing host capability", async () => {
     const res = await rib.onAction?.(
       { type: "refresh-lens", payload: { id: "whatever" } },

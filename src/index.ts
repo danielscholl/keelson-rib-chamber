@@ -1,4 +1,10 @@
-import type { Rib, RibAuthStatus, RibContext, RibViewDescriptor } from "@keelson/shared";
+import type {
+  Rib,
+  RibAuthStatus,
+  RibContext,
+  RibSurfaceRegion,
+  RibViewDescriptor,
+} from "@keelson/shared";
 import { dispatchChamberAction } from "./actions/index.ts";
 import { listAgents, resolveAgent } from "./agents.ts";
 import { bindBriefGate, disposeBriefGate, evaluateBriefGate } from "./brief-gate.ts";
@@ -70,6 +76,24 @@ const RIB_VIEWS: RibViewDescriptor[] = [
   { key: BRIEF_KEY, canvasKind: "view", title: "Briefing" },
 ];
 
+// The Chamber panel's descriptor, held by reference so the bench's own state can fold
+// it. The host re-reads `surfaces` per GET /api/ribs (as it does RIB_VIEWS), but the SPA
+// takes `collapsed` as a mount-time initial value only — so this decides how the panel
+// OPENS on a visit; it never folds under the operator mid-session, and it cannot
+// remember a manual expand.
+const CHAMBER_PANEL: RibSurfaceRegion = {
+  key: PRESENCE_KEY,
+  title: "The Chamber",
+  glyph: { char: "◈", tone: "brand" },
+  live: true,
+  collapsible: true,
+};
+
+// Set from the panel's own compose (runtime.ts), which already reads the bench.
+function setChamberCollapsed(collapsed: boolean): void {
+  CHAMBER_PANEL.collapsed = collapsed;
+}
+
 function declareHtmlLensView(id: string, title?: string): () => void {
   return declareHtmlViewByKey(htmlLensKey(id), title ?? id);
 }
@@ -110,9 +134,9 @@ const rib: Rib = {
   // payload-carrying board actions (the OSDU pattern) that reach onAction below.
 
   // The Chamber nav tab. The Chamber panel leads in the header (the bench itself:
-  // seat cards, authoring, live pulse), the Briefing banner follows as the
-  // always-on heartbeat (the one narrator, folding what were three what's-happening
-  // panels — delta / digest / record — into one), and the
+  // seat cards, authoring, live pulse), the Briefing follows as the always-on
+  // heartbeat (the one narrator, folding what were three what's-happening panels —
+  // delta / digest / record — into one) on its own full-width row, and the
   // standing row pairs the rooms index (every session, live or ended) with the lenses
   // index (the living views) at half width each. A panel is for what is continuously
   // true, so a room — an activity — has none: it is entered from its index card, and
@@ -130,25 +154,32 @@ const rib: Rib = {
       hideRegionActions: true,
       layout: {
         // The Chamber panel leads: the bench itself — seat cards, boot card,
-        // authoring launchpad, live pulse.
-        // Not collapsible — it is the focal panel every visit. In-process (no
-        // workflow binding); the rib recomposes it on any roster/rooms mutation,
-        // and the genesis ticker's frames pulse the head dot (keelson#353).
-        header: {
-          key: PRESENCE_KEY,
-          title: "The Chamber",
-          glyph: { char: "◈", tone: "brand" },
-          live: true,
-        },
-        // Binds no `workflow`: the Briefing is rib-driven, composed and re-published
-        // in-process, so a binding would make the SPA try to refresh a workflow that
-        // does not exist.
-        banner: {
-          key: BRIEF_KEY,
-          title: "Briefing",
-          glyph: { char: "❖", tone: "brand" },
-        },
+        // authoring launchpad, live pulse. It is the focal panel only while the bench
+        // is still being built; an assembled bench opens folded (setChamberCollapsed)
+        // so the standing row leads the daily view. In-process (no workflow binding);
+        // the rib recomposes it on any roster/rooms mutation, and the genesis ticker's
+        // frames pulse the head dot (keelson#353).
+        header: CHAMBER_PANEL,
+        // The Briefing rides a full-width row rather than the `banner` slot: a banner
+        // is contractually uncollapsible (bannerRegionSchema omits the flags), and the
+        // operator has to be able to fold the narrator. A lone column stretches to the
+        // row's full width, so this renders exactly where the banner did.
         rows: [
+          {
+            columns: [
+              {
+                // Binds no `workflow`: the Briefing is rib-driven, composed and
+                // re-published in-process, so a binding would make the SPA try to
+                // refresh a workflow that does not exist. Collapsible but never
+                // auto-folded — it is the one narrator, so it opens on every visit and
+                // folds only when the operator says so.
+                key: BRIEF_KEY,
+                title: "Briefing",
+                glyph: { char: "❖", tone: "brand" },
+                collapsible: true,
+              },
+            ],
+          },
           {
             columns: [
               {
@@ -231,7 +262,12 @@ const rib: Rib = {
     // The cross-cutting host seams (refresh fan-out + projects lookup) and the in-process
     // Convene + Chamber panels: bindRuntime captures the seams, registers the panels on
     // the snapshot manager, and reconciles a crashed genesis's boot card. See src/runtime.ts.
-    bindRuntime({ refreshWorkflow: ctx.refreshWorkflow, getProjects: ctx.getProjects, sm });
+    bindRuntime({
+      refreshWorkflow: ctx.refreshWorkflow,
+      getProjects: ctx.getProjects,
+      sm,
+      setChamberCollapsed,
+    });
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —
     // independent of the room's C1 agent-turn seam (the room tools below additionally

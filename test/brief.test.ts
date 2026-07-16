@@ -40,13 +40,20 @@ describe("Chamber surface (attention chrome)", () => {
     expect(ribSurfaceDescriptorSchema.safeParse(surface).success).toBe(true);
   });
 
-  test("the Briefing banner carries the key with NO workflow binding", () => {
-    const banner = rib.surfaces?.[0]?.layout.banner;
-    expect(banner?.key).toBe(BRIEF_KEY);
-    expect(banner?.key.startsWith("rib:chamber:")).toBe(true);
-    // Rib-driven, not refresh-fed: the banner must not bind a workflow (there is no
+  test("the Briefing carries the key with NO workflow binding, and folds only by hand", () => {
+    const brief = (rib.surfaces?.[0]?.layout.rows ?? [])
+      .flatMap((r) => r.columns)
+      .find((c) => c.key === BRIEF_KEY);
+    expect(brief?.key).toBe(BRIEF_KEY);
+    expect(brief?.key.startsWith("rib:chamber:")).toBe(true);
+    // Rib-driven, not refresh-fed: it must not bind a workflow (there is no
     // chamber-brief workflow), or the SPA would try to refresh a non-existent one.
-    expect(banner?.workflow).toBeUndefined();
+    expect(brief?.workflow).toBeUndefined();
+    // A banner cannot collapse (bannerRegionSchema omits the flags), so the narrator
+    // rides a full-width row instead — foldable, but never pre-folded.
+    expect(brief?.collapsible).toBe(true);
+    expect(brief?.collapsed).toBeUndefined();
+    expect(rib.surfaces?.[0]?.layout.banner).toBeUndefined();
     expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
   });
 

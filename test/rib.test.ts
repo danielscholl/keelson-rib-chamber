@@ -52,19 +52,25 @@ describe("rib-chamber", () => {
     // The Roster region folded into the Chamber header panel (rib#214) — no roster
     // row remains; the standalone roster view + workflow survive off-surface.
     expect(cols.some((c) => c.key === "rib:chamber:roster")).toBe(false);
-    // The Chamber panel leads the header and never collapses — the focal constant.
+    // The Chamber panel leads the header and folds once the bench is assembled.
     // Its live dot pulses on the genesis ticker's frames (keelson#353).
     expect(surface?.layout.header?.key).toBe("rib:chamber:presence");
-    expect(surface?.layout.header?.collapsible).toBeUndefined();
+    expect(surface?.layout.header?.collapsible).toBe(true);
     expect(surface?.layout.header?.live).toBe(true);
   });
 
-  it("the Briefing banner is rib-driven — keyed but with no workflow binding", () => {
+  it("the Briefing is rib-driven — keyed but with no workflow binding", () => {
     // The brief moved off a contributed workflow onto the rib-owned attention gate,
-    // so the banner keeps the key but binds no workflow (none exists to refresh).
-    const banner = rib.surfaces?.[0]?.layout.banner;
-    expect(banner?.key).toBe("rib:chamber:brief");
-    expect(banner?.workflow).toBeUndefined();
+    // so the region keeps the key but binds no workflow (none exists to refresh).
+    const brief = (rib.surfaces?.[0]?.layout.rows ?? [])
+      .flatMap((r) => r.columns)
+      .find((c) => c.key === "rib:chamber:brief");
+    expect(brief?.workflow).toBeUndefined();
+    // Foldable but never auto-folded: the narrator opens on every visit.
+    expect(brief?.collapsible).toBe(true);
+    expect(brief?.collapsed).toBeUndefined();
+    // The banner slot is contractually uncollapsible, so the Briefing left it.
+    expect(rib.surfaces?.[0]?.layout.banner).toBeUndefined();
     expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
     const names = (rib.contributeWorkflows?.({} as RibContext) ?? []).map(
       (w) => (w.definition as { name?: string }).name,
@@ -244,9 +250,10 @@ describe("rib-chamber", () => {
     expect(keys).not.toContain("rib:chamber:activity");
   });
 
-  it("the one standing row is Rooms + Lenses (convening folded into the header bench)", () => {
+  it("the Briefing leads the rows; the standing row is Rooms + Lenses (convening folded into the header bench)", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
     expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
+      ["rib:chamber:brief"],
       ["rib:chamber:rooms", "rib:chamber:lenses"],
     ]);
     const cols = rows.flatMap((r) => r.columns);
@@ -257,8 +264,8 @@ describe("rib-chamber", () => {
     expect(cols.some((c) => c.key === "rib:chamber:digest")).toBe(false);
     // The Exhibits index retired: an exhibit is reached from the room that tabled it.
     expect(cols.some((c) => c.key === "rib:chamber:exhibits")).toBe(false);
-    // The Briefing is the one narrator, in the banner.
-    expect(rib.surfaces?.[0]?.layout.banner?.key).toBe("rib:chamber:brief");
+    // The Briefing is the one narrator, leading the rows on its own full-width row.
+    expect(rib.surfaces?.[0]?.layout.banner).toBeUndefined();
     expect(rib.surfaces?.[0]?.layout.footer).toBeUndefined();
   });
 
