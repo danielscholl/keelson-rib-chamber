@@ -167,3 +167,83 @@ describe("boot reconcile — crash-orphaned pending-genesis marker", () => {
     expect(board.sections.some((s) => s.kind === "actions")).toBe(false);
   });
 });
+
+// The panel folds itself once the bench has a cast to convene. Every case seats its own
+// bench on its own data home, so each still exercises the transition it names when run
+// alone — the flag is module state, and an order-dependent case would assert whatever
+// the previous one happened to leave behind.
+describe("Chamber panel collapse — the bench folds its own region", () => {
+  const homes: string[] = [];
+
+  afterAll(async () => {
+    await rib.dispose?.();
+    setChamberDataHome(undefined);
+    await Promise.all(homes.map((h) => rm(h, { recursive: true, force: true })));
+  });
+
+  const header = () => rib.surfaces?.[0]?.layout.header;
+
+  // Seat `names` on a fresh home and bind the rib to it, counting manifest nudges.
+  const bench = async (names: readonly string[]) => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collapse-"));
+    homes.push(home);
+    setChamberDataHome(home);
+    for (const [i, name] of names.entries()) {
+      await scaffoldMind(mindsDir(), record(name.toLowerCase(), name, i), "soul");
+    }
+    const cap = capturingSm();
+    const nudges = { count: 0 };
+    registerTools({
+      getDataDir: () => home,
+      getExec: () => ({
+        runJSON: async () => ({ ok: true as const, data: undefined }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+      getSnapshotManager: () => cap.sm,
+      registerRegion: () => () => {},
+      invalidateManifest: () => {
+        nudges.count++;
+      },
+    } as unknown as RibContext);
+    return { cap, nudges, compose: async () => await cap.composers.get(PRESENCE_KEY)?.() };
+  };
+
+  it("a bench below a cast opens expanded", async () => {
+    const { compose } = await bench(["Jarvis"]);
+    await compose();
+    expect(header()?.collapsible).toBe(true);
+    expect(header()?.collapsed).toBe(false);
+  });
+
+  it("assembling a bench folds the panel; losing the cast re-opens it, each nudging the client", async () => {
+    const { compose, nudges } = await bench(["Jarvis"]);
+    await compose();
+    expect(header()?.collapsed).toBe(false);
+
+    const beforeFold = nudges.count;
+    await scaffoldMind(mindsDir(), record("mycroft", "Mycroft", 1), "soul");
+    await compose();
+    expect(header()?.collapsed).toBe(true);
+    // The client caches the manifest, so the flip is worthless unless it is told.
+    expect(nudges.count).toBeGreaterThan(beforeFold);
+
+    // And back: retiring down to one Mind makes the bench a setup screen again, so the
+    // panel has to re-open. Folding is not a latch.
+    const beforeUnfold = nudges.count;
+    await rm(join(mindsDir(), "mycroft"), { recursive: true, force: true });
+    await compose();
+    expect(header()?.collapsed).toBe(false);
+    expect(nudges.count).toBeGreaterThan(beforeUnfold);
+  });
+
+  it("re-composing an unchanged bench nudges nobody", async () => {
+    const { compose, nudges } = await bench(["Jarvis", "Mycroft"]);
+    // The first compose settles the flag; every later one must be silent.
+    await compose();
+    expect(header()?.collapsed).toBe(true);
+    const settled = nudges.count;
+    await compose();
+    await compose();
+    expect(nudges.count).toBe(settled);
+  });
+});

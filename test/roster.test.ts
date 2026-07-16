@@ -70,7 +70,10 @@ describe("Chamber surface (Phase 1)", () => {
     // The Convene row folded into the Chamber (presence) header; the standing rows
     // now lead with the Rooms + Lenses index.
     expect(keys).not.toContain("rib:chamber:convene");
-    expect(layout?.rows[0]?.columns[0]?.key).toBe("rib:chamber:rooms");
+    // The Briefing leads the rows (it left the uncollapsible banner slot); the
+    // Rooms + Lenses index is the standing row beneath it.
+    expect(layout?.rows[0]?.columns[0]?.key).toBe("rib:chamber:brief");
+    expect(layout?.rows[1]?.columns[0]?.key).toBe("rib:chamber:rooms");
     expect(ribSurfaceDescriptorSchema.safeParse(rib.surfaces?.[0]).success).toBe(true);
   });
 
