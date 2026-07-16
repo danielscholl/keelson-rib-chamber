@@ -86,10 +86,12 @@ The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
   genesis boot-card verbs), the bench draft that assembles a cast (`draft-set`,
   `convene` — unseating is a second click on the seat card), the room controls
   (`room-start` / `room-inject` / `room-stop` / `room-delete` / `room-open`), and the
-  lens/exhibit verbs. Actions relayed from a sandboxed HTML-lens iframe arrive with
-  origin `canvas-html` and are gated to a non-paid, non-destructive subset
-  (`FRAME_SAFE_ACTIONS`) — that markup is LLM-authored and can auto-fire on load, so
-  it must never reach `retire` / `room-*` / `set-model` / `convene`.
+  lens/exhibit verbs (including `pin-lens`, the operator-only toggle that decides
+  whether a lens holds a Chamber panel at all). Actions relayed from a sandboxed
+  HTML-lens iframe arrive with origin `canvas-html` and are gated to a non-paid,
+  non-destructive subset (`FRAME_SAFE_ACTIONS`) — that markup is LLM-authored and can
+  auto-fire on load, so it must never reach `retire` / `room-*` / `set-model` /
+  `convene` / `pin-lens` (a lens that could pin itself is the clutter pinning ends).
 - **Agents + commands** — every Mind is enterable as a keelson agent
   (`listAgents` / `resolveAgent`); `/mind` opens a Mind as a seeded chat,
   `/genesis` authors a new Mind from a brief, and `/lens <subject>` authors a
