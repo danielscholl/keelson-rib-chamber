@@ -87,11 +87,18 @@ const CHAMBER_PANEL: RibSurfaceRegion = {
   glyph: { char: "◈", tone: "brand" },
   live: true,
   collapsible: true,
+  // Spelled out rather than left undefined so the first compose of an empty bench
+  // matches it and nudges no one.
+  collapsed: false,
 };
 
 // Set from the panel's own compose (runtime.ts), which already reads the bench.
-function setChamberCollapsed(collapsed: boolean): void {
+// Reports whether the value actually moved: the client caches the manifest, so the
+// caller has to nudge it to re-fetch — but only on a real change.
+function setChamberCollapsed(collapsed: boolean): boolean {
+  if (CHAMBER_PANEL.collapsed === collapsed) return false;
   CHAMBER_PANEL.collapsed = collapsed;
+  return true;
 }
 
 function declareHtmlLensView(id: string, title?: string): () => void {
@@ -267,6 +274,7 @@ const rib: Rib = {
       getProjects: ctx.getProjects,
       sm,
       setChamberCollapsed,
+      invalidateManifest: ctx.invalidateManifest,
     });
     // Lenses render via the registerRegion seam, so the registry and its emit tool
     // wire up only when BOTH the snapshot manager and registerRegion are present —

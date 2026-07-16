@@ -113,20 +113,6 @@ describe("Presence region — snapshot manager, no host refreshWorkflow", () => 
     expect(board.header?.status?.label).toBe("1 mind convenes here");
   });
 
-  // The panel's compose is what folds its own surface region, so the flag can only
-  // track the bench if composing is what sets it. The retire above dropped the bench
-  // to one Mind, so the panel must have re-opened itself.
-  it("an assembled bench folds the Chamber panel; a bench below a cast re-opens it", async () => {
-    const header = () => rib.surfaces?.[0]?.layout.header;
-    expect(header()?.collapsible).toBe(true);
-    // One Mind left after the retire: nobody to convene, so the panel is still the
-    // thing you came to use.
-    expect(header()?.collapsed).toBe(false);
-    await scaffoldMind(mindsDir(), record("moneypenny", "Moneypenny", 2), "soul");
-    await composers.get(PRESENCE_KEY)?.();
-    expect(header()?.collapsed).toBe(true);
-  });
-
   it("lens Refresh still reports the missing host capability", async () => {
     const res = await rib.onAction?.(
       { type: "refresh-lens", payload: { id: "whatever" } },
@@ -179,5 +165,76 @@ describe("boot reconcile — crash-orphaned pending-genesis marker", () => {
     expect(boot?.actions?.some((a) => a.type === "dismiss-genesis")).toBe(true);
     // While the orphan is pending the authoring launchpad stays withheld.
     expect(board.sections.some((s) => s.kind === "actions")).toBe(false);
+  });
+});
+
+// The panel folds itself once the bench has a cast to convene. Every case seats its own
+// bench on its own data home, so each still exercises the transition it names when run
+// alone — the flag is module state, and an order-dependent case would assert whatever
+// the previous one happened to leave behind.
+describe("Chamber panel collapse — the bench folds its own region", () => {
+  const homes: string[] = [];
+
+  afterAll(async () => {
+    await rib.dispose?.();
+    setChamberDataHome(undefined);
+    await Promise.all(homes.map((h) => rm(h, { recursive: true, force: true })));
+  });
+
+  const header = () => rib.surfaces?.[0]?.layout.header;
+
+  // Seat `names` on a fresh home and bind the rib to it, counting manifest nudges.
+  const bench = async (names: readonly string[]) => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collapse-"));
+    homes.push(home);
+    setChamberDataHome(home);
+    for (const [i, name] of names.entries()) {
+      await scaffoldMind(mindsDir(), record(name.toLowerCase(), name, i), "soul");
+    }
+    const cap = capturingSm();
+    const nudges = { count: 0 };
+    registerTools({
+      getDataDir: () => home,
+      getExec: () => ({
+        runJSON: async () => ({ ok: true as const, data: undefined }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+      getSnapshotManager: () => cap.sm,
+      registerRegion: () => () => {},
+      invalidateManifest: () => {
+        nudges.count++;
+      },
+    } as unknown as RibContext);
+    return { cap, nudges, compose: async () => await cap.composers.get(PRESENCE_KEY)?.() };
+  };
+
+  it("a bench below a cast opens expanded", async () => {
+    const { compose } = await bench(["Jarvis"]);
+    await compose();
+    expect(header()?.collapsible).toBe(true);
+    expect(header()?.collapsed).toBe(false);
+  });
+
+  it("assembling a bench folds the panel and nudges the client", async () => {
+    const { compose, nudges } = await bench(["Jarvis"]);
+    await compose();
+    expect(header()?.collapsed).toBe(false);
+    const before = nudges.count;
+    await scaffoldMind(mindsDir(), record("mycroft", "Mycroft", 1), "soul");
+    await compose();
+    expect(header()?.collapsed).toBe(true);
+    // The client caches the manifest, so the flip is worthless unless it is told.
+    expect(nudges.count).toBeGreaterThan(before);
+  });
+
+  it("re-composing an unchanged bench nudges nobody", async () => {
+    const { compose, nudges } = await bench(["Jarvis", "Mycroft"]);
+    // The first compose settles the flag; every later one must be silent.
+    await compose();
+    expect(header()?.collapsed).toBe(true);
+    const settled = nudges.count;
+    await compose();
+    await compose();
+    expect(nudges.count).toBe(settled);
   });
 });
