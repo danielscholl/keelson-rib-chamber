@@ -4,6 +4,7 @@ import {
   lensHtmlAction,
   lensNoteAction,
   lensOpenAction,
+  pinLensAction,
   refreshLensAction,
   retireHtmlLensAction,
   retireLensAction,
@@ -33,6 +34,9 @@ import {
 // "canvas-html"): a no-op ack (`lens-html`) and read-only navigation to a lens
 // panel (`lens-open`). Everything destructive or paid stays off this list, so a
 // prompt-injected lens can't drive retire / room-* / set-model / convene. See #124.
+// `pin-lens` stays off it too, and not merely because it mutates: pinning is the
+// operator's alone, so a frame-safe pin would let an LLM-authored lens pin ITSELF to
+// the Chamber surface — the exact claim-the-surface behavior pinning exists to end.
 const FRAME_SAFE_ACTIONS: ReadonlySet<string> = new Set(["lens-html", "lens-open"]);
 
 export function dispatchChamberAction(
@@ -93,6 +97,8 @@ export function dispatchChamberAction(
       return lensNoteAction(action);
     case "refresh-lens":
       return refreshLensAction(action);
+    case "pin-lens":
+      return pinLensAction(action);
     default:
       return { ok: false, error: `unknown action '${action.type}'` };
   }

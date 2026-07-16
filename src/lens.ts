@@ -4,13 +4,20 @@ import type { LensKind, LensProvenance, LensRefresh, LensStore } from "./lens-st
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
 // A Mind authors a lens by publishing a board under a per-subject key
-// (rib:chamber:lens:<id>). The registry registers that snapshot key AND — for a LENS —
-// adds a surface region for it through the harness `registerRegion` seam, so each new
-// subject appears as its own panel: unbounded, no fixed pool, no eviction. An EXHIBIT
-// shares the key namespace but gets no panel; it is a room's deliverable, reached from
-// the room that tabled it. The rib withholds the lens tool entirely when that seam is
-// absent (see index.ts), so the registry requires it rather than publish invisible,
-// unrendered keys.
+// (rib:chamber:lens:<id>). The registry registers that snapshot key ALWAYS, and adds a
+// surface region for it through the harness `registerRegion` seam only when the lens is
+// PINNED — an operator's choice, so the Chamber surface holds what you put there rather
+// than every subject anyone ever authored. An unpinned lens is a key plus an index card,
+// read through the drawer; that is the shape an EXHIBIT has always had (it shares the key
+// namespace, gets no panel, and is reached from the room that tabled it). The rib
+// withholds the lens tool entirely when that seam is absent (see index.ts), so the
+// registry requires it rather than publish invisible, unrendered keys.
+//
+// NB: the region carries the refresh wiring (see regionFor), so an unpinned lens has no
+// cadence — it re-composes through the index card's Refresh verb. Pinning is what makes
+// a lens live, and that is deliberate: a lens region is args-bearing, which the server
+// heartbeat skips, so every pinned living lens bills a turn per tick while the surface is
+// open. Bounding that to the pinned set is half the point of the pin.
 
 // The id of the Chamber surface lens panels attach to. Shared with the surface
 // declaration in index.ts so the registerRegion target can't drift from it.
@@ -112,6 +119,19 @@ export function destructiveHeadAction(type: string, verb: string, noun: string, 
   };
 }
 
+// The pinned panel's own way off the surface, in the region head's ⋯ menu — the
+// mirror of destructiveHeadAction's reasoning (a record should be puttable away from
+// the panel itself without hunting the index), minus the confirm: unpinning destroys
+// nothing, and the lens keeps its key, its card, and its Open.
+export function unpinHeadAction(id: string, kind: "canvas" | "html" = "canvas") {
+  return {
+    type: "pin-lens",
+    label: "Unpin from Chamber",
+    glyph: "⊙",
+    payload: { id, kind, pinned: false },
+  };
+}
+
 // Whether a re-author left the backing alone — rewireRegion's early-out, so an
 // unwatched field here means a changed backing keeps the region's stale wiring
 // until a restart. `inputs` compares structurally because it reaches the region
@@ -158,6 +178,14 @@ export function boardsEqual(a: CanvasBoardView, b: CanvasBoardView): boolean {
 // the two share the store, the id space, and the lensKey namespace, so the open path
 // and the briefing's jump chips resolve either kind through one key shape.
 export interface LensRegistry {
+  // `pinned` is REQUIRED and positioned ahead of the optionals on purpose. It is
+  // durable state the store owns, and every publish REBUILDS the record (the emit
+  // hand-builds its provenance, and saveLens writes only the keys it is handed), so a
+  // caller that could omit it would silently unpin the lens — and a living lens
+  // re-authors on its own cadence, so a pinned one would unpin itself within the hour.
+  // Required means a forgotten thread is a typecheck failure instead. Resolve it from
+  // the prior record, as with `refresh`.
+  //
   // `provenance` (scope / maintaining-Mind / reason / source-room) is forwarded to
   // the store for the index card; the live key + region are board-only, so
   // reregister omits it. `refresh` is the RESOLVED backing to persist and wire —
@@ -167,6 +195,7 @@ export interface LensRegistry {
   publish(
     id: string,
     board: CanvasBoardView,
+    pinned: boolean,
     provenance?: LensProvenance,
     kind?: LensKind,
     refresh?: LensRefresh,
@@ -178,9 +207,15 @@ export interface LensRegistry {
   reregister(
     id: string,
     board: CanvasBoardView,
+    pinned: boolean,
     kind?: LensKind,
     refresh?: LensRefresh,
   ): Promise<{ key: string }>;
+  // Add or drop a pinned lens's panel, leaving its key, publisher, and record alone.
+  // The ONLY mutator of live pin state — publish never changes it, it only carries
+  // what the caller read off disk. False on an unknown id (mirrors remove) or on an
+  // exhibit, so a caller can tell "panel swapped" from "nothing live to swap".
+  setPin(id: string, pinned: boolean): boolean;
   // True when a live entry was released; false on an unknown id, so a delete
   // path can tell "panel dropped" from "nothing was live".
   remove(id: string): boolean;
@@ -196,13 +231,18 @@ interface LensEntry {
   // been coalesced into someone else's compose that landed a different one.
   published: () => CanvasBoardView | undefined;
   unregisterSnapshot: () => void;
-  // Absent for an exhibit: it holds a key but no panel (see regionFor).
+  // Absent for an exhibit and for an unpinned lens: both hold a key but no panel
+  // (see regionFor).
   unregisterRegion?: () => void;
   // The shelf wiring the live region was built from, so a re-publish that
   // changes the refresh backing can swap the region in place (and a failed
   // swap can restore this exact wiring).
   kind: LensKind;
   refresh?: LensRefresh;
+  // Always a strict boolean, never undefined: rewireRegion compares it against a
+  // publish's value, and an undefined here would never equal a passed `false`, so
+  // every re-author of an unpinned lens would churn the region it doesn't have.
+  pinned: boolean;
 }
 
 export function createLensRegistry(
@@ -225,21 +265,30 @@ export function createLensRegistry(
     return true;
   }
 
-  // A LENS's panel. Only a lens gets one: it is a standing view, continuously true, so
-  // it earns permanent surface. An exhibit is a room's deliverable — reached from the
-  // room that tabled it — so it holds a key with no panel, and regionFor is never
-  // called for one. A refresh-backed lens also carries the region's re-compose wiring:
-  // the named workflow runs with input `lens` = this id, on the emit's cadence (clamped
-  // to the host floor).
+  // A PINNED lens's panel. Only a pinned lens gets one — an unpinned lens and an
+  // exhibit both hold a key with no panel, so regionFor is never called for them. A
+  // refresh-backed lens also carries the region's re-compose wiring: the named workflow
+  // runs with input `lens` = this id, on the emit's cadence (clamped to the host floor).
+  //
+  // The `group` is per-id so each pinned lens is the only member of its own group: the
+  // host chunks regions per group, so a shared one would render them three-across
+  // instead of a row each. One shared `groupTitle` is what folds those rows back under
+  // a single zone header.
   function regionFor(id: string, refresh?: LensRefresh): RibSurfaceRegion {
     return {
       key: lensKey(id),
       title: id,
       collapsible: true,
+      // Folded on arrival: a pinned lens earns a heartbeat strip — name, live dot,
+      // freshness — for one row of height, and expands when you want to read it.
+      collapsed: true,
       glyph: { char: "✦", tone: "accent" as const },
-      group: "lens",
-      groupTitle: "Lenses",
-      headActions: [destructiveHeadAction("retire-lens", "Retire", "lens", id)],
+      group: `lens:${id}`,
+      groupTitle: "Pinned",
+      headActions: [
+        unpinHeadAction(id),
+        destructiveHeadAction("retire-lens", "Retire", "lens", id),
+      ],
       ...(refresh
         ? {
             workflow: refresh.workflow,
@@ -258,18 +307,20 @@ export function createLensRegistry(
   // two concurrent publishes of the same new id — the tool is both a workflow seam
   // and a room turn-tool — can't both reach sm.register and trip its duplicate-key
   // guard; the second finds the entry and just republishes.
-  function register(id: string, kind: LensKind, refresh?: LensRefresh): LensEntry {
+  function register(id: string, kind: LensKind, pinned: boolean, refresh?: LensRefresh): LensEntry {
     const key = lensKey(id);
     const { publisher, latest, published } = createCoalescingPublisher(
       () => sm.recompose(key),
       emptyLensBoard(),
     );
     const unregisterSnapshot = sm.register(key, latest, { validate: expectView(key, "board") });
-    // An exhibit registers its KEY only. The key is what lens-open focuses, so it is what
-    // the room board's Tabled cards read — dropping it with the panel would leave every
-    // one of those cards opening a dead key.
+    // An exhibit and an unpinned lens register their KEY only. The key is what lens-open
+    // focuses, so it is what the index cards and the room board's Tabled cards read —
+    // dropping it with the panel would leave every one of those cards opening a dead key.
+    // Order matters: the exhibit term is first because it is a species fact (an exhibit
+    // has no panel at any pin state), while pin is a preference layered on a lens.
     let unregisterRegion: (() => void) | undefined;
-    if (kind !== "exhibit") {
+    if (kind !== "exhibit" && pinned) {
       try {
         unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, refresh));
       } catch (e) {
@@ -287,34 +338,50 @@ export function createLensRegistry(
       ...(unregisterRegion ? { unregisterRegion } : {}),
       kind,
       refresh,
+      pinned,
     };
     entries.set(id, entry);
     return entry;
   }
 
   // Swap an existing entry's region when a re-publish changes its shelf wiring
-  // (a refresh backing added/changed/cleared, or a kind crossing between lens and
-  // exhibit). The snapshot key and publisher stay put — only the layout re-registers,
-  // so the panel's frames are uninterrupted. A failed swap restores the prior wiring;
-  // if even that fails, release the whole entry so no orphaned key lingers behind a
-  // missing panel. An exhibit has no region: crossing INTO one drops the panel, and
-  // crossing out of one builds the first.
-  function rewireRegion(id: string, entry: LensEntry, kind: LensKind, refresh?: LensRefresh): void {
-    if (entry.kind === kind && sameRefresh(entry.refresh, refresh)) return;
+  // (a refresh backing added/changed/cleared, a kind crossing between lens and
+  // exhibit, or a pin toggling). The snapshot key and publisher stay put — only the
+  // layout re-registers, so the panel's frames are uninterrupted. A failed swap
+  // restores the prior wiring; if even that fails, release the whole entry so no
+  // orphaned key lingers behind a missing panel. An exhibit and an unpinned lens have
+  // no region: crossing INTO either drops the panel, and crossing out builds the first.
+  //
+  // `entry.pinned === pinned` is compared HERE rather than inside sameRefresh: that
+  // helper is shared with the HTML twin and answers "did the refresh backing change",
+  // which a pin is not — so the species-specific terms stay at the call site, as
+  // `entry.kind === kind` already does.
+  function rewireRegion(
+    id: string,
+    entry: LensEntry,
+    kind: LensKind,
+    pinned: boolean,
+    refresh?: LensRefresh,
+  ): void {
+    if (entry.kind === kind && entry.pinned === pinned && sameRefresh(entry.refresh, refresh)) {
+      return;
+    }
     entry.unregisterRegion?.();
     entry.unregisterRegion = undefined;
-    if (kind === "exhibit") {
+    if (kind === "exhibit" || !pinned) {
       entry.kind = kind;
       entry.refresh = refresh;
+      entry.pinned = pinned;
       return;
     }
     try {
       entry.unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, refresh));
       entry.kind = kind;
       entry.refresh = refresh;
+      entry.pinned = pinned;
     } catch (e) {
       try {
-        if (entry.kind !== "exhibit") {
+        if (entry.kind !== "exhibit" && entry.pinned) {
           entry.unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, entry.refresh));
         }
       } catch {
@@ -333,6 +400,7 @@ export function createLensRegistry(
     id: string,
     board: CanvasBoardView,
     kind: LensKind,
+    pinned: boolean,
     refresh?: LensRefresh,
   ): Promise<{ key: string }> {
     // Validate the board BEFORE registering anything, so a board we can't render
@@ -340,13 +408,13 @@ export function createLensRegistry(
     expectView(lensKey(id), "board")(board);
     let entry = entries.get(id);
     if (!entry) {
-      entry = register(id, kind, refresh);
+      entry = register(id, kind, pinned, refresh);
       // Seed the cache so a client subscribing the instant the panel appears gets
       // the seed board, not a 204 (the GET path doesn't lazy-compose). The entry is
       // already mapped, so this await can't reopen the duplicate-register race.
       await sm.recompose(entry.key);
     } else {
-      rewireRegion(id, entry, kind, refresh);
+      rewireRegion(id, entry, kind, pinned, refresh);
     }
     // Re-broadcasting an identical board would restamp the frame's composedAt — the
     // "updated" a panel head reads — with freshness the content never earned. The
@@ -359,8 +427,8 @@ export function createLensRegistry(
   }
 
   return {
-    async publish(id, board, provenance, kind = "lens", refresh, updatedAt) {
-      const result = await liveRegister(id, board, kind, refresh);
+    async publish(id, board, pinned, provenance, kind = "lens", refresh, updatedAt) {
+      const result = await liveRegister(id, board, kind, pinned, refresh);
       // Persist only AFTER the live validate + publish succeed, so a board we
       // can't render never reaches disk (fail-closed); the store stamps updatedAt
       // unless the caller held the prior one, and carries the provenance through
@@ -369,6 +437,7 @@ export function createLensRegistry(
         id,
         board,
         kind,
+        ...(pinned ? { pinned } : {}),
         ...(refresh ? { refresh } : {}),
         ...(updatedAt ? { updatedAt } : {}),
         ...provenance,
@@ -379,8 +448,19 @@ export function createLensRegistry(
     // the record is already on disk with its authored updatedAt, and re-stamping it
     // would reset every lens's freshness on every restart. So boot goes through the
     // live half only.
-    reregister(id, board, kind = "lens", refresh) {
-      return liveRegister(id, board, kind, refresh);
+    reregister(id, board, pinned, kind = "lens", refresh) {
+      return liveRegister(id, board, kind, pinned, refresh);
+    },
+    // Live-only: the record is the caller's to write (it holds the write chain and the
+    // updatedAt it must preserve). Refuses an exhibit outright — the region predicate is
+    // the only thing standing between an exhibit and a panel, so a setPin that rewired
+    // blindly would hand a room's deliverable permanent surface.
+    setPin(id, pinned) {
+      const entry = entries.get(id);
+      if (!entry || entry.kind === "exhibit") return false;
+      if (entry.pinned === pinned) return true;
+      rewireRegion(id, entry, entry.kind, pinned, entry.refresh);
+      return true;
     },
     remove(id) {
       return release(id);

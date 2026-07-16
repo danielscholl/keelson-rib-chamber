@@ -100,6 +100,49 @@ describe("createFileLensStore", () => {
     expect(rec?.reason).toBe("added two risks");
   });
 
+  // saveLens hand-lists the fields it writes, so a `pinned` missing from that spread is
+  // dropped on every save — and a restart would silently unpin every panel.
+  it("round-trips a pin, and writes no key when unpinned", async () => {
+    const store = createFileLensStore(root);
+    await store.saveLens({ id: "pinned-one", board: board("Pinned"), pinned: true });
+    expect((await store.loadLens("pinned-one"))?.pinned).toBe(true);
+
+    // Unpinned is the ABSENT default, exactly as `kind: "lens"` is — so a lens authored
+    // before pinning existed and one the operator unpinned serialize identically.
+    await store.saveLens({ id: "plain-one", board: board("Plain"), pinned: false });
+    expect((await store.loadLens("plain-one"))?.pinned).toBeUndefined();
+    const raw = await readFile(join(root, "plain-one", "lens.json"), "utf8");
+    expect(raw).not.toContain("pinned");
+  });
+
+  it("never pins an exhibit — a deliverable holds a key, not surface", async () => {
+    const store = createFileLensStore(root);
+    await store.saveLens({
+      id: "verdict",
+      board: board("Verdict"),
+      kind: "exhibit",
+      pinned: true,
+    });
+    expect((await store.loadLens("verdict"))?.pinned).toBeUndefined();
+  });
+
+  // The fold, not a reject: isLensRecord's rule would drop the whole record, taking the
+  // lens out of the index, out of boot re-registration, and out of the brief fingerprint
+  // over a hand-edit typo. A bad pin can't take anything down — the predicate reads it
+  // falsy — so it degrades to unpinned and the lens survives.
+  it("folds a non-boolean pinned to unpinned rather than losing the record", async () => {
+    await seedLens(root, "typo", {
+      id: "typo",
+      board: board("Typo"),
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      pinned: "true",
+    });
+    const rec = await createFileLensStore(root).loadLens("typo");
+    expect(rec?.id).toBe("typo");
+    expect(rec?.pinned).toBeUndefined();
+    expect(await listLenses(root)).toHaveLength(1);
+  });
+
   it("omitted provenance stays absent — no undefined keys leak to disk", async () => {
     const store = createFileLensStore(root);
     await store.saveLens({ id: "bare", board: board("Bare") });

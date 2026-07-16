@@ -92,18 +92,22 @@ describe("living-html-lens region wiring", () => {
   it("a refresh-backed html lens region carries workflow + per-lens args + the default cadence", async () => {
     const region = fakeRegisterRegion();
     const reg = createHtmlLensRegistry(fakeSnapshotManager(), region.register, memoryHtmlStore());
-    await reg.publish(page("hi"), { id: "status", refresh: { workflow: "chamber-lens-status" } });
+    await reg.publish(page("hi"), {
+      pinned: true,
+      id: "status",
+      refresh: { workflow: "chamber-lens-status" },
+    });
     const wired = region.current(htmlLensKey("status"));
     expect(wired?.workflow).toBe("chamber-lens-status");
     expect(wired?.workflowArgs).toEqual({ lens: "status" });
     expect(wired?.cadenceMs).toBe(DEFAULT_LENS_REFRESH_CADENCE_MS);
-    expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens-html"]);
+    expect(wired?.headActions?.map((a) => a.type)).toEqual(["pin-lens", "retire-lens-html"]);
   });
 
   it("clamps a sub-floor cadence so a hand-edited record can't sink the region parse", async () => {
     const region = fakeRegisterRegion();
     const reg = createHtmlLensRegistry(fakeSnapshotManager(), region.register, memoryHtmlStore());
-    await reg.reregister("fast", page("hi"), undefined, { workflow: "w", cadenceMs: 1_000 });
+    await reg.reregister("fast", page("hi"), true, undefined, { workflow: "w", cadenceMs: 1_000 });
     expect(region.current(htmlLensKey("fast"))?.cadenceMs).toBe(30_000);
   });
 
@@ -111,6 +115,7 @@ describe("living-html-lens region wiring", () => {
     const region = fakeRegisterRegion();
     const reg = createHtmlLensRegistry(fakeSnapshotManager(), region.register, memoryHtmlStore());
     await reg.publish(page("hi"), {
+      pinned: true,
       id: "metrics",
       refresh: { workflow: "w", inputs: { repo: "acme/widget", lens: "evil" } },
     });
@@ -123,10 +128,10 @@ describe("living-html-lens region wiring", () => {
   it("a plain html lens region wires no workflow but still carries the retire head verb", async () => {
     const region = fakeRegisterRegion();
     const reg = createHtmlLensRegistry(fakeSnapshotManager(), region.register, memoryHtmlStore());
-    await reg.publish(page("hi"), { id: "plain" });
+    await reg.publish(page("hi"), { pinned: true, id: "plain" });
     const wired = region.current(htmlLensKey("plain"));
     expect(wired?.workflow).toBeUndefined();
-    expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens-html"]);
+    expect(wired?.headActions?.map((a) => a.type)).toEqual(["pin-lens", "retire-lens-html"]);
   });
 
   it("the legacy id-less canvas takes no refresh wiring and no retire verb", async () => {
@@ -141,27 +146,35 @@ describe("living-html-lens region wiring", () => {
   it("re-emitting with a changed refresh swaps the region in place; unchanged leaves it alone", async () => {
     const region = fakeRegisterRegion();
     const reg = createHtmlLensRegistry(fakeSnapshotManager(), region.register, memoryHtmlStore());
-    await reg.publish(page("1"), { id: "s", refresh: { workflow: "w1" } });
+    await reg.publish(page("1"), { pinned: true, id: "s", refresh: { workflow: "w1" } });
     expect(region.calls).toHaveLength(1);
     // Same wiring → no region churn (the SPA would remount the panel).
-    await reg.publish(page("2"), { id: "s", refresh: { workflow: "w1" } });
+    await reg.publish(page("2"), { pinned: true, id: "s", refresh: { workflow: "w1" } });
     expect(region.calls).toHaveLength(1);
     // Changed backing → the region re-registers with the new workflow.
-    await reg.publish(page("3"), { id: "s", refresh: { workflow: "w2" } });
+    await reg.publish(page("3"), { pinned: true, id: "s", refresh: { workflow: "w2" } });
     expect(region.calls).toHaveLength(2);
     expect(region.current(htmlLensKey("s"))?.workflow).toBe("w2");
     // Cleared backing → the wiring drops but the head verb stays.
-    await reg.publish(page("4"), { id: "s" });
+    await reg.publish(page("4"), { pinned: true, id: "s" });
     const wired = region.current(htmlLensKey("s"));
     expect(wired?.workflow).toBeUndefined();
-    expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens-html"]);
+    expect(wired?.headActions?.map((a) => a.type)).toEqual(["pin-lens", "retire-lens-html"]);
   });
 
   it("an inputs-only change rewires the region rather than stranding stale args", async () => {
     const region = fakeRegisterRegion();
     const reg = createHtmlLensRegistry(fakeSnapshotManager(), region.register, memoryHtmlStore());
-    await reg.publish(page("1"), { id: "s", refresh: { workflow: "w", inputs: { env: "dev" } } });
-    await reg.publish(page("2"), { id: "s", refresh: { workflow: "w", inputs: { env: "prod" } } });
+    await reg.publish(page("1"), {
+      pinned: true,
+      id: "s",
+      refresh: { workflow: "w", inputs: { env: "dev" } },
+    });
+    await reg.publish(page("2"), {
+      pinned: true,
+      id: "s",
+      refresh: { workflow: "w", inputs: { env: "prod" } },
+    });
     expect(region.calls).toHaveLength(2);
     expect(region.current(htmlLensKey("s"))?.workflowArgs).toEqual({ env: "prod", lens: "s" });
   });
@@ -175,8 +188,8 @@ describe("living-html-lens region wiring", () => {
       memoryHtmlStore(),
       views.declare,
     );
-    await reg.publish(page("1"), { id: "s", title: "Before" });
-    await reg.publish(page("2"), { id: "s", title: "After" });
+    await reg.publish(page("1"), { pinned: true, id: "s", title: "Before" });
+    await reg.publish(page("2"), { pinned: true, id: "s", title: "After" });
     expect(region.current(htmlLensKey("s"))?.title).toBe("After");
     // One entry, not two: the stale declaration is released before the new one.
     expect(views.views).toEqual([{ id: "s", title: "After" }]);
@@ -200,12 +213,12 @@ describe("living-html-lens region wiring", () => {
     } as unknown as SnapshotManager;
     const reg = createHtmlLensRegistry(sm, region.register, memoryHtmlStore());
     const composes = () => recomposed.filter((k) => k === htmlLensKey("s")).length;
-    await reg.publish(page("same"), { id: "s" });
+    await reg.publish(page("same"), { pinned: true, id: "s" });
     const afterFirst = composes();
-    await reg.publish(page("same"), { id: "s" });
+    await reg.publish(page("same"), { pinned: true, id: "s" });
     expect(composes()).toBe(afterFirst);
     // A changed page still publishes.
-    await reg.publish(page("different"), { id: "s" });
+    await reg.publish(page("different"), { pinned: true, id: "s" });
     expect(composes()).toBeGreaterThan(afterFirst);
   });
 });
@@ -289,6 +302,8 @@ let tools: ReturnType<NonNullable<typeof rib.registerTools>>;
 
 const registerTools = rib.registerTools;
 if (!registerTools) throw new Error("rib is missing registerTools");
+const onAction = rib.onAction;
+if (!onAction) throw new Error("rib is missing onAction");
 
 function makeCtx(sm: SnapshotManager): RibContext {
   return {
@@ -343,6 +358,44 @@ describe("living-html-lens emit", () => {
     await rm(lensesDir(), { recursive: true, force: true });
     await rm(htmlLensesDir(), { recursive: true, force: true });
     tools = registerTools(makeCtx(fakeSnapshotManager()));
+  });
+
+  // An emit rebuilds the record and the store writes only what it is handed, so a pin
+  // the emit fails to carry is dropped — and a living page re-emits on its own cadence,
+  // so a pinned one would unpin itself.
+  it("a re-emit preserves the operator's pin", async () => {
+    const store = createFileHtmlLensStore(htmlLensesDir());
+    await emitHtml({ id: "designed", html: page("v1") });
+    await onAction(
+      { type: "pin-lens", payload: { id: "designed", kind: "html", pinned: true } },
+      {} as RibContext,
+    );
+    expect((await store.load("designed"))?.pinned).toBe(true);
+
+    const t = await emitHtml({ id: "designed", html: page("v2") });
+    expect(t.errored()).toBe(false);
+    const after = await store.load("designed");
+    expect(after?.html).toContain("v2");
+    expect(after?.pinned).toBe(true);
+  });
+
+  it("pinning an html lens holds its updatedAt and is reachable from the card", async () => {
+    const store = createFileHtmlLensStore(htmlLensesDir());
+    await emitHtml({ id: "designed", html: page("v1") });
+    const before = (await store.load("designed"))?.updatedAt;
+    await onAction(
+      { type: "pin-lens", payload: { id: "designed", kind: "html", pinned: true } },
+      {} as RibContext,
+    );
+    expect((await store.load("designed"))?.updatedAt).toBe(before);
+    // And back off again — the index card is the only affordance left once the panel
+    // (and its head verb) is gone.
+    const off = await onAction(
+      { type: "pin-lens", payload: { id: "designed", kind: "html", pinned: false } },
+      {} as RibContext,
+    );
+    expect(off.ok).toBe(true);
+    expect((await store.load("designed"))?.pinned).toBeUndefined();
   });
 
   it("refuses a refresh that names no workflow — an html lens has no generic re-author", async () => {

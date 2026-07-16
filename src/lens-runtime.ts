@@ -97,11 +97,14 @@ function reconcileLensPanels(registry: LensRegistry): void {
     }
     for (const rec of records) {
       try {
-        // Kind and refresh ride through so an exhibit's panel comes back on its
-        // own shelf and a living lens comes back with its re-compose wiring.
+        // Kind, pin, and refresh ride through so an exhibit comes back panel-less, a
+        // pinned lens comes back on the surface, and a living lens comes back with its
+        // re-compose wiring. The record is authoritative for the pin — reading it here
+        // is what lets a lens whose region registration failed heal on the next boot.
         await registry.reregister(
           rec.id,
           rec.board,
+          rec.pinned === true,
           isExhibit(rec) ? "exhibit" : "lens",
           rec.refresh,
         );
@@ -134,8 +137,10 @@ function reconcileHtmlLensPanels(registry: HtmlLensRegistry): void {
       try {
         // The refresh backing rides through, as it does for a canvas lens: it is
         // region wiring built at registration, so dropping it here would cost every
-        // living HTML lens its cadence on every restart — silently.
-        await registry.reregister(rec.id, rec.html, rec.title, rec.refresh);
+        // living HTML lens its cadence on every restart — silently. So does the pin,
+        // for the same reason and one more: the record is authoritative, so reading it
+        // here is what heals a lens whose region registration failed last boot.
+        await registry.reregister(rec.id, rec.html, rec.pinned === true, rec.title, rec.refresh);
       } catch (e) {
         console.error(`[rib-chamber] html lens '${rec.id}' re-registration failed: ${errText(e)}`);
       }
@@ -318,8 +323,9 @@ export async function deleteRecordOfKind(
 
 // One HTML-lens delete backs both its verbs — the panel's head ⋯ action and
 // chamber_retire_lens — mirroring deleteRecordOfKind's role for the canvas store.
-// Delete the record, then release the live key + region + views entry. No index
-// refresh: HTML lenses live in their own store, which no collector reads.
+// Delete the record, then release the live key + region + views entry, and re-run the
+// lenses collector: the index reads both stores, so a retired page would otherwise
+// leave a card whose Open is dead.
 export async function deleteHtmlLensRecord(
   rawId: string,
 ): Promise<{ ok: true; id: string; key: string } | { ok: false; error: string }> {
@@ -337,12 +343,14 @@ export async function deleteHtmlLensRecord(
       // tamper): releasing it lets the verb converge instead of stranding a
       // ghost panel no second retire could ever remove.
       if (/not found/.test(errText(e)) && getHtmlLensRegistry()?.remove(id)) {
+        await refreshWorkflow("chamber-lenses").catch(() => {});
         await refreshStandingPanels();
         return { ok: true, id, key: htmlLensKey(id) };
       }
       throw e;
     }
     getHtmlLensRegistry()?.remove(id);
+    await refreshWorkflow("chamber-lenses").catch(() => {});
     await refreshStandingPanels();
     return { ok: true, id, key: htmlLensKey(id) };
   } catch (e) {

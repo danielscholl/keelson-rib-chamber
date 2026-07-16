@@ -34,6 +34,11 @@ export interface LensRecord {
   maintainingMind?: string;
   reason?: string;
   sourceRoom?: string;
+  // Whether this lens holds a panel on the Chamber surface. Operator-owned (the
+  // pin-lens board verb) and absent by default, so an unpinned lens is a key and an
+  // index card — the exhibit's shape. Never agent-supplied: an authoring Mind must
+  // not be able to claim main-surface real estate. Exhibits never carry it.
+  pinned?: boolean;
 }
 
 // The provenance an emit may carry alongside { id, board }: all optional. saveLens
@@ -77,6 +82,7 @@ export interface LensStore {
       kind?: LensKind;
       refresh?: LensRefresh;
       updatedAt?: string;
+      pinned?: boolean;
     } & LensProvenance,
   ): Promise<void>;
   loadLens(id: string): Promise<LensRecord | undefined>;
@@ -115,6 +121,9 @@ export function createFileLensStore(lensesRoot: string): LensStore {
         ...(record.kind === "exhibit" ? { kind: record.kind } : {}),
         // Refresh backing is lens-only: an exhibit is its moment (see LensRefresh).
         ...(record.refresh && record.kind !== "exhibit" ? { refresh: record.refresh } : {}),
+        // Pin is lens-only and written only when true, so unpinned stays the absent
+        // default and a record predating the field serializes identically.
+        ...(record.pinned && record.kind !== "exhibit" ? { pinned: true } : {}),
         ...(record.scope ? { scope: record.scope } : {}),
         ...(record.maintainingMind ? { maintainingMind: record.maintainingMind } : {}),
         ...(record.reason ? { reason: record.reason } : {}),
@@ -207,6 +216,15 @@ async function parseLensJson(path: string): Promise<LensRecord | undefined> {
     // so a corrupt config degrades to a non-refreshing panel, not a lost record.
     if (!isValidRefresh((record as { refresh?: unknown }).refresh)) {
       const { refresh: _dropped, ...rest } = record as LensRecord & { refresh?: unknown };
+      record = rest as LensRecord;
+    }
+    // And for a non-boolean pinned. Folding rather than rejecting (isLensRecord's
+    // rule) because a bad pin can't take anything down — the region predicate reads
+    // it falsy — whereas rejecting would drop the record from the index, from boot
+    // re-registration, and from the brief fingerprint over a hand-edit typo.
+    const pinned = (record as { pinned?: unknown }).pinned;
+    if (pinned !== undefined && typeof pinned !== "boolean") {
+      const { pinned: _dropped, ...rest } = record as LensRecord & { pinned?: unknown };
       record = rest as LensRecord;
     }
     return record;

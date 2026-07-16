@@ -81,30 +81,30 @@ describe("living-lens region wiring", () => {
   it("a refresh-backed lens region carries workflow + per-lens args + the default cadence", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("morning-brief", board("Morning Brief"), undefined, "lens", {
+    await reg.publish("morning-brief", board("Morning Brief"), true, undefined, "lens", {
       workflow: "chamber-lens-refresh",
     });
     const wired = region.current(lensKey("morning-brief"));
     expect(wired?.workflow).toBe("chamber-lens-refresh");
     expect(wired?.workflowArgs).toEqual({ lens: "morning-brief" });
     expect(wired?.cadenceMs).toBe(DEFAULT_LENS_REFRESH_CADENCE_MS);
-    expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens"]);
+    expect(wired?.headActions?.map((a) => a.type)).toEqual(["pin-lens", "retire-lens"]);
   });
 
   it("clamps a sub-floor cadence so a hand-edited record can't sink the region parse", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.reregister("fast", board("Fast"), "lens", { workflow: "w", cadenceMs: 1_000 });
+    await reg.reregister("fast", board("Fast"), true, "lens", { workflow: "w", cadenceMs: 1_000 });
     expect(region.current(lensKey("fast"))?.cadenceMs).toBe(30_000);
   });
 
   it("a plain lens region wires no workflow but still carries the retire head verb", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("plain", board("Plain"));
+    await reg.publish("plain", board("Plain"), true);
     const wired = region.current(lensKey("plain"));
     expect(wired?.workflow).toBeUndefined();
-    expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens"]);
+    expect(wired?.headActions?.map((a) => a.type)).toEqual(["pin-lens", "retire-lens"]);
   });
 
   it("an exhibit gets no region at all — refresh wiring is a lens's affordance", async () => {
@@ -112,7 +112,7 @@ describe("living-lens region wiring", () => {
     // deliverable and holds no panel to wire.
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("verdict", board("Verdict"), undefined, "exhibit");
+    await reg.publish("verdict", board("Verdict"), true, undefined, "exhibit");
     expect(region.current(lensKey("verdict"))).toBeUndefined();
     expect(region.calls).toHaveLength(0);
   });
@@ -120,26 +120,26 @@ describe("living-lens region wiring", () => {
   it("re-publishing with a changed refresh swaps the region in place; unchanged leaves it alone", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("brief", board("Brief"), undefined, "lens", { workflow: "w1" });
+    await reg.publish("brief", board("Brief"), true, undefined, "lens", { workflow: "w1" });
     expect(region.calls).toHaveLength(1);
     // Same wiring → no region churn (the SPA would remount the panel).
-    await reg.publish("brief", board("Brief 2"), undefined, "lens", { workflow: "w1" });
+    await reg.publish("brief", board("Brief 2"), true, undefined, "lens", { workflow: "w1" });
     expect(region.calls).toHaveLength(1);
     // Changed backing → the region re-registers with the new workflow.
-    await reg.publish("brief", board("Brief 3"), undefined, "lens", { workflow: "w2" });
+    await reg.publish("brief", board("Brief 3"), true, undefined, "lens", { workflow: "w2" });
     expect(region.calls).toHaveLength(2);
     expect(region.current(lensKey("brief"))?.workflow).toBe("w2");
     // Cleared backing → the wiring drops but the head verb stays.
-    await reg.publish("brief", board("Brief 4"), undefined, "lens");
+    await reg.publish("brief", board("Brief 4"), true, undefined, "lens");
     const wired = region.current(lensKey("brief"));
     expect(wired?.workflow).toBeUndefined();
-    expect(wired?.headActions?.map((a) => a.type)).toEqual(["retire-lens"]);
+    expect(wired?.headActions?.map((a) => a.type)).toEqual(["pin-lens", "retire-lens"]);
   });
 
   it("the region's workflowArgs carry the refresh's own inputs plus the lens id", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+    await reg.publish("metrics", board("Metrics"), true, undefined, "lens", {
       workflow: "chamber-lens-release",
       inputs: { repo: "acme/widget" },
     });
@@ -154,7 +154,7 @@ describe("living-lens region wiring", () => {
   it("a stored input cannot shadow the lens id", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+    await reg.publish("metrics", board("Metrics"), true, undefined, "lens", {
       workflow: "w1",
       inputs: { lens: "somewhere-else" },
     });
@@ -166,12 +166,12 @@ describe("living-lens region wiring", () => {
   it("an inputs-only change rewires the region", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+    await reg.publish("metrics", board("Metrics"), true, undefined, "lens", {
       workflow: "w1",
       inputs: { repo: "acme/widget" },
     });
     expect(region.calls).toHaveLength(1);
-    await reg.publish("metrics", board("Metrics"), undefined, "lens", {
+    await reg.publish("metrics", board("Metrics"), true, undefined, "lens", {
       workflow: "w1",
       inputs: { service: "storage" },
     });
@@ -185,11 +185,11 @@ describe("living-lens region wiring", () => {
   it("a refresh-only change rewires the region even though the board is untouched", async () => {
     const region = fakeRegisterRegion();
     const reg = createLensRegistry(fakeSnapshotManager(), region.register, memoryLensStore());
-    await reg.publish("brief", board("Brief"), undefined, "lens", { workflow: "w1" });
+    await reg.publish("brief", board("Brief"), true, undefined, "lens", { workflow: "w1" });
     expect(region.calls).toHaveLength(1);
     // An identical board is not re-broadcast — but a cadence/workflow edit rides the
     // same call, and must not be dropped along with the frame.
-    await reg.publish("brief", board("Brief"), undefined, "lens", { workflow: "w2" });
+    await reg.publish("brief", board("Brief"), true, undefined, "lens", { workflow: "w2" });
     expect(region.calls).toHaveLength(2);
     expect(region.current(lensKey("brief"))?.workflow).toBe("w2");
   });
@@ -353,6 +353,122 @@ describe("living-lens emit + verbs", () => {
     await rm(htmlLensesDir(), { recursive: true, force: true });
     refreshCalls = [];
     tools = registerTools(makeCtx(fakeSnapshotManager()));
+  });
+
+  // An emit rebuilds the record and saveLens writes only the keys it is handed, so a
+  // pin the emit fails to carry is dropped — and a living lens re-authors on its own
+  // cadence, so a pinned one would unpin itself within the hour. Only a test through
+  // the tool sees this; the rebuild is not in the registry.
+  it("a re-author preserves the operator's pin — the emit never unpins what it rewrites", async () => {
+    const store = createFileLensStore(lensesDir());
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t.ctx);
+    await onAction({ type: "pin-lens", payload: { id: "brief", pinned: true } }, {} as RibContext);
+    expect((await store.loadLens("brief"))?.pinned).toBe(true);
+
+    // A CHANGED board, so the emit takes its strictly-ahead updatedAt branch — the path
+    // a real refresh turn walks.
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief v2") }, t.ctx);
+    expect(t.errored()).toBe(false);
+    const after = await store.loadLens("brief");
+    expect(after?.board).toEqual(board("Brief v2"));
+    expect(after?.pinned).toBe(true);
+  });
+
+  // The note write-back republishes the whole record too: adding a note must not cost
+  // the operator their panel.
+  it("a note write-back preserves the pin", async () => {
+    const store = createFileLensStore(lensesDir());
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t.ctx);
+    await onAction({ type: "pin-lens", payload: { id: "brief", pinned: true } }, {} as RibContext);
+    const res = await onAction(
+      { type: "lens-note", payload: { id: "brief", note: "checked" } },
+      {} as RibContext,
+    );
+    expect(res.ok).toBe(true);
+    expect((await store.loadLens("brief"))?.pinned).toBe(true);
+  });
+
+  // A pin changes no content. The brief and digest gates fingerprint on
+  // `${id}=${updatedAt}` (chamber-state.ts), so a re-stamp here buys TWO paid LLM turns
+  // for a lens that says exactly what it said before — and jumps it to the top of a
+  // newest-first index it didn't earn.
+  it("pinning holds updatedAt — a layout toggle is not new substance", async () => {
+    const store = createFileLensStore(lensesDir());
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t.ctx);
+    const before = (await store.loadLens("brief"))?.updatedAt;
+
+    await onAction({ type: "pin-lens", payload: { id: "brief", pinned: true } }, {} as RibContext);
+    expect((await store.loadLens("brief"))?.updatedAt).toBe(before);
+    await onAction({ type: "pin-lens", payload: { id: "brief", pinned: false } }, {} as RibContext);
+    expect((await store.loadLens("brief"))?.updatedAt).toBe(before);
+  });
+
+  // A lens whose boot re-registration failed has a record and no live entry — the one
+  // state that cannot heal itself, since reconcile is fail-soft per record and only
+  // runs at boot. Reporting the pin done over a missing panel would strand it there
+  // until a restart, and a durable early-out would make every retry do the same.
+  it("pinning reconciles a lens the boot re-registration never registered", async () => {
+    const sm = fakeSnapshotManager();
+    tools = registerTools(makeCtx(sm));
+    // Land the record AFTER boot, so nothing ever registered it: the strand.
+    await createFileLensStore(lensesDir()).saveLens({ id: "orphan", board: board("Orphan") });
+    expect(sm.keys()).not.toContain(lensKey("orphan"));
+
+    const res = await onAction(
+      { type: "pin-lens", payload: { id: "orphan", pinned: true } },
+      {} as RibContext,
+    );
+    expect(res.ok).toBe(true);
+    // Converged now rather than at the next boot: a reported pin means a live lens.
+    expect(sm.keys()).toContain(lensKey("orphan"));
+    expect((await createFileLensStore(lensesDir()).loadLens("orphan"))?.pinned).toBe(true);
+  });
+
+  it("pin-lens refreshes the index but never the roster pulse", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t.ctx);
+    refreshCalls = [];
+    await onAction({ type: "pin-lens", payload: { id: "brief", pinned: true } }, {} as RibContext);
+    const names = refreshCalls.map((c) => c.name);
+    // The card's label and pill changed.
+    expect(names).toContain("chamber-lenses");
+    // "Live views" counts standing lenses whether or not they hold a panel, so a pin
+    // moves nothing there.
+    expect(names).not.toContain("chamber-roster");
+  });
+
+  it("pin-lens fails closed on an exhibit, an unknown id, and a missing target state", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t.ctx);
+
+    const ghost = await onAction(
+      { type: "pin-lens", payload: { id: "nope", pinned: true } },
+      {} as RibContext,
+    );
+    expect(ghost).toMatchObject({ ok: false });
+    expect((ghost as { error: string }).error).toContain("not found");
+
+    const noState = await onAction(
+      { type: "pin-lens", payload: { id: "brief" } },
+      {} as RibContext,
+    );
+    expect(noState).toMatchObject({ ok: false });
+  });
+
+  // pin-lens is deliberately off FRAME_SAFE_ACTIONS, and not merely because it mutates:
+  // HTML-lens markup is LLM-authored and can auto-fire on load, so a frame-safe pin
+  // would let a lens pin ITSELF to the Chamber surface — inverting the operator-only
+  // premise the whole feature rests on.
+  it("an HTML-lens frame cannot pin anything", async () => {
+    const res = await onAction(
+      { type: "pin-lens", payload: { id: "brief", pinned: true }, origin: "canvas-html" },
+      {} as RibContext,
+    );
+    expect(res).toMatchObject({ ok: false });
+    expect((res as { error: string }).error).toContain("not permitted");
   });
 
   it("emit with refresh: {} takes the bundled default workflow", async () => {

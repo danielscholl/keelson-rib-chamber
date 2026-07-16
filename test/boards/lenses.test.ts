@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type CanvasTone, canvasViewSchema } from "@keelson/shared";
 import { buildLensesIndexBoard } from "../../src/boards/lenses.ts";
+import type { HtmlLensRecord } from "../../src/lens-html-store.ts";
 import type { LensRecord } from "../../src/lens-store.ts";
 import type { Mind } from "../../src/types.ts";
 
@@ -15,6 +16,14 @@ const mind = (over: Partial<Mind> = {}): Mind => ({
 const lens = (over: Partial<LensRecord> = {}): LensRecord => ({
   id: "release-risks",
   board: { view: "board", title: "Release Risks", sections: [] },
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  ...over,
+});
+
+const htmlLens = (over: Partial<HtmlLensRecord> = {}): HtmlLensRecord => ({
+  id: "designed-page",
+  html: "<p>hi</p>",
+  title: "Designed Page",
   updatedAt: "2026-01-01T00:00:00.000Z",
   ...over,
 });
@@ -167,7 +176,7 @@ describe("buildLensesIndexBoard cards", () => {
 
   test("Retire follows — a destructive overflow action with a simple confirm", () => {
     const actions = cards(buildLensesIndexBoard([lens({ id: "release-risks" })]))[0]?.actions ?? [];
-    expect(actions).toHaveLength(2);
+    expect(actions).toHaveLength(3);
     const retire = actions.find((a) => a.type === "retire-lens");
     expect(retire).toMatchObject({
       type: "retire-lens",
@@ -183,11 +192,129 @@ describe("buildLensesIndexBoard cards", () => {
     expect(retire?.confirm?.cancelLabel).toBe("Cancel");
   });
 
+  test("Pin swaps to Unpin on a pinned lens, carrying the TARGET state either way", () => {
+    const unpinned = cards(buildLensesIndexBoard([lens({ id: "release-risks" })]))[0];
+    const pin = unpinned?.actions?.find((a) => a.type === "pin-lens");
+    expect(pin).toMatchObject({
+      type: "pin-lens",
+      label: "Pin",
+      glyph: "⊙",
+      tone: "accent",
+      // The target, not the current state: a card rendered before someone else's pin
+      // must not toggle against state it isn't showing.
+      payload: { id: "release-risks", pinned: true },
+    });
+    // Pinning is not destructive — no confirm, no overflow.
+    expect(pin?.destructive).toBeUndefined();
+    expect(pin?.confirm).toBeUndefined();
+
+    const pinned = cards(buildLensesIndexBoard([lens({ id: "release-risks", pinned: true })]))[0];
+    expect(pinned?.actions?.find((a) => a.type === "pin-lens")).toMatchObject({
+      label: "Unpin",
+      payload: { id: "release-risks", pinned: false },
+    });
+  });
+
+  test("a pinned lens wears the pinned pill, ahead of its authored scope", () => {
+    const plain = cards(buildLensesIndexBoard([lens({ id: "a", scope: "status board" })]))[0];
+    expect(plain?.pill).toEqual({ label: "status board", tone: "info" });
+
+    // Where the lens IS outranks what kind it is: only one pill fits, and the pin is
+    // what the operator scans this index for.
+    const pinned = cards(
+      buildLensesIndexBoard([lens({ id: "a", scope: "status board", pinned: true })]),
+    )[0];
+    expect(pinned?.pill).toEqual({ label: "pinned", tone: "accent" });
+  });
+
   test("the id rides the serialized board on both action payloads (guards collect-lenses toContain)", () => {
     const board = buildLensesIndexBoard([lens({ id: "lens-xyz" })]);
     expect(JSON.stringify(board)).toContain("lens-xyz");
     const actions = cards(board)[0]?.actions ?? [];
     for (const a of actions) expect((a.payload as { id: string }).id).toBe("lens-xyz");
+  });
+});
+
+describe("buildLensesIndexBoard both species", () => {
+  test("an HTML lens gets a card — its only reachable affordance", () => {
+    const board = buildLensesIndexBoard([], [], [htmlLens()]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const card = cards(board)[0];
+    expect(card?.title).toBe("Designed Page");
+    // The count is the whole shelf, both species.
+    expect(board.header?.status?.label).toBe("1 lens");
+    // No provenance exists on an HTML record to dot it with.
+    expect(card?.dot).toBe("neutral");
+    // Open must name the species: a page's board lives under a different key
+    // namespace, so an unqualified open would focus a canvas key that may not exist.
+    expect(card?.actions?.find((a) => a.type === "lens-open")?.payload).toEqual({
+      id: "designed-page",
+      kind: "html",
+    });
+    // Retire is the html verb, not the canvas one — separate stores, separate deletes.
+    expect(card?.actions?.map((a) => a.type)).toEqual([
+      "lens-open",
+      "pin-lens",
+      "retire-lens-html",
+    ]);
+  });
+
+  // The card is the ONLY way to pin an HTML lens back: its panel head is the only other
+  // affordance it has, and unpinning takes the head away with the panel. Without this
+  // verb, unpin would be a one-way door.
+  test("an HTML lens's Pin verb names its species, and swaps to Unpin when pinned", () => {
+    const unpinned = cards(buildLensesIndexBoard([], [], [htmlLens()]))[0];
+    expect(unpinned?.actions?.find((a) => a.type === "pin-lens")).toMatchObject({
+      label: "Pin",
+      payload: { id: "designed-page", kind: "html", pinned: true },
+    });
+    const pinned = cards(buildLensesIndexBoard([], [], [htmlLens({ pinned: true })]))[0];
+    expect(pinned?.pill).toEqual({ label: "pinned", tone: "accent" });
+    expect(pinned?.actions?.find((a) => a.type === "pin-lens")).toMatchObject({
+      label: "Unpin",
+      payload: { id: "designed-page", kind: "html", pinned: false },
+    });
+  });
+
+  test("the species rides a field, so one subject authored as both never reads as a duplicate", () => {
+    const board = buildLensesIndexBoard([lens({ id: "status" })], [], [htmlLens({ id: "status" })]);
+    expect(cards(board)).toHaveLength(2);
+    const kinds = cards(board).map((c) => c.fields?.find((f) => f.label === "kind")?.value);
+    // The pill is spoken for by the pin, so the page marker lives in a field — which is
+    // always rendered, where only one pill ever is.
+    expect(kinds).toEqual([undefined, "page"]);
+  });
+
+  test("the two species interleave newest-first, each keeping its given order", () => {
+    const board = buildLensesIndexBoard(
+      [
+        lens({ id: "c-new", updatedAt: "2026-03-01T00:00:00.000Z" }),
+        lens({ id: "c-old", updatedAt: "2026-01-01T00:00:00.000Z" }),
+      ],
+      [],
+      [htmlLens({ id: "h-mid", updatedAt: "2026-02-01T00:00:00.000Z" })],
+    );
+    expect(cards(board).map((c) => c.title)).toEqual([
+      "Release Risks",
+      "Designed Page",
+      "Release Risks",
+    ]);
+  });
+
+  test("an HTML lens offers Refresh only with a backing", () => {
+    const living = cards(
+      buildLensesIndexBoard([], [], [htmlLens({ refresh: { workflow: "chamber-lens-html" } })]),
+    )[0];
+    expect(living?.actions?.map((a) => a.type)).toEqual([
+      "lens-open",
+      "refresh-lens",
+      "pin-lens",
+      "retire-lens-html",
+    ]);
+    expect(living?.actions?.find((a) => a.type === "refresh-lens")?.payload).toEqual({
+      id: "designed-page",
+      kind: "html",
+    });
   });
 });
 
@@ -201,6 +328,7 @@ describe("buildLensesIndexBoard living lenses", () => {
     expect(living?.actions?.map((a) => a.type)).toEqual([
       "lens-open",
       "refresh-lens",
+      "pin-lens",
       "retire-lens",
     ]);
     const refresh = living?.actions?.find((a) => a.type === "refresh-lens");
@@ -212,6 +340,6 @@ describe("buildLensesIndexBoard living lenses", () => {
     expect(refresh?.destructive).toBeUndefined();
 
     const plain = cards(buildLensesIndexBoard([lens({ id: "static" })]))[0];
-    expect(plain?.actions?.map((a) => a.type)).toEqual(["lens-open", "retire-lens"]);
+    expect(plain?.actions?.map((a) => a.type)).toEqual(["lens-open", "pin-lens", "retire-lens"]);
   });
 });

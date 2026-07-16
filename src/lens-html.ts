@@ -11,6 +11,7 @@ import {
   lensRefreshInputs,
   MIN_REFRESH_CADENCE_MS,
   sameRefresh,
+  unpinHeadAction,
 } from "./lens.ts";
 import type { HtmlLensStore } from "./lens-html-store.ts";
 import type { LensRefresh } from "./lens-store.ts";
@@ -97,12 +98,16 @@ interface HtmlLensEntry {
   // republish (see LensEntry.published for why the publisher owns it).
   published: () => string | undefined;
   unregisterSnapshot: () => void;
-  unregisterRegion: () => void;
+  // Absent for an unpinned lens — it holds a key and a views entry, but no panel.
+  unregisterRegion?: () => void;
   undeclareView: () => void;
   // The wiring the live region and views entry were built from, so a re-emit that
   // changes either can swap them in place (mirrors LensEntry.refresh).
   title?: string;
   refresh?: LensRefresh;
+  // Always a strict boolean (see LensEntry.pinned). The legacy id-less canvas is
+  // always true: it has no record to hold a pin and no card to pin it back from.
+  pinned: boolean;
 }
 
 export interface HtmlLensRegistry {
@@ -111,18 +116,32 @@ export interface HtmlLensRegistry {
   // is the RESOLVED backing to persist and wire — the caller owns preserve-vs-clear
   // against the prior record — and `updatedAt` overrides the store's stamp so an
   // unchanged re-emit holds the freshness it already had (the LensRegistry rules).
+  // `pinned` is resolved from the prior record by the caller, exactly as `refresh` is
+  // and for the same reason: a publish rebuilds the record, so an omitted pin would be
+  // dropped on the next re-emit (see LensRegistry.publish). The legacy id-less canvas
+  // ignores it — it is always panelled.
   publish(
     html: string,
-    opts?: { id?: string; title?: string; refresh?: LensRefresh; updatedAt?: string },
+    opts?: {
+      id?: string;
+      title?: string;
+      refresh?: LensRefresh;
+      updatedAt?: string;
+      pinned?: boolean;
+    },
   ): Promise<{ key: string }>;
   // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving,
   // so the authored updatedAt is preserved (mirrors LensRegistry.reregister).
   reregister(
     id: string,
     html: string,
+    pinned: boolean,
     title?: string,
     refresh?: LensRefresh,
   ): Promise<{ key: string }>;
+  // Add or drop a pinned lens's panel, leaving its key, its views entry, and its
+  // record alone (mirrors LensRegistry.setPin). False on an unknown id.
+  setPin(id: string, pinned: boolean): boolean;
   // Drop one subject's live key + region + views entry (mirrors
   // LensRegistry.remove; true when something live was released). Durable
   // deletion is the caller's.
@@ -143,7 +162,9 @@ export function createHtmlLensRegistry(
   function release(mapKey: string): boolean {
     const entry = entries.get(mapKey);
     if (!entry) return false;
-    entry.unregisterRegion();
+    // Optional-called: an unpinned lens has no region to release, and a retire of one
+    // must not throw on its way to removing the record.
+    entry.unregisterRegion?.();
     entry.unregisterSnapshot();
     entry.undeclareView();
     entries.delete(mapKey);
@@ -165,18 +186,29 @@ export function createHtmlLensRegistry(
       key: id === undefined ? HTML_LENS_KEY : htmlLensKey(id),
       title: id === undefined ? "HTML Lens" : (title ?? id),
       glyph: { char: "❖", tone: "accent" },
-      group: "lens",
-      groupTitle: "Lenses",
+      // Per-id group + one shared zone title, as the canvas twin does: a pinned page is
+      // a full-width row in the Pinned zone rather than a third of one. The legacy fixed
+      // key keeps the old shared group — it is always panelled and never pinned.
+      group: id === undefined ? "lens" : `lens:${id}`,
+      groupTitle: id === undefined ? "Lenses" : "Pinned",
       // Foldable like every other lens panel — a tall designed page shouldn't
       // monopolize the surface with no way to put it away.
       collapsible: true,
-      // The head ⋯ verb is the ONLY delete path for an HTML lens: its
-      // sandboxed iframe rightly can't reach destructive actions, and it has
-      // no index card. The legacy fixed key is in-memory only — nothing
-      // durable to retire — so it carries no verb.
+      // Folded on arrival, like a pinned board lens: a designed page is the taller of
+      // the two species, so it is the one that most needs to earn its height.
+      ...(id === undefined ? {} : { collapsed: true }),
+      // A pinned page's verbs. Its sandboxed iframe rightly can't reach destructive
+      // actions, so the head is where they live; the index card is what carries them
+      // once unpinned, and is the only way to pin it back. The legacy fixed key is
+      // in-memory only — nothing durable to retire or pin — so it carries no verbs.
       ...(id === undefined
         ? {}
-        : { headActions: [destructiveHeadAction("retire-lens-html", "Retire", "lens", id)] }),
+        : {
+            headActions: [
+              unpinHeadAction(id, "html"),
+              destructiveHeadAction("retire-lens-html", "Retire", "lens", id),
+            ],
+          }),
       ...(id !== undefined && refresh
         ? {
             workflow: refresh.workflow,
@@ -197,6 +229,7 @@ export function createHtmlLensRegistry(
     id: string | undefined,
     title: string | undefined,
     refresh: LensRefresh | undefined,
+    pinned: boolean,
   ): HtmlLensEntry {
     const key = id === undefined ? HTML_LENS_KEY : htmlLensKey(id);
     const { publisher, latest, published } = createCoalescingPublisher(
@@ -206,25 +239,32 @@ export function createHtmlLensRegistry(
     const unregisterSnapshot = sm.register(key, latest, {
       validate: htmlStringValidator(key),
     });
-    let unregisterRegion: () => void;
-    try {
-      unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, title, refresh));
-    } catch (e) {
-      // A failed region add (e.g. the harness per-surface ceiling) must not leak
-      // the snapshot registration we already made.
-      unregisterSnapshot();
-      throw e;
+    let unregisterRegion: (() => void) | undefined;
+    if (pinned) {
+      try {
+        unregisterRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, title, refresh));
+      } catch (e) {
+        // A failed region add (e.g. the harness per-surface ceiling) must not leak
+        // the snapshot registration we already made.
+        unregisterSnapshot();
+        throw e;
+      }
     }
+    // The views entry is declared whether or not there is a panel, and outlives an
+    // unpin: the host resolves a key's canvas kind by EXACT match against the rib's
+    // views, so an unpinned lens without one would have its markup rendered through
+    // the board pipeline the moment Open focused it.
     const undeclareView = id === undefined ? () => undefined : declareView(id, title);
     const entry: HtmlLensEntry = {
       key,
       publisher,
       published,
       unregisterSnapshot,
-      unregisterRegion,
+      ...(unregisterRegion ? { unregisterRegion } : {}),
       undeclareView,
       title,
       refresh,
+      pinned,
     };
     entries.set(id ?? HTML_LENS_KEY, entry);
     return entry;
@@ -242,18 +282,37 @@ export function createHtmlLensRegistry(
     entry: HtmlLensEntry,
     title: string | undefined,
     refresh: LensRefresh | undefined,
+    pinned: boolean,
   ): void {
-    if (entry.title === title && sameRefresh(entry.refresh, refresh)) return;
-    entry.unregisterRegion();
+    if (entry.title === title && entry.pinned === pinned && sameRefresh(entry.refresh, refresh)) {
+      return;
+    }
+    entry.unregisterRegion?.();
+    entry.unregisterRegion = undefined;
+    // Unpinning drops the region and nothing else. It deliberately does NOT go through
+    // release(): that takes the key and the views entry with it, which would leave the
+    // record unreachable — no panel, and no view entry to render it as HTML when Open
+    // focuses its key. The title swap still runs, so an unpinned lens keeps a current
+    // views entry for the day it is pinned back.
+    if (!pinned) {
+      entry.undeclareView();
+      entry.undeclareView = declareView(id, title);
+      entry.title = title;
+      entry.refresh = refresh;
+      entry.pinned = pinned;
+      return;
+    }
     let nextRegion: () => void;
     try {
       nextRegion = registerRegion(CHAMBER_SURFACE_ID, regionFor(id, title, refresh));
     } catch (e) {
       try {
-        entry.unregisterRegion = registerRegion(
-          CHAMBER_SURFACE_ID,
-          regionFor(id, entry.title, entry.refresh),
-        );
+        if (entry.pinned) {
+          entry.unregisterRegion = registerRegion(
+            CHAMBER_SURFACE_ID,
+            regionFor(id, entry.title, entry.refresh),
+          );
+        }
       } catch {
         entry.unregisterSnapshot();
         entry.undeclareView();
@@ -264,6 +323,7 @@ export function createHtmlLensRegistry(
     // Past the only step that can throw, so the views entry — which carries the title
     // too — swaps with no window where a failure could strand two live regions.
     entry.unregisterRegion = nextRegion;
+    entry.pinned = pinned;
     entry.undeclareView();
     entry.undeclareView = declareView(id, title);
     entry.title = title;
@@ -275,17 +335,22 @@ export function createHtmlLensRegistry(
     id: string | undefined,
     title: string | undefined,
     refresh: LensRefresh | undefined,
+    pinned: boolean,
   ): Promise<{ key: string }> {
     const mapKey = id ?? HTML_LENS_KEY;
     htmlStringValidator(id === undefined ? HTML_LENS_KEY : htmlLensKey(id))(html);
+    // The legacy id-less canvas is always panelled: it has no record to hold a pin and
+    // no index card to pin it back from, so defaulting it to unpinned would make it
+    // permanently invisible with nothing able to recover it.
+    const panelled = id === undefined || pinned;
     let entry = entries.get(mapKey);
     if (!entry) {
-      entry = register(id, title, refresh);
+      entry = register(id, title, refresh, panelled);
       // Seed the cache so a client subscribing the instant the panel appears gets
       // the seed markup, not a 204 (the GET path doesn't lazy-compose).
       await sm.recompose(entry.key);
     } else if (id !== undefined) {
-      rewire(id, entry, title, refresh);
+      rewire(id, entry, title, refresh, panelled);
     }
     // Re-broadcasting identical markup would restamp the frame's composedAt — the
     // "updated" a panel head reads — with freshness the page never earned, which is
@@ -299,7 +364,8 @@ export function createHtmlLensRegistry(
 
   return {
     async publish(html, opts) {
-      const result = await livePublish(html, opts?.id, opts?.title, opts?.refresh);
+      const pinned = opts?.pinned === true;
+      const result = await livePublish(html, opts?.id, opts?.title, opts?.refresh, pinned);
       // Persist only per-subject lenses, and only AFTER the live publish succeeds
       // (fail-closed, mirrors LensRegistry.publish); the legacy fixed key stays
       // in-memory only, exactly as before.
@@ -310,14 +376,22 @@ export function createHtmlLensRegistry(
           ...(opts.title ? { title: opts.title } : {}),
           ...(opts.refresh ? { refresh: opts.refresh } : {}),
           ...(opts.updatedAt ? { updatedAt: opts.updatedAt } : {}),
+          ...(pinned ? { pinned } : {}),
         });
       }
       return result;
     },
     // Boot goes through the live half only, so the on-disk updatedAt is never
     // re-stamped by a restart.
-    reregister(id, html, title, refresh) {
-      return livePublish(html, id, title, refresh);
+    reregister(id, html, pinned, title, refresh) {
+      return livePublish(html, id, title, refresh, pinned);
+    },
+    setPin(id, pinned) {
+      const entry = entries.get(id);
+      if (!entry) return false;
+      if (entry.pinned === pinned) return true;
+      rewire(id, entry, entry.title, entry.refresh, pinned);
+      return true;
     },
     remove(id) {
       return release(id);
