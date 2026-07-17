@@ -24,7 +24,7 @@ export async function retireLensAction(action: RibAction): Promise<RibActionResu
   const res = await deleteRecordOfKind(
     raw,
     "lens",
-    (id) => `'${id}' is an exhibit — delete it from the Exhibits index`,
+    (id) => `'${id}' is an exhibit — delete it from the Tabled section of its room's board`,
   );
   return res.ok ? { ok: true, data: { id: res.id, key: res.key } } : res;
 }
