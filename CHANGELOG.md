@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.47.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.0...v0.47.1) (2026-07-17)
+
+
+### Fixed
+
+* **lenses:** steer an exhibit retire to its room, not a retired index ([#321](https://github.com/danielscholl/keelson-rib-chamber/issues/321)) ([e0d9f55](https://github.com/danielscholl/keelson-rib-chamber/commit/e0d9f5549f54dcc426ba986b93c21818bdc8c2ce))
+
+
+### Documentation
+
+* realign the lens, surface, and briefing docs with what ships ([#319](https://github.com/danielscholl/keelson-rib-chamber/issues/319)) ([6ac11df](https://github.com/danielscholl/keelson-rib-chamber/commit/6ac11df31731ab3106a3ba9e5cb76c1c42d37655))
+
 ## [0.47.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.46.0...v0.47.0) (2026-07-16)
 
 
