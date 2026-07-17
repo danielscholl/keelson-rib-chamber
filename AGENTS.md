@@ -5,6 +5,12 @@ Copilot's coding agent, and (via an import in `CLAUDE.md`) Claude Code — worki
 in this repository. `CONTRIBUTING.md` is the authoritative human guide; this is
 its agent-facing distillation.
 
+It records only what stays true across changes: the contract, the commands, the
+recurring patterns, and the invariants. Inventories — how many views, workflows,
+tools, strategies, or actions exist and what they are named — live in the code,
+change often, and are deliberately NOT recorded here. Derive them from the code
+when you need them; the `/prime` command does exactly that.
+
 ## What this is
 
 `@keelson/rib-chamber` is a **rib** (extension) for
@@ -39,82 +45,72 @@ cd ../keelson && KEELSON_RIBS=chamber bun dev   # exercise it in a running harne
 `danielscholl/keelson` checkout's `packages/shared` from `main`, so a harness
 contract change that breaks this rib turns CI red here.
 
-## Architecture
+## Architecture (the shapes, not the inventory)
 
-The whole rib is one `Rib` object exported from `src/index.ts`. It contributes:
+The whole rib is one `Rib` object exported from `src/index.ts` — and `index.ts`
+is only the **composition root**: the `Rib` literal, `registerTools` as
+assembly, `onAction` delegating to `dispatchChamberAction`, and `dispose`
+composing the module teardowns. Each subsystem lives in its own module exposing
+a `bindX(seams)` / `disposeX()` pair built in `registerTools` and torn down in
+`dispose()`. The recurring shapes:
 
-- **Views + a surface** — seven static snapshot keys: six defined in `src/keys.ts`
-  (`rib:chamber:presence`, `:roster`, `:rooms`, `:lenses`, `:digest`,
-  `:brief`) plus `rib:chamber:lens-html`, defined in `src/lens-html.ts`, alongside
-  dynamic per-room (`rib:chamber:room:<slug>` for live rooms,
-  `rib:chamber:room-view:<slug>` for the drawer view) and per-lens keys, bound to the
-  canvas renderer, and the **Chamber** nav surface that lays them out. `RIB_VIEWS` is
-  mutable: each per-subject HTML lens pushes its own `canvasKind: "html"` entry at
-  runtime via the `declareView` seam, because the host resolves a key's canvas kind
-  by EXACT match. No hand-coded UI: every view is a board a producer publishes.
-- **Workflows** (`contributeWorkflows`, `src/workflows.ts`) — eight. Three
-  deterministic collectors that read the data home (`chamber-roster` /
-  `chamber-rooms` / `chamber-lenses`, each backed by a
-  `bin/collect-*.ts`); four agent-turn authors (`chamber-genesis` writes a Mind's
-  SOUL.md via the `chamber_emit_genesis` seam; `chamber-lens` authors a lens board;
-  `chamber-lens-refresh` re-emits a living lens under the same id;
-  `chamber-lens-html` authors a sandboxed HTML page); and `chamber-digest`
-  (self-gating: a gate bash node reads the Chamber fingerprint, an agent-turn author
-  node runs only when the fingerprint advanced, and an always-on publish node
-  re-reads the store every tick — so the Digest board stays live but a paid turn
-  fires only on a real change). The **Briefing** (`rib:chamber:brief`) is NOT a
-  workflow — it is the rib-owned attention gate (`evaluateBriefGate`,
-  `src/brief-gate.ts`, backed by `src/chamber-state.ts` and `src/watermark-store.ts`):
-  a room ending or a lens changing promotes it to one agent-authored board, gated
-  fail-closed against a persisted watermark so a quiet Chamber runs no paid turn.
-  The Chamber panel and Convene composer are likewise in-process (`runtime.ts`),
-  which is why they bind no workflow.
-- **Tools** (`registerTools`) — a **seam ladder**, so a missing host seam means a tool
-  is never returned rather than one that half-runs. Always present (they need only the
-  disk paths): the `chamber_emit_genesis` and `chamber_emit_digest` write seams, five
-  read-only tools (`chamber_list_minds` / `_list_rooms` / `_list_lenses` /
-  `_list_exhibits` / `chamber_room_transcript`), and two cleanup tools
-  (`chamber_retire_mind`, `chamber_room_delete`). The lens and exhibit tools
-  (`chamber_emit_lens`, `chamber_retire_lens`, `chamber_table_exhibit`,
-  `chamber_delete_exhibit`, `chamber_emit_lens_html`) need the snapshot-manager **and**
-  `registerRegion` seams. The room-control chat tools (`chamber_room_start` / `_say` /
-  `_stop` / `_status`) and the room driver additionally need the agent-turn
-  (`runAgentTurn`) seam. Absent those, room actions fail closed.
-- **Actions** (`onAction` → `dispatchChamberAction`, `src/actions/`) — payload-carrying
-  board actions rather than a static `actions[]`, since a payload-less button can't
-  carry input: entering and managing Minds (`enter-mind`, `retire`, `set-model`, the
-  genesis boot-card verbs), the bench draft that assembles a cast (`draft-set`,
-  `convene` — unseating is a second click on the seat card), the room controls
-  (`room-start` / `room-inject` / `room-stop` / `room-delete` / `room-open`), and the
-  lens/exhibit verbs (including `pin-lens`, the operator-only toggle that decides
-  whether a lens holds a Chamber panel at all). Actions relayed from a sandboxed
+- **Every view is a board a producer publishes.** No hand-coded UI. `RIB_VIEWS`
+  is mutable by design: per-subject HTML lenses push their own
+  `canvasKind: "html"` entries at runtime via the `declareView` seam, because
+  the host resolves a key's canvas kind by EXACT match. Static keys live in
+  `src/keys.ts`; live rooms and lenses get dynamic per-slug keys.
+- **Workflows** (`contributeWorkflows`, `src/workflows.ts`) come in two producer
+  shapes: deterministic **collectors** (`bin/collect-*.ts` scripts that read the
+  data home) and paid **agent-turn authors** (genesis, the lens family). Where a
+  paid turn must not fire idle, the workflow self-gates: a cheap gate node reads
+  a persisted fingerprint/watermark and the author node runs only when it
+  advanced. Not everything is a workflow — the Briefing is the rib-owned
+  attention gate (`brief-gate.ts`), published in-process and gated fail-closed
+  against a persisted watermark, and the Chamber panel and Convene composer are
+  likewise in-process (`runtime.ts`), which is why those bind no workflow.
+- **Tools are a seam ladder.** `registerTools` returns a tool only when every
+  host seam it needs is present — a missing seam means the tool is never
+  returned, not one that half-runs. The rungs: disk-path-only tools (write
+  seams, read-only listers, cleanup) are always present; lens/exhibit tools need
+  the snapshot-manager and `registerRegion` seams; room-control tools and the
+  room driver additionally need the agent-turn seam (`runAgentTurn`).
+- **Actions** (`onAction` → `dispatchChamberAction`, `src/actions/`) are
+  payload-carrying board actions rather than a static `actions[]`, since a
+  payload-less button can't carry input. Actions relayed from a sandboxed
   HTML-lens iframe arrive with origin `canvas-html` and are gated to a non-paid,
-  non-destructive subset (`FRAME_SAFE_ACTIONS`) — that markup is LLM-authored and can
-  auto-fire on load, so it must never reach `retire` / `room-*` / `set-model` /
-  `convene` / `pin-lens` (a lens that could pin itself is the clutter pinning ends).
+  non-destructive subset (`FRAME_SAFE_ACTIONS`) — that markup is LLM-authored
+  and can auto-fire on load, so it must never reach a destructive, paid, or
+  self-promoting verb.
+- **Strategies are pure.** An orchestration strategy (`src/strategies/`) reads
+  room state plus the transcript and returns the next turn decision; it does no
+  I/O and knows nothing about providers or the host. The **driver**
+  (`src/room.ts`) owns turns, persistence, and publishing. The strategy registry
+  sits behind an own-property guard so a crafted strategy name can't resolve an
+  inherited `Object` member.
 - **Agents + commands** — every Mind is enterable as a keelson agent
-  (`listAgents` / `resolveAgent`); `/mind` opens a Mind as a seeded chat,
-  `/genesis` authors a new Mind from a brief, and `/lens <subject>` authors a
-  canvas lens board on a subject.
+  (`listAgents` / `resolveAgent`), and slash commands front the same seams the
+  boards use.
 
-`src/index.ts` is only the **composition root** — the `Rib` literal, `registerTools`
-as assembly, `onAction` delegating to `dispatchChamberAction`, and `dispose` composing
-the module teardowns. Each subsystem lives in its own module: the briefing gate
-(`brief-gate.ts`), reflection gate (`reflection-gate.ts`), host-seam + standing-panel
-runtime (`runtime.ts`), lens registries (`lens-runtime.ts`), and room lifecycle + driver
-wiring (`room-lifecycle.ts`) each expose a `bindX(seams)` / `disposeX()` pair; the MCP
-tools live under `src/tools/` and the board action handlers under `src/actions/`.
+## Layout (where things live)
 
-Orchestration **strategies** (`src/strategies/`: `sequential`, `group-chat`,
-`open-floor`, `concurrent`, `review`, `magentic`, registered in `strategies/index.ts`
-behind an own-property guard, so a crafted strategy name can't resolve an inherited
-`Object` member) are **pure** — they read room state plus the transcript and return the
-next turn decision (`speak` / `speak-parallel` / `moderate` / `synthesize` / `manage` /
-`assign` / `end`; `synthesis.ts` is a shared close helper, not a strategy). They do no I/O
-and know nothing about providers or the host; the **driver** (`src/room.ts`)
-owns turns, persistence, and publishing.
+- `src/index.ts` — the composition root (wiring, never implementations).
+- `src/room.ts` — the room driver (turns, persistence, publishing);
+  `src/ports.ts` — its two seams (RoomStore, RoomPublisher);
+  `src/room-lifecycle.ts` — driver + key-registry wiring.
+- `src/strategies/` — the pure turn strategies plus the shared synthesis close
+  helper; registered in `strategies/index.ts`.
+- `src/brief-gate.ts` / `src/reflection-gate.ts` — the paid-turn gates;
+  `src/runtime.ts` — host seams + the in-process standing panels;
+  `src/lens-runtime.ts` — the lens registries.
+- `src/boards/` — deterministic board builders the rib composes (a lens/exhibit
+  is what a Mind authors; these are the rib-built boards).
+- `src/tools/` — the MCP tools; `src/actions/` — the board action handlers.
+- `src/workflows.ts` — the workflow definitions; `bin/` — the out-of-process
+  collectors behind the deterministic ones.
+- `src/types.ts` — Mind, Room, strategy decision types; `src/keys.ts` — the
+  static snapshot keys; the `*-store.ts` modules — file-based persistence.
 
-### Invariants worth protecting
+## Invariants worth protecting
 
 - **`index.ts` stays a composition root.** It declares the `Rib` and wires modules —
   it does not grow implementations back. A new subsystem (state + functions) gets its
@@ -133,11 +129,11 @@ owns turns, persistence, and publishing.
   budget is capped (`MAX_ROOM_TURN_BUDGET`), and `chamber_room_start` is a
   confirm-gated dry-run by default.
 - **Bounded concurrent rooms, fresh slug per start.** Rooms run concurrently —
-  each on its own `rib:chamber:room:<slug>` key — capped at
-  `MAX_ACTIVE_ROOMS`, since every room drives its own loop of paid turns. Each
-  start mints a fresh slug, so a late turn from a stopped room can't bleed into a
-  new one. Mind/room slugs are path segments, guarded by `assertSafeSlug` /
-  `isSafeSlug` before they touch the filesystem.
+  each on its own per-slug key — capped at `MAX_ACTIVE_ROOMS`, since every room
+  drives its own loop of paid turns. Each start mints a fresh slug, so a late
+  turn from a stopped room can't bleed into a new one. Mind/room slugs are path
+  segments, guarded by `assertSafeSlug` / `isSafeSlug` before they touch the
+  filesystem.
 
 ## Comments
 
