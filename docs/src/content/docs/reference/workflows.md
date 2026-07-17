@@ -19,11 +19,11 @@ gate with a conditional agent turn.
 | `chamber-roster` | bash collector | `collect` | `ROSTER_KEY` | the Roster board |
 | `chamber-rooms` | bash collector | `collect` | `ROOMS_KEY` | the Rooms index |
 | `chamber-lenses` | bash collector | `collect` | `LENSES_KEY` | the Lenses index |
-| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, rendered as the Briefing banner's "The read" register |
+| `chamber-digest` | self-gating pipeline | `gate`/`author`/`publish` | `DIGEST_KEY` | the digest store, rendered as the Briefing's "The read" register |
 | `chamber-genesis` | prompt turn | `genesis` | none | nothing (writes a Mind) |
-| `chamber-lens` | prompt turn | `compose` | none | a per-subject lens panel |
+| `chamber-lens` | prompt turn | `compose` | none | a per-subject lens (a card in the Lenses index; a panel only once pinned) |
 | `chamber-lens-refresh` | prompt turn | `refresh` | none | re-emits an existing living lens |
-| `chamber-lens-html` | prompt turn | `compose` | none | a per-subject HTML lens panel |
+| `chamber-lens-html` | prompt turn | `compose` | none | a per-subject HTML lens, on the same terms |
 
 ## The operator's own lens producers
 
@@ -97,7 +97,7 @@ changed since the last digest.
 
 The cost-safety invariant: a quiet Chamber (no new rooms, lenses, or exhibits since
 the last digest) never spends an agent turn. Minds sit outside the *content floor*
-only — they are capacity, not work, so a bench that has produced nothing has no shape
+only. They are capacity, not work, so a bench that has produced nothing has no shape
 to synthesize and authoring a Mind onto a bare bench buys no turn. Once a room, lens,
 or exhibit exists the floor is met, and Minds are in the fingerprint like everything
 else: seating or retiring one then does re-author. `publish` still runs on every
@@ -136,8 +136,8 @@ for a subject and publishes it by calling `chamber_emit_lens`. It has:
 - `fail_on_tool_error: true`, so a publish that fails the board validation fails
   the run rather than reporting success with nothing rendered.
 - No `bindSnapshotKey`. The per-subject key (`rib:chamber:lens:{id}`) is chosen
-  at run time by the tool from the `id` the turn supplies, not pinned to one
-  static key, so each subject lands in its own panel.
+  at run time by the tool from the `id` the turn supplies, not fixed to one
+  static key, so each subject lands on its own key.
 
 The workflow prompt asks the model for `{ id, board, scope?, reason? }`. The
 `chamber_emit_lens` tool accepts one more optional provenance field,
@@ -196,8 +196,8 @@ declines.
 
 ## The Briefing is not a workflow
 
-The Briefing banner is rib-driven, not a contributed workflow. There is no
-`chamber-brief` workflow and the banner region binds no `workflow`. The rib
+The Briefing is rib-driven, not a contributed workflow. There is no
+`chamber-brief` workflow and its region binds no `workflow`. The rib
 seeds a quiet board at boot, and a single gate decides when to spend a paid
 agent turn: only when a room has ended, a lens has changed, or an exhibit has
 been tabled since the last watermark. The quiet path authors nothing. See

@@ -46,8 +46,8 @@ differs from the others by author and update model:
 | Room board | The room driver | Show the attributed conversation | Updated after each committed turn |
 | Lens | A Mind or the lens workflow | Preserve an interpretation you keep watching | Re-authored explicitly under a stable id |
 | Exhibit | A room turn via `chamber_table_exhibit` | Preserve a deliverable a discussion produced | Tabled once; deleted when no longer needed, or with its room |
-| Briefing | The rib's attention gate plus one agent turn | Surface newly ended rooms or changed lenses | Runs only when its watermark finds new substance |
-| Digest | Watermark-gated agent turn | Standing synthesis of current Chamber state | Runs only when fingerprint detects a change since last digest |
+| Briefing | The rib's attention gate plus one agent turn | Surface newly ended rooms, changed lenses, or tabled exhibits | Runs only when its watermark finds new substance |
+| Digest | Fingerprint-gated agent turn | Standing synthesis of current Chamber state | Runs only when fingerprint detects a change since last digest |
 | Roster and index boards | Deterministic collectors | Show persistent Chamber state | Cadence or explicit refresh |
 
 ## The board, and the pipeline it rides
@@ -216,14 +216,13 @@ exception: it describes one authoring, so omitting it clears it.
   that room's own board (below). Authoring a standing lens stays a deliberate,
   named act: the workflow or a direct chat tool call.
 - **As an HTML canvas.** A Mind (or any tool call) can invoke `chamber_emit_lens_html`
-  with a literal HTML string, rendered in a sandboxed iframe on the Chamber surface
-  under the Lenses group. With an `id` it is per-subject and persisted like a board
-  lens, and it takes the same `refresh` backing, so a designed page can be living too.
-  Without an `id` it lands on the legacy fixed key `rib:chamber:lens-html`, in-memory
-  only, and re-publishing replaces that single shared panel; having no record, it
-  takes no backing. An HTML lens has no index card, so its panel-head
-  **⋯ → Retire lens…** is its one *surface* delete path (the sandboxed iframe rightly
-  can't reach destructive verbs).
+  with a literal HTML string, rendered in a sandboxed iframe. With an `id` it is
+  per-subject and persisted like a board lens: it lands as a card in the Lenses
+  index, takes a panel only once pinned, and takes the same `refresh` backing, so a
+  designed page can be living too. Without an `id` it lands on the legacy fixed key
+  `rib:chamber:lens-html`, in-memory only, and re-publishing replaces that single
+  shared panel. Having no record, it takes no backing and no pin: it is always
+  panelled, because there would be no card to pin it back from.
 
 The two species are separate lenses in separate stores, sharing nothing but the id
 string. So one id can name both a board and a page, which is the natural pairing when
@@ -259,15 +258,23 @@ no cascade collects it; `chamber_list_exhibits` and `chamber_delete_exhibit` sta
 way to find and remove one. A Mind that declares the `lens` capability holds the
 exhibit tool in rooms.
 
-## Every panel uses the same canvas contract
+## Every board uses the same canvas contract
 
-Every panel on the Chamber surface is a published board, never hand-coded UI, but they
-do not all share an author. A lens, the briefing, and the digest are agent-authored: an agent turn
-composes the board. The roster and the live room transcript are deterministic boards a
-collector or the room driver assembles. What they have in common is the contract, not
-the author. Each is a board published to a `rib:chamber:*` key and drawn by the canvas.
-The briefing was the first proof an agent could author its own view, and it still runs
-on demand on its own key, distinct from the per-subject lenses described here.
+Every board Chamber publishes is a canvas board, never hand-coded UI, but they do
+not all share an author. A lens, the briefing, and the digest are agent-authored: an
+agent turn composes the board. The roster, the index boards, and the live room
+transcript are deterministic: a collector or the room driver assembles them. What
+they have in common is the contract, not the author. Each is a board published to a
+`rib:chamber:*` key and drawn by the canvas.
+
+Holding a key is not the same as holding a panel, and most of these do not. The
+surface has four standing regions (the Chamber panel, the Briefing, and the Rooms
+and Lenses indexes) plus whatever lenses are pinned. The digest renders inside the
+Briefing's "The read" register rather than on a region of its own; the roster
+reaches the surface through the Chamber panel's compose; and a room transcript is
+entered from its card. The briefing was the first proof an agent could author its
+own view, and it still runs on its own key, distinct from the per-subject lenses
+described here, though never on demand: only its gate may spend that turn.
 
 ## Related
 

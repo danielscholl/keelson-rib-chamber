@@ -241,7 +241,7 @@ all-selected.
 
 ## brief-watermark.json
 
-The watermark drives the briefing substance gate: it records what the banner
+The watermark drives the briefing substance gate: it records what the Briefing
 has already accounted for, so a paid briefing turn runs only when something new
 happened since the last one.
 
@@ -258,8 +258,8 @@ happened since the last one.
 `lensFingerprints` maps each lens `id` to its `updatedAt`, so a new lens, or one
 whose board actually changed, reads as changed. Because `updatedAt` tracks the
 board, a cadence refresh that re-emits the same board leaves the fingerprint alone
-and buys no briefing turn. `briefPromoted` tracks whether the banner
-currently holds a promoted briefing (`true`) or the quiet board (`false`). A
+and buys no briefing turn. `briefPromoted` tracks whether the Briefing
+currently holds a promoted board (`true`) or the quiet one (`false`). A
 missing or torn file reads as empty, so a cold start treats everything as new
 and unpromoted.
 

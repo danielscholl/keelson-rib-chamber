@@ -121,8 +121,8 @@ coding-review reviewer gate below.
 
 The `code` capability applies to coding rooms (rooms started with `coding: true` and
 a `projectId`): it lets a Mind run Bash, Edit, and Write. A coding review room
-requires the author Mind to declare `code` and the reviewer Mind to declare at least
-`read`.
+requires the author Mind to declare `code`, and the reviewer Mind to declare either
+`read` or `code`, so it can inspect the author's change.
 
 A fourth capability, `osdu`, lets a Mind consult read-only OSDU platform status
 during a room turn. Use it only when the osdu rib is co-installed, because those
