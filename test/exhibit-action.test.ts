@@ -155,6 +155,16 @@ describe("retire-lens kind check", () => {
     expect("error" in res && res.error).toMatch(/is an exhibit/);
     expect((await listLenses(lensesDir())).map((l) => l.id)).toEqual(["assessment"]);
   });
+
+  // The steering, not just the refusal: the Exhibits index is retired, so naming it
+  // sends the operator to a surface that no longer exists.
+  it("steers to the room's Tabled section, never a retired index", async () => {
+    await seedExhibit("assessment");
+    const res = await onAction({ type: "retire-lens", payload: { id: "assessment" } }, actionCtx);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/Tabled section of its room's board/);
+    expect("error" in res && res.error).not.toMatch(/Exhibits index/);
+  });
 });
 
 describe("chamber_table_exhibit tool", () => {
