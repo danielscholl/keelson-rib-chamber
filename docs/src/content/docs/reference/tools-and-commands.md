@@ -28,8 +28,8 @@ optional field is marked `?`.
 | `chamber_room_transcript` | no | no | Page a room's persisted transcript with `offset`/`limit`, avoiding the truncation `chamber_room_status` applies to a long transcript. Read-only. | `room`, `offset?`, `limit?` |
 | `chamber_retire_mind` | yes | no | Permanently remove a Mind's record and SOUL.md from the roster. Fails closed if absent. | `slug` |
 | `chamber_room_delete` | yes | no | Permanently delete an ended room's record, transcript, and ledger, plus every exhibit it tabled. Stop first with `chamber_room_stop`. | `room` |
-| `chamber_emit_lens` | yes | no | Author a lens: render an agent-composed canvas board onto the surface as its own live panel. | `id`, `board`, `scope?`, `maintainingMind?`, `reason?` |
-| `chamber_emit_lens_html` | yes | no | Author an HTML lens: publish a self-contained HTML page as its own live panel. A stable kebab-case `id` creates a per-subject panel that persists across restarts (re-emit to update); `title` names the panel head; omit `id` to target the shared legacy canvas. `refresh` makes it living on the board lens's rules, except `workflow` is required and the legacy canvas takes no backing. | `html`, `id?`, `title?`, `refresh?` |
+| `chamber_emit_lens` | yes | no | Author a lens: publish an agent-composed canvas board as a standing view on a subject. It lands as a card in the Lenses index, read with Open; it takes a surface panel only if an operator pins it, which is not the tool's to set. | `id`, `board`, `scope?`, `maintainingMind?`, `reason?`, `refresh?` |
+| `chamber_emit_lens_html` | yes | no | Author an HTML lens: publish a self-contained HTML page, rendered in a sandboxed iframe. A stable kebab-case `id` creates a per-subject lens that persists across restarts (re-emit to update) and lands as a card in the Lenses index; `title` names it; omit `id` to target the shared legacy canvas, which is always panelled. Like a board lens, a per-subject page takes a panel only when pinned. `refresh` makes it living on the board lens's rules, except `workflow` is required and the legacy canvas takes no backing. | `html`, `id?`, `title?`, `refresh?` |
 | `chamber_retire_lens` | yes | no | Permanently remove a lens of either species, both its record and its live panel. `kind` (`canvas` or `html`) picks; without it the id resolves to whichever store holds it, and an id naming both is refused rather than guessed. Fails closed if no such lens, or if the id names an exhibit. | `id`, `kind?` |
 | `chamber_table_exhibit` | yes | no | Table an exhibit: publish a canvas-board deliverable a discussion produced into the Tabled section of its room's board. | `id`, `board`, `reason?` |
 | `chamber_delete_exhibit` | yes | no | Permanently remove an exhibit, both its record and its snapshot key. Fails closed if no such exhibit, or if the id names a lens. | `id` |
@@ -161,6 +161,7 @@ without navigating.
 | `room-stop` | `{ slug }` | data (`{ slug }`) |
 | `room-delete` | `{ slug }` | data (`{ slug }`) |
 | `room-open` | `{ slug }` | `open-canvas` (a driving room's own key, else the room-view key; liveness is the driver's in-memory set, not the record's status) |
+| `room-summary` | `{ slug }` | `open-canvas` (the room-summary key: a rib-built HTML page of the room's outcome) |
 | `outcome-copy` | `{ slug }` | data (the room's outcome as a markdown string) |
 | `outcome-explore` | `{ slug }` | `open-chat` (seeded from the outcome document) |
 | `set-model` | `{ slug, model?, provider? }` | data (`{ slug, model? }`) |
