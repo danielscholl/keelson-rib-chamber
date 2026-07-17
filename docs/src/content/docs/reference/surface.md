@@ -131,10 +131,13 @@ Lenses and exhibits share one key family (`rib:chamber:lens:{id}`) and one id
 space, so the open path and the briefing's jump chips resolve either kind through
 the same key. An exhibit registers a key and never a region, at any pin state.
 
-Each lens gets its own per-id key. The key routes a re-publish back to the same
-panel, so re-authoring a lens `id` updates that panel in place. The harness
-enforces a per-surface region ceiling; a region the harness rejects unwinds the
-snapshot registration it paired with, rather than leaving an orphaned key.
+Each lens gets its own per-id key, and the key is what a re-publish routes back to,
+so re-authoring a lens `id` always updates that lens in place. Whether that reaches
+a panel depends on the pin: a pinned lens's board updates on the surface, an
+unpinned one's updates the key its card opens. The harness enforces a per-surface
+region ceiling, which only a pin can reach; a region the harness rejects unwinds
+the registration rather than leaving an orphaned key, and the record stays
+authoritative so a later pin re-seats it.
 
 Unpinning drops the region only. It deliberately does not release the key or the
 view declaration, both of which must outlive an unpin: the host resolves a key's

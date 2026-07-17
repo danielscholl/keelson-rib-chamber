@@ -118,11 +118,14 @@ a deterministic reverse-chron feed of recent activity that always renders.
 
 The Briefing is seeded with a quiet board at boot, and a single gate is the only
 path that may run the briefing turn. That turn is paid, so the gate runs it only
-when there is substance to brief: a room ended or a lens changed since a persisted
-watermark. A retire alone is not substance, because a removed lens is no longer in
-the current fingerprints the watermark is compared against, so it never promotes
-the Briefing. When nothing has changed, the quiet path authors nothing: no turn,
-and in the steady state no publish or write either.
+when there is substance to brief: a room ended, a lens changed, or an exhibit was
+tabled since a persisted watermark. The exhibit case is not a special one. Both
+species share the lens fingerprint set, so a tabled or re-tabled deliverable reads
+as changed exactly as a re-authored lens does. A retire alone is not substance,
+because a removed record is no longer in the current fingerprints the watermark is
+compared against, so it never promotes the Briefing. When nothing has changed, the
+quiet path authors nothing: no turn, and in the steady state no publish or write
+either.
 
 The briefing turn composes a board from metadata only. It is handed the names,
 statuses, and turn counts of ended rooms and the scope and reason of changed lenses,

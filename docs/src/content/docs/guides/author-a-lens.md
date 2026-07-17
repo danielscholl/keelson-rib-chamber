@@ -37,9 +37,11 @@ tool, and is not reachable from an HTML lens's iframe, because a page that could
 pin itself is exactly the clutter pinning removes.
 
 The rib sets no limit on how many lenses can exist, or how many may be pinned. The
-only ceiling is the harness per-surface region limit. If adding a panel would
-exceed it, the emit fails closed and unwinds cleanly, so a rejected lens never
-leaves a half-registered panel behind.
+only ceiling is the harness per-surface region limit, and Pin is where you would
+meet it: authoring registers no panel, so a lens costs nothing against that ceiling
+until you pin it. A pin the harness cannot seat leaves the lens's key and record
+intact rather than half-registering a panel, and pinning it again re-tries the
+seating, so a pin that failed once converges rather than needing a restart.
 
 :::note[Upgrading]
 Lenses authored before pinning existed carry no `pinned` field, and absent means
@@ -181,12 +183,16 @@ retire takes effect immediately.
 The standing **Briefing** is also an agent-authored board, but it is not a
 per-subject lens. It is rib-driven, and nothing runs it on demand: its gate is the
 only path that may spend its turn, and every trigger is a Chamber mutation. That
-turn is promoted only when a room ends or a lens changes since the last briefing,
-which keeps a paid turn from firing on every surface refresh.
+turn is promoted only when a room ends, a lens changes, or an exhibit is tabled
+since the last briefing, which keeps a paid turn from firing on every surface
+refresh.
 
-Authoring or re-authoring a lens counts as a change and can promote the briefing.
-Retiring a lens does not: a retire alone never triggers a briefing turn. So if you
-clear out stale lenses, the Briefing stays as it was until the next real change.
+Authoring or re-authoring a lens counts as a change and can promote the briefing,
+and so does tabling one's sibling: an exhibit rides the same fingerprint set, so a
+newly tabled or re-tabled deliverable is substance too. Retiring a lens is not: a
+retire alone never triggers a briefing turn, because a removed record is no longer
+in the fingerprints the watermark is compared against. So if you clear out stale
+lenses, the Briefing stays as it was until the next real change.
 
 ## Related
 
