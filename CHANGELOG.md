@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.1...v0.47.2) (2026-07-17)
+
+
+### Documentation
+
+* update prime.md and AGENTS.md with updated rib-chamber guidance ([#322](https://github.com/danielscholl/keelson-rib-chamber/issues/322)) ([d49b34d](https://github.com/danielscholl/keelson-rib-chamber/commit/d49b34de6fb1fe9d4f3652f5a562978093c884d0))
+
 ## [0.47.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.0...v0.47.1) (2026-07-17)
 
 
