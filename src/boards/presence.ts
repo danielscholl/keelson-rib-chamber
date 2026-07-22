@@ -187,13 +187,16 @@ function assemblyHint(cast: readonly Mind[]): string {
 // so the picker lives on the seats themselves, not a separate roster.
 function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boolean }) {
   const active = rooms.filter((r) => r.status === "active" && seatsMind(r, mind.slug));
-  const status = select?.selected
-    ? { value: "at the table", tone: "brand" as CanvasTone }
-    : active.length === 0
-      ? { value: "on the bench" }
+  // Bench vs table is carried by the card's own selection ring, not a line of prose:
+  // an unlabelled field renders in the same face as the mission above it, so a resting
+  // "on the bench" read as a fourth sentence of the persona. A session is the one state
+  // nothing visual encodes, so it alone still prints — labelled, so it reads as metadata.
+  const session =
+    active.length === 0
+      ? undefined
       : active.length === 1
-        ? { value: `in session · ${active[0]?.name}`, tone: "info" as CanvasTone }
-        : { value: `active in ${active.length} rooms`, tone: "info" as CanvasTone };
+        ? { label: "session", value: active[0]?.name ?? "", tone: "info" as CanvasTone }
+        : { label: "session", value: `${active.length} rooms`, tone: "info" as CanvasTone };
   const tone = identityToneForSlot(mind.identitySlot);
   return {
     title: mind.name,
@@ -202,10 +205,13 @@ function seatCard(mind: Mind, rooms: readonly Room[], select?: { selected: boole
       label: mind.role.trim() || "Mind",
       ...(tone === "neutral" ? {} : { tone }),
     },
-    // Stacked: the mission reads as its own line with the status as a quiet
+    // Stacked: the mission reads as its own line with the session as a quiet
     // footer beneath it, not an inline `·`-joined meta row.
     stacked: true,
-    fields: [{ value: mission(mind.mission?.trim() || mind.persona) }, status],
+    fields: [
+      { value: mission(mind.mission?.trim() || mind.persona) },
+      ...(session ? [session] : []),
+    ],
     actions: mindCardActions(mind),
     // The card body IS the who's-in control (a `draft-set` toggle); `selected` rings
     // the ones at the table. The Enter/Model buttons keep their own clicks — the

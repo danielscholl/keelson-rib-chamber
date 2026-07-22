@@ -86,10 +86,10 @@ describe("buildChamberBoard cold start", () => {
     expect(openSeat(board).actions?.[0]?.type).toBe("describe-own");
   });
 
-  test("a stopped room is not in session — no pulse chip, footer on the bench", () => {
+  test("a stopped room is not in session — no pulse chip, no session footer", () => {
     const board = buildChamberBoard([mind({ identitySlot: 0 })], [room({ status: "stopped" })]);
     expect(board.header?.chip).toBe("bench at rest");
-    expect(cards(board)[0]?.fields?.at(-1)?.value).toBe("on the bench");
+    expect(cards(board)[0]?.fields?.map((f) => f.label)).toEqual([undefined]);
   });
 });
 
@@ -110,10 +110,11 @@ describe("buildChamberBoard seated", () => {
     expect(items[0]?.dot).toBe(IDENTITY_SLOT_TONES[0]);
     expect(items[0]?.pill?.tone).toBe(IDENTITY_SLOT_TONES[0]);
     expect(items[1]?.pill?.label).toBe("Research Partner");
-    // Mission line first, status footer last — stacked, not an inline meta row.
+    // Mission line only — a Mind at rest carries no status prose, so the card body
+    // never reads as a fourth sentence of the persona.
     expect(items[0]?.stacked).toBe(true);
     expect(items[0]?.fields?.[0]?.value).toBe("You are Jarvis.");
-    expect(items[0]?.fields?.at(-1)?.value).toBe("on the bench");
+    expect(items[0]?.fields?.length).toBe(1);
     expect(items[0]?.actions?.map((a) => a.type)).toEqual(["enter-mind", "set-model", "retire"]);
   });
 
@@ -202,22 +203,26 @@ describe("buildChamberBoard seated", () => {
   });
 });
 
-describe("buildChamberBoard status footer", () => {
-  test("is room-scoped: session name when in one, a count past that, never a verb", () => {
+describe("buildChamberBoard session footer", () => {
+  test("is room-scoped: session name when in one, a count past that, absent otherwise", () => {
     const minds = [mind({ slug: "jarvis", identitySlot: 0 })];
     const one = cards(
       buildChamberBoard(minds, [room({ status: "active", name: "Liveness decision" })]),
     );
-    expect(one[0]?.fields?.at(-1)?.value).toBe("in session · Liveness decision");
+    expect(one[0]?.fields?.at(-1)).toMatchObject({
+      label: "session",
+      value: "Liveness decision",
+      tone: "info",
+    });
     const two = cards(
       buildChamberBoard(minds, [
         room({ slug: "a", status: "active" }),
         room({ slug: "b", status: "active", participants: ["jarvis"] }),
       ]),
     );
-    expect(two[0]?.fields?.at(-1)?.value).toBe("active in 2 rooms");
+    expect(two[0]?.fields?.at(-1)).toMatchObject({ label: "session", value: "2 rooms" });
     const done = cards(buildChamberBoard(minds, [room({ status: "done" })]));
-    expect(done[0]?.fields?.at(-1)?.value).toBe("on the bench");
+    expect(done[0]?.fields?.length).toBe(1);
   });
 
   test("counts a room the Mind moderates without being a participant", () => {
@@ -232,7 +237,39 @@ describe("buildChamberBoard status footer", () => {
         }),
       ]),
     );
-    expect(items[0]?.fields?.at(-1)?.value).toBe("in session · Moderated debate");
+    expect(items[0]?.fields?.at(-1)).toMatchObject({
+      label: "session",
+      value: "Moderated debate",
+    });
+  });
+
+  test("is orthogonal to the draft: seating a mid-session Mind keeps its session named", () => {
+    // The two states answer different questions — the ring says "in this cast", the
+    // field says "already talking over there" — so seating must not swallow the room.
+    // Two Minds and headroom under the cap, else the bench withholds the seat toggle.
+    const minds = [
+      mind({ slug: "jarvis", name: "Jarvis", identitySlot: 0 }),
+      mind({ slug: "mycroft", name: "Mycroft", identitySlot: 1 }),
+    ];
+    const board = buildChamberBoard(
+      minds,
+      [room({ status: "active", participants: ["jarvis"], name: "Liveness decision" })],
+      [],
+      Date.parse("2026-07-12T09:00:05.000Z"),
+      { selected: new Set(["jarvis"]) },
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const jarvis = cards(board).find((c) => c.title === "Jarvis");
+    expect(jarvis?.selected).toBe(true);
+    expect(jarvis?.fields?.at(-1)).toMatchObject({
+      label: "session",
+      value: "Liveness decision",
+      tone: "info",
+    });
+    // The unseated Mind is in no room, so its card carries the mission alone.
+    const mycroft = cards(board).find((c) => c.title === "Mycroft");
+    expect(mycroft?.selected).toBe(false);
+    expect(mycroft?.fields?.length).toBe(1);
   });
 });
 
@@ -382,22 +419,24 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     }
   });
 
-  test("assembling: seats become click-to-seat toggles and read 'at the table' when seated", () => {
+  test("assembling: seats become click-to-seat toggles, ringed — not labelled — when seated", () => {
     const board = buildChamberBoard([A, B], [], [], NOW, draft(["a"]));
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(board.header?.chip).toBe("assembling");
     const ada = seat(board, "Ada");
     // The whole card is the participant toggle now: a draft-set on the card body,
-    // selected + "at the table"; the management verbs stay their own buttons.
+    // `selected` rings it; the management verbs stay their own buttons. Seating adds
+    // no field — the ring IS the indicator, so seated and benched read identically
+    // in the body and differ only in the frame.
     expect(ada?.action).toEqual({ type: "draft-set", payload: { slug: "a" } });
     expect(ada?.selected).toBe(true);
-    expect(ada?.fields?.at(-1)?.value).toBe("at the table");
+    expect(ada?.fields?.length).toBe(1);
     expect(ada?.actions?.map((a) => a.type)).toEqual(["enter-mind", "set-model", "retire"]);
-    // The un-seated Mind carries the same toggle, not selected, still on the bench.
+    // The un-seated Mind carries the same toggle, not selected — same body, no ring.
     const bo = seat(board, "Bo");
     expect(bo?.action).toEqual({ type: "draft-set", payload: { slug: "b" } });
     expect(bo?.selected).toBe(false);
-    expect(bo?.fields?.at(-1)?.value).toBe("on the bench");
+    expect(bo?.fields?.length).toBe(1);
   });
 
   test("with two seated the composer unfolds the shape tabs and named cast without Clear", () => {
