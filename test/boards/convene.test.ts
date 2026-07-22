@@ -198,8 +198,24 @@ describe("conveneScopeSection", () => {
     expect(proj?.required).toBeUndefined();
   });
 
-  test("no bar at all when the host exposes no projects", () => {
+  test("no bar at all when the host exposes no projects and nothing is scoped", () => {
     expect(conveneScopeSection([], {})).toBeNull();
+  });
+
+  test("a scope the host no longer offers stays selectable so it can be cleared", () => {
+    // Otherwise the draft keeps a projectId every convene rejects with no UI path to
+    // drop it — and a defaultValue matching no option fails the board's own schema, so
+    // the panel would stop publishing rather than merely look stale.
+    for (const projects of [[], [{ id: "p1", name: "keelson" }]]) {
+      const section = conveneScopeSection(projects, { projectId: "gone" });
+      expect(section).not.toBeNull();
+      if (!section) continue;
+      expect(valid(section)).toBe(true);
+      const proj = shapes(section)[0]?.fields?.find((f) => f.name === "project");
+      expect(proj?.options?.some((o) => o.value === "gone")).toBe(true);
+      expect(proj?.options?.find((o) => o.value === "gone")?.label).toContain("unavailable");
+      expect(proj?.defaultValue).toBe("gone");
+    }
   });
 
   test("the coding tier appears only once a project is set", () => {

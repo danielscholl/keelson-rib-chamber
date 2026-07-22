@@ -59,21 +59,33 @@ const criteriaField: CanvasActionField = {
 // Where a room runs, as a standing bar above the shape tabs rather than a field inside
 // one of them: a project is a property of the room (it resolves to the cwd every turn
 // takes) and not of how the Minds take turns, so asking for it per-shape both scattered
-// it across two of five forms and lost it on every change of shape. Null when the host
-// exposes no projects — there is nothing to scope to, so the bar doesn't render and a
-// room simply runs in the shared scope.
+// it across two of five forms and lost it on every change of shape. Null only when there
+// is neither anything to scope to nor a scope to recover from — a room then simply runs
+// in the shared scope.
 export function conveneScopeSection(
   projects: readonly ConveneProject[],
   scope: { projectId?: string; coding?: boolean },
 ): CanvasBoardView["sections"][number] | null {
-  if (projects.length === 0) return null;
+  // A scope naming a project the host no longer offers still has to be selectable: the
+  // draft holds a projectId every convene would reject, so the bar has to stay reachable
+  // to clear it — and a defaultValue matching no option fails the board's own schema, so
+  // the whole panel would stop publishing rather than merely look stale.
+  const stale =
+    scope.projectId && !projects.some((p) => p.id === scope.projectId)
+      ? scope.projectId
+      : undefined;
+  // Nothing to scope to and nothing to recover from.
+  if (projects.length === 0 && !stale) return null;
   const project: CanvasActionField = {
     name: "project",
     label: "Project",
     // Not required, so this doubles as the clear option — picking it dispatches "" and
     // drops the scope (and the coding tier with it).
     placeholder: "No project (shared)",
-    options: projects.map((p) => ({ value: p.id, label: p.name })),
+    options: [
+      ...projects.map((p) => ({ value: p.id, label: p.name })),
+      ...(stale ? [{ value: stale, label: `${stale} (unavailable)` }] : []),
+    ],
     defaultValue: scope.projectId ?? "",
   };
   // The coding tier is unconfined without a repo to bound it to, so it only appears once

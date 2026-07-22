@@ -94,22 +94,21 @@ export async function draftSetAction(action: RibAction): Promise<RibActionResult
 export async function scopeSetAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   const projectInput = asNonEmptyString(payload.project);
-  const coding = asNonEmptyString(payload.coding) === "on";
+  // An empty project is authoritative. A submit carries every field the form rendered,
+  // so clearing the project on a coding-enabled scope arrives as
+  // `{ project: "", coding: "on" }` — that is a legitimate clear, not a contradiction.
+  // Dropping the project drops the tier with it (setScope enforces the same pairing),
+  // rather than making the operator turn coding off in a separate submit first.
   if (!projectInput) {
-    // The coding tier has no confinement boundary without a project. The form can't
-    // produce this pair (the control only renders once a project is set), so a payload
-    // that does is forged — surface it rather than silently dropping the coding flag.
-    if (coding) {
-      return { ok: false, error: "the coding tier needs a project — pick one first" };
-    }
     try {
-      const draft = await setScope(undefined, false);
+      await setScope(undefined, false);
       refreshPresence();
-      return { ok: true, data: { projectId: null, coding: draft.coding === true } };
+      return { ok: true, data: { projectId: null, coding: false } };
     } catch (e) {
       return { ok: false, error: errText(e) };
     }
   }
+  const coding = asNonEmptyString(payload.coding) === "on";
   const resolved = resolveProjectInput(projectInput);
   if (!resolved.ok) return { ok: false, error: resolved.error };
   try {

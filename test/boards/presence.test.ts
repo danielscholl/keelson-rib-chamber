@@ -484,6 +484,10 @@ describe("buildChamberBoard convene composer (folded in)", () => {
 
   test("a scope naming a project the host has dropped reads as stale, not as nothing", () => {
     const board = buildChamberBoard([A, B], [], [], NOW, scoped(["a", "b"], "gone"), PROJECTS);
+    // The whole panel must still publish: a select whose defaultValue matches no option
+    // fails the schema, which would take the bench down with it, not just the bar.
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(sectionIndex(board, "Where does it run?")).toBeGreaterThan(-1);
     const line = board.sections
       .flatMap((s) => (s.kind === "rows" ? s.items : []))
       .find((i) => typeof i.text === "string" && i.text.includes("at the table"));
