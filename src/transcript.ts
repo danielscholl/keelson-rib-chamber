@@ -1,6 +1,6 @@
 import type { Brief, TokenUsage } from "@keelson/shared";
 import { stripControlJson } from "./routing.ts";
-import type { MindSlug, TaskLedger, TurnEntry } from "./types.ts";
+import type { MindSlug, TaskLedger, ToolCall, TurnEntry } from "./types.ts";
 
 // The grounding brief rendered for a turn prompt. Undefined when the brief carries no
 // source and no criterion, so an ungrounded room adds nothing to the prompt (the
@@ -364,6 +364,7 @@ export interface BuildTurnEntryInput {
   aborted?: boolean;
   round?: number;
   usage?: TokenUsage;
+  toolCalls?: readonly ToolCall[];
 }
 
 // Build a transcript entry from driver-stamped fields. Centralised so the driver
@@ -381,5 +382,6 @@ export function buildTurnEntry(input: BuildTurnEntryInput): TurnEntry {
     ...(input.aborted ? { aborted: true } : {}),
     at: input.at,
     ...(input.usage ? { usage: input.usage } : {}),
+    ...(input.toolCalls ? { toolCalls: input.toolCalls } : {}),
   };
 }

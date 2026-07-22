@@ -1853,3 +1853,42 @@ describe("room driver — concurrent (speak-parallel)", () => {
     expect((await store.loadRoom("demo"))?.status).toBe("stopped");
   });
 });
+
+describe("room driver — tool + usage capture", () => {
+  test("persists tool calls (name, failed flag) and usage harvested from the turn stream", async () => {
+    const h = harness([
+      {
+        text: "done",
+        usage: {
+          inputTokens: 1200,
+          outputTokens: 40,
+          contextTokens: 148_000,
+          contextWindow: 200_000,
+        },
+        emits: [
+          { type: "tool_use", id: "t1", toolName: "Read", toolInput: { file_path: "a.ts" } },
+          { type: "tool_use", id: "t2", toolName: "Bash", toolInput: { command: "grep x" } },
+          { type: "tool_result", toolUseId: "t2", content: "exit 2", isError: true },
+          { type: "tool_use", id: "t3", toolName: "mcp__srv__lookup", toolInput: {} },
+        ],
+      },
+    ]);
+    await h.driver.start({ ...START, turnBudget: 4 });
+    await h.driver.step("demo");
+    const first = h.transcripts.get("demo")?.[0];
+    // usage flows through unchanged (drives the Context meter + trailing).
+    expect(first?.usage?.contextWindow).toBe(200_000);
+    // mcp__ names are stripped to their leaf; call order is preserved.
+    expect(first?.toolCalls?.map((c) => c.name)).toEqual(["Read", "Bash", "lookup"]);
+    // Only the call whose tool_result carried isError is flagged.
+    expect(first?.toolCalls?.find((c) => c.name === "Bash")?.errored).toBe(true);
+    expect(first?.toolCalls?.find((c) => c.name === "Read")?.errored).toBeUndefined();
+  });
+
+  test("a text-only turn persists no toolCalls", async () => {
+    const h = harness([{ text: "just talking", usage: { inputTokens: 10, outputTokens: 5 } }]);
+    await h.driver.start({ ...START, turnBudget: 4 });
+    await h.driver.step("demo");
+    expect(h.transcripts.get("demo")?.[0]).not.toHaveProperty("toolCalls");
+  });
+});

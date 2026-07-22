@@ -83,6 +83,8 @@ export interface TurnScript {
   chunks?: string[];
   // Raw chunks yielded after the text ones — a turn that reached a tool.
   emits?: MessageChunk[];
+  // The usage the result reports (drives the per-turn token trailing + Context meter).
+  usage?: RibAgentTurnResult["usage"];
 }
 
 // Scripted runAgentTurn: each call consumes the next script (repeating the last).
@@ -107,6 +109,7 @@ export function scriptedRunAgentTurn(scripts: TurnScript[]) {
       result: Promise.resolve({
         status: script.status ?? "ok",
         text: script.text,
+        ...(script.usage ? { usage: script.usage } : {}),
       } satisfies RibAgentTurnResult),
     };
     return turn;

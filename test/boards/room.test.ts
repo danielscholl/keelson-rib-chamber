@@ -91,6 +91,17 @@ function journeyItems(board: Board) {
   const s = board.sections.find((x) => x.kind === "journey");
   return s?.kind === "journey" ? s.items : undefined;
 }
+// The Context meter is the `bars` section nested in the side (weight 1) column.
+function contextBars(board: Board) {
+  const side = columnsSection(board).columns[1];
+  const bars = side?.sections.find((x) => x.kind === "bars");
+  return bars?.kind === "bars" ? bars.items : undefined;
+}
+// The Totals band is the one top-level `stats` section titled "Totals".
+function totalsStats(board: Board) {
+  const s = board.sections.find((x) => x.kind === "stats" && x.title === "Totals");
+  return s?.kind === "stats" ? s.items : undefined;
+}
 
 describe("buildRoomBoard", () => {
   test("empty transcript is valid; no vitals stats (no turns, no scope)", () => {
@@ -648,15 +659,21 @@ describe("buildRoomBoard", () => {
     expect(vitalsRow(empty)).toBeUndefined();
   });
 
-  test("token usage sums across turns onto the same line, omitted when no turn carries it", () => {
+  test("token totals ride the Totals stats band, not the vitals line; omitted when no turn carries usage", () => {
     const noUsage = buildRoomBoard(room(), [entry()]);
     expect(vitalsRow(noUsage)?.text).not.toContain("↑");
+    expect(totalsStats(noUsage)).toBeUndefined();
 
     const board = buildRoomBoard(room(), [
       entry({ usage: { inputTokens: 100_000, outputTokens: 8_000 } }),
       entry({ usage: { inputTokens: 48_000, outputTokens: 3_000 } }),
     ]);
-    expect(vitalsRow(board)?.text).toContain("↑ 148k in · ↓ 11k out");
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    // Totals moved off the vitals line into the stats band.
+    expect(vitalsRow(board)?.text).not.toContain("↑");
+    const tiles = totalsStats(board);
+    expect(tiles?.find((t) => t.label === "input · total")?.value).toBe("↑ 148k");
+    expect(tiles?.find((t) => t.label === "output · total")?.value).toBe("↓ 11k");
   });
 
   test("the scope, when set, rides as a leading chip on the vitals row", () => {
@@ -1032,5 +1049,102 @@ describe("buildRoomBoard — the Tabled section", () => {
     ]);
     expect(vitalsRow(board)).toBeDefined();
     expect(outcomeCard(board)).toBeUndefined();
+  });
+});
+
+describe("buildRoomBoard · observability", () => {
+  const withWindow = (input: number, ctx: number, window: number) =>
+    ({ inputTokens: input, outputTokens: 100, contextTokens: ctx, contextWindow: window }) as const;
+
+  test("a turn's trailing folds in a tool count and its token spend", () => {
+    const board = buildRoomBoard(room(), [
+      entry({
+        turnIndex: 0,
+        usage: { inputTokens: 12_400, outputTokens: 640 },
+        toolCalls: [{ name: "Read", primary: "services.py" }, { name: "Grep" }],
+      }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const trailing = debateItems(board)[0]?.trailing ?? "";
+    expect(trailing).toContain("⚙ 2 tools");
+    expect(trailing).toContain("↑12k ↓640");
+  });
+
+  test("one tool reads as singular, and no usage/tools leaves a bare time trailing", () => {
+    const one = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "Read" }] })]);
+    expect(debateItems(one)[0]?.trailing).toContain("⚙ 1 tool");
+    const bare = buildRoomBoard(room(), [entry()]);
+    expect(bare && debateItems(bare)[0]?.trailing).not.toContain("⚙");
+    expect(debateItems(bare)[0]?.trailing).not.toContain("↑");
+  });
+
+  test("tool calls land in the row detail — with a failed note — even when the turn text is short", () => {
+    const board = buildRoomBoard(room(), [
+      entry({
+        parts: [{ text: "ok" }],
+        toolCalls: [
+          { name: "Read", primary: "services.py" },
+          { name: "Bash", primary: "grep …", errored: true },
+        ],
+      }),
+    ]);
+    const detail = debateItems(board)[0]?.detail ?? "";
+    expect(detail).toContain("Read — services.py");
+    expect(detail).toContain("Bash — grep … — failed");
+  });
+
+  test("Context bars appear per Mind whose latest turn reports a window, toned by fill", () => {
+    const board = buildRoomBoard(
+      room({ participants: ["a", "b"] }),
+      [
+        entry({ from: "a", turnIndex: 0, usage: withWindow(1, 148_000, 200_000) }), // 74% → warn
+        entry({ from: "b", turnIndex: 1, usage: withWindow(1, 62_000, 200_000) }), // 31% → ok
+      ],
+      undefined,
+      [mind({ slug: "a", name: "Ada" }), mind({ slug: "b", name: "Bo" })],
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const bars = contextBars(board);
+    expect(bars?.map((b) => b.label)).toEqual(["Ada", "Bo"]);
+    expect(bars?.[0]).toMatchObject({ value: 148_000, total: 200_000, tone: "warn" });
+    expect(bars?.[0]?.trailing).toBe("148k / 200k · 74%");
+    expect(bars?.[1]?.tone).toBe("ok");
+  });
+
+  test("a fill at or over 85% tones the Context bar red (error)", () => {
+    const board = buildRoomBoard(room({ participants: ["a"] }), [
+      entry({ from: "a", usage: withWindow(1, 181_000, 200_000) }), // 90%
+    ]);
+    expect(contextBars(board)?.[0]?.tone).toBe("error");
+  });
+
+  test("the latest window reading per Mind wins", () => {
+    const board = buildRoomBoard(room({ participants: ["a"] }), [
+      entry({ from: "a", turnIndex: 0, usage: withWindow(1, 40_000, 200_000) }),
+      entry({ from: "a", turnIndex: 1, usage: withWindow(1, 150_000, 200_000) }),
+    ]);
+    expect(contextBars(board)?.[0]?.value).toBe(150_000);
+  });
+
+  test("no Context section when no turn reports a window (provider omits it)", () => {
+    const board = buildRoomBoard(room(), [
+      entry({ usage: { inputTokens: 1000, outputTokens: 50 } }), // spend, but no window
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(contextBars(board)).toBeUndefined();
+    // Decisions still resolves at its usual slot when Context is absent.
+    expect(vitalsRow(board)).toBeDefined();
+  });
+
+  test("the Totals band counts tool calls and flags failures", () => {
+    const board = buildRoomBoard(room(), [
+      entry({ turnIndex: 0, toolCalls: [{ name: "Read" }, { name: "Bash", errored: true }] }),
+      entry({ turnIndex: 1, toolCalls: [{ name: "Grep" }] }),
+    ]);
+    const tiles = totalsStats(board);
+    const toolTile = tiles?.find((t) => t.label === "tool calls");
+    expect(toolTile?.value).toBe(3);
+    expect(toolTile?.sub).toBe("1 failed");
+    expect(toolTile?.tone).toBe("warn");
   });
 });

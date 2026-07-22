@@ -1,13 +1,17 @@
 import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
+import { toolPresentation } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { flatFromRoomConfig } from "../room-config.ts";
 import {
   clockTime,
+  contextFillTone,
+  countToolCalls,
   type DecisionMarker,
   flattenMarkdown,
   formatDuration,
   formatTokenCount,
+  latestContextByMind,
   type OutcomeSplit,
   outcomeReceipt,
   parseDecisionMarkers,
@@ -33,6 +37,9 @@ import {
 // share, and the return type a `columns` slot's leaf sections need (not the
 // full board-section union, which also includes `columns` itself).
 type RowsSection = Extract<CanvasBoardView["sections"][number], { kind: "rows" }>;
+
+// A `bars` section — the per-Mind context meter's shape (a leaf the rail column nests).
+type BarsSection = Extract<CanvasBoardView["sections"][number], { kind: "bars" }>;
 
 // One rows item — the debate feed, the Voices/Decisions rail, and the Topic row
 // all share this shape.
@@ -97,13 +104,21 @@ export function buildRoomBoard(
     items: buildDebateItems(room, transcript, textFor, mindBySlug, roundDecisions, decisions),
   };
   const voicesSection = buildVoicesSection(room, mindBySlug, counts);
+  const contextSection = buildContextSection(room, transcript, mindBySlug);
   const decisionsSection = buildDecisionsSection(decisions, mindBySlug, outcome);
 
   const columnsSection: CanvasBoardView["sections"][number] = {
     kind: "columns",
     columns: [
       { weight: 1.9, sections: [debateColumn] },
-      { weight: 1, sections: [voicesSection, ...(decisionsSection ? [decisionsSection] : [])] },
+      {
+        weight: 1,
+        sections: [
+          voicesSection,
+          ...(contextSection ? [contextSection] : []),
+          ...(decisionsSection ? [decisionsSection] : []),
+        ],
+      },
     ],
   };
 
@@ -139,6 +154,7 @@ export function buildRoomBoard(
       ...groundingSection,
       ...planSection,
       columnsSection,
+      ...buildTotalsSection(transcript),
       ...outcomeSection,
       ...buildTabledSection(tabled),
       roomControls(room, mindBySlug),
@@ -207,8 +223,8 @@ function findLastAgentIndex(transcript: readonly TurnEntry[]): number {
 // hero tiles (the right weight for a handful of headline KPIs, the wrong one
 // here: these are secondary facts riding beside the debate, not the point of
 // the screen). A single `rows` item reads at the same quiet register as the
-// round dividers below it: duration + its clock-time span, then token usage,
-// with the scope (when set) as a small leading chip.
+// round dividers below it: duration + its clock-time span, with the scope (when
+// set) as a small leading chip. Token/tool totals ride the Totals stats band.
 function buildVitalsSection(
   transcript: readonly TurnEntry[],
   projectLabel: string | undefined,
@@ -220,12 +236,8 @@ function buildVitalsSection(
     const duration = formatDuration(first.at, last.at);
     if (duration) parts.push(`${duration} · ${clockTime(first.at)} → ${clockTime(last.at)}`);
   }
-  const usage = sumTurnUsage(transcript);
-  if (usage) {
-    parts.push(
-      `↑ ${formatTokenCount(usage.inputTokens)} in · ↓ ${formatTokenCount(usage.outputTokens)} out`,
-    );
-  }
+  // Token totals moved to the Totals stats band below the debate; the vitals line
+  // stays the quiet duration + scope register it was.
   if (parts.length === 0 && !projectLabel) return [];
   return [
     {
@@ -663,26 +675,33 @@ function turnRow(
 ): FeedItem {
   const label = mindBySlug.get(entry.from)?.name ?? entry.from;
   const time = clockTime(entry.at);
+  const observ = turnTokenTail(entry);
+  const tools = toolCallLines(entry);
 
   if (entry.aborted) {
     return {
       glyph: "error",
       chip: { label, tone: roleTone(entry.role) },
       text: "(aborted)",
-      trailing: `${time} · aborted`,
+      trailing: `${time} · aborted${observ}`,
+      // The tools already ran server-side before the abort, so list them even here.
+      ...(tools ? { detail: tools } : {}),
     };
   }
 
   const flattened = flattenMarkdown(textFor(entry, index));
   const summary = summaryLine(flattened);
   const text = summary || "(no text)";
-  const detail =
+  const textDetail =
     flattened.trim().length > 0 && flattened.trim() !== summary ? flattened : undefined;
+  // The turn's tools (option B: folded) expand inside the same `detail` disclosure as
+  // its full text — appended below it, or standing alone when the turn text is short.
+  const detail = [textDetail, tools].filter(Boolean).join("\n\n") || undefined;
   const decidedHere = decisions.filter((d) => d.turnIndex === index);
   const decidedSuffix = decidedHere.length
     ? ` · ${decidedHere.map((d) => `Q${d.question} decided`).join(", ")}`
     : "";
-  const trailing = `${time}${decidedSuffix}`;
+  const trailing = `${time}${decidedSuffix}${observ}`;
 
   if (entry.from === synthesizer || entry.from === manager || entry.from === moderator) {
     return {
@@ -697,6 +716,34 @@ function turnRow(
   const mind = entry.role === "agent" ? mindBySlug.get(entry.from) : undefined;
   const tone = mind ? identityToneForSlot(mind.identitySlot) : roleTone(entry.role);
   return { glyph: tone, chip: { label, tone }, text, trailing, ...(detail ? { detail } : {}) };
+}
+
+// The folded observability tail a turn row carries after its time: a compact tool
+// count (option B) and the turn's own token spend, each added only when present.
+function turnTokenTail(entry: TurnEntry): string {
+  const parts: string[] = [];
+  const n = entry.toolCalls?.length ?? 0;
+  if (n > 0) parts.push(`⚙ ${n} tool${n === 1 ? "" : "s"}`);
+  if (entry.usage) {
+    parts.push(
+      `↑${formatTokenCount(entry.usage.inputTokens)} ↓${formatTokenCount(entry.usage.outputTokens)}`,
+    );
+  }
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
+// The turn's tool calls as plain-text lines for the row's `detail` disclosure —
+// each with its presentation marker, name, arg preview, and a failed note. The board
+// contract has no nested collapsible, so this rides the same detail the full text uses.
+function toolCallLines(entry: TurnEntry): string | undefined {
+  if (!entry.toolCalls?.length) return undefined;
+  const lines = entry.toolCalls.map((c) => {
+    const marker = toolPresentation(c.name).marker;
+    const arg = c.primary ? ` — ${c.primary}` : "";
+    const failed = c.errored ? " — failed" : "";
+    return `${marker} ${c.name}${arg}${failed}`;
+  });
+  return `Tools\n${lines.join("\n")}`;
 }
 
 function summaryLine(flatText: string, max = 140): string {
@@ -751,6 +798,67 @@ function voiceRow(
     text: role?.trim() || "Mind",
     trailing: `${turns} turn${turns === 1 ? "" : "s"}`,
   };
+}
+
+// The Context meter: one `bars` fill per speaker whose latest turn reported a context
+// window, in the same facilitator-then-participant order as Voices, toned green→amber→
+// red by fill. A provider that reports no window contributes no bar; when none do, the
+// whole section is omitted rather than rendering an empty meter.
+function buildContextSection(
+  room: Room,
+  transcript: readonly TurnEntry[],
+  mindBySlug: Map<string, Mind>,
+): BarsSection | undefined {
+  const latest = latestContextByMind(transcript);
+  const order: MindSlug[] = [];
+  const seen = new Set<string>();
+  for (const [slug] of facilitatorRoles(room)) {
+    if (!seen.has(slug)) {
+      seen.add(slug);
+      order.push(slug);
+    }
+  }
+  for (const slug of room.participants) {
+    if (!seen.has(slug)) {
+      seen.add(slug);
+      order.push(slug);
+    }
+  }
+  const items: BarsSection["items"] = [];
+  for (const slug of order) {
+    const ctx = latest.get(slug);
+    if (!ctx) continue;
+    const pct = Math.min(100, Math.round((ctx.contextTokens / ctx.contextWindow) * 100));
+    items.push({
+      label: mindBySlug.get(slug)?.name ?? slug,
+      value: ctx.contextTokens,
+      total: ctx.contextWindow,
+      tone: contextFillTone(pct),
+      trailing: `${formatTokenCount(ctx.contextTokens)} / ${formatTokenCount(ctx.contextWindow)} · ${pct}%`,
+    });
+  }
+  return items.length > 0 ? { kind: "bars", title: "Context · window fill", items } : undefined;
+}
+
+// The Totals band: a `stats` row summing the room's token spend and tool calls,
+// beneath the debate columns. Omitted when nothing has usage and no tool ran.
+function buildTotalsSection(transcript: readonly TurnEntry[]): CanvasBoardView["sections"] {
+  const usage = sumTurnUsage(transcript);
+  const tools = countToolCalls(transcript);
+  if (!usage && tools.total === 0) return [];
+  const items: Extract<CanvasBoardView["sections"][number], { kind: "stats" }>["items"] = [];
+  if (usage) {
+    items.push({ label: "input · total", value: `↑ ${formatTokenCount(usage.inputTokens)}` });
+    items.push({ label: "output · total", value: `↓ ${formatTokenCount(usage.outputTokens)}` });
+  }
+  if (tools.total > 0) {
+    items.push({
+      label: "tool calls",
+      value: tools.total,
+      ...(tools.failed > 0 ? { sub: `${tools.failed} failed`, tone: "warn" as CanvasTone } : {}),
+    });
+  }
+  return items.length > 0 ? [{ kind: "stats", title: "Totals", items }] : [];
 }
 
 // The Decisions rail: one row per pinned question, in debate order — the tone

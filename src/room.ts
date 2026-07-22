@@ -1,4 +1,5 @@
 import type { Brief, TokenUsage } from "@keelson/shared";
+import { toolPresentation } from "@keelson/shared";
 import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
 import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
@@ -44,8 +45,21 @@ import type {
   StrategyStep,
   TaskLedger,
   TaskStatus,
+  ToolCall,
   TurnEntry,
 } from "./types.ts";
+
+// Strip a `mcp__<server>__<tool>` wire name down to its display leaf, matching
+// how the host chat surfaces name a tool. A plain tool name passes through.
+function displayToolName(raw: string): string {
+  const at = raw.lastIndexOf("__");
+  return at >= 0 ? raw.slice(at + 2) : raw;
+}
+
+// A tool_use arg preview is only a scannable hint on the turn's detail line, not
+// a record — cap it so a large input (a pasted patch, a long command) can't bloat
+// transcript.jsonl or the board.
+const MAX_TOOL_ARG_PREVIEW = 80;
 
 export interface RoomDriverDeps {
   store: RoomStore;
@@ -723,7 +737,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     prompt: string,
     controller: AbortController,
   ): Promise<
-    { text: string; aborted: boolean; errored: boolean; usage?: TokenUsage } | "disposed"
+    | {
+        text: string;
+        aborted: boolean;
+        errored: boolean;
+        usage?: TokenUsage;
+        toolCalls?: readonly ToolCall[];
+      }
+    | "disposed"
   > {
     let text: string;
     let aborted: boolean;
@@ -732,6 +753,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // callers ignore it (an errored turn already surfaces via its error text).
     let errored = false;
     let usage: TokenUsage | undefined;
+    let toolCalls: readonly ToolCall[] | undefined;
     // The composed identity (authored soul + the Mind's durable memory & rules) is
     // the turn's system prompt; fall back to the roster tagline when a Mind has no
     // composer or no readable soul so the turn still runs in character. Skip the
@@ -804,14 +826,37 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         // ran it server-side, so re-running the attempt would re-apply it — Edit/Write
         // /Bash in a coding room are not idempotent.
         let sawToolUse = false;
+        // The turn's tool calls, in stream order, for the transcript. `errored` is
+        // resolved from a matching tool_result (keyed by tool_use id) — best-effort,
+        // since the host may emit no result and the result object carries no tool data.
+        const calls: ToolCall[] = [];
+        const callIndexById = new Map<string, number>();
         try {
           // Draining the stream could drive throttled partial publishes later; for
           // now the result is the source of truth.
           for await (const chunk of turn.stream) {
-            if (chunk.type === "tool_use") sawToolUse = true;
-            if (chunk.type !== "tool_use" || chunk.toolName !== EXHIBIT_TOOL_NAME) continue;
-            const rawId = chunk.toolInput?.id;
-            if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
+            if (chunk.type === "tool_use") {
+              sawToolUse = true;
+              const raw = toolPresentation(chunk.toolName, chunk.toolInput).primary;
+              const primary =
+                raw && raw.length > MAX_TOOL_ARG_PREVIEW
+                  ? `${raw.slice(0, MAX_TOOL_ARG_PREVIEW - 1)}…`
+                  : raw;
+              if (chunk.id) callIndexById.set(chunk.id, calls.length);
+              calls.push({
+                name: displayToolName(chunk.toolName),
+                ...(primary ? { primary } : {}),
+              });
+              if (chunk.toolName === EXHIBIT_TOOL_NAME) {
+                const rawId = chunk.toolInput?.id;
+                if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
+              }
+              continue;
+            }
+            if (chunk.type === "tool_result" && chunk.isError) {
+              const at = callIndexById.get(chunk.toolUseId);
+              if (at !== undefined && calls[at]) calls[at] = { ...calls[at], errored: true };
+            }
           }
         } catch {
           // a stream error surfaces via result.status below
@@ -821,24 +866,26 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         // when its tool_use chunk streamed, so the record exists either way (the
         // stamp itself load-checks and skips a record the emit never persisted).
         if (tabledIds.length > 0) deps.onExhibitsTabled?.(tabledIds, room);
-        return { result, sawToolUse };
+        return { result, sawToolUse, calls };
       };
-      let { result, sawToolUse } = await runAttempt();
+      let attempt = await runAttempt();
       const spentRetries = emptyRetries.get(room.slug) ?? 0;
       if (
         !disposed &&
         !controller.signal.aborted &&
-        !sawToolUse &&
+        !attempt.sawToolUse &&
         spentRetries < MAX_EMPTY_TURN_RETRIES &&
-        result.status === "ok" &&
-        result.text.trim().length === 0
+        attempt.result.status === "ok" &&
+        attempt.result.text.trim().length === 0
       ) {
         emptyRetries.set(room.slug, spentRetries + 1);
         console.warn(
           `[rib-chamber] empty turn from '${mind.slug}' in room '${room.slug}'; retrying once`,
         );
-        ({ result } = await runAttempt());
+        attempt = await runAttempt();
       }
+      const { result, calls } = attempt;
+      toolCalls = calls.length > 0 ? calls : undefined;
       aborted = result.status === "aborted" || controller.signal.aborted;
       errored = result.status === "error" || result.status === "timeout";
       text =
@@ -850,7 +897,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     // Shutdown landed during the (uncancellable) turn — drop the late result so
     // nothing is appended or published after the rib is disposed.
     if (disposed) return "disposed";
-    return { text, aborted, errored, ...(usage ? { usage } : {}) };
+    return {
+      text,
+      aborted,
+      errored,
+      ...(usage ? { usage } : {}),
+      ...(toolCalls ? { toolCalls } : {}),
+    };
   }
 
   // Build an agent-authored transcript entry (a Mind's turn) with driver-stamped
@@ -862,7 +915,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     roomSlug: MindSlug,
     turnIndex: number,
     fromSlug: MindSlug,
-    reply: { text: string; aborted: boolean; usage?: TokenUsage },
+    reply: { text: string; aborted: boolean; usage?: TokenUsage; toolCalls?: readonly ToolCall[] },
     round: number,
   ): TurnEntry {
     return buildTurnEntry({
@@ -876,6 +929,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       messageId: newId(),
       at: now().toISOString(),
       ...(reply.usage ? { usage: reply.usage } : {}),
+      ...(reply.toolCalls ? { toolCalls: reply.toolCalls } : {}),
     });
   }
 
@@ -900,11 +954,18 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     aborted: boolean,
     gen: number,
     usage?: TokenUsage,
+    toolCalls?: readonly ToolCall[],
   ): Promise<boolean> {
     await appendEntry(
       room.slug,
       gen,
-      buildAgentEntry(room.slug, room.turnIndex, mind.slug, { text, aborted, usage }, room.round),
+      buildAgentEntry(
+        room.slug,
+        room.turnIndex,
+        mind.slug,
+        { text, aborted, usage, toolCalls },
+        room.round,
+      ),
     );
     return await withLock(room.slug, async () => {
       const current = (await deps.store.loadRoom(room.slug)) ?? room;
@@ -985,7 +1046,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
     );
     const turn = await runOneTurn(room, mind, prompt, controller);
     if (turn === "disposed") return false;
-    const active = await commitTurn(room, mind, turn.text, turn.aborted, gen, turn.usage);
+    const active = await commitTurn(
+      room,
+      mind,
+      turn.text,
+      turn.aborted,
+      gen,
+      turn.usage,
+      turn.toolCalls,
+    );
     if (!active) return false;
     return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
   }
@@ -1034,7 +1103,10 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       directionInjection,
     );
     const turns = minds.map((m) => runOneTurn(room, m, prompt, controller));
-    let results: ({ text: string; aborted: boolean; usage?: TokenUsage } | "disposed")[];
+    let results: (
+      | { text: string; aborted: boolean; usage?: TokenUsage; toolCalls?: readonly ToolCall[] }
+      | "disposed"
+    )[];
     try {
       results = await Promise.all(turns);
     } catch (err) {
@@ -1048,7 +1120,12 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       throw err;
     }
     if (results.some((r) => r === "disposed")) return false; // torn down mid-round
-    const replies = results as { text: string; aborted: boolean; usage?: TokenUsage }[];
+    const replies = results as {
+      text: string;
+      aborted: boolean;
+      usage?: TokenUsage;
+      toolCalls?: readonly ToolCall[];
+    }[];
 
     // One lock for the whole batch: append every reply in participant order, indices
     // running from the re-loaded current.turnIndex; the room then advances to that
@@ -1119,6 +1196,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       modTurn.aborted,
       gen,
       modTurn.usage,
+      modTurn.toolCalls,
     );
     if (!modActive) return false; // aborted/stopped or superseded
 
@@ -1182,6 +1260,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
       spkTurn.aborted,
       gen,
       spkTurn.usage,
+      spkTurn.toolCalls,
     );
     if (!active) return false;
     return (await runBudgetSynthesisIfExhausted(room.slug, controller, gen)) ?? true;
@@ -1312,7 +1391,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         room.slug,
         room.turnIndex,
         checker.slug,
-        { text: turn.text, aborted: turn.aborted, usage: turn.usage },
+        { text: turn.text, aborted: turn.aborted, usage: turn.usage, toolCalls: turn.toolCalls },
         room.round,
       ),
     );
@@ -1402,7 +1481,7 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
           room.slug,
           cursor,
           synth.slug,
-          { text: turn.text, aborted: turn.aborted, usage: turn.usage },
+          { text: turn.text, aborted: turn.aborted, usage: turn.usage, toolCalls: turn.toolCalls },
           synthRound,
         );
         await appendEntry(room.slug, gen, synthesisEntry);
@@ -1548,7 +1627,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
   async function commitLedgerTurn(
     room: Room,
     mind: Mind,
-    turn: { text: string; aborted: boolean; errored: boolean; usage?: TokenUsage },
+    turn: {
+      text: string;
+      aborted: boolean;
+      errored: boolean;
+      usage?: TokenUsage;
+      toolCalls?: readonly ToolCall[];
+    },
     nextLedger: TaskLedger,
     gen: number,
   ): Promise<boolean> {

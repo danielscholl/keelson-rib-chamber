@@ -88,6 +88,18 @@ export interface Mind {
   identitySlot?: number;
 }
 
+// One tool a Mind invoked during a turn, harvested from the turn's `tool_use`
+// stream chunks (the result object carries none). `name` is the display name
+// with any `mcp__<server>__` prefix stripped; `primary` is a bounded arg preview
+// (toolPresentation); `errored` is set only when a matching `tool_result` carried
+// isError — absent means the host reported no failure (or emitted no result).
+// The family and glyph are derived at render from `name`, not persisted.
+export interface ToolCall {
+  name: string;
+  primary?: string;
+  errored?: boolean;
+}
+
 export interface TurnEntry {
   messageId: string;
   roomSlug: MindSlug;
@@ -103,6 +115,9 @@ export interface TurnEntry {
   // failure) or on a turn recorded before this field existed. Additive: the
   // board sums whatever entries carry it rather than requiring a complete set.
   usage?: TokenUsage;
+  // The tools this turn invoked, in call order — absent on a text-only turn or an
+  // entry recorded before this field existed. Additive, like `usage`.
+  toolCalls?: readonly ToolCall[];
 }
 
 export type RoomStrategyName =
