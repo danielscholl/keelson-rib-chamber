@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.3](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.2...v0.47.3) (2026-07-22)
+
+
+### Fixed
+
+* **presence:** carry a seat's table state in the ring, not a prose line ([#324](https://github.com/danielscholl/keelson-rib-chamber/issues/324)) ([a2cdf36](https://github.com/danielscholl/keelson-rib-chamber/commit/a2cdf36be060e192f78038da5a995993ffcf758a))
+
 ## [0.47.2](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.1...v0.47.2) (2026-07-17)
 
 
