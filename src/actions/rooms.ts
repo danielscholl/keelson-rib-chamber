@@ -93,10 +93,9 @@ export async function draftSetAction(action: RibAction): Promise<RibActionResult
 // restates the scope), return the new state. An empty project clears the scope.
 export async function scopeSetAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
-  // The project picker and the tier toggle are separate controls now, so each dispatch
-  // carries only its own key — the handler patches what it is given and leaves the rest.
-  // Presence of the key is the signal, not its value: `{ project: "" }` is a deliberate
-  // clear, while an absent `project` means the toggle fired and the project must stand.
+  // A patch, keyed on the PRESENCE of a payload key rather than its value: each control
+  // dispatches only its own key, so `{ project: "" }` is a deliberate clear while an
+  // absent `project` means the scope must stand.
   const setsProject = Object.hasOwn(payload, "project");
   const setsCoding = Object.hasOwn(payload, "coding");
   if (!setsProject && !setsCoding) {
@@ -115,6 +114,16 @@ export async function scopeSetAction(action: RibAction): Promise<RibActionResult
       }
     }
     const coding = setsCoding ? asNonEmptyString(payload.coding) === "on" : draft.coding === true;
+    // A retained project is carried over unresolved, so re-check it before granting the
+    // tier against it: the host can drop a project while a board still holds it, and
+    // persisting an edit tier for a target validateStart will reject only deepens a scope
+    // the operator has to unpick anyway. Revoking stays allowed — that direction is safe.
+    if (coding && !setsProject && projectId && !resolveProjectInput(projectId).ok) {
+      return {
+        ok: false,
+        error: `project "${projectId}" is no longer available — pick a project before enabling edits`,
+      };
+    }
     // setScope owns the pairing: clearing the project drops the tier with it, so a clear
     // never has to be preceded by turning the tier off.
     const next = await setScope(projectId, coding);

@@ -23,7 +23,7 @@ import {
   roomsDir,
   setChamberDataHome,
 } from "../src/paths.ts";
-import { clearDraft, readDraft } from "../src/room-draft.ts";
+import { clearDraft, readDraft, setScope } from "../src/room-draft.ts";
 import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 import { gatedRunAgentTurn, scriptedRunAgentTurn } from "./helpers/fakes.ts";
@@ -648,6 +648,29 @@ describe("room adapter — convene composer (draft-set + assemble + convene)", (
     const draft = await readDraft();
     expect(draft.projectId).toBe("p1");
     expect(draft.coding).toBe(true);
+  });
+
+  it("the tier cannot be enabled against a project the host has dropped", async () => {
+    // A board rendered before the host dropped the project can still dispatch the
+    // toggle; without re-resolving the retained id this would persist an edit tier for
+    // a target validateStart rejects, breaking every subsequent convene.
+    await setScope("ghost", false);
+    const res = await onAction(
+      { type: "scope-set", payload: { coding: "on" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(false);
+    expect((await readDraft()).coding).toBeUndefined();
+  });
+
+  it("the tier can always be revoked, even on a dropped project", async () => {
+    await setScope("ghost", true);
+    const res = await onAction(
+      { type: "scope-set", payload: { coding: "off" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(true);
+    expect((await readDraft()).coding).toBeUndefined();
   });
 
   it("scope-set carrying neither key is rejected rather than silently no-op", async () => {

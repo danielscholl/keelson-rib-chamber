@@ -250,6 +250,16 @@ describe("conveneScopeSection", () => {
     expect(off && valid(off)).toBe(true);
   });
 
+  test("a stale project offers no tier toggle — only the picker that can unpick it", () => {
+    // Granting edits against a project the host no longer lists would deepen a scope
+    // every convene already rejects; the useful move is to repick or clear.
+    for (const p of [[], projects]) {
+      const section = conveneScopeSection(p, { projectId: "gone", coding: true });
+      expect(section && shapes(section).length).toBe(1);
+      expect(section && shapes(section)[0]?.fields?.length).toBe(1);
+    }
+  });
+
   test("the toggle names the project it would let the Minds write to", () => {
     const off = conveneScopeSection(projects, { projectId: "p1" });
     expect(shapes(off ?? ({} as Section))[1]?.hint).toContain("keelson");
