@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.48.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.3...v0.48.0) (2026-07-22)
+
+
+### Added
+
+* **convene:** give a room its scope on the table ([#328](https://github.com/danielscholl/keelson-rib-chamber/issues/328)) ([1b3b1f3](https://github.com/danielscholl/keelson-rib-chamber/commit/1b3b1f34d0f429d69a90658cfaf25172a4cec933))
+* **convene:** let the shape tabs and the required field speak ([#326](https://github.com/danielscholl/keelson-rib-chamber/issues/326)) ([79559cb](https://github.com/danielscholl/keelson-rib-chamber/commit/79559cbec7fa8971aad2a2b5128508fb512dc29f))
+* **convene:** press the tier toggle instead of relabelling it ([#330](https://github.com/danielscholl/keelson-rib-chamber/issues/330)) ([ce6c762](https://github.com/danielscholl/keelson-rib-chamber/commit/ce6c76226965c6cc3e3c90b43da293c623433f08))
+* **convene:** wear the scope on the control, not in a form ([#329](https://github.com/danielscholl/keelson-rib-chamber/issues/329)) ([c1a17cd](https://github.com/danielscholl/keelson-rib-chamber/commit/c1a17cd43d5795d86564c74a9789b42ca2469462))
+
 ## [0.47.3](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.2...v0.47.3) (2026-07-22)
 
 
