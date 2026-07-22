@@ -62,15 +62,17 @@ describe("conveneShapeSection cast + shapes", () => {
     ]);
   });
 
-  test("every shape shows only its name — the description rides the hover hint", () => {
+  test("every shape describes itself inline, and still carries the fuller hover hint", () => {
     // Three seated: Discussion, Debate, and Delegate enabled (three — two run, one
     // facilitates), Review gated (not a pair). A gated tab still carries its hover hint.
     const bs = byStrategy([A, B, C]);
     for (const item of shapes(conveneShapeSection([A, B, C]))) {
-      expect(item.subtitle).toBeUndefined();
-      expect(typeof item.hint).toBe("string");
+      // Both registers, and distinct: the subtitle orients at a glance, the hint explains.
+      expect(item.subtitle?.length ?? 0).toBeGreaterThan(0);
       expect(item.hint?.length ?? 0).toBeGreaterThan(0);
+      expect(item.subtitle).not.toBe(item.hint);
       expect(item.submitLabel).toBe("Convene");
+      expect(item.submitTone).toBe("brand");
     }
     expect(bs.get("review")?.disabled).toBe(true);
     expect(bs.get("review")?.hint).toContain("cross-vendor");
@@ -78,6 +80,15 @@ describe("conveneShapeSection cast + shapes", () => {
     expect(bs.get("magentic")?.disabled ?? false).toBe(false);
     expect(bs.get("sequential")?.disabled ?? false).toBe(false);
     expect(bs.get("sequential")?.hint).toContain("Round-robin");
+    expect(bs.get("sequential")?.subtitle).toContain("Round-robin");
+  });
+
+  test("the strip opens on Discussion — the default shape, and never a gated one", () => {
+    const bs = byStrategy([A, B, C]);
+    expect(bs.get("sequential")?.defaultOpen).toBe(true);
+    for (const strategy of ["group-chat", "open-floor", "review", "magentic"]) {
+      expect(bs.get(strategy)?.defaultOpen).toBeUndefined();
+    }
   });
 });
 
@@ -92,18 +103,48 @@ describe("conveneShapeSection capability gating", () => {
     expect(bs.get("magentic")?.reason).toContain("manage");
   });
 
-  test("Debate enables at three seated with a chair select drawn from the cast", () => {
+  test("Debate enables at three seated with a chair picker drawn from the cast", () => {
     const section = conveneShapeSection([A, B, C]);
     const debate = byStrategy([A, B, C]).get("group-chat");
     expect(debate?.disabled ?? false).toBe(false);
     const chair = debate?.fields?.find((f) => f.name === "moderator");
     expect(chair?.required).toBe(true);
+    expect(chair?.segmented).toBe(true);
     expect(chair?.options).toEqual([
       { value: "a", label: "Ada" },
       { value: "b", label: "Bo" },
       { value: "c", label: "Cy" },
     ]);
     expect(valid(section)).toBe(true);
+  });
+
+  test("a full table falls back to a select rather than a wrapping strip", () => {
+    const cast = [
+      A,
+      B,
+      C,
+      mind({ slug: "d", name: "Di", identitySlot: 3 }),
+      mind({ slug: "e", name: "El", identitySlot: 4 }),
+    ];
+    const section = conveneShapeSection(cast);
+    const chair = byStrategy(cast)
+      .get("group-chat")
+      ?.fields?.find((f) => f.name === "moderator");
+    expect(chair?.options).toHaveLength(5);
+    expect(chair?.segmented).toBe(false);
+    expect(valid(section)).toBe(true);
+  });
+
+  test("a gated shape says what to change inline, and keeps the fuller reason", () => {
+    const review = byStrategy([A, B, C]).get("review");
+    expect(review?.disabled).toBe(true);
+    expect(review?.subtitle).toBe("Needs exactly two Minds");
+    expect(review?.reason).toContain("exactly two Minds");
+    // The tab-sized form is not the tooltip — a strip can't carry the full sentence.
+    expect(review?.subtitle).not.toBe(review?.reason);
+    const debate = byStrategy([A, B]).get("group-chat");
+    expect(debate?.subtitle).toContain("chair");
+    expect(debate?.reason).toContain("chair");
   });
 
   test("Review needs exactly two seated of different vendors", () => {
@@ -159,6 +200,39 @@ describe("conveneShapeSection project picker + grounding", () => {
     }
     const criteria = bs.get("sequential")?.fields?.find((f) => f.name === "criteria");
     expect(criteria?.multiline).toBe(true);
+  });
+
+  test("the two short fields share a row where both are present", () => {
+    const bs = byStrategy([A, B, C]);
+    for (const strategy of ["group-chat", "open-floor", "magentic"]) {
+      const fields = bs.get(strategy)?.fields ?? [];
+      expect(fields.find((f) => f.name === "turns")?.half).toBe(true);
+      expect(fields.find((f) => f.name === "groundingUrl")?.half).toBe(true);
+    }
+  });
+
+  test("a half field with no half neighbour drops back to full width", () => {
+    // Discussion carries no turns field, so grounding source would sit alone at half
+    // width above a full-width criteria — the normalization clears it.
+    const fields = byStrategy([A, B]).get("sequential")?.fields ?? [];
+    expect(fields.some((f) => f.name === "turns")).toBe(false);
+    expect(fields.find((f) => f.name === "groundingUrl")?.half).toBeUndefined();
+  });
+
+  test("only the required field is marked; the optional ones carry no suffix", () => {
+    const bs = byStrategy([A, B, C], [{ id: "p1", name: "keelson" }]);
+    for (const strategy of ["sequential", "group-chat", "open-floor", "review", "magentic"]) {
+      for (const f of bs.get(strategy)?.fields ?? []) {
+        expect(f.label).not.toContain("(optional)");
+        expect(f.label.includes("(required)")).toBe(f.required === true);
+      }
+    }
+    expect(bs.get("group-chat")?.fields?.find((f) => f.name === "moderator")?.label).toBe(
+      "Chair (required)",
+    );
+    expect(bs.get("magentic")?.fields?.find((f) => f.name === "manager")?.label).toBe(
+      "Manager (required)",
+    );
   });
 
   test("Review carries no grounding fields — its cross-vendor pass is not a synthesis close", () => {
