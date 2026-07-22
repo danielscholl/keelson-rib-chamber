@@ -10,7 +10,7 @@
         "typescript": "^7.0.2",
       },
       "peerDependencies": {
-        "@keelson/shared": ">=0.75.0",
+        "@keelson/shared": ">=0.77.0",
       },
       "optionalPeers": [
         "@keelson/shared",
