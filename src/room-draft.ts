@@ -9,10 +9,18 @@ import { chamberDataHome } from "./paths.ts";
 // exactly while this set is non-empty, so a seat click is the only thing that enters it.
 export interface RoomDraft {
   selected: Set<string>;
+  // Where a convened room runs: the host project id its turns take as their cwd, and
+  // whether the coding tier is on. Scope belongs to the table rather than to a shape's
+  // form — it is a property of the room, not of how the Minds take turns, so it holds
+  // across a change of shape and outlives the cast a convene clears.
+  projectId?: string;
+  coding?: boolean;
 }
 
 interface DraftFile {
   selected: string[];
+  projectId?: string;
+  coding?: boolean;
 }
 
 // The draft lives next to minds/ and rooms/ under the data home (rib-owned, like
@@ -39,7 +47,12 @@ export async function readDraft(dataHome: string = chamberDataHome()): Promise<R
     const selected = Array.isArray(selectedRaw)
       ? new Set(selectedRaw.filter((s): s is string => typeof s === "string"))
       : new Set<string>();
-    return { selected };
+    const { projectId, coding } = parsed as { projectId?: unknown; coding?: unknown };
+    return {
+      selected,
+      ...(typeof projectId === "string" && projectId ? { projectId } : {}),
+      ...(typeof coding === "boolean" ? { coding } : {}),
+    };
   } catch {
     return emptyDraft();
   }
@@ -56,7 +69,11 @@ async function writeDraft(draft: RoomDraft, dataHome: string): Promise<void> {
   await mkdir(dataHome, { recursive: true });
   const file = draftFile(dataHome);
   const tmp = `${file}.${process.pid}.${writeSeq++}.tmp`;
-  const payload: DraftFile = { selected: [...draft.selected].sort() };
+  const payload: DraftFile = {
+    selected: [...draft.selected].sort(),
+    ...(draft.projectId ? { projectId: draft.projectId } : {}),
+    ...(draft.coding ? { coding: true } : {}),
+  };
   await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`);
   await rename(tmp, file);
 }
@@ -74,9 +91,35 @@ export async function toggleSelected(
   return draft;
 }
 
-// Reset to the empty default (nobody selected) — the state a successful convene, or a
-// deliberate Clear, returns the bench to. Writing (rather than unlinking) keeps the
-// file's presence stable for readers.
+// Set where a convened room runs. The coding tier is unconfined without a repo to bound
+// it to, so dropping the project forces it off here — the one place that pairing is
+// enforced, so an incoherent scope can never be persisted and reach validateStart.
+export async function setScope(
+  projectId: string | undefined,
+  coding: boolean,
+  dataHome: string = chamberDataHome(),
+): Promise<RoomDraft> {
+  const draft = await readDraft(dataHome);
+  const next: RoomDraft = {
+    selected: draft.selected,
+    ...(projectId ? { projectId, ...(coding ? { coding: true } : {}) } : {}),
+  };
+  await writeDraft(next, dataHome);
+  return next;
+}
+
+// Empty the cast but keep the scope — the state a successful convene returns the bench
+// to. Several rooms are commonly convened against one project, so the seats clear and
+// the scope stands.
+export async function clearCast(dataHome: string = chamberDataHome()): Promise<RoomDraft> {
+  const draft = await readDraft(dataHome);
+  const next: RoomDraft = { ...draft, selected: new Set() };
+  await writeDraft(next, dataHome);
+  return next;
+}
+
+// Reset to the empty default (nobody seated, no scope) — a full deliberate Clear.
+// Writing (rather than unlinking) keeps the file's presence stable for readers.
 export async function clearDraft(dataHome: string = chamberDataHome()): Promise<void> {
   await writeDraft(emptyDraft(), dataHome);
 }

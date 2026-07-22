@@ -527,10 +527,17 @@ describe("room adapter — room-open on a live room", () => {
 describe("room adapter — convene composer (draft-set + assemble + convene)", () => {
   let snap: ReturnType<typeof fakeSnapshotManager>;
   const seated = async () => [...(await readDraft()).selected].sort();
+  const SCOPE_PROJECT = {
+    id: "p1",
+    name: "Alpha",
+    rootPath: "/repos/alpha",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+  const projects = () => [SCOPE_PROJECT];
   beforeAll(() => {
     const { run } = scriptedRunAgentTurn([{ text: "Alice speaks." }, { text: "Bob replies." }]);
     snap = fakeSnapshotManager();
-    registerTools(makeCtx({ run, sm: snap.sm }));
+    registerTools(makeCtx({ run, sm: snap.sm, projects }));
   });
   beforeEach(async () => {
     await clearDraft(); // start each case from an empty table — nobody seated
@@ -582,6 +589,82 @@ describe("room adapter — convene composer (draft-set + assemble + convene)", (
     await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
     await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
     expect([...(await readDraft()).selected]).toEqual([]);
+  });
+
+  it("scope-set persists the project and the coding tier onto the draft", async () => {
+    const res = await onAction(
+      { type: "scope-set", payload: { project: "p1", coding: "on" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(true);
+    const draft = await readDraft();
+    expect(draft.projectId).toBe("p1");
+    expect(draft.coding).toBe(true);
+  });
+
+  it("clearing a coding-enabled scope takes the tier with it in ONE submit", async () => {
+    await onAction(
+      { type: "scope-set", payload: { project: "p1", coding: "on" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    // The form submits every field it rendered, so clearing the project while the
+    // coding strip still reads "on" arrives as this exact pair. It is a clear, not a
+    // contradiction — the operator must not have to turn coding off first.
+    const res = await onAction(
+      { type: "scope-set", payload: { project: "", coding: "on" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(true);
+    const draft = await readDraft();
+    expect(draft.projectId).toBeUndefined();
+    expect(draft.coding).toBeUndefined();
+  });
+
+  it("scope-set fails closed on a project the host does not offer", async () => {
+    const res = await onAction(
+      { type: "scope-set", payload: { project: "ghost" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(false);
+    expect((await readDraft()).projectId).toBeUndefined();
+  });
+
+  it("convene carries the table's scope onto the room, coding tier and all", async () => {
+    const store = createFileRoomStore(roomsDir());
+    await onAction(
+      { type: "scope-set", payload: { project: "p1", coding: "on" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
+    const slug = slugOf(
+      await onAction(
+        { type: "convene", payload: { topic: "scoped" } },
+        makeCtx({ sm: snap.sm, projects }),
+      ),
+    );
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    const room = await store.loadRoom(slug);
+    expect(room?.projectId).toBe("p1");
+    expect(room?.coding).toBe(true);
+    // The seats empty but the scope stands — the next room inherits the same table.
+    const draft = await readDraft();
+    expect([...draft.selected]).toEqual([]);
+    expect(draft.projectId).toBe("p1");
+    expect(draft.coding).toBe(true);
+  });
+
+  it("an unscoped table convenes a room with no project and no coding tier", async () => {
+    const store = createFileRoomStore(roomsDir());
+    await onAction({ type: "draft-set", payload: { slug: "alice" } }, makeCtx());
+    await onAction({ type: "draft-set", payload: { slug: "bob" } }, makeCtx());
+    const slug = slugOf(
+      await onAction({ type: "convene", payload: { topic: "plain" } }, makeCtx({ sm: snap.sm })),
+    );
+    await waitFor(async () => (await store.loadRoom(slug))?.status === "done");
+    const room = await store.loadRoom(slug);
+    expect(room?.projectId).toBeUndefined();
+    expect(room?.coding ?? false).toBe(false);
   });
 
   it("the retired assemble verb is no longer dispatchable", async () => {

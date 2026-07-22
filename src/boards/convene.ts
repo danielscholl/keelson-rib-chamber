@@ -9,66 +9,113 @@
 import type { CanvasActionField, CanvasActionItem, CanvasBoardView } from "@keelson/shared";
 import type { Mind } from "../types.ts";
 
-// The host projects a room can target — the minimal shape conveneShapeSection needs
-// (id is the option value the convene action resolves; name is the label).
+// The host projects a room can target — the minimal shape conveneScopeSection needs
+// (id is the option value the scope action resolves; name is the label).
 export interface ConveneProject {
   id: string;
   name: string;
 }
 
+// The topic is what the shape will actually do with it — a debate decides, a delegate
+// room decomposes a goal (TaskLedger.goal) — so the prompt names the shape's own verb
+// rather than asking every room the same generic question. Required where a room drives
+// to a definite outcome: those close on a decision, a ledger, or a review target, and a
+// topicless one spends its turns with nothing to converge on.
+//
 // Unmarked reads as optional, so only a required field is marked — and it is marked in
 // the label text because the renderer draws no required affordance of its own (it
 // raises a submit-time error instead).
-const topicField: CanvasActionField = {
-  name: "topic",
-  label: "Topic",
-  placeholder: "What should they discuss?",
-  multiline: true,
-};
+function topicField(placeholder: string, required = false): CanvasActionField {
+  return {
+    name: "topic",
+    label: required ? "Topic (required)" : "Topic",
+    placeholder,
+    multiline: true,
+    ...(required ? { required: true } : {}),
+  };
+}
 const turnsField: CanvasActionField = {
   name: "turns",
   label: "Turns",
   placeholder: "8",
-  half: true,
 };
-// Grounding is a brief distinct from the topic: a source and the acceptance criteria
-// the room is convened to satisfy. When criteria are given, a design-bearing room runs
-// a cross-vendor fidelity check against them before it closes.
-const groundingUrlField: CanvasActionField = {
+// The two halves of the grounding brief are one type but not one thing: the source is
+// narration (renderGrounding puts it in every prompt and nothing reads it back), while
+// the criteria are the only field here that is CHECKED — a cross-vendor room spends an
+// extra paid turn diffing the outcome against them before it closes. Labelled by what
+// each does rather than by the type they share.
+const referenceField: CanvasActionField = {
   name: "groundingUrl",
-  label: "Grounding source",
-  placeholder: "Link to the issue / spec / acceptance criteria",
-  half: true,
+  label: "Reference link",
+  placeholder: "Issue or spec the room should work from",
 };
 const criteriaField: CanvasActionField = {
   name: "criteria",
-  label: "Acceptance criteria",
-  placeholder: "One criterion per line (a cross-vendor room checks these before it closes)",
+  label: "Done when",
+  placeholder: "One per line — a cross-vendor room spends a turn checking these at close",
   multiline: true,
 };
 
-// `half` pairs a field with an adjacent half sibling; a lone one renders ragged at
-// half width above a full-width row, so clear it rather than let a shape's field
-// list leak into the layout.
-function pairHalves(fields: readonly CanvasActionField[]): CanvasActionField[] {
-  return fields.map((f, i) => {
-    if (!f.half || fields[i - 1]?.half || fields[i + 1]?.half) return f;
-    const { half, ...rest } = f;
-    return rest;
-  });
-}
-
-// The project field is a real picker over the host's projects (option value = id,
-// which the convene action resolves the same as a typed id). Null when the host
-// exposes no projects, so the shape drops the field rather than offering an empty
-// select — a room simply runs in the shared scope.
-function projectField(projects: readonly ConveneProject[]): CanvasActionField | null {
-  if (projects.length === 0) return null;
-  return {
+// Where a room runs, as a standing bar above the shape tabs rather than a field inside
+// one of them: a project is a property of the room (it resolves to the cwd every turn
+// takes) and not of how the Minds take turns, so asking for it per-shape both scattered
+// it across two of five forms and lost it on every change of shape. Null only when there
+// is neither anything to scope to nor a scope to recover from — a room then simply runs
+// in the shared scope.
+export function conveneScopeSection(
+  projects: readonly ConveneProject[],
+  scope: { projectId?: string; coding?: boolean },
+): CanvasBoardView["sections"][number] | null {
+  // A scope naming a project the host no longer offers still has to be selectable: the
+  // draft holds a projectId every convene would reject, so the bar has to stay reachable
+  // to clear it — and a defaultValue matching no option fails the board's own schema, so
+  // the whole panel would stop publishing rather than merely look stale.
+  const stale =
+    scope.projectId && !projects.some((p) => p.id === scope.projectId)
+      ? scope.projectId
+      : undefined;
+  // Nothing to scope to and nothing to recover from.
+  if (projects.length === 0 && !stale) return null;
+  const project: CanvasActionField = {
     name: "project",
     label: "Project",
+    // Not required, so this doubles as the clear option — picking it dispatches "" and
+    // drops the scope (and the coding tier with it).
     placeholder: "No project (shared)",
-    options: projects.map((p) => ({ value: p.id, label: p.name })),
+    options: [
+      ...projects.map((p) => ({ value: p.id, label: p.name })),
+      ...(stale ? [{ value: stale, label: `${stale} (unavailable)` }] : []),
+    ],
+    defaultValue: scope.projectId ?? "",
+  };
+  // The coding tier is unconfined without a repo to bound it to, so it only appears once
+  // a project is set — the form expresses that pairing instead of an error enforcing it
+  // after the fact. Named for what it lets the Minds DO, since it is the one control here
+  // that lets a paid turn write to disk.
+  const coding: CanvasActionField = {
+    name: "coding",
+    label: "What may they do?",
+    required: true,
+    segmented: true,
+    options: [
+      { value: "off", label: "Discuss only" },
+      { value: "on", label: "Edit the repo" },
+    ],
+    defaultValue: scope.coding ? "on" : "off",
+  };
+  return {
+    kind: "actions",
+    title: "Where does it run?",
+    items: [
+      {
+        type: "scope-set",
+        label: "Set scope",
+        // The bar is the affordance, so the form stands open rather than behind a
+        // disclosure click.
+        expanded: true,
+        fields: scope.projectId ? [project, coding] : [project],
+      },
+    ],
   };
 }
 
@@ -160,21 +207,21 @@ function evalShape(strategy: string, cast: readonly Mind[]): ShapeEval {
 // One action per room shape the driver speaks. Each dispatches `convene` with its
 // strategy; an enabled shape carries only the fields its strategy needs, a gated one
 // carries none (a disabled tab can't open a form) plus the reason it can't run.
-function shapeActions(
-  cast: readonly Mind[],
-  projects: readonly ConveneProject[],
-): CanvasActionItem[] {
-  const proj = projectField(projects);
+function shapeActions(cast: readonly Mind[]): CanvasActionItem[] {
   // `blurb` is the one-line description the `tabs` layout renders under the name, so
   // choosing a shape needs no hover; `hint` stays the fuller hover text, which the host
   // joins with the disabled `reason` on a gated tab.
+  //
+  // Field order follows what each answer is FOR: what they're working on (topic, then
+  // the reference that frames it), how this shape runs (facilitator, turns), and last
+  // the one thing that is checked at close.
   const defs: {
     strategy: string;
     label: string;
     glyph: string;
     blurb: string;
     hint: string;
-    fields: (CanvasActionField | null)[];
+    fields: CanvasActionField[];
   }[] = [
     {
       strategy: "sequential",
@@ -182,7 +229,7 @@ function shapeActions(
       glyph: "▸",
       blurb: "Round-robin — each builds on the last",
       hint: "Round-robin — each Mind speaks in turn, building on the last. The default shape.",
-      fields: [topicField, proj, groundingUrlField, criteriaField],
+      fields: [topicField("What should they discuss?"), referenceField, turnsField, criteriaField],
     },
     {
       strategy: "group-chat",
@@ -191,10 +238,10 @@ function shapeActions(
       blurb: "A chair you name drives one decision",
       hint: "A chaired panel — a Mind you name chairs the others toward one decision.",
       fields: [
-        topicField,
+        topicField("What should they decide?", true),
+        referenceField,
         facilitatorField("moderator", "Chair (required)", cast),
         turnsField,
-        groundingUrlField,
         criteriaField,
       ],
     },
@@ -204,7 +251,7 @@ function shapeActions(
       glyph: "⊙",
       blurb: "Unchaired — they route themselves",
       hint: "Unchaired brainstorm — the Minds route themselves and stop when enough vote to end.",
-      fields: [topicField, turnsField, groundingUrlField, criteriaField],
+      fields: [topicField("What should they explore?"), referenceField, turnsField, criteriaField],
     },
     {
       strategy: "review",
@@ -212,7 +259,7 @@ function shapeActions(
       glyph: "✓",
       blurb: "Cross-vendor pair — one authors, one reviews",
       hint: "A two-Mind cross-vendor pass — one authors, a different provider reviews for an independent second opinion.",
-      fields: [topicField],
+      fields: [topicField("What should they review?", true)],
     },
     {
       strategy: "magentic",
@@ -221,11 +268,10 @@ function shapeActions(
       blurb: "A manager splits and assigns the goal",
       hint: "A manager you name splits the goal into tasks and delegates to the others until it's done. Magentic-style orchestration.",
       fields: [
-        topicField,
+        topicField("What goal should they complete?", true),
+        referenceField,
         facilitatorField("manager", "Manager (required)", cast),
-        proj,
         turnsField,
-        groundingUrlField,
         criteriaField,
       ],
     },
@@ -250,7 +296,7 @@ function shapeActions(
       // Discussion is the default shape and is never gated, so the strip opens on it
       // rather than on nothing.
       ...(s.strategy === "sequential" ? { defaultOpen: true } : {}),
-      fields: pairHalves(s.fields.filter((f): f is CanvasActionField => f !== null)),
+      fields: s.fields,
     };
   });
 }
@@ -262,16 +308,13 @@ function shapeActions(
 // called to the table (the inclusion draft); participant selection now lives on the seat
 // cards, so there are no who's-in chips here. Pure — validated against canvasViewSchema
 // in the presence tests; the producer never parses (validation lives at the binding edge).
-export function conveneShapeSection(
-  cast: readonly Mind[],
-  projects: readonly ConveneProject[] = [],
-): CanvasBoardView["sections"][number] {
+export function conveneShapeSection(cast: readonly Mind[]): CanvasBoardView["sections"][number] {
   if (cast.length >= 2) {
     return {
       kind: "actions",
       title: "How should they convene?",
       tabs: true,
-      items: shapeActions(cast, projects),
+      items: shapeActions(cast),
     };
   }
   return {

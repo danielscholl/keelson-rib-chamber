@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { CanvasBoardView } from "@keelson/shared";
 import { canvasViewSchema } from "@keelson/shared";
-import { type ConveneProject, conveneShapeSection } from "../../src/boards/convene.ts";
+import {
+  type ConveneProject,
+  conveneScopeSection,
+  conveneShapeSection,
+} from "../../src/boards/convene.ts";
 import type { Mind } from "../../src/types.ts";
 
 const mind = (over: Partial<Mind> = {}): Mind => ({
@@ -26,9 +30,12 @@ function valid(section: Section): boolean {
 function shapes(section: Section) {
   return section.kind === "actions" ? section.items : [];
 }
-function byStrategy(cast: readonly Mind[], projects: readonly ConveneProject[] = []) {
-  const section = conveneShapeSection(cast, projects);
+function byStrategy(cast: readonly Mind[]) {
+  const section = conveneShapeSection(cast);
   return new Map(shapes(section).map((i) => [(i.payload as { strategy: string }).strategy, i]));
+}
+function fieldNames(item: { fields?: readonly { name: string }[] } | undefined): string[] {
+  return (item?.fields ?? []).map((f) => f.name);
 }
 
 describe("conveneShapeSection cast + shapes", () => {
@@ -165,62 +172,168 @@ describe("conveneShapeSection capability gating", () => {
   });
 });
 
-describe("conveneShapeSection project picker + grounding", () => {
+describe("conveneScopeSection", () => {
   const projects: ConveneProject[] = [
     { id: "p1", name: "keelson" },
     { id: "p2", name: "chamber" },
   ];
 
-  test("Discussion carries a project select over the host projects", () => {
-    const section = conveneShapeSection([A, B], projects);
-    const proj = byStrategy([A, B], projects)
-      .get("sequential")
-      ?.fields?.find((f) => f.name === "project");
+  test("a project picker over the host projects, opening on the current scope", () => {
+    const section = conveneScopeSection(projects, { projectId: "p1" });
+    expect(section).not.toBeNull();
+    if (!section) return;
+    expect(valid(section)).toBe(true);
+    expect(section.kind === "actions" && section.title).toBe("Where does it run?");
+    const item = shapes(section)[0];
+    expect(item?.type).toBe("scope-set");
+    // The bar IS the affordance — the form stands open rather than behind a click.
+    expect(item?.expanded).toBe(true);
+    const proj = item?.fields?.find((f) => f.name === "project");
     expect(proj?.options).toEqual([
       { value: "p1", label: "keelson" },
       { value: "p2", label: "chamber" },
     ]);
-    expect(valid(section)).toBe(true);
+    expect(proj?.defaultValue).toBe("p1");
+    // Not required, so its placeholder doubles as the clear option.
+    expect(proj?.required).toBeUndefined();
   });
 
-  test("no project field when the host exposes no projects", () => {
-    expect(
-      byStrategy([A, B])
-        .get("sequential")
-        ?.fields?.some((f) => f.name === "project"),
-    ).toBe(false);
+  test("no bar at all when the host exposes no projects and nothing is scoped", () => {
+    expect(conveneScopeSection([], {})).toBeNull();
   });
 
-  test("the design-bearing shapes expose the grounding source + criteria fields", () => {
-    const bs = byStrategy([A, B, C]);
-    for (const strategy of ["sequential", "group-chat", "open-floor", "magentic"]) {
-      const names = bs.get(strategy)?.fields?.map((f) => f.name) ?? [];
-      expect(names).toContain("groundingUrl");
-      expect(names).toContain("criteria");
+  test("a scope the host no longer offers stays selectable so it can be cleared", () => {
+    // Otherwise the draft keeps a projectId every convene rejects with no UI path to
+    // drop it — and a defaultValue matching no option fails the board's own schema, so
+    // the panel would stop publishing rather than merely look stale.
+    for (const projects of [[], [{ id: "p1", name: "keelson" }]]) {
+      const section = conveneScopeSection(projects, { projectId: "gone" });
+      expect(section).not.toBeNull();
+      if (!section) continue;
+      expect(valid(section)).toBe(true);
+      const proj = shapes(section)[0]?.fields?.find((f) => f.name === "project");
+      expect(proj?.options?.some((o) => o.value === "gone")).toBe(true);
+      expect(proj?.options?.find((o) => o.value === "gone")?.label).toContain("unavailable");
+      expect(proj?.defaultValue).toBe("gone");
     }
-    const criteria = bs.get("sequential")?.fields?.find((f) => f.name === "criteria");
+  });
+
+  test("the coding tier appears only once a project is set", () => {
+    const unscoped = conveneScopeSection(projects, {});
+    expect(unscoped && fieldNames(shapes(unscoped)[0])).toEqual(["project"]);
+    const scoped = conveneScopeSection(projects, { projectId: "p1" });
+    expect(scoped && fieldNames(shapes(scoped)[0])).toEqual(["project", "coding"]);
+  });
+
+  test("the coding control is a segmented pair opening on the drafted value", () => {
+    const on = conveneScopeSection(projects, { projectId: "p1", coding: true });
+    const off = conveneScopeSection(projects, { projectId: "p1" });
+    const codingOf = (s: Section | null) =>
+      s ? shapes(s)[0]?.fields?.find((f) => f.name === "coding") : undefined;
+    expect(codingOf(on)?.segmented).toBe(true);
+    expect(codingOf(on)?.options).toEqual([
+      { value: "off", label: "Discuss only" },
+      { value: "on", label: "Edit the repo" },
+    ]);
+    expect(codingOf(on)?.defaultValue).toBe("on");
+    expect(codingOf(off)?.defaultValue).toBe("off");
+    // Required, so there is no clear segment — the tier always reads as a definite state.
+    expect(codingOf(on)?.required).toBe(true);
+    expect(on && valid(on)).toBe(true);
+  });
+});
+
+describe("conveneShapeSection fields", () => {
+  test("no shape asks where the room runs — scope is the table's, not the shape's", () => {
+    const bs = byStrategy([A, B, C]);
+    for (const strategy of ["sequential", "group-chat", "open-floor", "review", "magentic"]) {
+      expect(fieldNames(bs.get(strategy))).not.toContain("project");
+      expect(fieldNames(bs.get(strategy))).not.toContain("coding");
+    }
+  });
+
+  test("fields run narration → shape → the one thing checked at close", () => {
+    const bs = byStrategy([A, B, C]);
+    expect(fieldNames(bs.get("group-chat"))).toEqual([
+      "topic",
+      "groundingUrl",
+      "moderator",
+      "turns",
+      "criteria",
+    ]);
+    expect(fieldNames(bs.get("magentic"))).toEqual([
+      "topic",
+      "groundingUrl",
+      "manager",
+      "turns",
+      "criteria",
+    ]);
+    // Discussion gains the turns field it was missing — turnBudget bounds every
+    // strategy identically, so its absence there was drift.
+    expect(fieldNames(bs.get("sequential"))).toEqual([
+      "topic",
+      "groundingUrl",
+      "turns",
+      "criteria",
+    ]);
+    expect(fieldNames(bs.get("open-floor"))).toEqual([
+      "topic",
+      "groundingUrl",
+      "turns",
+      "criteria",
+    ]);
+    // Review stays a single-pass pair: no budget to spend, no synthesis to ground.
+    // Read it from a two-seated cast — at three it is gated, so it carries no form.
+    expect(fieldNames(byStrategy([A, B]).get("review"))).toEqual(["topic"]);
+  });
+
+  test("the brief's two halves are labelled by what each does", () => {
+    const fields = byStrategy([A, B, C]).get("group-chat")?.fields ?? [];
+    expect(fields.find((f) => f.name === "groundingUrl")?.label).toBe("Reference link");
+    const criteria = fields.find((f) => f.name === "criteria");
+    expect(criteria?.label).toBe("Done when");
     expect(criteria?.multiline).toBe(true);
+    // The cost the form used to hide: criteria buy an extra cross-vendor turn.
+    expect(criteria?.placeholder).toContain("turn");
   });
 
-  test("the two short fields share a row where both are present", () => {
+  test("nothing is half-width — the grouping carries the form, not a paired row", () => {
     const bs = byStrategy([A, B, C]);
-    for (const strategy of ["group-chat", "open-floor", "magentic"]) {
-      const fields = bs.get(strategy)?.fields ?? [];
-      expect(fields.find((f) => f.name === "turns")?.half).toBe(true);
-      expect(fields.find((f) => f.name === "groundingUrl")?.half).toBe(true);
+    for (const strategy of ["sequential", "group-chat", "open-floor", "review", "magentic"]) {
+      for (const f of bs.get(strategy)?.fields ?? []) expect(f.half).toBeUndefined();
     }
   });
 
-  test("a half field with no half neighbour drops back to full width", () => {
-    // Discussion carries no turns field, so grounding source would sit alone at half
-    // width above a full-width criteria — the normalization clears it.
-    const fields = byStrategy([A, B]).get("sequential")?.fields ?? [];
-    expect(fields.some((f) => f.name === "turns")).toBe(false);
-    expect(fields.find((f) => f.name === "groundingUrl")?.half).toBeUndefined();
+  // Review is only enabled as a cross-vendor pair, so it is read from a two-seated
+  // cast; the chaired shapes need a third to facilitate.
+  const topicOf = (cast: readonly Mind[], strategy: string) =>
+    byStrategy(cast)
+      .get(strategy)
+      ?.fields?.find((f) => f.name === "topic");
+
+  test("a topic is required where the room drives to a definite outcome", () => {
+    for (const strategy of ["group-chat", "magentic"]) {
+      expect(topicOf([A, B, C], strategy)?.required).toBe(true);
+      expect(topicOf([A, B, C], strategy)?.label).toBe("Topic (required)");
+    }
+    expect(topicOf([A, B], "review")?.required).toBe(true);
+    for (const strategy of ["sequential", "open-floor"]) {
+      expect(topicOf([A, B, C], strategy)?.required).toBeUndefined();
+      expect(topicOf([A, B, C], strategy)?.label).toBe("Topic");
+    }
+  });
+
+  test("each shape asks for the topic in its own verb", () => {
+    expect(topicOf([A, B, C], "group-chat")?.placeholder).toContain("decide");
+    expect(topicOf([A, B, C], "open-floor")?.placeholder).toContain("explore");
+    expect(topicOf([A, B], "review")?.placeholder).toContain("review");
+    // Delegate decomposes a goal (TaskLedger.goal) — "discuss" was simply wrong.
+    expect(topicOf([A, B, C], "magentic")?.placeholder).toContain("goal");
+    expect(topicOf([A, B, C], "sequential")?.placeholder).toContain("discuss");
   });
 
   test("only the required field is marked; the optional ones carry no suffix", () => {
-    const bs = byStrategy([A, B, C], [{ id: "p1", name: "keelson" }]);
+    const bs = byStrategy([A, B, C]);
     for (const strategy of ["sequential", "group-chat", "open-floor", "review", "magentic"]) {
       for (const f of bs.get(strategy)?.fields ?? []) {
         expect(f.label).not.toContain("(optional)");

@@ -3,7 +3,7 @@ import type { PendingGenesis } from "../pending-genesis.ts";
 import { MAX_ACTIVE_ROOMS } from "../room-config.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
-import { type ConveneProject, conveneShapeSection } from "./convene.ts";
+import { type ConveneProject, conveneScopeSection, conveneShapeSection } from "./convene.ts";
 import {
   bootCard,
   bootSlotsFor,
@@ -20,6 +20,10 @@ type Section = CanvasBoardView["sections"][number];
 // builder stays free of the fs-backed store.
 interface DraftView {
   selected: ReadonlySet<string>;
+  // Where a convened room runs. Held on the draft rather than asked per shape, so it
+  // survives a change of shape and outlives the cast a convene clears.
+  projectId?: string;
+  coding?: boolean;
 }
 
 const NO_DRAFT: DraftView = { selected: new Set() };
@@ -154,8 +158,15 @@ function benchSections(
   if (convene.canConvene) {
     const { cast } = convene;
     if (cast.length >= 2) {
-      sections.push({ kind: "rows", items: [{ glyph: "brand", text: castLine(cast) }] });
-      sections.push(conveneShapeSection(cast, convene.projects));
+      sections.push({
+        kind: "rows",
+        items: [{ glyph: "brand", text: castLine(cast, convene.draft, convene.projects) }],
+      });
+      // Where before how: the scope bar stands between the cast and the shape tabs, so
+      // the table states its own context before the shape asks anything.
+      const scope = conveneScopeSection(convene.projects, convene.draft);
+      if (scope) sections.push(scope);
+      sections.push(conveneShapeSection(cast));
     } else {
       // Brand-toned with nobody seated: this row is the bench's only invitation into
       // convening, so it has to pull like an affordance rather than read as a note.
@@ -168,11 +179,23 @@ function benchSections(
 // Name the cast rather than count it: two or three names verify at a glance against the
 // seats they were clicked from, in the same left-to-right order. Past three the list is
 // the same work as a count, so it falls back to one.
-function castLine(cast: readonly Mind[]): string {
+function castLine(
+  cast: readonly Mind[],
+  scope: DraftView = NO_DRAFT,
+  projects: readonly ConveneProject[] = [],
+): string {
   const names = cast.map((m) => m.name);
-  if (names.length === 2) return `${names[0]} and ${names[1]} at the table`;
-  if (names.length === 3) return `${names[0]}, ${names[1]}, and ${names[2]} at the table`;
-  return `${names.length} at the table`;
+  const who =
+    names.length === 2
+      ? `${names[0]} and ${names[1]} at the table`
+      : names.length === 3
+        ? `${names[0]}, ${names[1]}, and ${names[2]} at the table`
+        : `${names.length} at the table`;
+  // The table states its own context: an unresolvable id still shows, so a scope set
+  // against a project the host has since dropped reads as stale rather than vanishing.
+  if (!scope.projectId) return who;
+  const project = projects.find((p) => p.id === scope.projectId)?.name ?? scope.projectId;
+  return `${who} · ${project}${scope.coding ? " · can edit the repo" : ""}`;
 }
 
 function assemblyHint(cast: readonly Mind[]): string {
