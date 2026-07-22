@@ -23,7 +23,7 @@ import {
   roomsDir,
   setChamberDataHome,
 } from "../src/paths.ts";
-import { clearDraft, readDraft } from "../src/room-draft.ts";
+import { clearDraft, readDraft, setScope } from "../src/room-draft.ts";
 import { createFileRoomStore, DEFAULT_CLOSED_ROOM_RETENTION } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
 import { gatedRunAgentTurn, scriptedRunAgentTurn } from "./helpers/fakes.ts";
@@ -602,22 +602,80 @@ describe("room adapter — convene composer (draft-set + assemble + convene)", (
     expect(draft.coding).toBe(true);
   });
 
-  it("clearing a coding-enabled scope takes the tier with it in ONE submit", async () => {
+  it("clearing the project takes the tier with it", async () => {
     await onAction(
       { type: "scope-set", payload: { project: "p1", coding: "on" } },
       makeCtx({ sm: snap.sm, projects }),
     );
-    // The form submits every field it rendered, so clearing the project while the
-    // coding strip still reads "on" arrives as this exact pair. It is a clear, not a
-    // contradiction — the operator must not have to turn coding off first.
+    // The picker's own submit carries only `project`; the tier has no confinement
+    // boundary left, so it drops rather than stranding an unconfined coding scope.
     const res = await onAction(
-      { type: "scope-set", payload: { project: "", coding: "on" } },
+      { type: "scope-set", payload: { project: "" } },
       makeCtx({ sm: snap.sm, projects }),
     );
     expect(res.ok).toBe(true);
     const draft = await readDraft();
     expect(draft.projectId).toBeUndefined();
     expect(draft.coding).toBeUndefined();
+  });
+
+  it("the tier toggle patches the tier and leaves the project standing", async () => {
+    await onAction(
+      { type: "scope-set", payload: { project: "p1" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    // The toggle is a fieldless chip: it dispatches only the value it flips to, so the
+    // handler must patch rather than treat the absent project as a clear.
+    await onAction({ type: "scope-set", payload: { coding: "on" } }, makeCtx({ sm: snap.sm }));
+    let draft = await readDraft();
+    expect(draft.projectId).toBe("p1");
+    expect(draft.coding).toBe(true);
+    await onAction({ type: "scope-set", payload: { coding: "off" } }, makeCtx({ sm: snap.sm }));
+    draft = await readDraft();
+    expect(draft.projectId).toBe("p1");
+    expect(draft.coding).toBeUndefined();
+  });
+
+  it("re-picking a project leaves the tier where it was", async () => {
+    await onAction(
+      { type: "scope-set", payload: { project: "p1", coding: "on" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    await onAction(
+      { type: "scope-set", payload: { project: "p1" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    const draft = await readDraft();
+    expect(draft.projectId).toBe("p1");
+    expect(draft.coding).toBe(true);
+  });
+
+  it("the tier cannot be enabled against a project the host has dropped", async () => {
+    // A board rendered before the host dropped the project can still dispatch the
+    // toggle; without re-resolving the retained id this would persist an edit tier for
+    // a target validateStart rejects, breaking every subsequent convene.
+    await setScope("ghost", false);
+    const res = await onAction(
+      { type: "scope-set", payload: { coding: "on" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(false);
+    expect((await readDraft()).coding).toBeUndefined();
+  });
+
+  it("the tier can always be revoked, even on a dropped project", async () => {
+    await setScope("ghost", true);
+    const res = await onAction(
+      { type: "scope-set", payload: { coding: "off" } },
+      makeCtx({ sm: snap.sm, projects }),
+    );
+    expect(res.ok).toBe(true);
+    expect((await readDraft()).coding).toBeUndefined();
+  });
+
+  it("scope-set carrying neither key is rejected rather than silently no-op", async () => {
+    const res = await onAction({ type: "scope-set", payload: {} }, makeCtx({ sm: snap.sm }));
+    expect(res.ok).toBe(false);
   });
 
   it("scope-set fails closed on a project the host does not offer", async () => {

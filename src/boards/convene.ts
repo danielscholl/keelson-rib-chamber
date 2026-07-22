@@ -76,47 +76,54 @@ export function conveneScopeSection(
       : undefined;
   // Nothing to scope to and nothing to recover from.
   if (projects.length === 0 && !stale) return null;
-  const project: CanvasActionField = {
-    name: "project",
-    label: "Project",
-    // Not required, so this doubles as the clear option — picking it dispatches "" and
-    // drops the scope (and the coding tier with it).
-    placeholder: "No project (shared)",
-    options: [
-      ...projects.map((p) => ({ value: p.id, label: p.name })),
-      ...(stale ? [{ value: stale, label: `${stale} (unavailable)` }] : []),
-    ],
-    defaultValue: scope.projectId ?? "",
-  };
-  // The coding tier is unconfined without a repo to bound it to, so it only appears once
-  // a project is set — the form expresses that pairing instead of an error enforcing it
-  // after the fact. Named for what it lets the Minds DO, since it is the one control here
-  // that lets a paid turn write to disk.
-  const coding: CanvasActionField = {
-    name: "coding",
-    label: "What may they do?",
-    required: true,
-    segmented: true,
-    options: [
-      { value: "off", label: "Discuss only" },
-      { value: "on", label: "Edit the repo" },
-    ],
-    defaultValue: scope.coding ? "on" : "off",
-  };
-  return {
-    kind: "actions",
-    title: "Where does it run?",
-    items: [
-      {
-        type: "scope-set",
-        label: "Set scope",
-        // The bar is the affordance, so the form stands open rather than behind a
-        // disclosure click.
-        expanded: true,
-        fields: scope.projectId ? [project, coding] : [project],
-      },
-    ],
-  };
+  // The seat cards' idiom: a control whose LABEL is its current value, with the picker
+  // behind it.
+  const current = scope.projectId
+    ? (projects.find((p) => p.id === scope.projectId)?.name ?? `${scope.projectId} (unavailable)`)
+    : "Shared";
+  const items: CanvasActionItem[] = [
+    {
+      type: "scope-set",
+      label: `Project — ${current}`,
+      glyph: "⚙",
+      hint: "Where this room runs: the project root each turn takes as its working directory.",
+      submitLabel: "Set project",
+      fields: [
+        {
+          name: "project",
+          label: "Project",
+          // Not required, so this doubles as the clear option — picking it dispatches ""
+          // and drops the scope (and the coding tier with it).
+          placeholder: "No project (shared)",
+          options: [
+            ...projects.map((p) => ({ value: p.id, label: p.name })),
+            ...(stale ? [{ value: stale, label: `${stale} (unavailable)` }] : []),
+          ],
+          defaultValue: scope.projectId ?? "",
+        },
+      ],
+    },
+  ];
+  // The tier is a boolean, so it gets ONE control rather than a pair of segments implying
+  // two peer choices: unset is read-only. It carries no fields, so it flips on click like
+  // a seat card. It appears only for a LIVE project: the tier has no confinement boundary
+  // without a repo to bound it to, and offering it against a project the host no longer
+  // lists would only deepen a scope that already fails validateStart — the one useful
+  // move there is to repick or clear the project.
+  if (scope.projectId && !stale) {
+    const on = scope.coding === true;
+    items.push({
+      type: "scope-set",
+      label: on ? "Can edit" : "Discuss only",
+      glyph: on ? "✎" : "◌",
+      ...(on ? { tone: "warn" as const } : {}),
+      hint: on
+        ? `Turns may run Bash, Edit and Write inside ${current}. Click to make the room read-only.`
+        : `The room only discusses. Click to let its turns edit ${current}.`,
+      payload: { coding: on ? "off" : "on" },
+    });
+  }
+  return { kind: "actions", title: "Where does it run?", wrap: true, items };
 }
 
 // The facilitator (Debate chair / Delegate manager) is one of the selected Minds the

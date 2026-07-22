@@ -93,28 +93,42 @@ export async function draftSetAction(action: RibAction): Promise<RibActionResult
 // restates the scope), return the new state. An empty project clears the scope.
 export async function scopeSetAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
-  const projectInput = asNonEmptyString(payload.project);
-  // An empty project is authoritative. A submit carries every field the form rendered,
-  // so clearing the project on a coding-enabled scope arrives as
-  // `{ project: "", coding: "on" }` — that is a legitimate clear, not a contradiction.
-  // Dropping the project drops the tier with it (setScope enforces the same pairing),
-  // rather than making the operator turn coding off in a separate submit first.
-  if (!projectInput) {
-    try {
-      await setScope(undefined, false);
-      refreshPresence();
-      return { ok: true, data: { projectId: null, coding: false } };
-    } catch (e) {
-      return { ok: false, error: errText(e) };
-    }
+  // A patch, keyed on the PRESENCE of a payload key rather than its value: each control
+  // dispatches only its own key, so `{ project: "" }` is a deliberate clear while an
+  // absent `project` means the scope must stand.
+  const setsProject = Object.hasOwn(payload, "project");
+  const setsCoding = Object.hasOwn(payload, "coding");
+  if (!setsProject && !setsCoding) {
+    return { ok: false, error: "scope-set needs a project or a coding value" };
   }
-  const coding = asNonEmptyString(payload.coding) === "on";
-  const resolved = resolveProjectInput(projectInput);
-  if (!resolved.ok) return { ok: false, error: resolved.error };
   try {
-    const draft = await setScope(resolved.project.id, coding);
+    const draft = await readDraft();
+    let projectId = draft.projectId;
+    if (setsProject) {
+      const input = asNonEmptyString(payload.project);
+      if (!input) projectId = undefined;
+      else {
+        const resolved = resolveProjectInput(input);
+        if (!resolved.ok) return { ok: false, error: resolved.error };
+        projectId = resolved.project.id;
+      }
+    }
+    const coding = setsCoding ? asNonEmptyString(payload.coding) === "on" : draft.coding === true;
+    // A retained project is carried over unresolved, so re-check it before granting the
+    // tier against it: the host can drop a project while a board still holds it, and
+    // persisting an edit tier for a target validateStart will reject only deepens a scope
+    // the operator has to unpick anyway. Revoking stays allowed — that direction is safe.
+    if (coding && !setsProject && projectId && !resolveProjectInput(projectId).ok) {
+      return {
+        ok: false,
+        error: `project "${projectId}" is no longer available — pick a project before enabling edits`,
+      };
+    }
+    // setScope owns the pairing: clearing the project drops the tier with it, so a clear
+    // never has to be preceded by turning the tier off.
+    const next = await setScope(projectId, coding);
     refreshPresence();
-    return { ok: true, data: { projectId: draft.projectId, coding: draft.coding === true } };
+    return { ok: true, data: { projectId: next.projectId ?? null, coding: next.coding === true } };
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
