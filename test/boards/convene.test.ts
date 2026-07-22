@@ -233,21 +233,30 @@ describe("conveneScopeSection", () => {
     expect(scoped && shapes(scoped).length).toBe(2);
   });
 
-  test("the tier is one toggle that flips on click — unset is read-only", () => {
+  test("the tier is one toggle whose label holds still and whose state is pressed", () => {
     const on = conveneScopeSection(projects, { projectId: "p1", coding: true });
     const off = conveneScopeSection(projects, { projectId: "p1" });
     const toggleOf = (s: Section | null) => (s ? shapes(s)[1] : undefined);
-    // A boolean gets one control, not a pair of segments implying two peer choices.
+    // The label names the capability once; `selected` says whether it is granted, so
+    // the control never reads as "is this the state, or what the click does?".
     expect(toggleOf(on)?.label).toBe("Can edit");
-    expect(toggleOf(off)?.label).toBe("Discuss only");
-    expect(toggleOf(on)?.tone).toBe("warn");
-    expect(toggleOf(off)?.tone).toBeUndefined();
+    expect(toggleOf(off)?.label).toBe("Can edit");
+    expect(toggleOf(on)?.selected).toBe(true);
+    expect(toggleOf(off)?.selected).toBe(false);
     // No fields — it dispatches on click like a seat card, carrying the value it flips to.
     expect(toggleOf(on)?.fields).toBeUndefined();
     expect(toggleOf(on)?.payload).toEqual({ coding: "off" });
     expect(toggleOf(off)?.payload).toEqual({ coding: "on" });
     expect(on && valid(on)).toBe(true);
     expect(off && valid(off)).toBe(true);
+  });
+
+  test("the read floor is stated where it comes from — the project, not the tier", () => {
+    // A scoped room grants every speaker Read inside the root (readToolPool), so an
+    // off tier is NOT "no repo access" and must not be labelled as though it were.
+    const section = conveneScopeSection(projects, { projectId: "p1" });
+    expect(shapes(section ?? ({} as Section))[0]?.hint).toContain("read");
+    expect(shapes(section ?? ({} as Section))[1]?.hint).toContain("Reading is already allowed");
   });
 
   test("a stale project offers no tier toggle — only the picker that can unpick it", () => {

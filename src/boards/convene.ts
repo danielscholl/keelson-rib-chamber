@@ -86,7 +86,10 @@ export function conveneScopeSection(
       type: "scope-set",
       label: `Project — ${current}`,
       glyph: "⚙",
-      hint: "Where this room runs: the project root each turn takes as its working directory.",
+      // The read floor belongs to the project decision, not the tier: scoping to a
+      // project is itself what grants every speaker Read inside the root, with no
+      // coding tier and no per-Mind declaration (readToolPool, room-lifecycle.ts).
+      hint: "Where this room runs: the project root each turn takes as its working directory. Every Mind in a scoped room can read it.",
       submitLabel: "Set project",
       fields: [
         {
@@ -114,12 +117,17 @@ export function conveneScopeSection(
     const on = scope.coding === true;
     items.push({
       type: "scope-set",
-      label: on ? "Can edit" : "Discuss only",
-      glyph: on ? "✎" : "◌",
-      ...(on ? { tone: "warn" as const } : {}),
+      // One constant label naming the capability, with `selected` carrying whether it
+      // is granted. A label that swaps on click reads as two different things on one
+      // control — "Discuss only" could equally describe what is true now or what a
+      // click will do — and it also mislabelled the off state, since a scoped room
+      // already reads the repo.
+      label: "Can edit",
+      glyph: "✎",
+      selected: on,
       hint: on
         ? `Turns may run Bash, Edit and Write inside ${current}. Click to make the room read-only.`
-        : `The room only discusses. Click to let its turns edit ${current}.`,
+        : `Let this room's turns run Bash, Edit and Write inside ${current}. Reading is already allowed.`,
       payload: { coding: on ? "off" : "on" },
     });
   }
