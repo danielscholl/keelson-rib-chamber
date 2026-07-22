@@ -242,6 +242,35 @@ describe("buildChamberBoard session footer", () => {
       value: "Moderated debate",
     });
   });
+
+  test("is orthogonal to the draft: seating a mid-session Mind keeps its session named", () => {
+    // The two states answer different questions — the ring says "in this cast", the
+    // field says "already talking over there" — so seating must not swallow the room.
+    // Two Minds and headroom under the cap, else the bench withholds the seat toggle.
+    const minds = [
+      mind({ slug: "jarvis", name: "Jarvis", identitySlot: 0 }),
+      mind({ slug: "mycroft", name: "Mycroft", identitySlot: 1 }),
+    ];
+    const board = buildChamberBoard(
+      minds,
+      [room({ status: "active", participants: ["jarvis"], name: "Liveness decision" })],
+      [],
+      Date.parse("2026-07-12T09:00:05.000Z"),
+      { selected: new Set(["jarvis"]) },
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const jarvis = cards(board).find((c) => c.title === "Jarvis");
+    expect(jarvis?.selected).toBe(true);
+    expect(jarvis?.fields?.at(-1)).toMatchObject({
+      label: "session",
+      value: "Liveness decision",
+      tone: "info",
+    });
+    // The unseated Mind is in no room, so its card carries the mission alone.
+    const mycroft = cards(board).find((c) => c.title === "Mycroft");
+    expect(mycroft?.selected).toBe(false);
+    expect(mycroft?.fields?.length).toBe(1);
+  });
 });
 
 describe("buildChamberBoard pending genesis", () => {
