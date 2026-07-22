@@ -9,7 +9,7 @@ import { readMinds } from "../minds-store.ts";
 import { mindsDir, roomsDir } from "../paths.ts";
 import { readPendingGeneses } from "../pending-genesis.ts";
 import { normalizeGrounding, parseCriteriaLines, roomConfigFromFlat } from "../room-config.ts";
-import { clearDraft, readDraft, toggleSelected } from "../room-draft.ts";
+import { clearCast, readDraft, setScope, toggleSelected } from "../room-draft.ts";
 import { roomKey } from "../room-key-registry.ts";
 import {
   DEFAULT_ROOM_TURN_BUDGET,
@@ -87,6 +87,40 @@ export async function draftSetAction(action: RibAction): Promise<RibActionResult
   }
 }
 
+// Set where a convened room runs — the project its turns take as their cwd, and whether
+// the coding tier is on. Mirrors draftSetAction: mutate the draft, recompose the Chamber
+// panel (so the scope bar re-renders, the coding control appears, and the cast line
+// restates the scope), return the new state. An empty project clears the scope.
+export async function scopeSetAction(action: RibAction): Promise<RibActionResult> {
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const projectInput = asNonEmptyString(payload.project);
+  const coding = asNonEmptyString(payload.coding) === "on";
+  if (!projectInput) {
+    // The coding tier has no confinement boundary without a project. The form can't
+    // produce this pair (the control only renders once a project is set), so a payload
+    // that does is forged — surface it rather than silently dropping the coding flag.
+    if (coding) {
+      return { ok: false, error: "the coding tier needs a project — pick one first" };
+    }
+    try {
+      const draft = await setScope(undefined, false);
+      refreshPresence();
+      return { ok: true, data: { projectId: null, coding: draft.coding === true } };
+    } catch (e) {
+      return { ok: false, error: errText(e) };
+    }
+  }
+  const resolved = resolveProjectInput(projectInput);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  try {
+    const draft = await setScope(resolved.project.id, coding);
+    refreshPresence();
+    return { ok: true, data: { projectId: draft.projectId, coding: draft.coding === true } };
+  } catch (e) {
+    return { ok: false, error: errText(e) };
+  }
+}
+
 // Convene a room from the current draft and the chosen shape: participants are the Minds
 // seated at the table (the inclusion draft) minus the named facilitator — a Debate chair
 // / Delegate manager is one of the seated Minds, pulled out of the cast so it routes/plans
@@ -114,10 +148,16 @@ export async function conveneAction(action: RibAction): Promise<RibActionResult>
   const payload = (action.payload ?? {}) as Record<string, unknown>;
   let allMinds: Mind[];
   let draftedMinds: Mind[];
+  // Scope rides the draft, not the shape's form: it is a property of the room rather
+  // than of how the Minds take turns, so it holds across a change of shape.
+  let projectId: string | undefined;
+  let coding = false;
   try {
     const draft = await readDraft();
     allMinds = await readMinds(mindsDir());
     draftedMinds = allMinds.filter((m) => draft.selected.has(m.slug));
+    projectId = draft.projectId;
+    coding = draft.coding === true;
   } catch (e) {
     return { ok: false, error: errText(e) };
   }
@@ -129,14 +169,6 @@ export async function conveneAction(action: RibAction): Promise<RibActionResult>
     sourceUrl: asNonEmptyString(payload.groundingUrl),
     criteria: parseCriteriaLines(asNonEmptyString(payload.criteria)),
   });
-
-  const projectInput = asNonEmptyString(payload.project);
-  let projectId: string | undefined;
-  if (projectInput) {
-    const resolved = resolveProjectInput(projectInput);
-    if (!resolved.ok) return { ok: false, error: resolved.error };
-    projectId = resolved.project.id;
-  }
 
   // Moderator (Debate) and manager (Build) are Mind name-or-slug free text; resolve
   // each to a slug so validateStart's facilitator rules apply. An unresolvable
@@ -176,11 +208,16 @@ export async function conveneAction(action: RibAction): Promise<RibActionResult>
     topic,
     ...(grounding ? { grounding } : {}),
     ...(projectId ? { projectId } : {}),
+    // validateStart owns the coding/project pairing, so it is passed through rather
+    // than re-checked here.
+    coding,
     ...(mod.slug ? { moderator: mod.slug } : {}),
     ...(mgr.slug ? { manager: mgr.slug } : {}),
   });
   if (res.ok) {
-    await clearDraft().catch(() => {});
+    // The seats empty but the scope stands — several rooms are commonly convened
+    // against one project.
+    await clearCast().catch(() => {});
     refreshPresence();
   }
   return res;

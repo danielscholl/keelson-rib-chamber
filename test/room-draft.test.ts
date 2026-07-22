@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearDraft, draftFile, readDraft, toggleSelected } from "../src/room-draft.ts";
+import {
+  clearCast,
+  clearDraft,
+  draftFile,
+  readDraft,
+  setScope,
+  toggleSelected,
+} from "../src/room-draft.ts";
 
 describe("room-draft persistence (the inclusion set)", () => {
   let home: string;
@@ -44,6 +51,64 @@ describe("room-draft persistence (the inclusion set)", () => {
     await toggleSelected("bo", home);
     await clearDraft(home);
     expect([...(await readDraft(home)).selected]).toEqual([]);
+  });
+
+  test("scope round-trips beside the cast", async () => {
+    await toggleSelected("ada", home);
+    await setScope("keelson", true, home);
+    const draft = await readDraft(home);
+    expect(draft.projectId).toBe("keelson");
+    expect(draft.coding).toBe(true);
+    expect([...draft.selected]).toEqual(["ada"]);
+  });
+
+  test("dropping the project forces the coding tier off", async () => {
+    await setScope("keelson", true, home);
+    // The tier is unconfined without a repo to bound it to, so it can never outlive
+    // the project that bounded it — enforced here so validateStart never sees the pair.
+    const cleared = await setScope(undefined, true, home);
+    expect(cleared.projectId).toBeUndefined();
+    expect(cleared.coding).toBeUndefined();
+    expect((await readDraft(home)).coding).toBeUndefined();
+  });
+
+  test("clearCast empties the cast but leaves the scope standing", async () => {
+    await toggleSelected("ada", home);
+    await toggleSelected("bo", home);
+    await setScope("keelson", true, home);
+    await clearCast(home);
+    const draft = await readDraft(home);
+    expect([...draft.selected]).toEqual([]);
+    expect(draft.projectId).toBe("keelson");
+    expect(draft.coding).toBe(true);
+  });
+
+  test("clearDraft drops the scope too — it is the full reset", async () => {
+    await setScope("keelson", true, home);
+    await clearDraft(home);
+    const draft = await readDraft(home);
+    expect(draft.projectId).toBeUndefined();
+    expect(draft.coding).toBeUndefined();
+  });
+
+  test("a draft written before scope existed still loads", async () => {
+    await mkdir(home, { recursive: true });
+    await writeFile(draftFile(home), JSON.stringify({ selected: ["ada"] }));
+    const draft = await readDraft(home);
+    expect([...draft.selected]).toEqual(["ada"]);
+    expect(draft.projectId).toBeUndefined();
+    expect(draft.coding).toBeUndefined();
+  });
+
+  test("mistyped scope keys are ignored rather than trusted", async () => {
+    await mkdir(home, { recursive: true });
+    await writeFile(
+      draftFile(home),
+      JSON.stringify({ selected: ["ada"], projectId: 7, coding: "yes" }),
+    );
+    const draft = await readDraft(home);
+    expect(draft.projectId).toBeUndefined();
+    expect(draft.coding).toBeUndefined();
   });
 
   test("a corrupt file degrades to the empty default rather than throwing", async () => {

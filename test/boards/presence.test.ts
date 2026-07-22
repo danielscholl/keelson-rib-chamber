@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { canvasViewSchema } from "@keelson/shared";
+import { type CanvasBoardView, canvasViewSchema } from "@keelson/shared";
 import { buildChamberBoard } from "../../src/boards/presence.ts";
 import type { PendingGenesis } from "../../src/pending-genesis.ts";
 import { MAX_ACTIVE_ROOMS } from "../../src/room-config.ts";
@@ -375,6 +375,17 @@ describe("buildChamberBoard convene composer (folded in)", () => {
   const B = mind({ slug: "b", name: "Bo", identitySlot: 1, provider: "openai" });
   // Assembly is derived from the cast, so a draft is only ever its inclusion set.
   const draft = (selected: string[] = []) => ({ selected: new Set(selected) });
+  const scoped = (selected: string[], projectId?: string, coding?: boolean) => ({
+    selected: new Set(selected),
+    ...(projectId ? { projectId } : {}),
+    ...(coding ? { coding } : {}),
+  });
+  const PROJECTS = [
+    { id: "p1", name: "keelson" },
+    { id: "p2", name: "chamber" },
+  ];
+  const sectionIndex = (board: CanvasBoardView, title: string) =>
+    board.sections.findIndex((s) => s.kind === "actions" && s.title === title);
   // A bench running n rooms, each its own — what listRooms hands the board.
   const liveRooms = (n: number) =>
     Array.from({ length: n }, (_, i) => room({ slug: `room-${i}`, status: "active" }));
@@ -437,6 +448,46 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     expect(bo?.action).toEqual({ type: "draft-set", payload: { slug: "b" } });
     expect(bo?.selected).toBe(false);
     expect(bo?.fields?.length).toBe(1);
+  });
+
+  test("the scope bar stands between the cast and the shape tabs — where before how", () => {
+    const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]), PROJECTS);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const where = sectionIndex(board, "Where does it run?");
+    const how = sectionIndex(board, "How should they convene?");
+    expect(where).toBeGreaterThan(-1);
+    expect(how).toBeGreaterThan(where);
+  });
+
+  test("no scope bar when the host exposes no projects — nothing to scope to", () => {
+    const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]));
+    expect(sectionIndex(board, "Where does it run?")).toBe(-1);
+    expect(sectionIndex(board, "How should they convene?")).toBeGreaterThan(-1);
+  });
+
+  test("the cast line states the table's scope, naming the project", () => {
+    const board = buildChamberBoard([A, B], [], [], NOW, scoped(["a", "b"], "p1", true), PROJECTS);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const line = board.sections
+      .flatMap((s) => (s.kind === "rows" ? s.items : []))
+      .find((i) => typeof i.text === "string" && i.text.includes("at the table"));
+    expect(line?.text).toBe("Bo and Ada at the table · keelson · can edit the repo");
+  });
+
+  test("an unscoped table says only who is at it", () => {
+    const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]), PROJECTS);
+    const line = board.sections
+      .flatMap((s) => (s.kind === "rows" ? s.items : []))
+      .find((i) => typeof i.text === "string" && i.text.includes("at the table"));
+    expect(line?.text).toBe("Bo and Ada at the table");
+  });
+
+  test("a scope naming a project the host has dropped reads as stale, not as nothing", () => {
+    const board = buildChamberBoard([A, B], [], [], NOW, scoped(["a", "b"], "gone"), PROJECTS);
+    const line = board.sections
+      .flatMap((s) => (s.kind === "rows" ? s.items : []))
+      .find((i) => typeof i.text === "string" && i.text.includes("at the table"));
+    expect(line?.text).toBe("Bo and Ada at the table · gone");
   });
 
   test("with two seated the composer unfolds the shape tabs and named cast without Clear", () => {
