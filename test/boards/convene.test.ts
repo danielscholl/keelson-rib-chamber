@@ -178,16 +178,19 @@ describe("conveneScopeSection", () => {
     { id: "p2", name: "chamber" },
   ];
 
-  test("a project picker over the host projects, opening on the current scope", () => {
+  test("the project control wears its current value and keeps the picker behind it", () => {
     const section = conveneScopeSection(projects, { projectId: "p1" });
     expect(section).not.toBeNull();
     if (!section) return;
     expect(valid(section)).toBe(true);
     expect(section.kind === "actions" && section.title).toBe("Where does it run?");
+    // A wrapping strip of compact chips, not a stacked column of labelled rows.
+    expect(section.kind === "actions" && section.wrap).toBe(true);
     const item = shapes(section)[0];
     expect(item?.type).toBe("scope-set");
-    // The bar IS the affordance — the form stands open rather than behind a click.
-    expect(item?.expanded).toBe(true);
+    // The seat-card idiom: the label IS the readout, so the form only exists on demand.
+    expect(item?.label).toBe("Project — keelson");
+    expect(item?.expanded).toBeUndefined();
     const proj = item?.fields?.find((f) => f.name === "project");
     expect(proj?.options).toEqual([
       { value: "p1", label: "keelson" },
@@ -196,6 +199,11 @@ describe("conveneScopeSection", () => {
     expect(proj?.defaultValue).toBe("p1");
     // Not required, so its placeholder doubles as the clear option.
     expect(proj?.required).toBeUndefined();
+  });
+
+  test("an unscoped table reads Shared on the face of the control", () => {
+    const section = conveneScopeSection(projects, {});
+    expect(section && shapes(section)[0]?.label).toBe("Project — Shared");
   });
 
   test("no bar at all when the host exposes no projects and nothing is scoped", () => {
@@ -218,28 +226,33 @@ describe("conveneScopeSection", () => {
     }
   });
 
-  test("the coding tier appears only once a project is set", () => {
+  test("the tier toggle appears only once a project is set", () => {
     const unscoped = conveneScopeSection(projects, {});
-    expect(unscoped && fieldNames(shapes(unscoped)[0])).toEqual(["project"]);
+    expect(unscoped && shapes(unscoped).length).toBe(1);
     const scoped = conveneScopeSection(projects, { projectId: "p1" });
-    expect(scoped && fieldNames(shapes(scoped)[0])).toEqual(["project", "coding"]);
+    expect(scoped && shapes(scoped).length).toBe(2);
   });
 
-  test("the coding control is a segmented pair opening on the drafted value", () => {
+  test("the tier is one toggle that flips on click — unset is read-only", () => {
     const on = conveneScopeSection(projects, { projectId: "p1", coding: true });
     const off = conveneScopeSection(projects, { projectId: "p1" });
-    const codingOf = (s: Section | null) =>
-      s ? shapes(s)[0]?.fields?.find((f) => f.name === "coding") : undefined;
-    expect(codingOf(on)?.segmented).toBe(true);
-    expect(codingOf(on)?.options).toEqual([
-      { value: "off", label: "Discuss only" },
-      { value: "on", label: "Edit the repo" },
-    ]);
-    expect(codingOf(on)?.defaultValue).toBe("on");
-    expect(codingOf(off)?.defaultValue).toBe("off");
-    // Required, so there is no clear segment — the tier always reads as a definite state.
-    expect(codingOf(on)?.required).toBe(true);
+    const toggleOf = (s: Section | null) => (s ? shapes(s)[1] : undefined);
+    // A boolean gets one control, not a pair of segments implying two peer choices.
+    expect(toggleOf(on)?.label).toBe("Can edit");
+    expect(toggleOf(off)?.label).toBe("Discuss only");
+    expect(toggleOf(on)?.tone).toBe("warn");
+    expect(toggleOf(off)?.tone).toBeUndefined();
+    // No fields — it dispatches on click like a seat card, carrying the value it flips to.
+    expect(toggleOf(on)?.fields).toBeUndefined();
+    expect(toggleOf(on)?.payload).toEqual({ coding: "off" });
+    expect(toggleOf(off)?.payload).toEqual({ coding: "on" });
     expect(on && valid(on)).toBe(true);
+    expect(off && valid(off)).toBe(true);
+  });
+
+  test("the toggle names the project it would let the Minds write to", () => {
+    const off = conveneScopeSection(projects, { projectId: "p1" });
+    expect(shapes(off ?? ({} as Section))[1]?.hint).toContain("keelson");
   });
 });
 
