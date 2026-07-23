@@ -1165,6 +1165,12 @@ describe("buildRoomBoard · observability", () => {
     expect(vitalsRow(board)?.text).toContain("⚙ 3 tools · 1 failed");
   });
 
+  test("a single tool call reads singular on the vitals line", () => {
+    const board = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "Read" }] })]);
+    expect(vitalsRow(board)?.text).toContain("⚙ 1 tool");
+    expect(vitalsRow(board)?.text).not.toContain("⚙ 1 tools");
+  });
+
   test("context-only usage (zero spend) shows the Context meter but no spend arrows", () => {
     const board = buildRoomBoard(room({ participants: ["a"] }), [
       // a real window, zero in/out — a context report, not measured spend

@@ -242,11 +242,8 @@ function buildVitalsSection(
   }
   const tools = countToolCalls(transcript);
   if (tools.total > 0) {
-    parts.push(
-      tools.failed > 0
-        ? `⚙ ${tools.total} tools · ${tools.failed} failed`
-        : `⚙ ${tools.total} tools`,
-    );
+    const label = `⚙ ${tools.total} tool${tools.total === 1 ? "" : "s"}`;
+    parts.push(tools.failed > 0 ? `${label} · ${tools.failed} failed` : label);
   }
   if (parts.length === 0 && !projectLabel) return [];
   return [
