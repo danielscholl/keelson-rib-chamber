@@ -1853,3 +1853,95 @@ describe("room driver — concurrent (speak-parallel)", () => {
     expect((await store.loadRoom("demo"))?.status).toBe("stopped");
   });
 });
+
+describe("room driver — tool + usage capture", () => {
+  const longPath = `src/${"a/".repeat(60)}file.ts`; // well over the 80-char preview cap
+
+  test("persists tool calls (name, preview, failed flag) and usage from the turn stream", async () => {
+    const h = harness([
+      {
+        text: "done",
+        usage: {
+          inputTokens: 1200,
+          outputTokens: 40,
+          contextTokens: 148_000,
+          contextWindow: 200_000,
+        },
+        emits: [
+          // Failure arriving BEFORE its tool_use — applied once the use lands.
+          { type: "tool_result", toolUseId: "early", content: "boom", isError: true },
+          { type: "tool_use", id: "early", toolName: "Grep", toolInput: { pattern: "needle" } },
+          { type: "tool_use", id: "t1", toolName: "Read", toolInput: { file_path: longPath } },
+          { type: "tool_use", id: "t2", toolName: "Bash", toolInput: { command: "grep x" } },
+          { type: "tool_result", toolUseId: "t2", content: "exit 2", isError: true },
+          // Nested MCP name keeps its tail; a plain `foo__bar` is NOT an MCP wrapper.
+          { type: "tool_use", id: "t3", toolName: "mcp__srv__a__b", toolInput: {} },
+          { type: "tool_use", id: "t4", toolName: "foo__bar", toolInput: {} },
+        ],
+      },
+    ]);
+    await h.driver.start({ ...START, turnBudget: 4 });
+    await h.driver.step("demo");
+    const first = h.transcripts.get("demo")?.[0];
+    const byName = (n: string) => first?.toolCalls?.find((c) => c.name === n);
+    // usage flows through unchanged (drives the Context meter + trailing).
+    expect(first?.usage?.contextWindow).toBe(200_000);
+    // Order preserved; only MCP names are reduced (nested tail kept), plain names intact.
+    expect(first?.toolCalls?.map((c) => c.name)).toEqual([
+      "Grep",
+      "Read",
+      "Bash",
+      "a__b",
+      "foo__bar",
+    ]);
+    // Out-of-order failure is applied; an in-order failure too; others stay unflagged.
+    expect(byName("Grep")?.errored).toBe(true);
+    expect(byName("Bash")?.errored).toBe(true);
+    expect(byName("Read")?.errored).toBeUndefined();
+    // A long arg preview is captured and truncated at the 80-char cap.
+    const readPrimary = byName("Read")?.primary ?? "";
+    expect(readPrimary.length).toBeLessThanOrEqual(80);
+    expect(readPrimary.endsWith("…")).toBe(true);
+  });
+
+  test("caps the persisted tool calls per turn (a runaway coding turn stays bounded)", async () => {
+    const emits = Array.from({ length: 45 }, (_, i) => ({
+      type: "tool_use" as const,
+      id: `k${i}`,
+      toolName: "Read",
+      toolInput: { file_path: `f${i}.ts` },
+    }));
+    const h = harness([{ text: "done", emits }]);
+    await h.driver.start({ ...START, turnBudget: 4 });
+    await h.driver.step("demo");
+    expect(h.transcripts.get("demo")?.[0]?.toolCalls?.length).toBe(40);
+  });
+
+  test("a multiline tool arg is collapsed to a single-line preview", async () => {
+    const h = harness([
+      {
+        text: "done",
+        emits: [
+          {
+            type: "tool_use",
+            id: "b",
+            toolName: "Bash",
+            toolInput: { command: "line one\n  line two\nline three" },
+          },
+        ],
+      },
+    ]);
+    await h.driver.start({ ...START, turnBudget: 4 });
+    await h.driver.step("demo");
+    const primary = h.transcripts.get("demo")?.[0]?.toolCalls?.[0]?.primary ?? "";
+    expect(primary.length).toBeGreaterThan(0);
+    expect(primary).not.toContain("\n");
+  });
+
+  test("a text-only turn persists no toolCalls", async () => {
+    const h = harness([{ text: "just talking", usage: { inputTokens: 10, outputTokens: 5 } }]);
+    await h.driver.start({ ...START, turnBudget: 4 });
+    await h.driver.step("demo");
+    expect(h.transcripts.get("demo")?.[0]).not.toHaveProperty("toolCalls");
+  });
+});

@@ -297,6 +297,24 @@ describe("buildTurnEntry", () => {
     expect(e.aborted).toBe(true);
     expect(e.round).toBe(2);
   });
+
+  test("includes toolCalls only when set", () => {
+    const base = {
+      roomSlug: "r",
+      turnIndex: 0,
+      from: "a",
+      role: "agent",
+      text: "",
+      at: "t",
+    } as const;
+    expect(buildTurnEntry({ ...base, messageId: "m" })).not.toHaveProperty("toolCalls");
+    const withTools = buildTurnEntry({
+      ...base,
+      messageId: "m",
+      toolCalls: [{ name: "Read", primary: "a.ts" }],
+    });
+    expect(withTools.toolCalls).toEqual([{ name: "Read", primary: "a.ts" }]);
+  });
 });
 
 describe("buildManagerPrompt", () => {

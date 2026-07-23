@@ -1,4 +1,5 @@
-import type { TurnEntry } from "./types.ts";
+import type { CanvasTone } from "@keelson/shared";
+import type { MindSlug, TurnEntry } from "./types.ts";
 
 // Mechanical helpers for the room-view board: human time/duration/token
 // formatting, a markdown-to-plain-text flattener (rows `detail` renders
@@ -80,6 +81,68 @@ export function sumTurnUsage(
     outputTokens += entry.usage.outputTokens;
   }
   return any ? { inputTokens, outputTokens } : undefined;
+}
+
+// The tone for a context-window fill, on the host's cross-surface convention: green
+// under 70%, amber at/over 70%, red at/over 85%. Mirrors keelson's chat usage meter
+// so a Mind running hot reads the same in a room as it does in a direct chat.
+export function contextFillTone(pct: number): CanvasTone {
+  if (pct >= 85) return "error";
+  if (pct >= 70) return "warn";
+  return "ok";
+}
+
+// The most recent context-window reading per speaker — the last turn each Mind took
+// whose usage reported both a window and a fill. A provider that reports no window
+// (a stub, or one that omits it) simply never lands in the map, so the caller renders
+// no meter for that Mind rather than a false 0%. Keyed by the entry's `from`, so it
+// covers facilitators and participants alike.
+export function latestContextByMind(
+  transcript: readonly TurnEntry[],
+): Map<MindSlug, { contextTokens: number; contextWindow: number }> {
+  const out = new Map<MindSlug, { contextTokens: number; contextWindow: number }>();
+  for (const entry of transcript) {
+    // Only an agent turn carries a window; a director/system entry (a different
+    // `from`) must never set or clear a Mind's reading.
+    if (entry.role !== "agent") continue;
+    const u = entry.usage;
+    // Guard against NaN/Infinity/negatives reaching the meter (a bad provider
+    // report): require a finite, non-negative fill and a finite, positive window.
+    const valid =
+      !!u &&
+      Number.isFinite(u.contextTokens ?? Number.NaN) &&
+      (u.contextTokens ?? -1) >= 0 &&
+      Number.isFinite(u.contextWindow ?? Number.NaN) &&
+      (u.contextWindow ?? 0) > 0;
+    if (valid && u) {
+      out.set(entry.from, {
+        contextTokens: u.contextTokens as number,
+        contextWindow: u.contextWindow as number,
+      });
+    } else {
+      // This Mind's newer turn reports no valid window — drop any stale earlier
+      // reading so the meter shows only a speaker whose LATEST turn had a window.
+      out.delete(entry.from);
+    }
+  }
+  return out;
+}
+
+// The transcript's tool-call tally — total invocations and how many a matching
+// tool_result flagged as errored. Zero total means the board omits the tool stat.
+export function countToolCalls(transcript: readonly Pick<TurnEntry, "toolCalls">[]): {
+  total: number;
+  failed: number;
+} {
+  let total = 0;
+  let failed = 0;
+  for (const entry of transcript) {
+    for (const call of entry.toolCalls ?? []) {
+      total += 1;
+      if (call.errored) failed += 1;
+    }
+  }
+  return { total, failed };
 }
 
 // The italic pattern requires no whitespace just inside either delimiter (the
