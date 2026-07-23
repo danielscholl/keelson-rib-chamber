@@ -753,21 +753,39 @@ function toolRows(entry: TurnEntry): FeedItem[] {
 }
 
 // The disclosed body: each call as `name · FAMILY` (+ `· failed`), its input JSON below.
-// Bounded to the row-detail cap so a coding turn's many calls can't overrun the field.
+// EVERY head line is kept — which tool ran and which failed must survive — so only the
+// input bodies share the remaining budget; a burst of large inputs drops its own bodies
+// (noted in a footer), never the tail of the list. Bounded to the row-detail cap.
 const MAX_TOOL_GROUP_DETAIL = 4000;
+const OMIT_FOOTER_MAX = 60;
 function toolGroupDetail(calls: readonly ToolCall[]): string {
-  const body = calls
-    .map((c) => {
-      // Prefer the family captured from the raw wire name; fall back for older entries.
-      const family = c.family ?? inferToolFamily(c.name);
-      const label = (family === "other" ? "built-in" : family).toUpperCase();
-      const head = `${c.name} · ${label}${c.errored ? " · failed" : ""}`;
-      return c.input ? `${head}\n${c.input}` : head;
-    })
-    .join("\n\n");
-  return body.length > MAX_TOOL_GROUP_DETAIL
-    ? `${body.slice(0, MAX_TOOL_GROUP_DETAIL - 2)}\n…`
-    : body;
+  const heads = calls.map((c) => {
+    // Prefer the family captured from the raw wire name; fall back for older entries.
+    const family = c.family ?? inferToolFamily(c.name);
+    const label = (family === "other" ? "built-in" : family).toUpperCase();
+    return `${c.name} · ${label}${c.errored ? " · failed" : ""}`;
+  });
+  const separators = Math.max(0, calls.length - 1) * 2; // "\n\n" between blocks
+  const headsTotal = heads.reduce((n, h) => n + h.length, 0) + separators;
+  let bodyBudget = MAX_TOOL_GROUP_DETAIL - headsTotal - OMIT_FOOTER_MAX;
+  let omitted = 0;
+  const blocks = calls.map((c, i) => {
+    const head = heads[i]!;
+    if (!c.input) return head;
+    const cost = c.input.length + 1; // the "\n" before the body
+    if (cost <= bodyBudget) {
+      bodyBudget -= cost;
+      return `${head}\n${c.input}`;
+    }
+    omitted++;
+    return head;
+  });
+  let joined = blocks.join("\n\n");
+  if (omitted > 0) joined += `\n\n… ${omitted} input${omitted === 1 ? "" : "s"} omitted (budget)`;
+  // Backstop: pathologically long head lines alone could still overrun the cap.
+  return joined.length > MAX_TOOL_GROUP_DETAIL
+    ? `${joined.slice(0, MAX_TOOL_GROUP_DETAIL - 2)}\n…`
+    : joined;
 }
 
 function summaryLine(flatText: string, max = 140): string {

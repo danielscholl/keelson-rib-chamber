@@ -1114,6 +1114,28 @@ describe("buildRoomBoard · observability", () => {
     expect(toolRowsIn(clean)[0]?.glyph).toBeUndefined();
   });
 
+  test("a big-input burst never hides the tail: every head survives, spilled bodies are dropped with a footer", () => {
+    const big = JSON.stringify({ blob: "x".repeat(1000) }); // each near the per-input cap
+    const calls = Array.from({ length: 10 }, (_, i) => ({
+      name: `tool${i}`,
+      input: big,
+      ...(i === 9 ? { errored: true } : {}),
+    }));
+    const board = buildRoomBoard(room(), [entry({ toolCalls: calls })]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const group = toolRowsIn(board)[0];
+    const detail = group?.detail ?? "";
+    expect(detail.length).toBeLessThanOrEqual(4000);
+    // Every head line is present — the last tool and its failure are NOT clipped.
+    for (let i = 0; i < 10; i++) expect(detail).toContain(`tool${i} · BUILT-IN`);
+    expect(detail).toContain("tool9 · BUILT-IN · failed");
+    // Ten 1k inputs can't all fit, so some bodies are dropped and the footer says so.
+    expect(detail).toMatch(/… \d+ inputs? omitted \(budget\)/);
+    // The group face still reports the true total and the failure.
+    expect(group?.text).toBe("10 tools");
+    expect(group?.trailing).toBe("1 failed");
+  });
+
   test("Context bars appear per Mind whose latest turn reports a window, toned by fill", () => {
     const board = buildRoomBoard(
       room({ participants: ["a", "b"] }),
