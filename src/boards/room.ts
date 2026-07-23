@@ -1,5 +1,4 @@
 import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
-import { toolPresentation } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { flatFromRoomConfig } from "../room-config.ts";
@@ -154,7 +153,6 @@ export function buildRoomBoard(
       ...groundingSection,
       ...planSection,
       columnsSection,
-      ...buildTotalsSection(transcript),
       ...outcomeSection,
       ...buildTabledSection(tabled),
       roomControls(room, mindBySlug),
@@ -219,12 +217,11 @@ function findLastAgentIndex(transcript: readonly TurnEntry[]): number {
   return -1;
 }
 
-// The room's vitals as ONE compact line — a `stats` section renders as a row of
-// hero tiles (the right weight for a handful of headline KPIs, the wrong one
-// here: these are secondary facts riding beside the debate, not the point of
-// the screen). A single `rows` item reads at the same quiet register as the
-// round dividers below it: duration + its clock-time span, with the scope (when
-// set) as a small leading chip. Token/tool totals ride the Totals stats band.
+// The room's vitals as ONE compact status line — a single quiet `rows` item at
+// the same register as the round dividers below it: the scope (when set) as a
+// small leading chip, then duration + clock span, then the room's token/tool
+// totals. A `stats` band of hero tiles for a handful of figures wasted a full row
+// at the foot of the board; on one line they read as the secondary facts they are.
 function buildVitalsSection(
   transcript: readonly TurnEntry[],
   projectLabel: string | undefined,
@@ -236,8 +233,18 @@ function buildVitalsSection(
     const duration = formatDuration(first.at, last.at);
     if (duration) parts.push(`${duration} · ${clockTime(first.at)} → ${clockTime(last.at)}`);
   }
-  // The vitals line is the quiet duration + scope register; token and tool totals
-  // read as headline figures in the Totals stats band, not on this secondary line.
+  const usage = sumTurnUsage(transcript);
+  // Suppress the spend arrows on a context-only report (real window, zero in/out).
+  if (usage && usage.inputTokens + usage.outputTokens > 0) {
+    parts.push(
+      `↑ ${formatTokenCount(usage.inputTokens)} in · ↓ ${formatTokenCount(usage.outputTokens)} out`,
+    );
+  }
+  const tools = countToolCalls(transcript);
+  if (tools.total > 0) {
+    const label = `⚙ ${tools.total} tool${tools.total === 1 ? "" : "s"}`;
+    parts.push(tools.failed > 0 ? `${label} · ${tools.failed} failed` : label);
+  }
   if (parts.length === 0 && !projectLabel) return [];
   return [
     {
@@ -735,18 +742,16 @@ function turnTokenTail(entry: TurnEntry): string {
 }
 
 // The turn's tool calls as plain-text lines for the row's `detail` disclosure —
-// each with its presentation marker, name, arg preview, and a failed note. The board
-// contract has no nested collapsible, so this rides the same detail the full text uses.
+// each is the tool name, its arg preview, and a failed note. The board contract has
+// no nested collapsible, so this rides the same detail the full text uses. No category
+// marker: toolPresentation's `marker` is a kind word (read/search/shell), which reads
+// as a doubled verb next to the tool name ("read view") — the name alone is clearer.
 function toolCallLines(entry: TurnEntry): string | undefined {
   if (!entry.toolCalls?.length) return undefined;
   const lines = entry.toolCalls.map((c) => {
-    // For an unrecognized tool the presentation marker IS the tool name; drop it
-    // then rather than rendering the name twice ("foo__bar foo__bar").
-    const m = toolPresentation(c.name).marker;
-    const marker = m && m !== c.name ? `${m} ` : "";
     const arg = c.primary ? ` — ${c.primary}` : "";
     const failed = c.errored ? " — failed" : "";
-    return `${marker}${c.name}${arg}${failed}`;
+    return `${c.name}${arg}${failed}`;
   });
   return `Tools\n${lines.join("\n")}`;
 }
@@ -846,28 +851,6 @@ function buildContextSection(
     });
   }
   return items.length > 0 ? { kind: "bars", title: "Context · window fill", items } : undefined;
-}
-
-// The Totals band: a `stats` row summing the room's token spend and tool calls,
-// beneath the debate columns. Omitted when nothing has usage and no tool ran.
-function buildTotalsSection(transcript: readonly TurnEntry[]): CanvasBoardView["sections"] {
-  const usage = sumTurnUsage(transcript);
-  const tools = countToolCalls(transcript);
-  const spent = !!usage && usage.inputTokens + usage.outputTokens > 0;
-  if (!spent && tools.total === 0) return [];
-  const items: Extract<CanvasBoardView["sections"][number], { kind: "stats" }>["items"] = [];
-  if (spent && usage) {
-    items.push({ label: "input · total", value: `↑ ${formatTokenCount(usage.inputTokens)}` });
-    items.push({ label: "output · total", value: `↓ ${formatTokenCount(usage.outputTokens)}` });
-  }
-  if (tools.total > 0) {
-    items.push({
-      label: "tool calls",
-      value: tools.total,
-      ...(tools.failed > 0 ? { sub: `${tools.failed} failed`, tone: "warn" as CanvasTone } : {}),
-    });
-  }
-  return items.length > 0 ? [{ kind: "stats", title: "Totals", items }] : [];
 }
 
 // The Decisions rail: one row per pinned question, in debate order — the tone

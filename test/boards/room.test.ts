@@ -97,11 +97,6 @@ function contextBars(board: Board) {
   const bars = side?.sections.find((x) => x.kind === "bars");
   return bars?.kind === "bars" ? bars.items : undefined;
 }
-// The Totals band is the one top-level `stats` section titled "Totals".
-function totalsStats(board: Board) {
-  const s = board.sections.find((x) => x.kind === "stats" && x.title === "Totals");
-  return s?.kind === "stats" ? s.items : undefined;
-}
 
 describe("buildRoomBoard", () => {
   test("empty transcript is valid; no vitals stats (no turns, no scope)", () => {
@@ -659,21 +654,17 @@ describe("buildRoomBoard", () => {
     expect(vitalsRow(empty)).toBeUndefined();
   });
 
-  test("token totals ride the Totals stats band, not the vitals line; omitted when no turn carries usage", () => {
+  test("token totals ride the vitals status line (no stats band); omitted when no turn carries usage", () => {
     const noUsage = buildRoomBoard(room(), [entry()]);
     expect(vitalsRow(noUsage)?.text).not.toContain("↑");
-    expect(totalsStats(noUsage)).toBeUndefined();
 
     const board = buildRoomBoard(room(), [
       entry({ usage: { inputTokens: 100_000, outputTokens: 8_000 } }),
       entry({ usage: { inputTokens: 48_000, outputTokens: 3_000 } }),
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    // Totals moved off the vitals line into the stats band.
-    expect(vitalsRow(board)?.text).not.toContain("↑");
-    const tiles = totalsStats(board);
-    expect(tiles?.find((t) => t.label === "input · total")?.value).toBe("↑ 148k");
-    expect(tiles?.find((t) => t.label === "output · total")?.value).toBe("↓ 11k");
+    expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
+    expect(vitalsRow(board)?.text).toContain("↑ 148k in · ↓ 11k out");
   });
 
   test("the scope, when set, rides as a leading chip on the vitals row", () => {
@@ -1089,8 +1080,8 @@ describe("buildRoomBoard · observability", () => {
       }),
     ]);
     const detail = debateItems(board)[0]?.detail ?? "";
-    expect(detail).toContain("Read — services.py");
-    expect(detail).toContain("Bash — grep … — failed");
+    expect(detail).toContain("\nRead — services.py");
+    expect(detail).toContain("\nBash — grep … — failed");
   });
 
   test("Context bars appear per Mind whose latest turn reports a window, toned by fill", () => {
@@ -1145,11 +1136,15 @@ describe("buildRoomBoard · observability", () => {
     expect(contextBars(board)).toBeUndefined();
   });
 
-  test("an unrecognized tool name is not doubled in the row detail", () => {
-    const board = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "foo__bar" }] })]);
+  test("a tool line is the bare name (no category-word marker doubling the verb)", () => {
+    // "view" would carry a "read" kind marker; the detail must not read "read view".
+    const board = buildRoomBoard(room(), [
+      entry({ toolCalls: [{ name: "view", primary: "README.md" }, { name: "foo__bar" }] }),
+    ]);
     const detail = debateItems(board)[0]?.detail ?? "";
-    expect(detail).toContain("foo__bar");
-    expect(detail).not.toContain("foo__bar foo__bar");
+    expect(detail).toContain("\nview — README.md");
+    expect(detail).toContain("\nfoo__bar");
+    expect(detail).not.toMatch(/read view|foo__bar foo__bar/);
   });
 
   test("no Context section when no turn reports a window (provider omits it)", () => {
@@ -1162,16 +1157,18 @@ describe("buildRoomBoard · observability", () => {
     expect(vitalsRow(board)).toBeDefined();
   });
 
-  test("the Totals band counts tool calls and flags failures", () => {
+  test("the vitals line counts tool calls and flags failures", () => {
     const board = buildRoomBoard(room(), [
       entry({ turnIndex: 0, toolCalls: [{ name: "Read" }, { name: "Bash", errored: true }] }),
       entry({ turnIndex: 1, toolCalls: [{ name: "Grep" }] }),
     ]);
-    const tiles = totalsStats(board);
-    const toolTile = tiles?.find((t) => t.label === "tool calls");
-    expect(toolTile?.value).toBe(3);
-    expect(toolTile?.sub).toBe("1 failed");
-    expect(toolTile?.tone).toBe("warn");
+    expect(vitalsRow(board)?.text).toContain("⚙ 3 tools · 1 failed");
+  });
+
+  test("a single tool call reads singular on the vitals line", () => {
+    const board = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "Read" }] })]);
+    expect(vitalsRow(board)?.text).toContain("⚙ 1 tool");
+    expect(vitalsRow(board)?.text).not.toContain("⚙ 1 tools");
   });
 
   test("context-only usage (zero spend) shows the Context meter but no spend arrows", () => {
@@ -1185,9 +1182,9 @@ describe("buildRoomBoard · observability", () => {
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     // Context meter renders...
     expect(contextBars(board)?.[0]?.value).toBe(90_000);
-    // ...but neither the turn trailing nor the Totals band claims ↑0 ↓0 spend.
+    // ...but neither the turn trailing nor the vitals line claims ↑0 ↓0 spend.
     expect(debateItems(board)[0]?.trailing).not.toContain("↑");
-    expect(totalsStats(board)?.some((t) => String(t.label).includes("input"))).toBeFalsy();
+    expect(vitalsRow(board)?.text).not.toContain("↑");
   });
 
   test("a non-finite or negative context reading is dropped from the meter", () => {
