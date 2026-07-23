@@ -1073,7 +1073,7 @@ describe("buildRoomBoard · observability", () => {
     expect(toolRowsIn(bare)).toHaveLength(0);
   });
 
-  test("each tool call renders as its own row — gear icon, source chip, name — arg, ok/failed", () => {
+  test("each tool call renders as its own row — gear icon, source chip, name — arg; only failures trailed", () => {
     const board = buildRoomBoard(room(), [
       entry({
         toolCalls: [
@@ -1098,8 +1098,10 @@ describe("buildRoomBoard · observability", () => {
       entry({ toolCalls: [{ name: "shell", family: "mcp", primary: "ls" }] }),
     ]);
     expect(toolRowsIn(mcp)[0]?.chip).toMatchObject({ label: "MCP", tone: "neutral" });
-    // ok/failed trailing, and a failed call wears the error tone.
-    expect(rows[0]?.trailing).toBe("ok");
+    // Success is NOT asserted (absent errored ≠ confirmed ok); only a known failure
+    // is trailed, and it wears the error tone.
+    expect(rows[0]?.trailing).toBeUndefined();
+    expect(rows[0]?.glyph).toBeUndefined();
     expect(rows[2]?.trailing).toBe("failed");
     expect(rows[2]?.glyph).toBe("error");
   });

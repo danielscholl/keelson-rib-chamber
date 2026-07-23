@@ -723,7 +723,6 @@ function turnRow(
 
 // The turn's own token spend, appended after its time — only when it actually spent,
 // so a context-only usage report (real window, zero in/out) never reads as ↑0 ↓0.
-// The tool COUNT no longer rides here: each call renders as its own row (toolRows).
 function turnSpendTail(entry: TurnEntry): string {
   const u = entry.usage;
   if (u && u.inputTokens + u.outputTokens > 0) {
@@ -733,10 +732,12 @@ function turnSpendTail(entry: TurnEntry): string {
 }
 
 // One feed row per tool a turn invoked: a gear icon, a source chip (CHAMBER for a
-// chamber tool, else BUILT-IN / the provider family), the tool name + arg preview,
-// and an ok/failed trailing — a failed call also wears the error tone. The board's
-// `rows` cannot reproduce the chat block's bordered monospace box (that needs a new
-// canvas kind); this carries the same information within the board contract.
+// chamber tool, else BUILT-IN / the provider family), and the tool name + arg preview.
+// Only a KNOWN failure is trailed (error tone + "failed"): a success is not asserted,
+// since `errored` is absent both for a confirmed-ok call and for one whose result the
+// host never emitted — claiming "ok" there would label an uncompleted call successful.
+// The board's `rows` cannot reproduce the chat block's bordered monospace box (that
+// needs a new canvas kind); this carries the same information within the board contract.
 function toolRows(entry: TurnEntry): FeedItem[] {
   if (!entry.toolCalls?.length) return [];
   return entry.toolCalls.map((c): FeedItem => {
@@ -747,10 +748,9 @@ function toolRows(entry: TurnEntry): FeedItem[] {
     const text = c.primary ? `${c.name} — ${c.primary}` : c.name;
     return {
       icon: "⚙",
-      ...(c.errored ? { glyph: "error" as CanvasTone } : {}),
       chip: { label, tone: chipTone },
       text,
-      trailing: c.errored ? "failed" : "ok",
+      ...(c.errored ? { glyph: "error" as CanvasTone, trailing: "failed" } : {}),
     };
   });
 }
