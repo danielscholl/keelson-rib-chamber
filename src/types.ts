@@ -93,7 +93,7 @@ export interface Mind {
 // with any `mcp__<server>__` prefix stripped; `primary` is a bounded arg preview
 // (toolPresentation); `errored` is set only when a matching `tool_result` carried
 // isError — absent means the host reported no failure (or emitted no result).
-// The family and glyph are derived at render from `name`, not persisted.
+// `family` is persisted (see below); the glyph is still derived at render.
 export interface ToolCall {
   name: string;
   // The tool's source family, inferred from the RAW wire name at capture — before
