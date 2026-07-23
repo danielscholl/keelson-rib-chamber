@@ -663,7 +663,6 @@ describe("buildRoomBoard", () => {
       entry({ usage: { inputTokens: 48_000, outputTokens: 3_000 } }),
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    // No stats-tile band anymore — the totals read on the one vitals line.
     expect(board.sections.some((s) => s.kind === "stats")).toBe(false);
     expect(vitalsRow(board)?.text).toContain("↑ 148k in · ↓ 11k out");
   });
@@ -1081,7 +1080,6 @@ describe("buildRoomBoard · observability", () => {
       }),
     ]);
     const detail = debateItems(board)[0]?.detail ?? "";
-    // Clean lines: the tool name + arg (+ failed), no category-word marker prefix.
     expect(detail).toContain("\nRead — services.py");
     expect(detail).toContain("\nBash — grep … — failed");
   });
