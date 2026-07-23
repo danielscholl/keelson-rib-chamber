@@ -1855,9 +1855,9 @@ describe("room driver — concurrent (speak-parallel)", () => {
 });
 
 describe("room driver — tool + usage capture", () => {
-  const longPath = `src/${"a/".repeat(60)}file.ts`; // well over the 80-char preview cap
+  const longPath = `src/${"a/".repeat(700)}file.ts`; // well over the 1000-char JSON cap
 
-  test("persists tool calls (name, preview, failed flag) and usage from the turn stream", async () => {
+  test("persists tool calls (name, input JSON, failed flag) and usage from the turn stream", async () => {
     const h = harness([
       {
         text: "done",
@@ -1898,10 +1898,13 @@ describe("room driver — tool + usage capture", () => {
     expect(byName("Grep")?.errored).toBe(true);
     expect(byName("Bash")?.errored).toBe(true);
     expect(byName("Read")?.errored).toBeUndefined();
-    // A long arg preview is captured and truncated at the 80-char cap.
-    const readPrimary = byName("Read")?.primary ?? "";
-    expect(readPrimary.length).toBeLessThanOrEqual(80);
-    expect(readPrimary.endsWith("…")).toBe(true);
+    // Input is captured as pretty JSON and truncated at the 1000-char cap.
+    const readInput = byName("Read")?.input ?? "";
+    expect(readInput.length).toBeLessThanOrEqual(1000);
+    expect(readInput.endsWith("…")).toBe(true);
+    expect(readInput).toContain('"file_path"');
+    // A no-input call carries no input field rather than an empty "{}".
+    expect(byName("a__b")).not.toHaveProperty("input");
     // Family is inferred from the RAW wire name: the mcp__srv__a__b call keeps `mcp`,
     // not the `other`/built-in bucket its stripped name (`a__b`) would yield.
     expect(byName("a__b")?.family).toBe("mcp");
@@ -1921,7 +1924,7 @@ describe("room driver — tool + usage capture", () => {
     expect(h.transcripts.get("demo")?.[0]?.toolCalls?.length).toBe(40);
   });
 
-  test("a multiline tool arg is collapsed to a single-line preview", async () => {
+  test("captures a multiline command as pretty JSON (disclosed under the tool caret)", async () => {
     const h = harness([
       {
         text: "done",
@@ -1937,9 +1940,10 @@ describe("room driver — tool + usage capture", () => {
     ]);
     await h.driver.start({ ...START, turnBudget: 4 });
     await h.driver.step("demo");
-    const primary = h.transcripts.get("demo")?.[0]?.toolCalls?.[0]?.primary ?? "";
-    expect(primary.length).toBeGreaterThan(0);
-    expect(primary).not.toContain("\n");
+    const input = h.transcripts.get("demo")?.[0]?.toolCalls?.[0]?.input ?? "";
+    // Pretty-printed JSON: newlines between keys, the command's own newlines escaped.
+    expect(input).toContain('"command"');
+    expect(input).toContain("line one\\n");
   });
 
   test("a text-only turn persists no toolCalls", async () => {

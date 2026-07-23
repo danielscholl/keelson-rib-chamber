@@ -1,5 +1,5 @@
 import type { Brief, TokenUsage } from "@keelson/shared";
-import { inferToolFamily, toolPresentation } from "@keelson/shared";
+import { inferToolFamily } from "@keelson/shared";
 import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
 import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
@@ -60,30 +60,23 @@ function displayToolName(raw: string): string {
   return parts.length > 2 ? parts.slice(2).join("__") : raw;
 }
 
-// A compact one-line preview of a tool's input: the shared presentation helper
-// when it recognizes the tool, else the first scalar arg value — so a custom or
-// MCP-wrapped tool (for which the helper returns no primary) still shows something
-// scannable, bounded so a large input can't bloat transcript.jsonl or the board.
-function toolArgPreview(name: string, input?: Record<string, unknown>): string | undefined {
-  const primary = toolPresentation(name, input).primary ?? firstScalarArg(input);
-  if (!primary) return undefined;
-  // Collapse newlines/runs of whitespace first: the helper can return a multiline
-  // shell command, which would split one tool across many detail lines despite the cap.
-  const raw = primary.replace(/\s+/g, " ").trim();
-  return raw.length > MAX_TOOL_ARG_PREVIEW ? `${raw.slice(0, MAX_TOOL_ARG_PREVIEW - 1)}…` : raw;
-}
-
-function firstScalarArg(input?: Record<string, unknown>): string | undefined {
-  if (!input) return undefined;
-  for (const v of Object.values(input)) {
-    if (typeof v === "string" && v.trim()) return v.trim();
-    if (typeof v === "number" || typeof v === "boolean") return String(v);
+// The tool's input as bounded, pretty-printed JSON — disclosed under the tool's
+// caret on the board (chat's tool block shows the same). Bounded so a large input
+// (a pasted file, a long shell command) can't bloat transcript.jsonl or a hot publish.
+function toolInputJson(input?: Record<string, unknown>): string | undefined {
+  if (!input || Object.keys(input).length === 0) return undefined;
+  let json: string;
+  try {
+    json = JSON.stringify(input, null, 2);
+  } catch {
+    return undefined; // circular / non-serializable input
   }
-  return undefined;
+  if (!json) return undefined;
+  return json.length > MAX_TOOL_INPUT_JSON ? `${json.slice(0, MAX_TOOL_INPUT_JSON - 1)}…` : json;
 }
 
-// A tool_use arg preview is a scannable hint, not a record — cap its length.
-const MAX_TOOL_ARG_PREVIEW = 80;
+// The disclosed JSON is a record to glance at, not the full call log — cap its size.
+const MAX_TOOL_INPUT_JSON = 1000;
 
 // A single provider turn can loop through arbitrarily many tools; persist only a
 // bounded prefix so the additive transcript record and every hot board publish stay
@@ -883,13 +876,13 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
               const name = displayToolName(chunk.toolName);
               // Family from the RAW name, before the mcp prefix is stripped off `name`.
               const family = inferToolFamily(chunk.toolName);
-              const primary = toolArgPreview(name, chunk.toolInput);
+              const input = toolInputJson(chunk.toolInput);
               const errored = chunk.id ? pendingErrors.delete(chunk.id) : false;
               if (chunk.id) callIndexById.set(chunk.id, calls.length);
               calls.push({
                 name,
                 family,
-                ...(primary ? { primary } : {}),
+                ...(input ? { input } : {}),
                 ...(errored ? { errored: true } : {}),
               });
               continue;

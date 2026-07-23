@@ -1056,14 +1056,14 @@ describe("buildRoomBoard · observability", () => {
       entry({
         turnIndex: 0,
         usage: { inputTokens: 12_400, outputTokens: 640 },
-        toolCalls: [{ name: "Read", primary: "services.py" }, { name: "Grep" }],
+        toolCalls: [{ name: "Read", input: '{ "file_path": "services.py" }' }, { name: "Grep" }],
       }),
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const turn = debateItems(board)[0];
     expect(turn?.trailing).toContain("↑12k ↓640");
     expect(turn?.trailing).not.toContain("⚙");
-    // Two inline tool rows follow the turn.
+    // Two per-tool rows follow the turn.
     expect(toolRowsIn(board)).toHaveLength(2);
   });
 
@@ -1073,31 +1073,32 @@ describe("buildRoomBoard · observability", () => {
     expect(toolRowsIn(bare)).toHaveLength(0);
   });
 
-  test("each tool call renders as its own row — gear icon, source chip, name — arg; only failures trailed", () => {
+  test("each tool call renders as a collapsed row — gear, name, source chip; input JSON on expand; only failures trailed", () => {
     const board = buildRoomBoard(room(), [
       entry({
         toolCalls: [
-          { name: "view", primary: "README.md" },
-          { name: "chamber_table_exhibit", primary: "id: x" },
-          { name: "Bash", primary: "grep …", errored: true },
+          { name: "view", input: '{\n  "path": "README.md"\n}' },
+          { name: "chamber_table_exhibit", input: '{ "id": "x" }' },
+          { name: "Bash", input: '{ "command": "grep …" }', errored: true },
         ],
       }),
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     const rows = toolRowsIn(board);
-    expect(rows.map((r) => r.text)).toEqual([
-      "view — README.md",
-      "chamber_table_exhibit — id: x",
-      "Bash — grep …",
-    ]);
+    // Collapsed, the row is just the tool name — its input is disclosed under the caret.
+    expect(rows.map((r) => r.text)).toEqual(["view", "chamber_table_exhibit", "Bash"]);
+    expect(rows[0]?.detail).toBe('{\n  "path": "README.md"\n}');
     // Source chip: built-in for a plain tool, CHAMBER (brand-toned) for a chamber tool.
     expect(rows[0]?.chip).toMatchObject({ label: "BUILT-IN", tone: "neutral" });
     expect(rows[1]?.chip).toMatchObject({ label: "CHAMBER", tone: "brand" });
     // A persisted family (from the raw MCP name) drives the chip, not the stripped name.
     const mcp = buildRoomBoard(room(), [
-      entry({ toolCalls: [{ name: "shell", family: "mcp", primary: "ls" }] }),
+      entry({ toolCalls: [{ name: "shell", family: "mcp", input: '{ "cmd": "ls" }' }] }),
     ]);
     expect(toolRowsIn(mcp)[0]?.chip).toMatchObject({ label: "MCP", tone: "neutral" });
+    // A call with no input carries no detail — no empty caret to open.
+    const bare = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "Grep" }] })]);
+    expect(toolRowsIn(bare)[0]).not.toHaveProperty("detail");
     // Success is NOT asserted (absent errored ≠ confirmed ok); only a known failure
     // is trailed, and it wears the error tone.
     expect(rows[0]?.trailing).toBeUndefined();
@@ -1161,10 +1162,12 @@ describe("buildRoomBoard · observability", () => {
   test("a tool row shows the bare name (no category-word marker doubling the verb)", () => {
     // "view" carries a "read" kind marker in toolPresentation; the row must not read "read view".
     const board = buildRoomBoard(room(), [
-      entry({ toolCalls: [{ name: "view", primary: "README.md" }, { name: "foo__bar" }] }),
+      entry({
+        toolCalls: [{ name: "view", input: '{ "path": "README.md" }' }, { name: "foo__bar" }],
+      }),
     ]);
     const texts = toolRowsIn(board).map((r) => r.text);
-    expect(texts).toEqual(["view — README.md", "foo__bar"]);
+    expect(texts).toEqual(["view", "foo__bar"]);
     expect(texts.join("\n")).not.toMatch(/read view|foo__bar foo__bar/);
   });
 

@@ -90,10 +90,9 @@ export interface Mind {
 
 // One tool a Mind invoked during a turn, harvested from the turn's `tool_use`
 // stream chunks (the result object carries none). `name` is the display name
-// with any `mcp__<server>__` prefix stripped; `primary` is a bounded arg preview
-// (toolPresentation); `errored` is set only when a matching `tool_result` carried
-// isError — absent means the host reported no failure (or emitted no result).
-// `family` is persisted (see below); the glyph is still derived at render.
+// with any `mcp__<server>__` prefix stripped; `errored` is set only when a matching
+// `tool_result` carried isError — absent means the host reported no failure (or
+// emitted no result). `family` is persisted (see below); the glyph is derived at render.
 export interface ToolCall {
   name: string;
   // The tool's source family, inferred from the RAW wire name at capture — before
@@ -101,7 +100,10 @@ export interface ToolCall {
   // family (e.g. `mcp__srv__shell` → `mcp`, not the misleading built-in bucket).
   // Absent on an entry recorded before this field; the board falls back to the name.
   family?: string;
-  primary?: string;
+  // The tool's input as bounded, pretty-printed JSON, disclosed under the tool's
+  // caret on the board (chat's tool block shows the same). Absent when the call
+  // carried no input or on an entry recorded before this field.
+  input?: string;
   errored?: boolean;
 }
 
