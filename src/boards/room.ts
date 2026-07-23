@@ -30,6 +30,7 @@ import {
   type MindSlug,
   type Room,
   type TaskLedger,
+  type ToolCall,
   type TurnEntry,
 } from "../types.ts";
 
@@ -731,26 +732,60 @@ function turnSpendTail(entry: TurnEntry): string {
   return "";
 }
 
-// Only a KNOWN failure is trailed (error tone + "failed"): a success is not asserted,
-// since `errored` is absent both for a confirmed-ok call and for one whose result the
-// host never emitted — claiming "ok" there would label an uncompleted call successful.
-// The input goes in `detail` (not the row face) because `rows` gives one disclosure
-// level: a single outer caret folding the group AND per-tool carets can't coexist.
+// A turn's tool calls fold into ONE collapsed `⚙ N tools` row so the discussion reads
+// clean; the per-tool list and each input is disclosed under its single caret via
+// `detail`. `rows` gives one disclosure level, so this is a group caret, not per-tool
+// carets nested inside it (that two-level nest would need a new canvas kind).
+// Only a KNOWN failure is surfaced (error tone + "N failed"): success is never asserted,
+// since `errored` is absent for a confirmed-ok call and for one whose result never emitted.
 function toolRows(entry: TurnEntry): FeedItem[] {
-  if (!entry.toolCalls?.length) return [];
-  return entry.toolCalls.map((c): FeedItem => {
+  const calls = entry.toolCalls;
+  if (!calls?.length) return [];
+  const failed = calls.filter((c) => c.errored).length;
+  return [
+    {
+      icon: "⚙",
+      text: `${calls.length} tool${calls.length === 1 ? "" : "s"}`,
+      detail: toolGroupDetail(calls),
+      ...(failed ? { glyph: "error" as CanvasTone, trailing: `${failed} failed` } : {}),
+    },
+  ];
+}
+
+// The disclosed body: each call as `name · FAMILY` (+ `· failed`), its input JSON below.
+// EVERY head line is kept — which tool ran and which failed must survive — so only the
+// input bodies share the remaining budget; a burst of large inputs drops its own bodies
+// (noted in a footer), never the tail of the list. Bounded to the row-detail cap.
+const MAX_TOOL_GROUP_DETAIL = 4000;
+const OMIT_FOOTER_MAX = 60;
+function toolGroupDetail(calls: readonly ToolCall[]): string {
+  const heads = calls.map((c) => {
     // Prefer the family captured from the raw wire name; fall back for older entries.
     const family = c.family ?? inferToolFamily(c.name);
     const label = (family === "other" ? "built-in" : family).toUpperCase();
-    const chipTone: CanvasTone = family === "chamber" ? "brand" : "neutral";
-    return {
-      icon: "⚙",
-      chip: { label, tone: chipTone },
-      text: c.name,
-      ...(c.input ? { detail: c.input } : {}),
-      ...(c.errored ? { glyph: "error" as CanvasTone, trailing: "failed" } : {}),
-    };
+    return `${c.name} · ${label}${c.errored ? " · failed" : ""}`;
   });
+  const separators = Math.max(0, calls.length - 1) * 2; // "\n\n" between blocks
+  const headsTotal = heads.reduce((n, h) => n + h.length, 0) + separators;
+  let bodyBudget = MAX_TOOL_GROUP_DETAIL - headsTotal - OMIT_FOOTER_MAX;
+  let omitted = 0;
+  const blocks = calls.map((c, i) => {
+    const head = heads[i]!;
+    if (!c.input) return head;
+    const cost = c.input.length + 1; // the "\n" before the body
+    if (cost <= bodyBudget) {
+      bodyBudget -= cost;
+      return `${head}\n${c.input}`;
+    }
+    omitted++;
+    return head;
+  });
+  let joined = blocks.join("\n\n");
+  if (omitted > 0) joined += `\n\n… ${omitted} input${omitted === 1 ? "" : "s"} omitted (budget)`;
+  // Backstop: pathologically long head lines alone could still overrun the cap.
+  return joined.length > MAX_TOOL_GROUP_DETAIL
+    ? `${joined.slice(0, MAX_TOOL_GROUP_DETAIL - 2)}\n…`
+    : joined;
 }
 
 function summaryLine(flatText: string, max = 140): string {
