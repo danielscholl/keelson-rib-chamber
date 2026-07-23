@@ -731,13 +731,11 @@ function turnSpendTail(entry: TurnEntry): string {
   return "";
 }
 
-// One feed row per tool a turn invoked: a gear icon, a source chip (CHAMBER for a
-// chamber tool, else BUILT-IN / the provider family), and the tool name + arg preview.
 // Only a KNOWN failure is trailed (error tone + "failed"): a success is not asserted,
 // since `errored` is absent both for a confirmed-ok call and for one whose result the
 // host never emitted — claiming "ok" there would label an uncompleted call successful.
-// The board's `rows` cannot reproduce the chat block's bordered monospace box (that
-// needs a new canvas kind); this carries the same information within the board contract.
+// The input goes in `detail` (not the row face) because `rows` gives one disclosure
+// level: a single outer caret folding the group AND per-tool carets can't coexist.
 function toolRows(entry: TurnEntry): FeedItem[] {
   if (!entry.toolCalls?.length) return [];
   return entry.toolCalls.map((c): FeedItem => {
@@ -745,11 +743,11 @@ function toolRows(entry: TurnEntry): FeedItem[] {
     const family = c.family ?? inferToolFamily(c.name);
     const label = (family === "other" ? "built-in" : family).toUpperCase();
     const chipTone: CanvasTone = family === "chamber" ? "brand" : "neutral";
-    const text = c.primary ? `${c.name} — ${c.primary}` : c.name;
     return {
       icon: "⚙",
       chip: { label, tone: chipTone },
-      text,
+      text: c.name,
+      ...(c.input ? { detail: c.input } : {}),
       ...(c.errored ? { glyph: "error" as CanvasTone, trailing: "failed" } : {}),
     };
   });

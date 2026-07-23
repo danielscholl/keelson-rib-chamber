@@ -311,9 +311,9 @@ describe("buildTurnEntry", () => {
     const withTools = buildTurnEntry({
       ...base,
       messageId: "m",
-      toolCalls: [{ name: "Read", primary: "a.ts" }],
+      toolCalls: [{ name: "Read", input: '{\n  "file_path": "a.ts"\n}' }],
     });
-    expect(withTools.toolCalls).toEqual([{ name: "Read", primary: "a.ts" }]);
+    expect(withTools.toolCalls).toEqual([{ name: "Read", input: '{\n  "file_path": "a.ts"\n}' }]);
   });
 });
 
