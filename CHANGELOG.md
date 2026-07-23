@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.49.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.48.0...v0.49.0) (2026-07-23)
+
+
+### Added
+
+* **room:** collapse each tool call to a caret revealing its input JSON ([#335](https://github.com/danielscholl/keelson-rib-chamber/issues/335)) ([11beae9](https://github.com/danielscholl/keelson-rib-chamber/commit/11beae924706102da86a0173c1b26e404ca91d72))
+* **room:** fold a turn's tool calls into one collapsed group row ([#336](https://github.com/danielscholl/keelson-rib-chamber/issues/336)) ([bd79782](https://github.com/danielscholl/keelson-rib-chamber/commit/bd7978257e1f5b61c91eee33bc1832c2fb896637))
+* **room:** render tool calls as inline rows, not buried in the detail ([#334](https://github.com/danielscholl/keelson-rib-chamber/issues/334)) ([5a761c1](https://github.com/danielscholl/keelson-rib-chamber/commit/5a761c1b98df7d573c60f6361601faed6258a612))
+* **room:** surface tool calls and per-Mind context in the room board ([#331](https://github.com/danielscholl/keelson-rib-chamber/issues/331)) ([e4bf473](https://github.com/danielscholl/keelson-rib-chamber/commit/e4bf4739e024be2300079bd525cbaa8826340049))
+
+
+### Fixed
+
+* **room:** tidy tool-call detail and fold totals into the vitals line ([#333](https://github.com/danielscholl/keelson-rib-chamber/issues/333)) ([24eb5c2](https://github.com/danielscholl/keelson-rib-chamber/commit/24eb5c245d8a40f2d7cbdf558542efde667e7fe1))
+
 ## [0.48.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.47.3...v0.48.0) (2026-07-22)
 
 
