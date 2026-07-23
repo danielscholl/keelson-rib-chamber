@@ -1,4 +1,5 @@
 import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
+import { inferToolFamily } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { flatFromRoomConfig } from "../room-config.ts";
@@ -645,6 +646,9 @@ function buildDebateItems(
     items.push(
       turnRow(entry, index, textFor, moderator, synthesizer, manager, mindBySlug, decisions),
     );
+    // Each tool the turn invoked reads as its own quiet row beneath the speaker —
+    // distinct and scannable without expanding the turn (the proposal's inline rows).
+    items.push(...toolRows(entry));
   });
   const end = terminationMarker(room);
   if (end) items.push(end);
@@ -682,8 +686,7 @@ function turnRow(
 ): FeedItem {
   const label = mindBySlug.get(entry.from)?.name ?? entry.from;
   const time = clockTime(entry.at);
-  const observ = turnTokenTail(entry);
-  const tools = toolCallLines(entry);
+  const observ = turnSpendTail(entry);
 
   if (entry.aborted) {
     return {
@@ -691,19 +694,14 @@ function turnRow(
       chip: { label, tone: roleTone(entry.role) },
       text: "(aborted)",
       trailing: `${time} · aborted${observ}`,
-      // The tools already ran server-side before the abort, so list them even here.
-      ...(tools ? { detail: tools } : {}),
     };
   }
 
   const flattened = flattenMarkdown(textFor(entry, index));
   const summary = summaryLine(flattened);
   const text = summary || "(no text)";
-  const textDetail =
+  const detail =
     flattened.trim().length > 0 && flattened.trim() !== summary ? flattened : undefined;
-  // The board contract has no nested per-row disclosure, so the tool list shares the
-  // turn's one `detail` — appended below its full text, or standing alone when short.
-  const detail = [textDetail, tools].filter(Boolean).join("\n\n") || undefined;
   const decidedHere = decisions.filter((d) => d.turnIndex === index);
   const decidedSuffix = decidedHere.length
     ? ` · ${decidedHere.map((d) => `Q${d.question} decided`).join(", ")}`
@@ -725,35 +723,38 @@ function turnRow(
   return { glyph: tone, chip: { label, tone }, text, trailing, ...(detail ? { detail } : {}) };
 }
 
-// The observability tail a turn row carries after its time: a compact tool count
-// and the turn's own token spend, each added only when present. A count (not the
-// per-tool list) keeps a chatty coding turn from flooding the trailing.
-function turnTokenTail(entry: TurnEntry): string {
-  const parts: string[] = [];
-  const n = entry.toolCalls?.length ?? 0;
-  if (n > 0) parts.push(`⚙ ${n} tool${n === 1 ? "" : "s"}`);
+// The turn's own token spend, appended after its time — only when it actually spent,
+// so a context-only usage report (real window, zero in/out) never reads as ↑0 ↓0.
+// The tool COUNT no longer rides here: each call renders as its own row (toolRows).
+function turnSpendTail(entry: TurnEntry): string {
   const u = entry.usage;
-  // Only show the spend arrows on a turn that actually spent: a context-only usage
-  // report (real window, zero in/out) must not read as ↑0 ↓0 measured spend.
   if (u && u.inputTokens + u.outputTokens > 0) {
-    parts.push(`↑${formatTokenCount(u.inputTokens)} ↓${formatTokenCount(u.outputTokens)}`);
+    return ` · ↑${formatTokenCount(u.inputTokens)} ↓${formatTokenCount(u.outputTokens)}`;
   }
-  return parts.length ? ` · ${parts.join(" · ")}` : "";
+  return "";
 }
 
-// The turn's tool calls as plain-text lines for the row's `detail` disclosure —
-// each is the tool name, its arg preview, and a failed note. The board contract has
-// no nested collapsible, so this rides the same detail the full text uses. No category
-// marker: toolPresentation's `marker` is a kind word (read/search/shell), which reads
-// as a doubled verb next to the tool name ("read view") — the name alone is clearer.
-function toolCallLines(entry: TurnEntry): string | undefined {
-  if (!entry.toolCalls?.length) return undefined;
-  const lines = entry.toolCalls.map((c) => {
-    const arg = c.primary ? ` — ${c.primary}` : "";
-    const failed = c.errored ? " — failed" : "";
-    return `${c.name}${arg}${failed}`;
+// Each tool a turn invoked as its own quiet feed row beneath the speaker (the
+// proposal's inline rows): a gear icon, a source chip (CHAMBER for a chamber tool,
+// else BUILT-IN / the provider family), the tool name + arg preview, and an ok/failed
+// trailing. A failed call also wears the error tone. The board's `rows` can't do the
+// chat block's bordered monospace box (that needs a new canvas kind), but this reads
+// as distinct tool activity without expanding the turn.
+function toolRows(entry: TurnEntry): FeedItem[] {
+  if (!entry.toolCalls?.length) return [];
+  return entry.toolCalls.map((c): FeedItem => {
+    const family = inferToolFamily(c.name);
+    const label = (family === "other" ? "built-in" : family).toUpperCase();
+    const chipTone: CanvasTone = family === "chamber" ? "brand" : "neutral";
+    const text = c.primary ? `${c.name} — ${c.primary}` : c.name;
+    return {
+      icon: "⚙",
+      ...(c.errored ? { glyph: "error" as CanvasTone } : {}),
+      chip: { label, tone: chipTone },
+      text,
+      trailing: c.errored ? "failed" : "ok",
+    };
   });
-  return `Tools\n${lines.join("\n")}`;
 }
 
 function summaryLine(flatText: string, max = 140): string {
