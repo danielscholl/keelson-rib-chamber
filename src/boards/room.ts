@@ -30,6 +30,7 @@ import {
   type MindSlug,
   type Room,
   type TaskLedger,
+  type ToolCall,
   type TurnEntry,
 } from "../types.ts";
 
@@ -731,26 +732,42 @@ function turnSpendTail(entry: TurnEntry): string {
   return "";
 }
 
-// Only a KNOWN failure is trailed (error tone + "failed"): a success is not asserted,
-// since `errored` is absent both for a confirmed-ok call and for one whose result the
-// host never emitted — claiming "ok" there would label an uncompleted call successful.
-// The input goes in `detail` (not the row face) because `rows` gives one disclosure
-// level: a single outer caret folding the group AND per-tool carets can't coexist.
+// A turn's tool calls fold into ONE collapsed `⚙ N tools` row so the discussion reads
+// clean; the per-tool list and each input is disclosed under its single caret via
+// `detail`. `rows` gives one disclosure level, so this is a group caret, not per-tool
+// carets nested inside it (that two-level nest would need a new canvas kind).
+// Only a KNOWN failure is surfaced (error tone + "N failed"): success is never asserted,
+// since `errored` is absent for a confirmed-ok call and for one whose result never emitted.
 function toolRows(entry: TurnEntry): FeedItem[] {
-  if (!entry.toolCalls?.length) return [];
-  return entry.toolCalls.map((c): FeedItem => {
-    // Prefer the family captured from the raw wire name; fall back for older entries.
-    const family = c.family ?? inferToolFamily(c.name);
-    const label = (family === "other" ? "built-in" : family).toUpperCase();
-    const chipTone: CanvasTone = family === "chamber" ? "brand" : "neutral";
-    return {
+  const calls = entry.toolCalls;
+  if (!calls?.length) return [];
+  const failed = calls.filter((c) => c.errored).length;
+  return [
+    {
       icon: "⚙",
-      chip: { label, tone: chipTone },
-      text: c.name,
-      ...(c.input ? { detail: c.input } : {}),
-      ...(c.errored ? { glyph: "error" as CanvasTone, trailing: "failed" } : {}),
-    };
-  });
+      text: `${calls.length} tool${calls.length === 1 ? "" : "s"}`,
+      detail: toolGroupDetail(calls),
+      ...(failed ? { glyph: "error" as CanvasTone, trailing: `${failed} failed` } : {}),
+    },
+  ];
+}
+
+// The disclosed body: each call as `name · FAMILY` (+ `· failed`), its input JSON below.
+// Bounded to the row-detail cap so a coding turn's many calls can't overrun the field.
+const MAX_TOOL_GROUP_DETAIL = 4000;
+function toolGroupDetail(calls: readonly ToolCall[]): string {
+  const body = calls
+    .map((c) => {
+      // Prefer the family captured from the raw wire name; fall back for older entries.
+      const family = c.family ?? inferToolFamily(c.name);
+      const label = (family === "other" ? "built-in" : family).toUpperCase();
+      const head = `${c.name} · ${label}${c.errored ? " · failed" : ""}`;
+      return c.input ? `${head}\n${c.input}` : head;
+    })
+    .join("\n\n");
+  return body.length > MAX_TOOL_GROUP_DETAIL
+    ? `${body.slice(0, MAX_TOOL_GROUP_DETAIL - 2)}\n…`
+    : body;
 }
 
 function summaryLine(flatText: string, max = 140): string {
