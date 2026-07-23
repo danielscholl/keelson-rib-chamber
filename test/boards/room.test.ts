@@ -91,6 +91,10 @@ function journeyItems(board: Board) {
   const s = board.sections.find((x) => x.kind === "journey");
   return s?.kind === "journey" ? s.items : undefined;
 }
+// The inline tool rows a turn's calls render as (icon "⚙"), in feed order.
+function toolRowsIn(board: Board) {
+  return debateItems(board).filter((it) => it.icon === "⚙");
+}
 // The Context meter is the `bars` section nested in the side (weight 1) column.
 function contextBars(board: Board) {
   const side = columnsSection(board).columns[1];
@@ -1047,7 +1051,7 @@ describe("buildRoomBoard · observability", () => {
   const withWindow = (input: number, ctx: number, window: number) =>
     ({ inputTokens: input, outputTokens: 100, contextTokens: ctx, contextWindow: window }) as const;
 
-  test("a turn's trailing folds in a tool count and its token spend", () => {
+  test("a turn's trailing carries token spend but NOT the tool count (tools are their own rows)", () => {
     const board = buildRoomBoard(room(), [
       entry({
         turnIndex: 0,
@@ -1056,32 +1060,50 @@ describe("buildRoomBoard · observability", () => {
       }),
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const trailing = debateItems(board)[0]?.trailing ?? "";
-    expect(trailing).toContain("⚙ 2 tools");
-    expect(trailing).toContain("↑12k ↓640");
+    const turn = debateItems(board)[0];
+    expect(turn?.trailing).toContain("↑12k ↓640");
+    expect(turn?.trailing).not.toContain("⚙");
+    // Two inline tool rows follow the turn.
+    expect(toolRowsIn(board)).toHaveLength(2);
   });
 
-  test("one tool reads as singular, and no usage/tools leaves a bare time trailing", () => {
-    const one = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "Read" }] })]);
-    expect(debateItems(one)[0]?.trailing).toContain("⚙ 1 tool");
+  test("no usage leaves a bare time trailing", () => {
     const bare = buildRoomBoard(room(), [entry()]);
-    expect(bare && debateItems(bare)[0]?.trailing).not.toContain("⚙");
     expect(debateItems(bare)[0]?.trailing).not.toContain("↑");
+    expect(toolRowsIn(bare)).toHaveLength(0);
   });
 
-  test("tool calls land in the row detail — with a failed note — even when the turn text is short", () => {
+  test("each tool call renders as its own row — gear icon, source chip, name — arg; only failures trailed", () => {
     const board = buildRoomBoard(room(), [
       entry({
-        parts: [{ text: "ok" }],
         toolCalls: [
-          { name: "Read", primary: "services.py" },
+          { name: "view", primary: "README.md" },
+          { name: "chamber_table_exhibit", primary: "id: x" },
           { name: "Bash", primary: "grep …", errored: true },
         ],
       }),
     ]);
-    const detail = debateItems(board)[0]?.detail ?? "";
-    expect(detail).toContain("\nRead — services.py");
-    expect(detail).toContain("\nBash — grep … — failed");
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const rows = toolRowsIn(board);
+    expect(rows.map((r) => r.text)).toEqual([
+      "view — README.md",
+      "chamber_table_exhibit — id: x",
+      "Bash — grep …",
+    ]);
+    // Source chip: built-in for a plain tool, CHAMBER (brand-toned) for a chamber tool.
+    expect(rows[0]?.chip).toMatchObject({ label: "BUILT-IN", tone: "neutral" });
+    expect(rows[1]?.chip).toMatchObject({ label: "CHAMBER", tone: "brand" });
+    // A persisted family (from the raw MCP name) drives the chip, not the stripped name.
+    const mcp = buildRoomBoard(room(), [
+      entry({ toolCalls: [{ name: "shell", family: "mcp", primary: "ls" }] }),
+    ]);
+    expect(toolRowsIn(mcp)[0]?.chip).toMatchObject({ label: "MCP", tone: "neutral" });
+    // Success is NOT asserted (absent errored ≠ confirmed ok); only a known failure
+    // is trailed, and it wears the error tone.
+    expect(rows[0]?.trailing).toBeUndefined();
+    expect(rows[0]?.glyph).toBeUndefined();
+    expect(rows[2]?.trailing).toBe("failed");
+    expect(rows[2]?.glyph).toBe("error");
   });
 
   test("Context bars appear per Mind whose latest turn reports a window, toned by fill", () => {
@@ -1136,15 +1158,14 @@ describe("buildRoomBoard · observability", () => {
     expect(contextBars(board)).toBeUndefined();
   });
 
-  test("a tool line is the bare name (no category-word marker doubling the verb)", () => {
-    // "view" would carry a "read" kind marker; the detail must not read "read view".
+  test("a tool row shows the bare name (no category-word marker doubling the verb)", () => {
+    // "view" carries a "read" kind marker in toolPresentation; the row must not read "read view".
     const board = buildRoomBoard(room(), [
       entry({ toolCalls: [{ name: "view", primary: "README.md" }, { name: "foo__bar" }] }),
     ]);
-    const detail = debateItems(board)[0]?.detail ?? "";
-    expect(detail).toContain("\nview — README.md");
-    expect(detail).toContain("\nfoo__bar");
-    expect(detail).not.toMatch(/read view|foo__bar foo__bar/);
+    const texts = toolRowsIn(board).map((r) => r.text);
+    expect(texts).toEqual(["view — README.md", "foo__bar"]);
+    expect(texts.join("\n")).not.toMatch(/read view|foo__bar foo__bar/);
   });
 
   test("no Context section when no turn reports a window (provider omits it)", () => {

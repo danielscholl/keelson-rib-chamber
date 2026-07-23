@@ -1,5 +1,5 @@
 import type { Brief, TokenUsage } from "@keelson/shared";
-import { toolPresentation } from "@keelson/shared";
+import { inferToolFamily, toolPresentation } from "@keelson/shared";
 import { buildRoomBoard } from "./boards/room.ts";
 import { resolveMindTools } from "./capabilities.ts";
 import { applyManagerPlan, failStuckTasks, freshLedger, setTaskStatus } from "./ledger.ts";
@@ -881,11 +881,14 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
               // standard tool (mcp__srv__shell) must be recognized by its leaf, else
               // it reads as unknown and the preview falls back to an arbitrary scalar.
               const name = displayToolName(chunk.toolName);
+              // Family from the RAW name, before the mcp prefix is stripped off `name`.
+              const family = inferToolFamily(chunk.toolName);
               const primary = toolArgPreview(name, chunk.toolInput);
               const errored = chunk.id ? pendingErrors.delete(chunk.id) : false;
               if (chunk.id) callIndexById.set(chunk.id, calls.length);
               calls.push({
                 name,
+                family,
                 ...(primary ? { primary } : {}),
                 ...(errored ? { errored: true } : {}),
               });

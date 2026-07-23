@@ -1902,6 +1902,10 @@ describe("room driver — tool + usage capture", () => {
     const readPrimary = byName("Read")?.primary ?? "";
     expect(readPrimary.length).toBeLessThanOrEqual(80);
     expect(readPrimary.endsWith("…")).toBe(true);
+    // Family is inferred from the RAW wire name: the mcp__srv__a__b call keeps `mcp`,
+    // not the `other`/built-in bucket its stripped name (`a__b`) would yield.
+    expect(byName("a__b")?.family).toBe("mcp");
+    expect(byName("Read")?.family).toBe("other");
   });
 
   test("caps the persisted tool calls per turn (a runaway coding turn stays bounded)", async () => {
