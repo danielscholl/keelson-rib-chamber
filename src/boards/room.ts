@@ -731,16 +731,11 @@ function turnSpendTail(entry: TurnEntry): string {
   return "";
 }
 
-// One collapsed feed row per tool a turn invoked, mirroring chat's tool block: a gear
-// icon, the tool name, and a source chip (CHAMBER for a chamber tool, else BUILT-IN /
-// the provider family). The row stays quiet by default — the input JSON is disclosed
-// under the row's own `▸` caret via `detail`, so a reader sees the tool types at a
-// glance and opens only the call they care about.
 // Only a KNOWN failure is trailed (error tone + "failed"): a success is not asserted,
 // since `errored` is absent both for a confirmed-ok call and for one whose result the
 // host never emitted — claiming "ok" there would label an uncompleted call successful.
-// A single outer caret that folds the whole group AND per-tool carets inside it can't
-// coexist — `rows` gives one disclosure level; the two-level nest needs a new canvas kind.
+// The input goes in `detail` (not the row face) because `rows` gives one disclosure
+// level: a single outer caret folding the group AND per-tool carets can't coexist.
 function toolRows(entry: TurnEntry): FeedItem[] {
   if (!entry.toolCalls?.length) return [];
   return entry.toolCalls.map((c): FeedItem => {

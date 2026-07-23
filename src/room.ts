@@ -870,9 +870,6 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
                 if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
               }
               if (calls.length >= MAX_TURN_TOOL_CALLS) continue;
-              // Derive the display name first, then presentation FROM it: a wrapped
-              // standard tool (mcp__srv__shell) must be recognized by its leaf, else
-              // it reads as unknown and the preview falls back to an arbitrary scalar.
               const name = displayToolName(chunk.toolName);
               // Family from the RAW name, before the mcp prefix is stripped off `name`.
               const family = inferToolFamily(chunk.toolName);
