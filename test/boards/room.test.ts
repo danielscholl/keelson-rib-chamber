@@ -1089,8 +1089,9 @@ describe("buildRoomBoard · observability", () => {
       }),
     ]);
     const detail = debateItems(board)[0]?.detail ?? "";
-    expect(detail).toContain("Read — services.py");
-    expect(detail).toContain("Bash — grep … — failed");
+    // Clean lines: the tool name + arg (+ failed), no category-word marker prefix.
+    expect(detail).toContain("\nRead — services.py");
+    expect(detail).toContain("\nBash — grep … — failed");
   });
 
   test("Context bars appear per Mind whose latest turn reports a window, toned by fill", () => {
@@ -1145,11 +1146,15 @@ describe("buildRoomBoard · observability", () => {
     expect(contextBars(board)).toBeUndefined();
   });
 
-  test("an unrecognized tool name is not doubled in the row detail", () => {
-    const board = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "foo__bar" }] })]);
+  test("a tool line is the bare name (no category-word marker doubling the verb)", () => {
+    // "view" would carry a "read" kind marker; the detail must not read "read view".
+    const board = buildRoomBoard(room(), [
+      entry({ toolCalls: [{ name: "view", primary: "README.md" }, { name: "foo__bar" }] }),
+    ]);
     const detail = debateItems(board)[0]?.detail ?? "";
-    expect(detail).toContain("foo__bar");
-    expect(detail).not.toContain("foo__bar foo__bar");
+    expect(detail).toContain("\nview — README.md");
+    expect(detail).toContain("\nfoo__bar");
+    expect(detail).not.toMatch(/read view|foo__bar foo__bar/);
   });
 
   test("no Context section when no turn reports a window (provider omits it)", () => {

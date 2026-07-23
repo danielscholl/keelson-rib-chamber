@@ -1,5 +1,4 @@
 import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
-import { toolPresentation } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { flatFromRoomConfig } from "../room-config.ts";
@@ -735,18 +734,16 @@ function turnTokenTail(entry: TurnEntry): string {
 }
 
 // The turn's tool calls as plain-text lines for the row's `detail` disclosure —
-// each with its presentation marker, name, arg preview, and a failed note. The board
-// contract has no nested collapsible, so this rides the same detail the full text uses.
+// each is the tool name, its arg preview, and a failed note. The board contract has
+// no nested collapsible, so this rides the same detail the full text uses. No category
+// marker: toolPresentation's `marker` is a kind word (read/search/shell), which reads
+// as a doubled verb next to the tool name ("read view") — the name alone is clearer.
 function toolCallLines(entry: TurnEntry): string | undefined {
   if (!entry.toolCalls?.length) return undefined;
   const lines = entry.toolCalls.map((c) => {
-    // For an unrecognized tool the presentation marker IS the tool name; drop it
-    // then rather than rendering the name twice ("foo__bar foo__bar").
-    const m = toolPresentation(c.name).marker;
-    const marker = m && m !== c.name ? `${m} ` : "";
     const arg = c.primary ? ` — ${c.primary}` : "";
     const failed = c.errored ? " — failed" : "";
-    return `${marker}${c.name}${arg}${failed}`;
+    return `${c.name}${arg}${failed}`;
   });
   return `Tools\n${lines.join("\n")}`;
 }
