@@ -1917,6 +1917,27 @@ describe("room driver — tool + usage capture", () => {
     expect(h.transcripts.get("demo")?.[0]?.toolCalls?.length).toBe(40);
   });
 
+  test("a multiline tool arg is collapsed to a single-line preview", async () => {
+    const h = harness([
+      {
+        text: "done",
+        emits: [
+          {
+            type: "tool_use",
+            id: "b",
+            toolName: "Bash",
+            toolInput: { command: "line one\n  line two\nline three" },
+          },
+        ],
+      },
+    ]);
+    await h.driver.start({ ...START, turnBudget: 4 });
+    await h.driver.step("demo");
+    const primary = h.transcripts.get("demo")?.[0]?.toolCalls?.[0]?.primary ?? "";
+    expect(primary.length).toBeGreaterThan(0);
+    expect(primary).not.toContain("\n");
+  });
+
   test("a text-only turn persists no toolCalls", async () => {
     const h = harness([{ text: "just talking", usage: { inputTokens: 10, outputTokens: 5 } }]);
     await h.driver.start({ ...START, turnBudget: 4 });

@@ -65,8 +65,11 @@ function displayToolName(raw: string): string {
 // MCP-wrapped tool (for which the helper returns no primary) still shows something
 // scannable, bounded so a large input can't bloat transcript.jsonl or the board.
 function toolArgPreview(name: string, input?: Record<string, unknown>): string | undefined {
-  const raw = toolPresentation(name, input).primary ?? firstScalarArg(input);
-  if (!raw) return undefined;
+  const primary = toolPresentation(name, input).primary ?? firstScalarArg(input);
+  if (!primary) return undefined;
+  // Collapse newlines/runs of whitespace first: the helper can return a multiline
+  // shell command, which would split one tool across many detail lines despite the cap.
+  const raw = primary.replace(/\s+/g, " ").trim();
   return raw.length > MAX_TOOL_ARG_PREVIEW ? `${raw.slice(0, MAX_TOOL_ARG_PREVIEW - 1)}…` : raw;
 }
 

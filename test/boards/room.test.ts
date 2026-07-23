@@ -1118,6 +1118,17 @@ describe("buildRoomBoard · observability", () => {
     expect(contextBars(board)?.[0]?.tone).toBe("error");
   });
 
+  test("Context tone uses the raw ratio, not the rounded percent, at the cutoffs", () => {
+    const at695 = buildRoomBoard(room({ participants: ["a"] }), [
+      entry({ from: "a", usage: withWindow(1, 139_000, 200_000) }), // 69.5% → ok, not warn
+    ]);
+    expect(contextBars(at695)?.[0]?.tone).toBe("ok");
+    const at845 = buildRoomBoard(room({ participants: ["a"] }), [
+      entry({ from: "a", usage: withWindow(1, 169_000, 200_000) }), // 84.5% → warn, not error
+    ]);
+    expect(contextBars(at845)?.[0]?.tone).toBe("warn");
+  });
+
   test("the latest window reading per Mind wins", () => {
     const board = buildRoomBoard(room({ participants: ["a"] }), [
       entry({ from: "a", turnIndex: 0, usage: withWindow(1, 40_000, 200_000) }),

@@ -694,8 +694,8 @@ function turnRow(
   const text = summary || "(no text)";
   const textDetail =
     flattened.trim().length > 0 && flattened.trim() !== summary ? flattened : undefined;
-  // The turn's tools (option B: folded) expand inside the same `detail` disclosure as
-  // its full text — appended below it, or standing alone when the turn text is short.
+  // The board contract has no nested per-row disclosure, so the tool list shares the
+  // turn's one `detail` — appended below its full text, or standing alone when short.
   const detail = [textDetail, tools].filter(Boolean).join("\n\n") || undefined;
   const decidedHere = decisions.filter((d) => d.turnIndex === index);
   const decidedSuffix = decidedHere.length
@@ -718,8 +718,9 @@ function turnRow(
   return { glyph: tone, chip: { label, tone }, text, trailing, ...(detail ? { detail } : {}) };
 }
 
-// The folded observability tail a turn row carries after its time: a compact tool
-// count (option B) and the turn's own token spend, each added only when present.
+// The observability tail a turn row carries after its time: a compact tool count
+// and the turn's own token spend, each added only when present. A count (not the
+// per-tool list) keeps a chatty coding turn from flooding the trailing.
 function turnTokenTail(entry: TurnEntry): string {
   const parts: string[] = [];
   const n = entry.toolCalls?.length ?? 0;
@@ -829,13 +830,16 @@ function buildContextSection(
   for (const slug of order) {
     const ctx = latest.get(slug);
     if (!ctx) continue;
-    const pct = Math.min(100, Math.round((ctx.contextTokens / ctx.contextWindow) * 100));
+    // Tone off the raw ratio so the 70%/85% cutoffs are exact; round only the
+    // displayed figure (else 69.5% would already read as warn).
+    const rawPct = (ctx.contextTokens / ctx.contextWindow) * 100;
+    const shownPct = Math.min(100, Math.round(rawPct));
     items.push({
       label: mindBySlug.get(slug)?.name ?? slug,
       value: ctx.contextTokens,
       total: ctx.contextWindow,
-      tone: contextFillTone(pct),
-      trailing: `${formatTokenCount(ctx.contextTokens)} / ${formatTokenCount(ctx.contextWindow)} · ${pct}%`,
+      tone: contextFillTone(rawPct),
+      trailing: `${formatTokenCount(ctx.contextTokens)} / ${formatTokenCount(ctx.contextWindow)} · ${shownPct}%`,
     });
   }
   return items.length > 0 ? { kind: "bars", title: "Context · window fill", items } : undefined;
