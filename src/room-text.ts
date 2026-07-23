@@ -102,21 +102,28 @@ export function latestContextByMind(
 ): Map<MindSlug, { contextTokens: number; contextWindow: number }> {
   const out = new Map<MindSlug, { contextTokens: number; contextWindow: number }>();
   for (const entry of transcript) {
+    // Only an agent turn carries a window; a director/system entry (a different
+    // `from`) must never set or clear a Mind's reading.
+    if (entry.role !== "agent") continue;
     const u = entry.usage;
     // Guard against NaN/Infinity/negatives reaching the meter (a bad provider
     // report): require a finite, non-negative fill and a finite, positive window.
-    if (
-      !u ||
-      !Number.isFinite(u.contextTokens ?? Number.NaN) ||
-      (u.contextTokens ?? -1) < 0 ||
-      !Number.isFinite(u.contextWindow ?? Number.NaN) ||
-      (u.contextWindow ?? 0) <= 0
-    )
-      continue;
-    out.set(entry.from, {
-      contextTokens: u.contextTokens as number,
-      contextWindow: u.contextWindow as number,
-    });
+    const valid =
+      !!u &&
+      Number.isFinite(u.contextTokens ?? Number.NaN) &&
+      (u.contextTokens ?? -1) >= 0 &&
+      Number.isFinite(u.contextWindow ?? Number.NaN) &&
+      (u.contextWindow ?? 0) > 0;
+    if (valid && u) {
+      out.set(entry.from, {
+        contextTokens: u.contextTokens as number,
+        contextWindow: u.contextWindow as number,
+      });
+    } else {
+      // This Mind's newer turn reports no valid window — drop any stale earlier
+      // reading so the meter shows only a speaker whose LATEST turn had a window.
+      out.delete(entry.from);
+    }
   }
   return out;
 }

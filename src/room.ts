@@ -877,11 +877,15 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
                 if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
               }
               if (calls.length >= MAX_TURN_TOOL_CALLS) continue;
-              const primary = toolArgPreview(chunk.toolName, chunk.toolInput);
+              // Derive the display name first, then presentation FROM it: a wrapped
+              // standard tool (mcp__srv__shell) must be recognized by its leaf, else
+              // it reads as unknown and the preview falls back to an arbitrary scalar.
+              const name = displayToolName(chunk.toolName);
+              const primary = toolArgPreview(name, chunk.toolInput);
               const errored = chunk.id ? pendingErrors.delete(chunk.id) : false;
               if (chunk.id) callIndexById.set(chunk.id, calls.length);
               calls.push({
-                name: displayToolName(chunk.toolName),
+                name,
                 ...(primary ? { primary } : {}),
                 ...(errored ? { errored: true } : {}),
               });

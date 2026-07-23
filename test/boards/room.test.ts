@@ -1137,6 +1137,21 @@ describe("buildRoomBoard · observability", () => {
     expect(contextBars(board)?.[0]?.value).toBe(150_000);
   });
 
+  test("a stale reading is cleared when the Mind's latest turn reports no window", () => {
+    const board = buildRoomBoard(room({ participants: ["a"] }), [
+      entry({ from: "a", turnIndex: 0, usage: withWindow(1, 150_000, 200_000) }),
+      entry({ from: "a", turnIndex: 1, usage: { inputTokens: 5, outputTokens: 5 } }), // no window
+    ]);
+    expect(contextBars(board)).toBeUndefined();
+  });
+
+  test("an unrecognized tool name is not doubled in the row detail", () => {
+    const board = buildRoomBoard(room(), [entry({ toolCalls: [{ name: "foo__bar" }] })]);
+    const detail = debateItems(board)[0]?.detail ?? "";
+    expect(detail).toContain("foo__bar");
+    expect(detail).not.toContain("foo__bar foo__bar");
+  });
+
   test("no Context section when no turn reports a window (provider omits it)", () => {
     const board = buildRoomBoard(room(), [
       entry({ usage: { inputTokens: 1000, outputTokens: 50 } }), // spend, but no window

@@ -740,10 +740,13 @@ function turnTokenTail(entry: TurnEntry): string {
 function toolCallLines(entry: TurnEntry): string | undefined {
   if (!entry.toolCalls?.length) return undefined;
   const lines = entry.toolCalls.map((c) => {
-    const marker = toolPresentation(c.name).marker;
+    // For an unrecognized tool the presentation marker IS the tool name; drop it
+    // then rather than rendering the name twice ("foo__bar foo__bar").
+    const m = toolPresentation(c.name).marker;
+    const marker = m && m !== c.name ? `${m} ` : "";
     const arg = c.primary ? ` — ${c.primary}` : "";
     const failed = c.errored ? " — failed" : "";
-    return `${marker} ${c.name}${arg}${failed}`;
+    return `${marker}${c.name}${arg}${failed}`;
   });
   return `Tools\n${lines.join("\n")}`;
 }
