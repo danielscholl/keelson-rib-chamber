@@ -96,6 +96,11 @@ export interface Mind {
 // The family and glyph are derived at render from `name`, not persisted.
 export interface ToolCall {
   name: string;
+  // The tool's source family, inferred from the RAW wire name at capture — before
+  // `name` has its `mcp__<server>__` prefix stripped — so an MCP tool keeps its real
+  // family (e.g. `mcp__srv__shell` → `mcp`, not the misleading built-in bucket).
+  // Absent on an entry recorded before this field; the board falls back to the name.
+  family?: string;
   primary?: string;
   errored?: boolean;
 }

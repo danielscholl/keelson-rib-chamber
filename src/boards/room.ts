@@ -646,8 +646,6 @@ function buildDebateItems(
     items.push(
       turnRow(entry, index, textFor, moderator, synthesizer, manager, mindBySlug, decisions),
     );
-    // Each tool the turn invoked reads as its own quiet row beneath the speaker —
-    // distinct and scannable without expanding the turn (the proposal's inline rows).
     items.push(...toolRows(entry));
   });
   const end = terminationMarker(room);
@@ -734,16 +732,16 @@ function turnSpendTail(entry: TurnEntry): string {
   return "";
 }
 
-// Each tool a turn invoked as its own quiet feed row beneath the speaker (the
-// proposal's inline rows): a gear icon, a source chip (CHAMBER for a chamber tool,
-// else BUILT-IN / the provider family), the tool name + arg preview, and an ok/failed
-// trailing. A failed call also wears the error tone. The board's `rows` can't do the
-// chat block's bordered monospace box (that needs a new canvas kind), but this reads
-// as distinct tool activity without expanding the turn.
+// One feed row per tool a turn invoked: a gear icon, a source chip (CHAMBER for a
+// chamber tool, else BUILT-IN / the provider family), the tool name + arg preview,
+// and an ok/failed trailing — a failed call also wears the error tone. The board's
+// `rows` cannot reproduce the chat block's bordered monospace box (that needs a new
+// canvas kind); this carries the same information within the board contract.
 function toolRows(entry: TurnEntry): FeedItem[] {
   if (!entry.toolCalls?.length) return [];
   return entry.toolCalls.map((c): FeedItem => {
-    const family = inferToolFamily(c.name);
+    // Prefer the family captured from the raw wire name; fall back for older entries.
+    const family = c.family ?? inferToolFamily(c.name);
     const label = (family === "other" ? "built-in" : family).toUpperCase();
     const chipTone: CanvasTone = family === "chamber" ? "brand" : "neutral";
     const text = c.primary ? `${c.name} — ${c.primary}` : c.name;

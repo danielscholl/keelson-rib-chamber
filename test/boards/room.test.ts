@@ -1093,6 +1093,11 @@ describe("buildRoomBoard · observability", () => {
     // Source chip: built-in for a plain tool, CHAMBER (brand-toned) for a chamber tool.
     expect(rows[0]?.chip).toMatchObject({ label: "BUILT-IN", tone: "neutral" });
     expect(rows[1]?.chip).toMatchObject({ label: "CHAMBER", tone: "brand" });
+    // A persisted family (from the raw MCP name) drives the chip, not the stripped name.
+    const mcp = buildRoomBoard(room(), [
+      entry({ toolCalls: [{ name: "shell", family: "mcp", primary: "ls" }] }),
+    ]);
+    expect(toolRowsIn(mcp)[0]?.chip).toMatchObject({ label: "MCP", tone: "neutral" });
     // ok/failed trailing, and a failed call wears the error tone.
     expect(rows[0]?.trailing).toBe("ok");
     expect(rows[2]?.trailing).toBe("failed");
