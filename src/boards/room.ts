@@ -236,8 +236,8 @@ function buildVitalsSection(
     const duration = formatDuration(first.at, last.at);
     if (duration) parts.push(`${duration} · ${clockTime(first.at)} → ${clockTime(last.at)}`);
   }
-  // Token totals moved to the Totals stats band below the debate; the vitals line
-  // stays the quiet duration + scope register it was.
+  // The vitals line is the quiet duration + scope register; token and tool totals
+  // read as headline figures in the Totals stats band, not on this secondary line.
   if (parts.length === 0 && !projectLabel) return [];
   return [
     {
@@ -724,10 +724,11 @@ function turnTokenTail(entry: TurnEntry): string {
   const parts: string[] = [];
   const n = entry.toolCalls?.length ?? 0;
   if (n > 0) parts.push(`⚙ ${n} tool${n === 1 ? "" : "s"}`);
-  if (entry.usage) {
-    parts.push(
-      `↑${formatTokenCount(entry.usage.inputTokens)} ↓${formatTokenCount(entry.usage.outputTokens)}`,
-    );
+  const u = entry.usage;
+  // Only show the spend arrows on a turn that actually spent: a context-only usage
+  // report (real window, zero in/out) must not read as ↑0 ↓0 measured spend.
+  if (u && u.inputTokens + u.outputTokens > 0) {
+    parts.push(`↑${formatTokenCount(u.inputTokens)} ↓${formatTokenCount(u.outputTokens)}`);
   }
   return parts.length ? ` · ${parts.join(" · ")}` : "";
 }
@@ -845,9 +846,10 @@ function buildContextSection(
 function buildTotalsSection(transcript: readonly TurnEntry[]): CanvasBoardView["sections"] {
   const usage = sumTurnUsage(transcript);
   const tools = countToolCalls(transcript);
-  if (!usage && tools.total === 0) return [];
+  const spent = !!usage && usage.inputTokens + usage.outputTokens > 0;
+  if (!spent && tools.total === 0) return [];
   const items: Extract<CanvasBoardView["sections"][number], { kind: "stats" }>["items"] = [];
-  if (usage) {
+  if (spent && usage) {
     items.push({ label: "input · total", value: `↑ ${formatTokenCount(usage.inputTokens)}` });
     items.push({ label: "output · total", value: `↓ ${formatTokenCount(usage.outputTokens)}` });
   }

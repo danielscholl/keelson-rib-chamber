@@ -49,17 +49,43 @@ import type {
   TurnEntry,
 } from "./types.ts";
 
-// Strip a `mcp__<server>__<tool>` wire name down to its display leaf, matching
-// how the host chat surfaces name a tool. A plain tool name passes through.
+// Reduce an MCP wire name (`mcp__<server>__<tool...>`) to its tool portion —
+// everything after the server segment, so a nested `mcp__srv__a__b` keeps `a__b`
+// and matches the host chat's leaf name. A non-MCP name passes through untouched:
+// a plain `foo__bar` is a real tool name, not an MCP wrapper, so it must not be
+// truncated.
 function displayToolName(raw: string): string {
-  const at = raw.lastIndexOf("__");
-  return at >= 0 ? raw.slice(at + 2) : raw;
+  if (!raw.startsWith("mcp__")) return raw;
+  const parts = raw.split("__");
+  return parts.length > 2 ? parts.slice(2).join("__") : raw;
 }
 
-// A tool_use arg preview is only a scannable hint on the turn's detail line, not
-// a record — cap it so a large input (a pasted patch, a long command) can't bloat
-// transcript.jsonl or the board.
+// A compact one-line preview of a tool's input: the shared presentation helper
+// when it recognizes the tool, else the first scalar arg value — so a custom or
+// MCP-wrapped tool (for which the helper returns no primary) still shows something
+// scannable, bounded so a large input can't bloat transcript.jsonl or the board.
+function toolArgPreview(name: string, input?: Record<string, unknown>): string | undefined {
+  const raw = toolPresentation(name, input).primary ?? firstScalarArg(input);
+  if (!raw) return undefined;
+  return raw.length > MAX_TOOL_ARG_PREVIEW ? `${raw.slice(0, MAX_TOOL_ARG_PREVIEW - 1)}…` : raw;
+}
+
+function firstScalarArg(input?: Record<string, unknown>): string | undefined {
+  if (!input) return undefined;
+  for (const v of Object.values(input)) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+  }
+  return undefined;
+}
+
+// A tool_use arg preview is a scannable hint, not a record — cap its length.
 const MAX_TOOL_ARG_PREVIEW = 80;
+
+// A single provider turn can loop through arbitrarily many tools; persist only a
+// bounded prefix so the additive transcript record and every hot board publish stay
+// bounded. The count beyond this is dropped (a coding turn's tail), not the turn.
+const MAX_TURN_TOOL_CALLS = 40;
 
 export interface RoomDriverDeps {
   store: RoomStore;
@@ -831,31 +857,37 @@ export function createRoomDriver(deps: RoomDriverDeps): RoomDriver {
         // since the host may emit no result and the result object carries no tool data.
         const calls: ToolCall[] = [];
         const callIndexById = new Map<string, number>();
+        // Failed tool_result ids seen BEFORE their tool_use — some provider bridges
+        // (e.g. Copilot) emit the result first. Held here and applied when the use lands,
+        // so an out-of-order failure isn't recorded as a success.
+        const pendingErrors = new Set<string>();
         try {
           // Draining the stream could drive throttled partial publishes later; for
           // now the result is the source of truth.
           for await (const chunk of turn.stream) {
             if (chunk.type === "tool_use") {
               sawToolUse = true;
-              const raw = toolPresentation(chunk.toolName, chunk.toolInput).primary;
-              const primary =
-                raw && raw.length > MAX_TOOL_ARG_PREVIEW
-                  ? `${raw.slice(0, MAX_TOOL_ARG_PREVIEW - 1)}…`
-                  : raw;
-              if (chunk.id) callIndexById.set(chunk.id, calls.length);
-              calls.push({
-                name: displayToolName(chunk.toolName),
-                ...(primary ? { primary } : {}),
-              });
+              // Exhibit witnessing is independent of the (bounded) tool record, so it
+              // runs for every tool_use — even past the persistence cap.
               if (chunk.toolName === EXHIBIT_TOOL_NAME) {
                 const rawId = chunk.toolInput?.id;
                 if (typeof rawId === "string" && rawId.length > 0) tabledIds.push(rawId);
               }
+              if (calls.length >= MAX_TURN_TOOL_CALLS) continue;
+              const primary = toolArgPreview(chunk.toolName, chunk.toolInput);
+              const errored = chunk.id ? pendingErrors.delete(chunk.id) : false;
+              if (chunk.id) callIndexById.set(chunk.id, calls.length);
+              calls.push({
+                name: displayToolName(chunk.toolName),
+                ...(primary ? { primary } : {}),
+                ...(errored ? { errored: true } : {}),
+              });
               continue;
             }
             if (chunk.type === "tool_result" && chunk.isError) {
               const at = callIndexById.get(chunk.toolUseId);
               if (at !== undefined && calls[at]) calls[at] = { ...calls[at], errored: true };
+              else pendingErrors.add(chunk.toolUseId);
             }
           }
         } catch {

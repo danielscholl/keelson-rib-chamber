@@ -1147,4 +1147,42 @@ describe("buildRoomBoard · observability", () => {
     expect(toolTile?.sub).toBe("1 failed");
     expect(toolTile?.tone).toBe("warn");
   });
+
+  test("context-only usage (zero spend) shows the Context meter but no spend arrows", () => {
+    const board = buildRoomBoard(room({ participants: ["a"] }), [
+      // a real window, zero in/out — a context report, not measured spend
+      entry({
+        from: "a",
+        usage: { inputTokens: 0, outputTokens: 0, contextTokens: 90_000, contextWindow: 200_000 },
+      }),
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    // Context meter renders...
+    expect(contextBars(board)?.[0]?.value).toBe(90_000);
+    // ...but neither the turn trailing nor the Totals band claims ↑0 ↓0 spend.
+    expect(debateItems(board)[0]?.trailing).not.toContain("↑");
+    expect(totalsStats(board)?.some((t) => String(t.label).includes("input"))).toBeFalsy();
+  });
+
+  test("a non-finite or negative context reading is dropped from the meter", () => {
+    const nan = buildRoomBoard(room({ participants: ["a"] }), [
+      entry({
+        from: "a",
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          contextTokens: Number.NaN,
+          contextWindow: 200_000,
+        },
+      }),
+    ]);
+    expect(contextBars(nan)).toBeUndefined();
+    const neg = buildRoomBoard(room({ participants: ["a"] }), [
+      entry({
+        from: "a",
+        usage: { inputTokens: 1, outputTokens: 1, contextTokens: 100, contextWindow: 0 },
+      }),
+    ]);
+    expect(contextBars(neg)).toBeUndefined();
+  });
 });

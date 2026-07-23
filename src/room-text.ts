@@ -103,9 +103,20 @@ export function latestContextByMind(
   const out = new Map<MindSlug, { contextTokens: number; contextWindow: number }>();
   for (const entry of transcript) {
     const u = entry.usage;
-    if (!u || typeof u.contextTokens !== "number" || !u.contextWindow || u.contextWindow <= 0)
+    // Guard against NaN/Infinity/negatives reaching the meter (a bad provider
+    // report): require a finite, non-negative fill and a finite, positive window.
+    if (
+      !u ||
+      !Number.isFinite(u.contextTokens ?? Number.NaN) ||
+      (u.contextTokens ?? -1) < 0 ||
+      !Number.isFinite(u.contextWindow ?? Number.NaN) ||
+      (u.contextWindow ?? 0) <= 0
+    )
       continue;
-    out.set(entry.from, { contextTokens: u.contextTokens, contextWindow: u.contextWindow });
+    out.set(entry.from, {
+      contextTokens: u.contextTokens as number,
+      contextWindow: u.contextWindow as number,
+    });
   }
   return out;
 }
