@@ -22,7 +22,7 @@ import {
 } from "../runtime.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { IDENTITY_SLOT_COUNT, nextFreeSlot } from "../types.ts";
-import { DIGEST_TOOL_NAME } from "../workflows.ts";
+import { DIGEST_TOOL_NAME, lensWorkflowStatus } from "../workflows.ts";
 import { emitJsonList, emitResult } from "./util.ts";
 
 // Serialize genesis slot allocation + scaffold across parallel landings. nextFreeSlot
@@ -292,19 +292,23 @@ export function makeListLensesTool(): ToolDefinition {
         const lenses = (await listLenses(lensesDir())).filter(
           (l) => !isExhibit(l) && (wanted === undefined || l.id === wanted),
         );
-        const rows: Record<string, unknown>[] = lenses.map((l) => ({
-          id: l.id,
-          kind: "canvas",
-          updatedAt: l.updatedAt,
-          ...(l.refresh ? { refresh: l.refresh } : {}),
-          ...(l.scope ? { scope: l.scope } : {}),
-          ...(l.maintainingMind ? { maintainingMind: l.maintainingMind } : {}),
-          ...(l.reason ? { reason: l.reason } : {}),
-          // The board rides along only on a single-lens fetch: it is the bulky
-          // field, and the list's readers (briefings, refresh turns) only need
-          // one composition at a time.
-          ...(wanted !== undefined ? { board: l.board } : {}),
-        }));
+        const rows: Record<string, unknown>[] = lenses.map((l) => {
+          const workflowStatus = l.refresh ? lensWorkflowStatus(l.refresh.workflow) : undefined;
+          return {
+            id: l.id,
+            kind: "canvas",
+            updatedAt: l.updatedAt,
+            ...(l.refresh ? { refresh: l.refresh } : {}),
+            ...(workflowStatus ? { workflowStatus } : {}),
+            ...(l.scope ? { scope: l.scope } : {}),
+            ...(l.maintainingMind ? { maintainingMind: l.maintainingMind } : {}),
+            ...(l.reason ? { reason: l.reason } : {}),
+            // The board rides along only on a single-lens fetch: it is the bulky
+            // field, and the list's readers (briefings, refresh turns) only need
+            // one composition at a time.
+            ...(wanted !== undefined ? { board: l.board } : {}),
+          };
+        });
         // The other species, from its own store. Read fail-soft, unlike the canvas
         // list above: an unreadable html store must not fail a canvas lens's refresh
         // turn, whose whole job is the board it already has in hand.
@@ -315,12 +319,14 @@ export function makeListLensesTool(): ToolDefinition {
           })
         ).filter((l) => wanted === undefined || l.id === wanted);
         for (const l of htmlLenses) {
+          const workflowStatus = l.refresh ? lensWorkflowStatus(l.refresh.workflow) : undefined;
           rows.push({
             id: l.id,
             kind: "html",
             updatedAt: l.updatedAt,
             ...(l.title ? { title: l.title } : {}),
             ...(l.refresh ? { refresh: l.refresh } : {}),
+            ...(workflowStatus ? { workflowStatus } : {}),
           });
         }
         // One newest-first order across both stores, so the merged list reads as one

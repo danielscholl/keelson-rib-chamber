@@ -264,6 +264,14 @@ describe("the rib contributes the operator's lens workflows", () => {
     contributedNames();
 
     const expected = createHash("sha256").update(WF).digest("hex");
+    const contributions = rib.contributeWorkflows?.(
+      {} as Parameters<NonNullable<typeof rib.contributeWorkflows>>[0],
+    );
+    const lenses = contributions?.find(
+      (contribution) => (contribution.definition as { name?: string }).name === "chamber-lenses",
+    );
+    const collector = (lenses?.definition as { nodes?: { bash?: string }[] })?.nodes?.[0]?.bash;
+    expect(collector).toContain(expected);
     expect(lensWorkflowStatus("chamber-lens-release-status")).toEqual({
       name: "chamber-lens-release-status",
       file,

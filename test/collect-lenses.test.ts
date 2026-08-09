@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,8 +13,14 @@ import { scaffoldMind } from "../src/minds-store.ts";
 // two processes agree without a shared env var.
 const COLLECTOR = fileURLToPath(new URL("../bin/collect-lenses.ts", import.meta.url));
 
-async function runCollector(home: string): Promise<{ out: string; code: number }> {
-  const proc = Bun.spawn(["bun", COLLECTOR, home], { stdout: "pipe", stderr: "ignore" });
+async function runCollector(
+  home: string,
+  activeWorkflowVersions: Readonly<Record<string, string>> = {},
+): Promise<{ out: string; code: number }> {
+  const proc = Bun.spawn(["bun", COLLECTOR, home, JSON.stringify(activeWorkflowVersions)], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
   const out = await new Response(proc.stdout).text();
   const code = await proc.exited;
   return { out, code };
@@ -112,6 +119,43 @@ describe("collect-lenses", () => {
       expect(code).toBe(0);
       expect(out).toContain("morning-brief");
       expect(out).not.toContain("sample-assessment");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("compares installed workflow files with the captured active version", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-lenses-"));
+    const workflow = `description: Produce release status
+nodes:
+  - id: compose
+    prompt: Compose release status.
+`;
+    try {
+      const store = createFileLensStore(join(home, "lenses"));
+      await store.saveLens({
+        id: "release-status",
+        board: { view: "board", title: "Release Status", sections: [] },
+        refresh: { workflow: "chamber-lens-release-status" },
+      });
+      const workflowDir = join(home, "lens-workflows");
+      await mkdir(workflowDir, { recursive: true });
+      const file = join(workflowDir, "release-status.yml");
+      await writeFile(file, workflow);
+      const activeVersion = createHash("sha256").update(workflow).digest("hex");
+
+      const active = await runCollector(home, {
+        "chamber-lens-release-status": activeVersion,
+      });
+      expect(active.code).toBe(0);
+      expect(active.out).not.toContain("stale definition");
+
+      await writeFile(file, workflow.replace("Compose release status.", "Compose current status."));
+      const stale = await runCollector(home, {
+        "chamber-lens-release-status": activeVersion,
+      });
+      expect(stale.code).toBe(0);
+      expect(stale.out).toContain("stale definition");
     } finally {
       await rm(home, { recursive: true, force: true });
     }

@@ -115,10 +115,13 @@ export function lensWorkflowStatuses(): readonly LensWorkflowStatus[] {
 }
 
 export function contributeChamberWorkflows(): readonly RibWorkflowContribution[] {
-  const bundled = bundledChamberWorkflows();
+  const reserved = bundledChamberWorkflows();
   // The bundled names are what a discovered file may not take: the catalog keeps one
   // definition per name, so a collision would drop the operator's file silently.
-  const discovered = discoverLensWorkflows(lensWorkflowsDir(), new Set(bundled.map(nameOf)));
+  const discovered = discoverLensWorkflows(lensWorkflowsDir(), new Set(reserved.map(nameOf)));
+  const bundled = bundledChamberWorkflows(
+    Object.fromEntries(discovered.workflows.map((workflow) => [workflow.name, workflow.hash])),
+  );
   const contributions = [...discovered.contributions, ...bundled];
   activeLensWorkflows = new Map(
     discovered.workflows.map((workflow) => [
@@ -139,7 +142,9 @@ export function contributeChamberWorkflows(): readonly RibWorkflowContribution[]
 // Every contributed workflow declares mutates_checkout: false — chamber
 // workflows write the rib data home and publish snapshots, never a project
 // checkout, so the host's per-project mutation lock must not serialize them.
-function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
+function bundledChamberWorkflows(
+  activeLensWorkflowVersions: Readonly<Record<string, string>> = {},
+): readonly RibWorkflowContribution[] {
   return [
     {
       // The roster producer: a deterministic collector that reads the
@@ -211,7 +216,7 @@ function bundledChamberWorkflows(): readonly RibWorkflowContribution[] {
             // captured in registerTools, which runs before this. The collector reads
             // both the lenses and the minds (to tone each lens's dot by its
             // maintaining Mind's identity), so it bakes the home, not a single store dir.
-            bash: `bun ${shQuote(LENSES_COLLECTOR)} ${shQuote(chamberDataHome())}`,
+            bash: `bun ${shQuote(LENSES_COLLECTOR)} ${shQuote(chamberDataHome())} ${shQuote(JSON.stringify(activeLensWorkflowVersions))}`,
             output_schema: { type: "object", required: ["view", "sections"] },
           },
         ],

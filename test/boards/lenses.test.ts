@@ -319,6 +319,25 @@ describe("buildLensesIndexBoard both species", () => {
 });
 
 describe("buildLensesIndexBoard living lenses", () => {
+  test("marks a stale custom workflow and leaves an active one unmarked", () => {
+    const record = lens({
+      id: "release-status",
+      refresh: { workflow: "chamber-lens-release-status" },
+    });
+    const stale = cards(
+      buildLensesIndexBoard([record], [], [], { "chamber-lens-release-status": "stale" }),
+    )[0];
+    expect(stale?.fields?.find((field) => field.label === "workflow")?.value).toBe(
+      "stale definition",
+    );
+
+    const active = cards(
+      buildLensesIndexBoard([record], [], [], { "chamber-lens-release-status": "active" }),
+    )[0];
+    expect(active?.fields?.some((field) => field.label === "workflow")).toBe(false);
+    expect(canvasViewSchema.safeParse(buildLensesIndexBoard([record])).success).toBe(true);
+  });
+
   test("a refresh-backed lens gains the Refresh verb between Open and Retire; a plain lens doesn't", () => {
     const living = cards(
       buildLensesIndexBoard([

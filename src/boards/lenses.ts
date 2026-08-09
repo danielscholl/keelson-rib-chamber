@@ -19,9 +19,12 @@ interface IndexEntry {
   maintainingMind?: string;
   scope?: string;
   reason?: string;
+  workflowState?: "active" | "stale";
 }
 
-function canvasEntry(lens: LensRecord): IndexEntry {
+export type LensWorkflowStates = Readonly<Record<string, "active" | "stale">>;
+
+function canvasEntry(lens: LensRecord, workflowStates: LensWorkflowStates): IndexEntry {
   return {
     id: lens.id,
     species: "canvas",
@@ -32,10 +35,13 @@ function canvasEntry(lens: LensRecord): IndexEntry {
     ...(lens.maintainingMind ? { maintainingMind: lens.maintainingMind } : {}),
     ...(lens.scope ? { scope: lens.scope } : {}),
     ...(lens.reason ? { reason: lens.reason } : {}),
+    ...(lens.refresh && workflowStates[lens.refresh.workflow]
+      ? { workflowState: workflowStates[lens.refresh.workflow] }
+      : {}),
   };
 }
 
-function htmlEntry(lens: HtmlLensRecord): IndexEntry {
+function htmlEntry(lens: HtmlLensRecord, workflowStates: LensWorkflowStates): IndexEntry {
   return {
     id: lens.id,
     species: "html",
@@ -43,6 +49,9 @@ function htmlEntry(lens: HtmlLensRecord): IndexEntry {
     updatedAt: lens.updatedAt,
     pinned: lens.pinned === true,
     ...(lens.refresh ? { refresh: lens.refresh } : {}),
+    ...(lens.refresh && workflowStates[lens.refresh.workflow]
+      ? { workflowState: workflowStates[lens.refresh.workflow] }
+      : {}),
   };
 }
 
@@ -95,9 +104,13 @@ export function buildLensesIndexBoard(
   lenses: readonly LensRecord[],
   minds: readonly Mind[] = [],
   htmlLenses: readonly HtmlLensRecord[] = [],
+  workflowStates: LensWorkflowStates = {},
 ): CanvasBoardView {
   const tones = maintainerTones(minds);
-  const entries = mergeNewestFirst([...lenses.map(canvasEntry), ...htmlLenses.map(htmlEntry)]);
+  const entries = mergeNewestFirst([
+    ...lenses.map((lens) => canvasEntry(lens, workflowStates)),
+    ...htmlLenses.map((lens) => htmlEntry(lens, workflowStates)),
+  ]);
   const sections: CanvasBoardView["sections"] =
     entries.length === 0
       ? []
@@ -136,6 +149,7 @@ function cardFor(entry: IndexEntry, tones: Map<string, CanvasTone>) {
     ...(html ? [{ label: "kind", value: "page" }] : []),
     ...(entry.maintainingMind ? [{ label: "by", value: entry.maintainingMind }] : []),
     { label: "updated", value: agoLabel(entry.updatedAt) },
+    ...(entry.workflowState === "stale" ? [{ label: "workflow", value: "stale definition" }] : []),
   ];
   return {
     title,
