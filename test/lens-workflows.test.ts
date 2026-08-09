@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,9 @@ import rib from "../src/index.ts";
 import {
   discoverLensWorkflows,
   lensWorkflowName,
+  MAX_LENS_WORKFLOW_SLUG_LENGTH,
   MAX_REFRESH_WORKFLOW_NAME,
+  parseLensWorkflow,
 } from "../src/lens-workflows.ts";
 import { lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
 import { isChamberWorkflow } from "../src/workflows.ts";
@@ -45,11 +48,29 @@ describe("lens workflow discovery", () => {
   });
 
   test("contributes a workflow file under a chamber-namespaced name", async () => {
-    await writeFile(join(root, "release-status.yaml"), WF);
-    const { contributions, names } = discoverLensWorkflows(root);
+    const path = join(root, "release-status.yaml");
+    await writeFile(path, WF);
+    const { contributions, names, workflows } = discoverLensWorkflows(root);
     expect(contributions).toHaveLength(1);
     expect(names).toEqual(new Set(["chamber-lens-release-status"]));
     expect(lensWorkflowName("release-status")).toBe("chamber-lens-release-status");
+    expect(workflows).toEqual([
+      {
+        slug: "release-status",
+        file: "release-status.yaml",
+        path,
+        name: "chamber-lens-release-status",
+        hash: createHash("sha256").update(WF).digest("hex"),
+        contribution: contributions[0]!,
+      },
+    ]);
+  });
+
+  test("parses and hashes one workflow through the shared validation path", () => {
+    const parsed = parseLensWorkflow(WF, "release-status");
+    expect(parsed.hash).toHaveLength(64);
+    expect(nameOf(parsed.contribution)).toBe("chamber-lens-release-status");
+    expect(() => parseLensWorkflow(WF, "Not Safe")).toThrow("name is not a kebab token");
   });
 
   // The filename is authoritative, like the lens store's record dirs. It also has to
@@ -154,15 +175,16 @@ describe("lens workflow discovery", () => {
   // chamber_emit_lens caps refresh.workflow at MAX_REFRESH_WORKFLOW_NAME, so a longer
   // name is one no lens could ever attach to.
   test("refuses a stem too long for any lens to name", async () => {
-    const tooLong = "a".repeat(MAX_REFRESH_WORKFLOW_NAME - "chamber-lens-".length + 1);
+    const tooLong = "a".repeat(MAX_LENS_WORKFLOW_SLUG_LENGTH + 1);
     await writeFile(join(root, `${tooLong}.yaml`), WF);
     await writeFile(join(root, "good.yaml"), WF);
     const { names } = discoverLensWorkflows(root);
     expect(names).toEqual(new Set(["chamber-lens-good"]));
     // The longest name that still fits is kept.
-    const longest = "a".repeat(MAX_REFRESH_WORKFLOW_NAME - "chamber-lens-".length);
+    const longest = "a".repeat(MAX_LENS_WORKFLOW_SLUG_LENGTH);
     await writeFile(join(root, `${longest}.yaml`), WF);
     expect(discoverLensWorkflows(root).names.has(`chamber-lens-${longest}`)).toBe(true);
+    expect(`chamber-lens-${longest}`).toHaveLength(MAX_REFRESH_WORKFLOW_NAME);
   });
 
   // A file the host would drop must not be vouched for: suppressing the emit caveat
