@@ -1,6 +1,6 @@
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
-import type { RibContext, ToolDefinition, WorkflowDiscoveryNotice } from "@keelson/shared";
+import type { ToolDefinition, WorkflowDiscoveryNotice } from "@keelson/shared";
 import { errText, z } from "@keelson/shared";
 import { assertSafeSlug } from "../genesis.ts";
 import { MAX_LENS_WORKFLOW_SLUG_LENGTH, parseLensWorkflow } from "../lens-workflows.ts";
@@ -15,6 +15,11 @@ const installSchema = z.object({
 
 let writeSequence = 0;
 let lensWorkflowInstallInFlight: Promise<unknown> = Promise.resolve();
+
+export type ReloadRibWorkflows = () => Promise<{
+  count: number;
+  notices: WorkflowDiscoveryNotice[];
+}>;
 
 async function replaceFile(path: string, content: string): Promise<void> {
   await mkdir(lensWorkflowsDir(), { recursive: true });
@@ -63,7 +68,7 @@ function activationError(
 }
 
 export function makeLensWorkflowInstallTool(
-  reloadRibWorkflows: NonNullable<RibContext["reloadRibWorkflows"]>,
+  reloadRibWorkflows: ReloadRibWorkflows,
 ): ToolDefinition {
   return {
     name: "chamber_lens_workflow_install",

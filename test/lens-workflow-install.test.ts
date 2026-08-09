@@ -5,7 +5,10 @@ import { join } from "node:path";
 import type { MessageChunk, RibContext, ToolContext } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
-import { makeLensWorkflowInstallTool } from "../src/tools/lens-workflow-install.ts";
+import {
+  makeLensWorkflowInstallTool,
+  type ReloadRibWorkflows,
+} from "../src/tools/lens-workflow-install.ts";
 import { contributeChamberWorkflows, lensWorkflowStatus } from "../src/workflows.ts";
 
 const ORIGINAL = `name: ignored
@@ -111,7 +114,7 @@ describe("chamber_lens_workflow_install", () => {
       noteFirstReload = resolve;
     });
     let calls = 0;
-    const reload: NonNullable<RibContext["reloadRibWorkflows"]> = async () => {
+    const reload: ReloadRibWorkflows = async () => {
       calls += 1;
       contributeChamberWorkflows();
       if (calls === 1) {
@@ -183,7 +186,7 @@ describe("chamber_lens_workflow_install", () => {
     const originalVersion = lensWorkflowStatus("chamber-lens-release-status")?.activeVersion;
     await writeFile(source, UPDATED);
     let calls = 0;
-    const reload: NonNullable<RibContext["reloadRibWorkflows"]> = async () => {
+    const reload: ReloadRibWorkflows = async () => {
       calls += 1;
       contributeChamberWorkflows();
       if (calls === 1) {
@@ -227,10 +230,9 @@ describe("chamber_lens_workflow_install", () => {
     expect(register(base).some((tool) => tool.name === "chamber_lens_workflow_install")).toBe(
       false,
     );
+    const contextWithReload = { ...base, reloadRibWorkflows: activate };
     expect(
-      register({ ...base, reloadRibWorkflows: activate }).some(
-        (tool) => tool.name === "chamber_lens_workflow_install",
-      ),
+      register(contextWithReload).some((tool) => tool.name === "chamber_lens_workflow_install"),
     ).toBe(true);
     await rib.dispose?.();
   });

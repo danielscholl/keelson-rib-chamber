@@ -39,7 +39,10 @@ import {
   makeRetireLensTool,
   makeTableExhibitTool,
 } from "./tools/lens-emit.ts";
-import { makeLensWorkflowInstallTool } from "./tools/lens-workflow-install.ts";
+import {
+  makeLensWorkflowInstallTool,
+  type ReloadRibWorkflows,
+} from "./tools/lens-workflow-install.ts";
 import {
   makeDigestTool,
   makeGenesisTool,
@@ -259,8 +262,10 @@ const rib: Rib = {
       makeRoomTranscriptTool(),
     ];
     const cleanupTools = [makeRetireMindTool(), makeRoomDeleteTool()];
-    const lensWorkflowTools = ctx.reloadRibWorkflows
-      ? [makeLensWorkflowInstallTool(ctx.reloadRibWorkflows)]
+    const reloadRibWorkflows = (ctx as RibContext & { reloadRibWorkflows?: ReloadRibWorkflows })
+      .reloadRibWorkflows;
+    const lensWorkflowTools = reloadRibWorkflows
+      ? [makeLensWorkflowInstallTool(reloadRibWorkflows)]
       : [];
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
