@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { RibWorkflowContribution } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
 import { DIGEST_KEY, LENSES_KEY, ROOMS_KEY, ROSTER_KEY } from "./keys.ts";
 import { LENS_TOOL_NAME } from "./lens.ts";
 import { HTML_LENS_TOOL_NAME } from "./lens-html.ts";
-import { discoverLensWorkflows } from "./lens-workflows.ts";
+import { discoverLensWorkflows, parseLensWorkflow } from "./lens-workflows.ts";
 import { chamberDataHome, lensWorkflowsDir } from "./paths.ts";
 import {
   DIGEST_WF_PROMPT,
@@ -65,18 +66,66 @@ function shQuote(value: string): string {
 // provenance?"), which any contribution satisfies — so this must be the WHOLE set,
 // not the lens-shaped part of it, or the caveat cries wolf over a backing that runs.
 let contributedWorkflows: ReadonlySet<string> = new Set();
+let activeLensWorkflows: ReadonlyMap<string, { slug: string; file: string; hash: string }> =
+  new Map();
+
+export interface LensWorkflowStatus {
+  name: string;
+  file: string;
+  activeVersion: string;
+  installedVersion?: string;
+  state: "active" | "stale";
+}
 
 export function isChamberWorkflow(name: string): boolean {
   return contributedWorkflows.has(name);
 }
 
+function nameOf(c: RibWorkflowContribution): string {
+  return (c.definition as { name: string }).name;
+}
+
+export function isReservedLensWorkflowName(name: string): boolean {
+  return bundledChamberWorkflows().some((contribution) => nameOf(contribution) === name);
+}
+
+export function lensWorkflowStatus(name: string): LensWorkflowStatus | undefined {
+  const active = activeLensWorkflows.get(name);
+  if (!active) return undefined;
+  let installedVersion: string | undefined;
+  try {
+    installedVersion = parseLensWorkflow(readFileSync(active.file, "utf8"), active.slug).hash;
+  } catch {
+    installedVersion = undefined;
+  }
+  return {
+    name,
+    file: active.file,
+    activeVersion: active.hash,
+    ...(installedVersion ? { installedVersion } : {}),
+    state: installedVersion === active.hash ? "active" : "stale",
+  };
+}
+
+export function lensWorkflowStatuses(): readonly LensWorkflowStatus[] {
+  return [...activeLensWorkflows.keys()]
+    .sort()
+    .map((name) => lensWorkflowStatus(name))
+    .filter((status): status is LensWorkflowStatus => status !== undefined);
+}
+
 export function contributeChamberWorkflows(): readonly RibWorkflowContribution[] {
   const bundled = bundledChamberWorkflows();
-  const nameOf = (c: RibWorkflowContribution): string => (c.definition as { name: string }).name;
   // The bundled names are what a discovered file may not take: the catalog keeps one
   // definition per name, so a collision would drop the operator's file silently.
   const discovered = discoverLensWorkflows(lensWorkflowsDir(), new Set(bundled.map(nameOf)));
   const contributions = [...discovered.contributions, ...bundled];
+  activeLensWorkflows = new Map(
+    discovered.workflows.map((workflow) => [
+      workflow.name,
+      { slug: workflow.slug, file: workflow.path, hash: workflow.hash },
+    ]),
+  );
   // Derived from what is actually returned, so a workflow added below is vouched for
   // without anyone remembering to list it twice.
   contributedWorkflows = new Set(contributions.map(nameOf));

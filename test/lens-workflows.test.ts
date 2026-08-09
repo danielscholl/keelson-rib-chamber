@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import rib from "../src/index.ts";
@@ -12,7 +12,12 @@ import {
   parseLensWorkflow,
 } from "../src/lens-workflows.ts";
 import { lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
-import { isChamberWorkflow } from "../src/workflows.ts";
+import {
+  isChamberWorkflow,
+  isReservedLensWorkflowName,
+  lensWorkflowStatus,
+  lensWorkflowStatuses,
+} from "../src/workflows.ts";
 
 let root: string;
 
@@ -217,9 +222,12 @@ describe("the rib contributes the operator's lens workflows", () => {
     setChamberDataHome(undefined);
     await rm(home, { recursive: true, force: true });
   });
+  beforeEach(async () => {
+    await rm(lensWorkflowsDir(), { recursive: true, force: true });
+    await mkdir(lensWorkflowsDir(), { recursive: true });
+  });
 
   test("a workflow file reaches the catalog beside the bundled ones", async () => {
-    await mkdir(lensWorkflowsDir(), { recursive: true });
     await writeFile(join(lensWorkflowsDir(), "release-status.yaml"), WF);
     const names = contributedNames();
     expect(names).toContain("chamber-lens-release-status");
@@ -231,7 +239,9 @@ describe("the rib contributes the operator's lens workflows", () => {
   // question — "does this name carry rib provenance?" — which EVERY contribution
   // satisfies, not just the lens-shaped ones. Vouching for too few cries wolf over a
   // backing that would have run fine.
-  test("vouches for every workflow chamber contributes, not just the lens ones", () => {
+  test("vouches for every workflow chamber contributes, not just the lens ones", async () => {
+    await writeFile(join(lensWorkflowsDir(), "release-status.yaml"), WF);
+    contributedNames();
     expect(isChamberWorkflow("chamber-lens-release-status")).toBe(true);
     expect(isChamberWorkflow("chamber-lens-refresh")).toBe(true);
     expect(isChamberWorkflow("chamber-lens-html")).toBe(true);
@@ -246,5 +256,59 @@ describe("the rib contributes the operator's lens workflows", () => {
     expect(names).toContain("chamber-lens-refresh");
     expect(names.filter((n) => n.startsWith("chamber-lens-release"))).toEqual([]);
     expect(isChamberWorkflow("chamber-lens-release-status")).toBe(false);
+  });
+
+  test("reports the active and installed versions for an unchanged definition", async () => {
+    const file = join(lensWorkflowsDir(), "release-status.yaml");
+    await writeFile(file, WF);
+    contributedNames();
+
+    const expected = createHash("sha256").update(WF).digest("hex");
+    expect(lensWorkflowStatus("chamber-lens-release-status")).toEqual({
+      name: "chamber-lens-release-status",
+      file,
+      activeVersion: expected,
+      installedVersion: expected,
+      state: "active",
+    });
+    expect(lensWorkflowStatuses()).toHaveLength(1);
+  });
+
+  test("reports an edited definition as stale against its active version", async () => {
+    const file = join(lensWorkflowsDir(), "release-status.yaml");
+    await writeFile(file, WF);
+    contributedNames();
+    const activeVersion = createHash("sha256").update(WF).digest("hex");
+    const edited = WF.replace("Re-author the lens.", "Re-author the edited lens.");
+    await writeFile(file, edited);
+
+    expect(lensWorkflowStatus("chamber-lens-release-status")).toEqual({
+      name: "chamber-lens-release-status",
+      file,
+      activeVersion,
+      installedVersion: createHash("sha256").update(edited).digest("hex"),
+      state: "stale",
+    });
+  });
+
+  test("reports a removed definition as stale without throwing", async () => {
+    const file = join(lensWorkflowsDir(), "release-status.yaml");
+    await writeFile(file, WF);
+    contributedNames();
+    await unlink(file);
+
+    expect(lensWorkflowStatus("chamber-lens-release-status")).toMatchObject({
+      file,
+      state: "stale",
+    });
+    expect(lensWorkflowStatus("chamber-lens-release-status")).not.toHaveProperty(
+      "installedVersion",
+    );
+  });
+
+  test("identifies names reserved by bundled workflows", () => {
+    expect(isReservedLensWorkflowName("chamber-lens-refresh")).toBe(true);
+    expect(isReservedLensWorkflowName("chamber-lens-html")).toBe(true);
+    expect(isReservedLensWorkflowName("chamber-lens-release-status")).toBe(false);
   });
 });
