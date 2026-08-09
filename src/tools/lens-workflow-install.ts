@@ -14,6 +14,7 @@ const installSchema = z.object({
 });
 
 let writeSequence = 0;
+let lensWorkflowInstallInFlight: Promise<unknown> = Promise.resolve();
 
 async function replaceFile(path: string, content: string): Promise<void> {
   await mkdir(lensWorkflowsDir(), { recursive: true });
@@ -93,39 +94,48 @@ export function makeLensWorkflowInstallTool(
         if (isReservedLensWorkflowName(definition.name)) {
           throw new Error(`'${definition.name}' is a bundled Chamber workflow`);
         }
-        const installedPath = await installedPathFor(slug);
-        let prior: string | undefined;
-        try {
-          prior = await readFile(installedPath, "utf8");
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-
-        await replaceFile(installedPath, content);
-        try {
-          const activation = await reloadRibWorkflows();
-          const rejected = activationError(activation.notices, definition.name);
-          if (rejected) throw new Error(`${rejected.filename}: ${rejected.message}`);
-          const status = lensWorkflowStatus(definition.name);
-          if (status?.state !== "active" || status.activeVersion !== definition.hash) {
-            throw new Error(`catalog did not activate '${definition.name}' at ${definition.hash}`);
-          }
-        } catch (activationFailure) {
+        const install = async () => {
+          const installedPath = await installedPathFor(slug);
+          let prior: string | undefined;
           try {
-            if (prior === undefined) {
-              await rm(installedPath, { force: true });
-            } else {
-              await replaceFile(installedPath, prior);
-            }
-            await reloadRibWorkflows();
-          } catch (rollbackFailure) {
-            throw new AggregateError(
-              [activationFailure, rollbackFailure],
-              `activation failed and the prior definition could not be restored`,
-            );
+            prior = await readFile(installedPath, "utf8");
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           }
-          throw activationFailure;
-        }
+
+          await replaceFile(installedPath, content);
+          try {
+            const activation = await reloadRibWorkflows();
+            const rejected = activationError(activation.notices, definition.name);
+            if (rejected) throw new Error(`${rejected.filename}: ${rejected.message}`);
+            const status = lensWorkflowStatus(definition.name);
+            if (status?.state !== "active" || status.activeVersion !== definition.hash) {
+              throw new Error(
+                `catalog did not activate '${definition.name}' at ${definition.hash}`,
+              );
+            }
+          } catch (activationFailure) {
+            try {
+              if (prior === undefined) {
+                await rm(installedPath, { force: true });
+              } else {
+                await replaceFile(installedPath, prior);
+              }
+              await reloadRibWorkflows();
+            } catch (rollbackFailure) {
+              throw new AggregateError(
+                [activationFailure, rollbackFailure],
+                `activation failed and the prior definition could not be restored`,
+              );
+            }
+            throw activationFailure;
+          }
+
+          return installedPath;
+        };
+        const installRun = lensWorkflowInstallInFlight.then(install, install);
+        lensWorkflowInstallInFlight = installRun.catch(() => {});
+        const installedPath = await installRun;
 
         emitResult(
           ctx,

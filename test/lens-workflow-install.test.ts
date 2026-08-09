@@ -97,6 +97,56 @@ describe("chamber_lens_workflow_install", () => {
     expect(lensWorkflowStatus("chamber-lens-release-status")?.activeVersion).toBe(secondVersion);
   });
 
+  test("serializes concurrent installs of the same slug", async () => {
+    const originalSource = join(sourceDir, "original.yml");
+    const updatedSource = join(sourceDir, "updated.yml");
+    await writeFile(originalSource, ORIGINAL);
+    await writeFile(updatedSource, UPDATED);
+    let releaseFirstReload: () => void = () => {};
+    const firstReloadBlocked = new Promise<void>((resolve) => {
+      releaseFirstReload = resolve;
+    });
+    let noteFirstReload: () => void = () => {};
+    const firstReloadStarted = new Promise<void>((resolve) => {
+      noteFirstReload = resolve;
+    });
+    let calls = 0;
+    const reload: NonNullable<RibContext["reloadRibWorkflows"]> = async () => {
+      calls += 1;
+      contributeChamberWorkflows();
+      if (calls === 1) {
+        noteFirstReload();
+        await firstReloadBlocked;
+      }
+      return { count: 1, notices: [] };
+    };
+    const tool = makeLensWorkflowInstallTool(reload);
+    const first = toolContext();
+    const second = toolContext();
+
+    const firstInstall = tool.execute(
+      { source: originalSource, slug: "release-status" },
+      first.ctx,
+    );
+    await firstReloadStarted;
+    const secondInstall = tool.execute(
+      { source: updatedSource, slug: "release-status" },
+      second.ctx,
+    );
+    await Bun.sleep(10);
+    expect(calls).toBe(1);
+    releaseFirstReload();
+    await Promise.all([firstInstall, secondInstall]);
+
+    expect(first.errored()).toBe(false);
+    expect(second.errored()).toBe(false);
+    expect(calls).toBe(2);
+    expect(await readFile(join(lensWorkflowsDir(), "release-status.yml"), "utf8")).toBe(UPDATED);
+    expect(lensWorkflowStatus("chamber-lens-release-status")?.activeVersion).toBe(
+      JSON.parse(second.output()).definitionVersion,
+    );
+  });
+
   test("rejects unsafe, invalid, and bundled workflow slugs", async () => {
     const valid = join(sourceDir, "valid.yml");
     const invalid = join(sourceDir, "invalid.yml");
