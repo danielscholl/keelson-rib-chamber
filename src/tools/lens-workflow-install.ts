@@ -58,13 +58,43 @@ async function installedPathFor(slug: string): Promise<string> {
 
 function activationError(
   notices: readonly WorkflowDiscoveryNotice[],
+  addedNotices: readonly WorkflowDiscoveryNotice[],
   workflow: string,
 ): WorkflowDiscoveryNotice | undefined {
-  return notices.find(
-    (notice) =>
-      notice.message.includes(`'${workflow}'`) ||
-      (notice.level === "error" && notice.filename.includes("rib:chamber")),
+  return (
+    notices.find((notice) => notice.message.includes(`'${workflow}'`)) ??
+    addedNotices.find(
+      (notice) => notice.level === "error" && notice.filename.includes("rib:chamber"),
+    )
   );
+}
+
+function noticeKey(notice: WorkflowDiscoveryNotice): string {
+  return JSON.stringify([notice.level, notice.filename, notice.nodeId ?? null, notice.message]);
+}
+
+function noticeBaseline(notices: readonly WorkflowDiscoveryNotice[]): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  for (const notice of notices) {
+    const key = noticeKey(notice);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function noticesAddedSince(
+  baseline: ReadonlyMap<string, number>,
+  notices: readonly WorkflowDiscoveryNotice[],
+): WorkflowDiscoveryNotice[] {
+  const remaining = new Map(baseline);
+  return notices.filter((notice) => {
+    const key = noticeKey(notice);
+    const count = remaining.get(key) ?? 0;
+    if (count === 0) return true;
+    if (count === 1) remaining.delete(key);
+    else remaining.set(key, count - 1);
+    return false;
+  });
 }
 
 export function makeLensWorkflowInstallTool(
@@ -108,10 +138,16 @@ export function makeLensWorkflowInstallTool(
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           }
 
+          const baseline = noticeBaseline((await reloadRibWorkflows()).notices);
+          const priorStatus = lensWorkflowStatus(definition.name);
           await replaceFile(installedPath, content);
           try {
             const activation = await reloadRibWorkflows();
-            const rejected = activationError(activation.notices, definition.name);
+            const rejected = activationError(
+              activation.notices,
+              noticesAddedSince(baseline, activation.notices),
+              definition.name,
+            );
             if (rejected) throw new Error(`${rejected.filename}: ${rejected.message}`);
             const status = lensWorkflowStatus(definition.name);
             if (status?.state !== "active" || status.activeVersion !== definition.hash) {
@@ -126,7 +162,31 @@ export function makeLensWorkflowInstallTool(
               } else {
                 await replaceFile(installedPath, prior);
               }
-              await reloadRibWorkflows();
+              const rollback = await reloadRibWorkflows();
+              const rollbackNotices = noticesAddedSince(baseline, rollback.notices);
+              const rollbackRejected = activationError(
+                rollbackNotices,
+                rollbackNotices,
+                definition.name,
+              );
+              if (rollbackRejected) {
+                throw new Error(
+                  `rollback reload rejected '${definition.name}': ${rollbackRejected.filename}: ${rollbackRejected.message}`,
+                );
+              }
+              const restored = lensWorkflowStatus(definition.name);
+              if (priorStatus) {
+                if (
+                  restored?.state !== "active" ||
+                  restored.activeVersion !== priorStatus.activeVersion
+                ) {
+                  throw new Error(
+                    `rollback did not restore '${definition.name}' at ${priorStatus.activeVersion}`,
+                  );
+                }
+              } else if (restored !== undefined) {
+                throw new Error(`rollback did not remove '${definition.name}' from the catalog`);
+              }
             } catch (rollbackFailure) {
               throw new AggregateError(
                 [activationFailure, rollbackFailure],

@@ -143,7 +143,7 @@ describe("chamber_lens_workflow_install", () => {
 
     expect(first.errored()).toBe(false);
     expect(second.errored()).toBe(false);
-    expect(calls).toBe(2);
+    expect(calls).toBe(4);
     expect(await readFile(join(lensWorkflowsDir(), "release-status.yml"), "utf8")).toBe(UPDATED);
     expect(lensWorkflowStatus("chamber-lens-release-status")?.activeVersion).toBe(
       JSON.parse(second.output()).definitionVersion,
@@ -177,6 +177,41 @@ describe("chamber_lens_workflow_install", () => {
     expect(reserved.output()).toContain("bundled Chamber workflow");
   });
 
+  test("ignores an unchanged pre-existing Chamber discovery error", async () => {
+    const source = join(sourceDir, "release-status.yml");
+    await writeFile(source, ORIGINAL);
+    const existingNotice = {
+      level: "error" as const,
+      filename: "<rib:chamber>",
+      message: "invalid workflow: unrelated definition",
+    };
+    const reload: ReloadRibWorkflows = async () => {
+      contributeChamberWorkflows();
+      return { count: 1, notices: [existingNotice] };
+    };
+    const t = toolContext();
+
+    await makeLensWorkflowInstallTool(reload).execute({ source }, t.ctx);
+
+    expect(t.errored()).toBe(false);
+    expect(lensWorkflowStatus("chamber-lens-release-status")?.state).toBe("active");
+  });
+
+  test("fails closed when the baseline reload fails", async () => {
+    const source = join(sourceDir, "release-status.yml");
+    const installed = join(lensWorkflowsDir(), "release-status.yml");
+    await writeFile(source, ORIGINAL);
+    const t = toolContext();
+
+    await makeLensWorkflowInstallTool(async () => {
+      throw new Error("catalog unavailable");
+    }).execute({ source }, t.ctx);
+
+    expect(t.errored()).toBe(true);
+    expect(t.output()).toContain("catalog unavailable");
+    await expect(readFile(installed, "utf8")).rejects.toThrow();
+  });
+
   test("restores the prior file and catalog when activation fails", async () => {
     await mkdir(lensWorkflowsDir(), { recursive: true });
     const installed = join(lensWorkflowsDir(), "release-status.yml");
@@ -189,7 +224,7 @@ describe("chamber_lens_workflow_install", () => {
     const reload: ReloadRibWorkflows = async () => {
       calls += 1;
       contributeChamberWorkflows();
-      if (calls === 1) {
+      if (calls === 2) {
         return {
           count: 1,
           notices: [
@@ -213,7 +248,43 @@ describe("chamber_lens_workflow_install", () => {
       state: "active",
       activeVersion: originalVersion,
     });
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
+  });
+
+  test("reports when rollback cannot restore the prior catalog version", async () => {
+    await mkdir(lensWorkflowsDir(), { recursive: true });
+    const installed = join(lensWorkflowsDir(), "release-status.yml");
+    const source = join(sourceDir, "release-status.yml");
+    await writeFile(installed, ORIGINAL);
+    contributeChamberWorkflows();
+    await writeFile(source, UPDATED);
+    let calls = 0;
+    const reload: ReloadRibWorkflows = async () => {
+      calls += 1;
+      if (calls < 3) contributeChamberWorkflows();
+      return {
+        count: 1,
+        notices:
+          calls === 2
+            ? [
+                {
+                  level: "error",
+                  filename: "<rib:chamber>",
+                  message: "invalid workflow: rejected update",
+                },
+              ]
+            : [],
+      };
+    };
+    const t = toolContext();
+
+    await makeLensWorkflowInstallTool(reload).execute({ source }, t.ctx);
+
+    expect(t.errored()).toBe(true);
+    expect(t.output()).toContain("prior definition could not be restored");
+    expect(await readFile(installed, "utf8")).toBe(ORIGINAL);
+    expect(lensWorkflowStatus("chamber-lens-release-status")?.state).toBe("stale");
+    expect(calls).toBe(3);
   });
 
   test("is registered only when the host can activate definitions", async () => {
