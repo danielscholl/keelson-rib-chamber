@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.49.0...v0.49.1) (2026-08-09)
+
+
+### Fixed
+
+* **lens-workflows:** install and surface definition drift ([#343](https://github.com/danielscholl/keelson-rib-chamber/issues/343)) ([8df54ff](https://github.com/danielscholl/keelson-rib-chamber/commit/8df54ff1866601b8e36e96e4541cee73f09ad75f))
+
 ## [0.49.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.48.0...v0.49.0) (2026-07-23)
 
 
