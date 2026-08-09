@@ -15,6 +15,7 @@ import { createHtmlLensRegistry, HTML_LENS_KEY, htmlLensKey } from "../src/lens-
 import { createFileHtmlLensStore, type HtmlLensStore } from "../src/lens-html-store.ts";
 import { createFileLensStore } from "../src/lens-store.ts";
 import { htmlLensesDir, lensesDir, lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
+import { contributeChamberWorkflows } from "../src/workflows.ts";
 
 const page = (body: string): string => `<html><body><p>${body}</p></body></html>`;
 
@@ -317,12 +318,13 @@ function makeCtx(sm: SnapshotManager): RibContext {
   } as unknown as RibContext;
 }
 
-function makeToolCtx() {
+function makeToolCtx(workflowName?: string) {
   const chunks: MessageChunk[] = [];
   const ctx: ToolContext = {
     cwd: ".",
     emit: (c) => chunks.push(c),
     abortSignal: new AbortController().signal,
+    ...(workflowName ? { turnContext: { workflowName } } : {}),
   };
   return {
     ctx,
@@ -337,8 +339,8 @@ function tool(name: string) {
   return t;
 }
 
-async function emitHtml(input: Record<string, unknown>) {
-  const t = makeToolCtx();
+async function emitHtml(input: Record<string, unknown>, workflowName?: string) {
+  const t = makeToolCtx(workflowName);
   await tool("chamber_emit_lens_html").execute(input, t.ctx);
   return t;
 }
@@ -358,6 +360,41 @@ describe("living-html-lens emit", () => {
     await rm(lensesDir(), { recursive: true, force: true });
     await rm(htmlLensesDir(), { recursive: true, force: true });
     tools = registerTools(makeCtx(fakeSnapshotManager()));
+  });
+
+  it("stamps the active custom workflow version and clears it on a direct re-emit", async () => {
+    const source = `description: Re-derive the page
+nodes:
+  - id: compose
+    prompt: Re-author the page.
+    allowed_tools: [chamber_emit_lens_html]
+`;
+    const file = join(lensWorkflowsDir(), "status.yml");
+    await mkdir(lensWorkflowsDir(), { recursive: true });
+    await writeFile(file, source);
+    contributeChamberWorkflows();
+    try {
+      const stamped = await emitHtml({ id: "designed", html: page("v1") }, "chamber-lens-status");
+      const output = JSON.parse(stamped.out()) as {
+        producedBy: { workflow: string; definitionVersion: string };
+      };
+      expect(output.producedBy.workflow).toBe("chamber-lens-status");
+      expect(output.producedBy.definitionVersion).toHaveLength(64);
+      const store = createFileHtmlLensStore(htmlLensesDir());
+      expect((await store.load("designed"))?.producedBy).toEqual(output.producedBy);
+
+      await onAction(
+        { type: "pin-lens", payload: { id: "designed", kind: "html", pinned: true } },
+        {} as RibContext,
+      );
+      expect((await store.load("designed"))?.producedBy).toEqual(output.producedBy);
+
+      await emitHtml({ id: "designed", html: page("v2") });
+      expect((await store.load("designed"))?.producedBy).toBeUndefined();
+    } finally {
+      await rm(file, { force: true });
+      contributeChamberWorkflows();
+    }
   });
 
   // An emit rebuilds the record and the store writes only what it is handed, so a pin

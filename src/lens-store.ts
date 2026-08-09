@@ -24,6 +24,11 @@ export interface LensRefresh {
   inputs?: Record<string, string>;
 }
 
+export interface LensWorkflowProvenance {
+  workflow: string;
+  definitionVersion: string;
+}
+
 export interface LensRecord {
   id: string;
   board: CanvasBoardView;
@@ -33,6 +38,7 @@ export interface LensRecord {
   scope?: string;
   maintainingMind?: string;
   reason?: string;
+  producedBy?: LensWorkflowProvenance;
   sourceRoom?: string;
   // Whether this lens holds a panel on the Chamber surface. Operator-owned (the
   // pin-lens board verb) and absent by default, so an unpinned lens is a key and an
@@ -83,6 +89,7 @@ export interface LensStore {
       refresh?: LensRefresh;
       updatedAt?: string;
       pinned?: boolean;
+      producedBy?: LensWorkflowProvenance;
     } & LensProvenance,
   ): Promise<void>;
   loadLens(id: string): Promise<LensRecord | undefined>;
@@ -128,6 +135,9 @@ export function createFileLensStore(lensesRoot: string): LensStore {
         ...(record.maintainingMind ? { maintainingMind: record.maintainingMind } : {}),
         ...(record.reason ? { reason: record.reason } : {}),
         ...(record.sourceRoom ? { sourceRoom: record.sourceRoom } : {}),
+        ...(record.producedBy && record.kind !== "exhibit"
+          ? { producedBy: record.producedBy }
+          : {}),
       };
       // lens.json is rewritten on every re-author; write a unique temp then
       // rename (atomic on the same filesystem) so a crash mid-write can't leave a
@@ -227,6 +237,10 @@ async function parseLensJson(path: string): Promise<LensRecord | undefined> {
       const { pinned: _dropped, ...rest } = record as LensRecord & { pinned?: unknown };
       record = rest as LensRecord;
     }
+    if (!isValidLensWorkflowProvenance((record as { producedBy?: unknown }).producedBy)) {
+      const { producedBy: _dropped, ...rest } = record as LensRecord & { producedBy?: unknown };
+      record = rest as LensRecord;
+    }
     return record;
   } catch {
     return undefined;
@@ -250,11 +264,26 @@ export function isValidRefresh(value: unknown): boolean {
   ) {
     return false;
   }
+
   // Same exposure for inputs: they become the region's workflowArgs, which the
   // harness types as a string→string record on a strict schema.
   if (r.inputs === undefined) return true;
   if (typeof r.inputs !== "object" || r.inputs === null || Array.isArray(r.inputs)) return false;
   return Object.values(r.inputs as Record<string, unknown>).every((v) => typeof v === "string");
+}
+
+export function isValidLensWorkflowProvenance(
+  value: unknown,
+): value is LensWorkflowProvenance | undefined {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const provenance = value as Record<string, unknown>;
+  return (
+    typeof provenance.workflow === "string" &&
+    provenance.workflow.length > 0 &&
+    typeof provenance.definitionVersion === "string" &&
+    /^[0-9a-f]{64}$/.test(provenance.definitionVersion)
+  );
 }
 
 function isLensRecord(value: unknown): value is LensRecord {

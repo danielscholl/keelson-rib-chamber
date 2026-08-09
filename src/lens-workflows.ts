@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { errText, type RibWorkflowContribution } from "@keelson/shared";
@@ -14,7 +15,8 @@ const LENS_WORKFLOW_PREFIX = "chamber-lens-";
 // one nothing can ever attach to. Exported so the schema's limit and this bound stay
 // one value (the MIN_REFRESH_CADENCE_MS precedent).
 export const MAX_REFRESH_WORKFLOW_NAME = 64;
-const MAX_SLUG = MAX_REFRESH_WORKFLOW_NAME - LENS_WORKFLOW_PREFIX.length;
+export const MAX_LENS_WORKFLOW_SLUG_LENGTH =
+  MAX_REFRESH_WORKFLOW_NAME - LENS_WORKFLOW_PREFIX.length;
 
 export function lensWorkflowName(slug: string): string {
   return `${LENS_WORKFLOW_PREFIX}${slug}`;
@@ -39,6 +41,40 @@ function shapeError(def: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+export interface ParsedLensWorkflow {
+  slug: string;
+  name: string;
+  hash: string;
+  contribution: RibWorkflowContribution;
+}
+
+export interface DiscoveredLensWorkflow extends ParsedLensWorkflow {
+  file: string;
+  path: string;
+}
+
+export function parseLensWorkflow(content: string, slug: string): ParsedLensWorkflow {
+  if (!isSafeSlug(slug)) throw new Error("name is not a kebab token");
+  if (slug.length > MAX_LENS_WORKFLOW_SLUG_LENGTH) {
+    throw new Error(
+      `name is over ${MAX_LENS_WORKFLOW_SLUG_LENGTH} characters, so no lens could name it`,
+    );
+  }
+  const parsed: unknown = Bun.YAML.parse(content);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("not a YAML mapping");
+  }
+  const bad = shapeError(parsed as Record<string, unknown>);
+  if (bad) throw new Error(bad);
+  const name = lensWorkflowName(slug);
+  return {
+    slug,
+    name,
+    hash: createHash("sha256").update(content).digest("hex"),
+    contribution: { definition: { ...parsed, name } },
+  };
+}
+
 // Read the operator's lens workflows off disk and hand them to the harness as rib
 // contributions, which is the whole point: the host auto-refreshes only a workflow
 // carrying rib provenance, so a lens's `refresh.workflow` can name one of these (or
@@ -59,14 +95,16 @@ export function discoverLensWorkflows(
 ): {
   contributions: RibWorkflowContribution[];
   names: ReadonlySet<string>;
+  workflows: readonly DiscoveredLensWorkflow[];
 } {
   const contributions: RibWorkflowContribution[] = [];
   const names = new Set<string>();
+  const workflows: DiscoveredLensWorkflow[] = [];
   let files: string[];
   try {
     files = readdirSync(root);
   } catch {
-    return { contributions, names };
+    return { contributions, names, workflows };
   }
   const skip = (file: string, why: string): void => {
     console.error(`[rib-chamber] lens workflow '${file}' skipped: ${why}`);
@@ -78,8 +116,11 @@ export function discoverLensWorkflows(
       skip(file, "name is not a kebab token");
       continue;
     }
-    if (slug.length > MAX_SLUG) {
-      skip(file, `name is over ${MAX_SLUG} characters, so no lens could name it`);
+    if (slug.length > MAX_LENS_WORKFLOW_SLUG_LENGTH) {
+      skip(
+        file,
+        `name is over ${MAX_LENS_WORKFLOW_SLUG_LENGTH} characters, so no lens could name it`,
+      );
       continue;
     }
     const name = lensWorkflowName(slug);
@@ -88,26 +129,20 @@ export function discoverLensWorkflows(
       continue;
     }
     try {
-      const parsed: unknown = Bun.YAML.parse(readFileSync(join(root, file), "utf8"));
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw new Error("not a YAML mapping");
-      }
-      const bad = shapeError(parsed as Record<string, unknown>);
-      if (bad) {
-        skip(file, bad);
-        continue;
-      }
+      const path = join(root, file);
+      const parsed = parseLensWorkflow(readFileSync(path, "utf8"), slug);
       // No bindSnapshotKey: these republish through chamber_emit_lens rather than to
       // a bound key, the unbound case the host's /refresh region leg covers. And no
       // mutates_checkout default: an omission means the host's own default applies.
       // The bundled workflows opt out because chamber knows they only touch its data
       // home; these are the operator's bash, and chamber has no such invariant to
       // claim on their behalf.
-      contributions.push({ definition: { ...parsed, name } });
+      contributions.push(parsed.contribution);
       names.add(name);
+      workflows.push({ ...parsed, file, path });
     } catch (e) {
       skip(file, errText(e));
     }
   }
-  return { contributions, names };
+  return { contributions, names, workflows };
 }

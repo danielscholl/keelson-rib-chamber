@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -13,9 +13,16 @@ import type { RunAgentTurn } from "../src/agent-turn.ts";
 import rib from "../src/index.ts";
 import { createFileLensStore, listLenses } from "../src/lens-store.ts";
 import { readMinds, scaffoldMind } from "../src/minds-store.ts";
-import { lensesDir, mindsDir, roomsDir, setChamberDataHome } from "../src/paths.ts";
+import {
+  lensesDir,
+  lensWorkflowsDir,
+  mindsDir,
+  roomsDir,
+  setChamberDataHome,
+} from "../src/paths.ts";
 import { createFileRoomStore, listRooms } from "../src/room-store.ts";
 import type { Room } from "../src/types.ts";
+import { contributeChamberWorkflows } from "../src/workflows.ts";
 import { abortableRunAgentTurn } from "./helpers/fakes.ts";
 
 // The list/cleanup tools are the always-on seams — they reach an MCP client over
@@ -97,6 +104,11 @@ function tool(list: readonly ToolDefinition[], name: string): ToolDefinition {
 }
 
 const at = "2026-01-01T00:00:00.000Z";
+const LENS_WORKFLOW = `description: Produce release risks
+nodes:
+  - id: compose
+    prompt: Compose release risks.
+`;
 
 beforeAll(async () => {
   workspace = await mkdtemp(join(tmpdir(), "chamber-mcp-tools-"));
@@ -121,6 +133,11 @@ beforeAll(async () => {
     scope: "checklist",
     maintainingMind: "alice",
     reason: "added a risk",
+    refresh: { workflow: "chamber-lens-release-risks" },
+    producedBy: {
+      workflow: "chamber-lens-release-risks",
+      definitionVersion: "a".repeat(64),
+    },
   });
   await lensStore.saveLens({
     id: "plain-lens",
@@ -141,6 +158,9 @@ beforeAll(async () => {
       createdAt: "2026-01-02T00:00:00.000Z",
     }),
   );
+  await mkdir(lensWorkflowsDir(), { recursive: true });
+  await writeFile(join(lensWorkflowsDir(), "release-risks.yml"), LENS_WORKFLOW);
+  contributeChamberWorkflows();
   tools = registerTools(makeCtx());
 });
 
@@ -192,7 +212,14 @@ describe("chamber list tools (read-only observability over MCP)", () => {
     expect(t.errored()).toBe(false);
     const out = JSON.parse(t.out()) as {
       count: number;
-      lenses: { id: string; scope?: string; maintainingMind?: string; reason?: string }[];
+      lenses: {
+        id: string;
+        scope?: string;
+        maintainingMind?: string;
+        reason?: string;
+        workflowStatus?: { state: string };
+        producedBy?: { workflow: string; definitionVersion: string };
+      }[];
     };
     expect(out.count).toBe(2);
     const risks = out.lenses.find((l) => l.id === "release-risks");
@@ -200,9 +227,35 @@ describe("chamber list tools (read-only observability over MCP)", () => {
       scope: "checklist",
       maintainingMind: "alice",
       reason: "added a risk",
+      workflowStatus: { state: "active" },
+      producedBy: {
+        workflow: "chamber-lens-release-risks",
+        definitionVersion: "a".repeat(64),
+      },
     });
     const plain = out.lenses.find((l) => l.id === "plain-lens");
     expect(plain?.scope).toBeUndefined();
+  });
+
+  it("chamber_list_lenses reports an out-of-band workflow edit as stale", async () => {
+    const file = join(lensWorkflowsDir(), "release-risks.yml");
+    await writeFile(
+      file,
+      LENS_WORKFLOW.replace("Compose release risks.", "Compose current risks."),
+    );
+    try {
+      const t = makeToolCtx();
+      await tool(tools, "chamber_list_lenses").execute({}, t.ctx);
+      const out = JSON.parse(t.out()) as {
+        lenses: { id: string; workflowStatus?: { state: string } }[];
+      };
+      expect(out.lenses.find((lens) => lens.id === "release-risks")?.workflowStatus?.state).toBe(
+        "stale",
+      );
+    } finally {
+      await writeFile(file, LENS_WORKFLOW);
+      contributeChamberWorkflows();
+    }
   });
 });
 

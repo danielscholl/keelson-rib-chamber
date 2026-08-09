@@ -37,11 +37,21 @@ describe("createFileHtmlLensStore", () => {
 
   it("round-trips a lens (lens.html + meta.json), creating the tree on first write", async () => {
     const store = createFileHtmlLensStore(root);
-    await store.save({ id: "findings", html: "<h1>Findings</h1>", title: "Findings" });
+    const producedBy = {
+      workflow: "chamber-lens-findings",
+      definitionVersion: "b".repeat(64),
+    };
+    await store.save({
+      id: "findings",
+      html: "<h1>Findings</h1>",
+      title: "Findings",
+      producedBy,
+    });
     const rec = await store.load("findings");
     expect(rec?.id).toBe("findings");
     expect(rec?.html).toBe("<h1>Findings</h1>");
     expect(rec?.title).toBe("Findings");
+    expect(rec?.producedBy).toEqual(producedBy);
     expect(await pathExists(join(root, "findings", "lens.html"))).toBe(true);
     expect(await pathExists(join(root, "findings", "meta.json"))).toBe(true);
     // lens.html carries the raw markup, not a JSON encoding of it.
@@ -81,6 +91,22 @@ describe("createFileHtmlLensStore", () => {
     expect(await store.load("ghost")).toBeUndefined();
     await seedHtmlLens(root, "drifted", { id: "other", updatedAt: new Date().toISOString() }, "x");
     expect(await store.load("drifted")).toBeUndefined();
+  });
+
+  it("folds malformed workflow provenance without losing the lens", async () => {
+    await seedHtmlLens(
+      root,
+      "typo",
+      {
+        id: "typo",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        producedBy: { workflow: "chamber-lens-typo", definitionVersion: "short" },
+      },
+      "<p>x</p>",
+    );
+    const rec = await createFileHtmlLensStore(root).load("typo");
+    expect(rec?.id).toBe("typo");
+    expect(rec?.producedBy).toBeUndefined();
   });
 });
 

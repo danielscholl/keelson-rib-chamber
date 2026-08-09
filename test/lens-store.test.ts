@@ -34,10 +34,15 @@ describe("createFileLensStore", () => {
 
   it("round-trips a lens, creating the lenses tree on first write", async () => {
     const store = createFileLensStore(root);
-    await store.saveLens({ id: "findings", board: board("Findings") });
+    const producedBy = {
+      workflow: "chamber-lens-findings",
+      definitionVersion: "a".repeat(64),
+    };
+    await store.saveLens({ id: "findings", board: board("Findings"), producedBy });
     const [rec] = await listLenses(root);
     expect(rec?.id).toBe("findings");
     expect(rec?.board).toEqual(board("Findings"));
+    expect(rec?.producedBy).toEqual(producedBy);
     expect(await pathExists(join(root, "findings", "lens.json"))).toBe(true);
   });
 
@@ -141,6 +146,18 @@ describe("createFileLensStore", () => {
     expect(rec?.id).toBe("typo");
     expect(rec?.pinned).toBeUndefined();
     expect(await listLenses(root)).toHaveLength(1);
+  });
+
+  it("folds malformed workflow provenance without losing the record", async () => {
+    await seedLens(root, "typo", {
+      id: "typo",
+      board: board("Typo"),
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      producedBy: { workflow: "chamber-lens-typo", definitionVersion: "short" },
+    });
+    const rec = await createFileLensStore(root).loadLens("typo");
+    expect(rec?.id).toBe("typo");
+    expect(rec?.producedBy).toBeUndefined();
   });
 
   it("omitted provenance stays absent — no undefined keys leak to disk", async () => {

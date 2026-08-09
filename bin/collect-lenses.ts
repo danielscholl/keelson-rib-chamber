@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { buildLensesIndexBoard } from "../src/boards/lenses.ts";
 import { listHtmlLenses } from "../src/lens-html-store.ts";
 import { isExhibit, listLenses } from "../src/lens-store.ts";
+import { discoverLensWorkflows } from "../src/lens-workflows.ts";
 import { readMinds } from "../src/minds-store.ts";
 import { chamberDataHome } from "../src/paths.ts";
 
@@ -21,6 +22,7 @@ async function main() {
   // collector derives the lens, html-lens, and minds dirs from it. Fall back to
   // chamberDataHome() for a manual/standalone run.
   const home = process.argv[2]?.trim() || chamberDataHome();
+  const activeWorkflowVersions = parseActiveWorkflowVersions(process.argv[3]);
   const [records, minds, htmlLenses] = await Promise.all([
     listLenses(join(home, "lenses")).catch(() => []),
     readMinds(join(home, "minds")).catch(() => []),
@@ -32,7 +34,39 @@ async function main() {
   // only. An exhibit is reached from the room that tabled it, so it has no index of
   // its own.
   const lenses = records.filter((r) => !isExhibit(r));
-  process.stdout.write(JSON.stringify(buildLensesIndexBoard(lenses, minds, htmlLenses)));
+  const installedWorkflows = new Map(
+    discoverLensWorkflows(join(home, "lens-workflows")).workflows.map((workflow) => [
+      workflow.name,
+      workflow.hash,
+    ]),
+  );
+  const workflowStates: Record<string, "active" | "stale"> = {};
+  for (const [name, version] of Object.entries(activeWorkflowVersions)) {
+    workflowStates[name] = installedWorkflows.get(name) === version ? "active" : "stale";
+  }
+  process.stdout.write(
+    JSON.stringify(buildLensesIndexBoard(lenses, minds, htmlLenses, workflowStates)),
+  );
+}
+
+function parseActiveWorkflowVersions(value: string | undefined): Record<string, string> {
+  if (!value) return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("expected an object");
+    }
+    const entries = Object.entries(parsed);
+    if (entries.some(([, version]) => typeof version !== "string")) {
+      throw new Error("expected string versions");
+    }
+    return Object.fromEntries(entries) as Record<string, string>;
+  } catch (error) {
+    console.error(
+      `[rib-chamber] active lens workflow versions ignored: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return {};
+  }
 }
 
 await main();

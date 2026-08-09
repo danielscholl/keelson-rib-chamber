@@ -33,12 +33,17 @@ import {
   enqueueLensWrite,
   refreshExhibitIndex,
 } from "../lens-runtime.ts";
-import { isExhibit, type LensRefresh, type LensStore } from "../lens-store.ts";
+import {
+  isExhibit,
+  type LensRefresh,
+  type LensStore,
+  type LensWorkflowProvenance,
+} from "../lens-store.ts";
 import { MAX_REFRESH_WORKFLOW_NAME } from "../lens-workflows.ts";
 import { htmlLensesDir, lensesDir } from "../paths.ts";
 import { recordDirState } from "../record-dir.ts";
 import { refreshStandingPanels, refreshWorkflow } from "../runtime.ts";
-import { isChamberWorkflow, LENS_REFRESH_WORKFLOW } from "../workflows.ts";
+import { isChamberWorkflow, LENS_REFRESH_WORKFLOW, lensWorkflowStatus } from "../workflows.ts";
 import { emitResult } from "./util.ts";
 
 // Lens publish seam: the chamber-lens workflow's prompt node composes a canvas
@@ -78,6 +83,16 @@ const lensEmitSchema = z.object({
     .nullable()
     .optional(),
 });
+
+function runningLensWorkflow(
+  ctx: Parameters<ToolDefinition["execute"]>[1],
+): LensWorkflowProvenance | undefined {
+  const workflow = ctx.turnContext?.workflowName;
+  if (typeof workflow !== "string") return undefined;
+  const status = lensWorkflowStatus(workflow);
+  if (!status) return undefined;
+  return { workflow, definitionVersion: status.activeVersion };
+}
 
 export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefinition {
   return {
@@ -121,6 +136,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             return;
           }
           const refresh = resolveLensRefresh(parsed.data.refresh, existing?.refresh);
+          const producedBy = runningLensWorkflow(ctx);
           const provenance = {
             scope: resolveProvenanceField(parsed.data.scope, existing?.scope),
             maintainingMind: resolveProvenanceField(
@@ -164,6 +180,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             "lens",
             refresh,
             updatedAt,
+            producedBy,
           );
           // Re-run the bound chamber-lenses collector so a newly-authored lens appears
           // in the index promptly instead of waiting on cadence (mirrors genesis
@@ -186,6 +203,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
             JSON.stringify({
               ok: true,
               key,
+              ...(producedBy ? { producedBy } : {}),
               ...(unvouchedWorkflow
                 ? {
                     note: `refresh names '${unvouchedWorkflow}', which chamber does not contribute — unless another rib does, the harness will refuse to run it and the panel will never re-compose. A workflow file in the chamber lens-workflows dir is contributed as 'chamber-lens-<filename>'.`,
@@ -391,6 +409,7 @@ async function emitHtmlLens(
   try {
     await awaitHtmlLensReconcile();
     const existing = id !== undefined ? await store.load(id) : undefined;
+    const producedBy = runningLensWorkflow(ctx);
     const resolved = resolveHtmlLensRefresh(parsed.data.refresh, existing?.refresh);
     if ("error" in resolved) {
       emitResult(ctx, `chamber_emit_lens_html: ${resolved.error}`, true);
@@ -419,6 +438,7 @@ async function emitHtmlLens(
       // field. Omitting it here would drop it, and a living page re-emits on its own
       // cadence, so a pinned one would unpin itself (the canvas twin's trap, verbatim).
       ...(existing?.pinned ? { pinned: true } : {}),
+      ...(producedBy ? { producedBy } : {}),
     });
     // The lenses index reads BOTH stores, so a newly authored page needs the same prompt
     // collector re-run its canvas twin does — otherwise its only card waits on cadence.
@@ -430,6 +450,7 @@ async function emitHtmlLens(
       JSON.stringify({
         ok: true,
         key,
+        ...(producedBy ? { producedBy } : {}),
         ...(unvouched
           ? {
               note: `refresh names '${unvouched}', which chamber does not contribute — unless another rib does, the harness will refuse to run it and the panel will never re-compose. A workflow file in the chamber lens-workflows dir is contributed as 'chamber-lens-<filename>'.`,

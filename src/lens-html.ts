@@ -14,7 +14,7 @@ import {
   unpinHeadAction,
 } from "./lens.ts";
 import type { HtmlLensStore } from "./lens-html-store.ts";
-import type { LensRefresh } from "./lens-store.ts";
+import type { LensRefresh, LensWorkflowProvenance } from "./lens-store.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
 // The legacy/default single-canvas key: an emit with no `id` still lands here,
@@ -128,6 +128,7 @@ export interface HtmlLensRegistry {
       refresh?: LensRefresh;
       updatedAt?: string;
       pinned?: boolean;
+      producedBy?: LensWorkflowProvenance;
     },
   ): Promise<{ key: string }>;
   // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving,
@@ -377,6 +378,7 @@ export function createHtmlLensRegistry(
           ...(opts.refresh ? { refresh: opts.refresh } : {}),
           ...(opts.updatedAt ? { updatedAt: opts.updatedAt } : {}),
           ...(pinned ? { pinned } : {}),
+          ...(opts.producedBy ? { producedBy: opts.producedBy } : {}),
         });
       }
       return result;

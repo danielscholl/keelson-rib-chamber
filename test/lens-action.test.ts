@@ -254,6 +254,22 @@ describe("lens-note onAction", () => {
     expect(rec?.maintainingMind).toBe("ada");
   });
 
+  it("preserves producing workflow provenance across the write-back", async () => {
+    const producedBy = {
+      workflow: "chamber-lens-release-status",
+      definitionVersion: "a".repeat(64),
+    };
+    await createFileLensStore(lensesDir()).saveLens({
+      id: "alpha",
+      board: board("Alpha"),
+      producedBy,
+    });
+
+    await onAction({ type: "lens-note", payload: { id: "alpha", note: "n" } }, actionCtx);
+
+    expect((await loadBoard("alpha"))?.producedBy).toEqual(producedBy);
+  });
+
   it("canonicalizes the payload id so the card's subject maps to the stored lens", async () => {
     await createFileLensStore(lensesDir()).saveLens({ id: "release-risks", board: board("R") });
     const res = await onAction(

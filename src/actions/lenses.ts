@@ -292,6 +292,8 @@ export async function lensNoteAction(action: RibAction): Promise<RibActionResult
         lensProvenance(record),
         isExhibit(record) ? "exhibit" : "lens",
         record.refresh,
+        undefined,
+        record.producedBy,
       );
       // The record's updatedAt advanced — refresh its own index card (and, for a
       // lens, the roster pulse; exhibits don't ride the "Live views" count), cheap

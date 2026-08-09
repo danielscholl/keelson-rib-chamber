@@ -40,6 +40,10 @@ import {
   makeTableExhibitTool,
 } from "./tools/lens-emit.ts";
 import {
+  makeLensWorkflowInstallTool,
+  type ReloadRibWorkflows,
+} from "./tools/lens-workflow-install.ts";
+import {
   makeDigestTool,
   makeGenesisTool,
   makeListExhibitsTool,
@@ -258,6 +262,11 @@ const rib: Rib = {
       makeRoomTranscriptTool(),
     ];
     const cleanupTools = [makeRetireMindTool(), makeRoomDeleteTool()];
+    const reloadRibWorkflows = (ctx as RibContext & { reloadRibWorkflows?: ReloadRibWorkflows })
+      .reloadRibWorkflows;
+    const lensWorkflowTools = reloadRibWorkflows
+      ? [makeLensWorkflowInstallTool(reloadRibWorkflows)]
+      : [];
     const sm = ctx.getSnapshotManager?.();
     const registerRegion = ctx.registerRegion;
     const run = ctx.runAgentTurn;
@@ -329,12 +338,21 @@ const rib: Rib = {
         digestTool,
         ...readTools,
         ...cleanupTools,
+        ...lensWorkflowTools,
         ...lensTools,
         ...htmlLensTools,
         ...roomControlTools(roomStore),
       ];
     }
-    return [genesisTool, digestTool, ...readTools, ...cleanupTools, ...lensTools, ...htmlLensTools];
+    return [
+      genesisTool,
+      digestTool,
+      ...readTools,
+      ...cleanupTools,
+      ...lensWorkflowTools,
+      ...lensTools,
+      ...htmlLensTools,
+    ];
   },
 
   // Retire a Mind (removes it, then refreshes the roster — the OSDU
