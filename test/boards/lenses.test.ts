@@ -338,6 +338,22 @@ describe("buildLensesIndexBoard living lenses", () => {
     expect(canvasViewSchema.safeParse(buildLensesIndexBoard([record])).success).toBe(true);
   });
 
+  test("shows the workflow name and short definition version that produced the lens", () => {
+    const card = cards(
+      buildLensesIndexBoard([
+        lens({
+          producedBy: {
+            workflow: "chamber-lens-release-status",
+            definitionVersion: "1234567890abcdef".repeat(4),
+          },
+        }),
+      ]),
+    )[0];
+    expect(card?.fields?.find((field) => field.label === "definition")?.value).toBe(
+      "chamber-lens-release-status @ 1234567890ab",
+    );
+  });
+
   test("a refresh-backed lens gains the Refresh verb between Open and Retire; a plain lens doesn't", () => {
     const living = cards(
       buildLensesIndexBoard([

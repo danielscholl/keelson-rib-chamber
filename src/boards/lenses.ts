@@ -1,6 +1,6 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import type { HtmlLensRecord } from "../lens-html-store.ts";
-import type { LensRecord, LensRefresh } from "../lens-store.ts";
+import type { LensRecord, LensRefresh, LensWorkflowProvenance } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { identityToneForSlot, type Mind } from "../types.ts";
 
@@ -20,6 +20,7 @@ interface IndexEntry {
   scope?: string;
   reason?: string;
   workflowState?: "active" | "stale";
+  producedBy?: LensWorkflowProvenance;
 }
 
 export type LensWorkflowStates = Readonly<Record<string, "active" | "stale">>;
@@ -38,6 +39,7 @@ function canvasEntry(lens: LensRecord, workflowStates: LensWorkflowStates): Inde
     ...(lens.refresh && workflowStates[lens.refresh.workflow]
       ? { workflowState: workflowStates[lens.refresh.workflow] }
       : {}),
+    ...(lens.producedBy ? { producedBy: lens.producedBy } : {}),
   };
 }
 
@@ -52,6 +54,7 @@ function htmlEntry(lens: HtmlLensRecord, workflowStates: LensWorkflowStates): In
     ...(lens.refresh && workflowStates[lens.refresh.workflow]
       ? { workflowState: workflowStates[lens.refresh.workflow] }
       : {}),
+    ...(lens.producedBy ? { producedBy: lens.producedBy } : {}),
   };
 }
 
@@ -150,6 +153,14 @@ function cardFor(entry: IndexEntry, tones: Map<string, CanvasTone>) {
     ...(entry.maintainingMind ? [{ label: "by", value: entry.maintainingMind }] : []),
     { label: "updated", value: agoLabel(entry.updatedAt) },
     ...(entry.workflowState === "stale" ? [{ label: "workflow", value: "stale definition" }] : []),
+    ...(entry.producedBy
+      ? [
+          {
+            label: "definition",
+            value: `${entry.producedBy.workflow} @ ${entry.producedBy.definitionVersion.slice(0, 12)}`,
+          },
+        ]
+      : []),
   ];
   return {
     title,

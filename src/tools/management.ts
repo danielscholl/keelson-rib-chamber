@@ -300,6 +300,7 @@ export function makeListLensesTool(): ToolDefinition {
             updatedAt: l.updatedAt,
             ...(l.refresh ? { refresh: l.refresh } : {}),
             ...(workflowStatus ? { workflowStatus } : {}),
+            ...(l.producedBy ? { producedBy: l.producedBy } : {}),
             ...(l.scope ? { scope: l.scope } : {}),
             ...(l.maintainingMind ? { maintainingMind: l.maintainingMind } : {}),
             ...(l.reason ? { reason: l.reason } : {}),
@@ -327,6 +328,7 @@ export function makeListLensesTool(): ToolDefinition {
             ...(l.title ? { title: l.title } : {}),
             ...(l.refresh ? { refresh: l.refresh } : {}),
             ...(workflowStatus ? { workflowStatus } : {}),
+            ...(l.producedBy ? { producedBy: l.producedBy } : {}),
           });
         }
         // One newest-first order across both stores, so the merged list reads as one

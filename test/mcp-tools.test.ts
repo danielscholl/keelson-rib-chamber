@@ -134,6 +134,10 @@ beforeAll(async () => {
     maintainingMind: "alice",
     reason: "added a risk",
     refresh: { workflow: "chamber-lens-release-risks" },
+    producedBy: {
+      workflow: "chamber-lens-release-risks",
+      definitionVersion: "a".repeat(64),
+    },
   });
   await lensStore.saveLens({
     id: "plain-lens",
@@ -214,6 +218,7 @@ describe("chamber list tools (read-only observability over MCP)", () => {
         maintainingMind?: string;
         reason?: string;
         workflowStatus?: { state: string };
+        producedBy?: { workflow: string; definitionVersion: string };
       }[];
     };
     expect(out.count).toBe(2);
@@ -223,6 +228,10 @@ describe("chamber list tools (read-only observability over MCP)", () => {
       maintainingMind: "alice",
       reason: "added a risk",
       workflowStatus: { state: "active" },
+      producedBy: {
+        workflow: "chamber-lens-release-risks",
+        definitionVersion: "a".repeat(64),
+      },
     });
     const plain = out.lenses.find((l) => l.id === "plain-lens");
     expect(plain?.scope).toBeUndefined();

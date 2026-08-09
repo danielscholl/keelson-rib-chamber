@@ -15,6 +15,7 @@ import { createLensRegistry, DEFAULT_LENS_REFRESH_CADENCE_MS, lensKey } from "..
 import { createFileHtmlLensStore } from "../src/lens-html-store.ts";
 import { createFileLensStore, type LensStore } from "../src/lens-store.ts";
 import { htmlLensesDir, lensesDir, lensWorkflowsDir, setChamberDataHome } from "../src/paths.ts";
+import { contributeChamberWorkflows } from "../src/workflows.ts";
 
 const onAction = rib.onAction;
 if (!onAction) throw new Error("rib is missing onAction");
@@ -317,12 +318,13 @@ function makeCtx(sm: SnapshotManager): RibContext {
   } as unknown as RibContext;
 }
 
-function makeToolCtx() {
+function makeToolCtx(workflowName?: string) {
   const chunks: MessageChunk[] = [];
   const ctx: ToolContext = {
     cwd: ".",
     emit: (c) => chunks.push(c),
     abortSignal: new AbortController().signal,
+    ...(workflowName ? { turnContext: { workflowName } } : {}),
   };
   return {
     ctx,
@@ -353,6 +355,46 @@ describe("living-lens emit + verbs", () => {
     await rm(htmlLensesDir(), { recursive: true, force: true });
     refreshCalls = [];
     tools = registerTools(makeCtx(fakeSnapshotManager()));
+  });
+
+  it("stamps the active custom workflow version and clears it on a direct re-author", async () => {
+    const source = `description: Re-derive the lens
+nodes:
+  - id: compose
+    prompt: Re-author the lens.
+    allowed_tools: [chamber_emit_lens]
+`;
+    const file = join(lensWorkflowsDir(), "release.yml");
+    await mkdir(lensWorkflowsDir(), { recursive: true });
+    await writeFile(file, source);
+    contributeChamberWorkflows();
+    try {
+      const stamped = makeToolCtx("chamber-lens-release");
+      await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, stamped.ctx);
+      const output = JSON.parse(stamped.out()) as {
+        producedBy: { workflow: string; definitionVersion: string };
+      };
+      expect(output.producedBy.workflow).toBe("chamber-lens-release");
+      expect(output.producedBy.definitionVersion).toHaveLength(64);
+      const store = createFileLensStore(lensesDir());
+      expect((await store.loadLens("brief"))?.producedBy).toEqual(output.producedBy);
+
+      await onAction(
+        { type: "pin-lens", payload: { id: "brief", pinned: true } },
+        {} as RibContext,
+      );
+      expect((await store.loadLens("brief"))?.producedBy).toEqual(output.producedBy);
+
+      const direct = makeToolCtx();
+      await tool("chamber_emit_lens").execute(
+        { id: "brief", board: board("Brief v2") },
+        direct.ctx,
+      );
+      expect((await store.loadLens("brief"))?.producedBy).toBeUndefined();
+    } finally {
+      await rm(file, { force: true });
+      contributeChamberWorkflows();
+    }
   });
 
   // An emit rebuilds the record and saveLens writes only the keys it is handed, so a

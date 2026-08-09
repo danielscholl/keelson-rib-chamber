@@ -1,7 +1,12 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSlug } from "./genesis.ts";
-import { isValidRefresh, type LensRefresh } from "./lens-store.ts";
+import {
+  isValidLensWorkflowProvenance,
+  isValidRefresh,
+  type LensRefresh,
+  type LensWorkflowProvenance,
+} from "./lens-store.ts";
 import { deleteRecordDir, isNodeError } from "./record-dir.ts";
 
 // A persisted HTML lens: the authored page markup plus a server-stamped
@@ -15,6 +20,7 @@ export interface HtmlLensRecord {
   title?: string;
   updatedAt: string;
   refresh?: LensRefresh;
+  producedBy?: LensWorkflowProvenance;
   // Whether this lens holds a panel on the Chamber surface — operator-owned and absent
   // by default, mirroring LensRecord.pinned. Never authored: the emit schema has no
   // such field, so a designed page cannot claim the surface it renders onto.
@@ -26,6 +32,7 @@ interface HtmlLensMeta {
   title?: string;
   updatedAt: string;
   refresh?: LensRefresh;
+  producedBy?: LensWorkflowProvenance;
   pinned?: boolean;
 }
 
@@ -39,6 +46,7 @@ export interface HtmlLensStore {
     refresh?: LensRefresh;
     updatedAt?: string;
     pinned?: boolean;
+    producedBy?: LensWorkflowProvenance;
   }): Promise<void>;
   load(id: string): Promise<HtmlLensRecord | undefined>;
   delete(id: string): Promise<void>;
@@ -70,6 +78,7 @@ export function createFileHtmlLensStore(root: string): HtmlLensStore {
         ...(record.refresh ? { refresh: record.refresh } : {}),
         // Written only when true, so unpinned stays the absent default (saveLens's rule).
         ...(record.pinned ? { pinned: true } : {}),
+        ...(record.producedBy ? { producedBy: record.producedBy } : {}),
       };
       // Unique temp then rename (atomic on the same filesystem) so a crash
       // mid-write can't leave a torn file. html first, meta second: meta.json is
@@ -162,6 +171,9 @@ async function parseHtmlLens(root: string, id: string): Promise<HtmlLensRecord |
     // Folded, not rejected (the createFileLensStore rule): a bad pin can't take a panel
     // down, so a hand-edit typo costs the pin, never the record.
     ...(meta.pinned === true ? { pinned: true } : {}),
+    ...(isValidLensWorkflowProvenance(meta.producedBy) && meta.producedBy
+      ? { producedBy: meta.producedBy }
+      : {}),
   };
 }
 

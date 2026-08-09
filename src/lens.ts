@@ -1,6 +1,12 @@
 import type { CanvasBoardView, RibSurfaceRegion, SnapshotManager } from "@keelson/shared";
 import { expectView } from "@keelson/shared";
-import type { LensKind, LensProvenance, LensRefresh, LensStore } from "./lens-store.ts";
+import type {
+  LensKind,
+  LensProvenance,
+  LensRefresh,
+  LensStore,
+  LensWorkflowProvenance,
+} from "./lens-store.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
 
 // A Mind authors a lens by publishing a board under a per-subject key
@@ -200,6 +206,7 @@ export interface LensRegistry {
     kind?: LensKind,
     refresh?: LensRefresh,
     updatedAt?: string,
+    producedBy?: LensWorkflowProvenance,
   ): Promise<{ key: string }>;
   // Re-establish a persisted lens's live key + region on boot WITHOUT re-saving, so
   // the authored updatedAt is preserved (a restart must not reset every lens's
@@ -427,7 +434,7 @@ export function createLensRegistry(
   }
 
   return {
-    async publish(id, board, pinned, provenance, kind = "lens", refresh, updatedAt) {
+    async publish(id, board, pinned, provenance, kind = "lens", refresh, updatedAt, producedBy) {
       const result = await liveRegister(id, board, kind, pinned, refresh);
       // Persist only AFTER the live validate + publish succeed, so a board we
       // can't render never reaches disk (fail-closed); the store stamps updatedAt
@@ -440,6 +447,7 @@ export function createLensRegistry(
         ...(pinned ? { pinned } : {}),
         ...(refresh ? { refresh } : {}),
         ...(updatedAt ? { updatedAt } : {}),
+        ...(producedBy ? { producedBy } : {}),
         ...provenance,
       });
       return result;
