@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.50.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.49.1...v0.50.0) (2026-08-14)
+
+
+### Added
+
+* **boards:** plan strip and speaker share bars ([#351](https://github.com/danielscholl/keelson-rib-chamber/issues/351)) ([47cdafa](https://github.com/danielscholl/keelson-rib-chamber/commit/47cdafa20a46cd5ca9d6a6402fa6dd6d78ee21fb))
+* **boards:** render the room outcome as a prose document ([#349](https://github.com/danielscholl/keelson-rib-chamber/issues/349)) ([4b07af1](https://github.com/danielscholl/keelson-rib-chamber/commit/4b07af1701cdf843d7059b535ff68be99194e9f9))
+* **lens-guidance:** teach the 0.102 board vocabulary ([#348](https://github.com/danielscholl/keelson-rib-chamber/issues/348)) ([fccd5b8](https://github.com/danielscholl/keelson-rib-chamber/commit/fccd5b83f58665689d6ba03dcbf2bdfa3c5444c0))
+
 ## [0.49.1](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.49.0...v0.49.1) (2026-08-09)
 
 
