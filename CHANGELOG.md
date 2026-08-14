@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.50.0...v0.51.0) (2026-08-14)
+
+
+### Added
+
+* **rooms:** rebuild the room summary as a designed report ([#353](https://github.com/danielscholl/keelson-rib-chamber/issues/353)) ([c458a1f](https://github.com/danielscholl/keelson-rib-chamber/commit/c458a1f589551793278934234ba65d28db271bff))
+
 ## [0.50.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.49.1...v0.50.0) (2026-08-14)
 
 
