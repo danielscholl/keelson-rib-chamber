@@ -336,6 +336,47 @@ export function parseOutcomeQuestions(body: string): number[] {
   return [...seen].sort((a, b) => a - b);
 }
 
+export interface OutcomeDocField {
+  label?: string;
+  value: string;
+}
+
+// OUTCOME_QUESTION carried through the closing bold — the outcome document
+// restates a decision as `**Qn — Title.** gist`, without the debate marker's
+// trailing "Pinned" word.
+const OUTCOME_DECISION = /\*\*Q(\d+)\s*—\s*([^\n]+?)\*\*/g;
+
+const OUTCOME_HEADING = /^###\s+([^\n]+)$/gm;
+
+// Headings and restated decisions parse as ONE ordered marker stream — the
+// synthesis format doesn't order them, so a decision nested under a
+// "### Decisions" wrapper heading still yields its own Qn field.
+export function outcomeDocumentFields(body: string): OutcomeDocField[] {
+  const stream = [
+    ...[...body.matchAll(OUTCOME_HEADING)].map((m) => ({ decision: false, m })),
+    ...[...body.matchAll(OUTCOME_DECISION)].map((m) => ({ decision: true, m })),
+  ]
+    .flatMap(({ decision, m }) => (m.index === undefined ? [] : [{ decision, m, index: m.index }]))
+    .sort((a, b) => a.index - b.index);
+  const fields: OutcomeDocField[] = [];
+  const preamble = flattenMarkdown(body.slice(0, stream[0]?.index ?? body.length));
+  if (preamble) fields.push({ value: preamble });
+  stream.forEach(({ decision, m, index }, i) => {
+    const prose = flattenMarkdown(
+      body.slice(index + m[0].length, stream[i + 1]?.index ?? body.length),
+    );
+    if (decision) {
+      const title = stripInlineMarks(m[2] ?? "").trim();
+      const value = [title, prose].filter(Boolean).join(" ");
+      if (value) fields.push({ label: `Q${m[1]}`, value });
+    } else {
+      const label = stripInlineMarks(m[1] ?? "").trim();
+      if (label && prose) fields.push({ label, value: prose });
+    }
+  });
+  return fields;
+}
+
 export interface OutcomeReceipt {
   decisions: number;
   criteria?: number;

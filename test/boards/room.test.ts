@@ -836,6 +836,131 @@ describe("buildRoomBoard — decisions rail and outcome", () => {
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
   });
 
+  test("the outcome document renders in place as labeled prose fields", () => {
+    const board = buildRoomBoard(room({ status: "done" }), decidedTranscript);
+    const card = outcomeCard(board);
+    expect(card?.prose).toBe(true);
+    expect(card?.stacked).toBeUndefined();
+    expect(card?.footnote).toBeUndefined();
+    expect(card?.fields?.map((f) => [f.label, f.value])).toEqual([
+      ["Q1", "Revert mechanics. Tree membership is the oracle."],
+      ["Q2", "Ledger honesty. An event row."],
+      ["Acceptance criteria", "• One.\n• Two."],
+      ["Test plan", "• Fake exec."],
+      ["Copy", "Outcome as markdown"],
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
+  test("preamble ahead of the first restated decision leads as an unlabeled field", () => {
+    const board = buildRoomBoard(room({ status: "done" }), [
+      entry({
+        parts: [
+          {
+            text: [
+              "Closing.",
+              "",
+              "---",
+              "",
+              "## Verdict",
+              "",
+              "The room converged in one round.",
+              "",
+              "**Q1 — Ship it.** Yes, behind a flag.",
+              "",
+              "### Out of scope",
+              "Rewrites.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    ]);
+    const card = outcomeCard(board);
+    expect(card?.fields?.map((f) => [f.label, f.value])).toEqual([
+      [undefined, "The room converged in one round."],
+      ["Q1", "Ship it. Yes, behind a flag."],
+      ["Out of scope", "Rewrites."],
+      ["Copy", "Outcome as markdown"],
+    ]);
+  });
+
+  test("decisions nested under a bare wrapper heading render as Qn fields, no empty heading field", () => {
+    const board = buildRoomBoard(room({ status: "done" }), [
+      entry({
+        parts: [
+          {
+            text: [
+              "Closing.",
+              "",
+              "---",
+              "",
+              "## Verdict",
+              "",
+              "### Decisions",
+              "",
+              "**Q1 — Ship `fast` mode.** Yes, *behind a flag*.",
+              "",
+              "**Q2 — Name it.** Done.",
+              "",
+              "### Test plan",
+              "- Fake exec.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    ]);
+    const card = outcomeCard(board);
+    expect(card?.fields?.map((f) => [f.label, f.value])).toEqual([
+      ["Q1", "Ship fast mode. Yes, behind a flag."],
+      ["Q2", "Name it. Done."],
+      ["Test plan", "• Fake exec."],
+      ["Copy", "Outcome as markdown"],
+    ]);
+  });
+
+  test("a heading with direct prose keeps its field ahead of its nested decisions", () => {
+    const board = buildRoomBoard(room({ status: "done" }), [
+      entry({
+        parts: [
+          {
+            text: [
+              "Closing.",
+              "",
+              "---",
+              "",
+              "## Verdict",
+              "",
+              "### Decisions",
+              "",
+              "Both landed unanimously.",
+              "",
+              "**Q1 — Ship it.** Yes.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    ]);
+    const card = outcomeCard(board);
+    expect(card?.fields?.map((f) => [f.label, f.value])).toEqual([
+      ["Decisions", "Both landed unanimously."],
+      ["Q1", "Ship it. Yes."],
+      ["Copy", "Outcome as markdown"],
+    ]);
+  });
+
+  test("a marker-and-heading-free outcome still renders as one prose field", () => {
+    const board = buildRoomBoard(room({ status: "done" }), [
+      entry({ parts: [{ text: "Closing.\n\n---\n\n## Outcome\n\nWe ship it. *Now.*" }] }),
+    ]);
+    const card = outcomeCard(board);
+    expect(card?.prose).toBe(true);
+    expect(card?.fields?.map((f) => [f.label, f.value])).toEqual([
+      [undefined, "We ship it. Now."],
+      ["Copy", "Outcome as markdown"],
+    ]);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+  });
+
   test("no Outcome card when the last turn carries no --- / ## boundary", () => {
     const board = buildRoomBoard(room({ status: "done" }), [
       entry({ parts: [{ text: "just an ordinary closing remark" }] }),

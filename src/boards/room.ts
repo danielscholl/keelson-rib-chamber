@@ -13,6 +13,7 @@ import {
   formatTokenCount,
   latestContextByMind,
   type OutcomeSplit,
+  outcomeDocumentFields,
   outcomeReceipt,
   parseDecisionMarkers,
   parseOutcomeQuestions,
@@ -925,12 +926,9 @@ function buildDecisionsSection(
   return { kind: "rows", title: `Decisions · ${metric}`, items };
 }
 
-// The Outcome card: the document's authored title, a receipt (who synthesized
-// it, when, and a mechanical contract check against its own section headings —
-// never an authored claim), a short preview, and the two concrete verbs: Copy
-// (the field's copyAction seam fetches the full markdown on click and writes it
-// to the clipboard — see index.ts's outcomeCopyAction) and Explore in chat (the
-// surface→chat handoff every ✦ verb uses — see outcomeExploreAction).
+// The receipt is a mechanical contract check against the document's own
+// section headings, never an authored claim; Copy hands back the original
+// markdown, not these flattened fields.
 function buildOutcomeSection(
   room: Room,
   outcome: OutcomeSplit,
@@ -944,9 +942,9 @@ function buildOutcomeSection(
   if (receipt.criteria !== undefined) parts.push(`${receipt.criteria} criteria`);
   if (receipt.hasTestPlan) parts.push("test plan");
   if (receipt.hasOutOfScope) parts.push("out-of-scope");
-  const flattenedBody = flattenMarkdown(outcome.body);
-  const preview =
-    flattenedBody.length > 220 ? `${flattenedBody.slice(0, 219).trim()}…` : flattenedBody;
+  const docFields = outcomeDocumentFields(outcome.body);
+  const fallback = flattenMarkdown(outcome.body);
+  const bodyFields = docFields.length > 0 ? docFields : fallback ? [{ value: fallback }] : [];
   return {
     kind: "cards",
     title: "Outcome",
@@ -954,11 +952,12 @@ function buildOutcomeSection(
       {
         title: outcome.title,
         dot: "ok" as CanvasTone,
+        prose: true,
         reason: {
           text: `synthesized by ${authorName} · ${clockTime(at)} — ✓ delivers ${parts.join(" · ")}`,
         },
-        footnote: `${preview}\n\nFull document via Copy markdown or ✦ Explore in chat.`,
         fields: [
+          ...bodyFields,
           {
             label: "Copy",
             value: "Outcome as markdown",
