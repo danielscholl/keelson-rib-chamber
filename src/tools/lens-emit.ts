@@ -417,11 +417,16 @@ async function emitHtmlLens(
     }
     // Freshness is the page's, the canvas emit's rule: a re-emit that left the markup
     // alone holds its prior stamp, so a producer re-deriving unchanged data on cadence
-    // reports the freshness it earned rather than the tick it ran on. No strictly-ahead
-    // stamp on a change (unlike the canvas twin) — no gate fingerprints this store.
+    // reports the freshness it earned rather than the tick it ran on; a changed page
+    // must outrun that stamp, since the store's clock only has millisecond resolution
+    // and two emits can land inside one tick.
     const prior =
       existing && Number.isFinite(Date.parse(existing.updatedAt)) ? existing : undefined;
-    const updatedAt = prior?.html === html ? prior?.updatedAt : undefined;
+    const updatedAt = !prior
+      ? undefined
+      : prior.html === html
+        ? prior.updatedAt
+        : new Date(Math.max(Date.now(), Date.parse(prior.updatedAt) + 1)).toISOString();
     // The host refreshes only a workflow with RIB provenance, and its refresh seam is
     // fail-soft, so a backing it won't run is otherwise a silent 409 on every tick.
     // Chamber can vouch for the workflows it contributed and no more (see the canvas twin).
