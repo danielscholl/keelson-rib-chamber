@@ -857,7 +857,7 @@ function buildVoicesSection(
   return { kind: "rows", title: "Voices", items: rows };
 }
 
-function facilitatorRoles(room: Room): [MindSlug, string][] {
+export function facilitatorRoles(room: Room): [MindSlug, string][] {
   const out: [MindSlug, string][] = [];
   if (room.config?.moderator) out.push([room.config.moderator, "moderator"]);
   if (room.config?.synthesizer) out.push([room.config.synthesizer, "synthesizer"]);
