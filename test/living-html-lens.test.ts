@@ -502,6 +502,19 @@ nodes:
     expect((await store.load("s"))?.updatedAt).not.toBe(first);
   });
 
+  it("a changed page always outruns the prior stamp, even within one millisecond", async () => {
+    const store = createFileHtmlLensStore(htmlLensesDir());
+    // The store's stamp is only millisecond-resolution, so two emits landing in the
+    // same tick would report the freshness of the page they replaced. Seeding the
+    // prior ahead of the clock forces that collision deterministically (the canvas
+    // twin's test, verbatim) instead of racing it on a fast runner.
+    const ahead = new Date(Date.now() + 1000).toISOString();
+    await store.save({ id: "s", html: page("first"), updatedAt: ahead });
+    await emitHtml({ id: "s", html: page("changed") });
+    const next = (await store.load("s"))?.updatedAt ?? "";
+    expect(Date.parse(next)).toBeGreaterThan(Date.parse(ahead));
+  });
+
   it("caveats a backing chamber does not contribute, and stays quiet about one it does", async () => {
     // The host runs only a rib-contributed workflow on a panel's cadence, and refuses
     // the rest silently — the emit reply is the one place the author can hear it. So a
