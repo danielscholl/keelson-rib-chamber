@@ -138,7 +138,7 @@ function cardFor(
 // The room's shape named for the meta line: the strategy in plain words, plus the
 // facilitator a moderated/managed room routes through — so the index reads how a room
 // runs, not just that it exists.
-function shapeLabel(room: Room): string {
+export function shapeLabel(room: Room): string {
   const mod = room.config?.moderator;
   const mgr = room.config?.manager;
   switch (room.strategy) {

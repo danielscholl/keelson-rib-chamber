@@ -31,9 +31,10 @@ import { createRoomDriver, type RoomDriver } from "./room.ts";
 import { MAX_ACTIVE_ROOMS, type RoomConfigInput } from "./room-config.ts";
 import { createRoomKeyRegistry, type RoomKeyRegistry } from "./room-key-registry.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
-import { createFileRoomStore, deriveRoomName, sweepClosedRooms } from "./room-store.ts";
+import { createFileRoomStore, deriveRoomName, listRooms, sweepClosedRooms } from "./room-store.ts";
 import { DEFAULT_END_VOTE_THRESHOLD } from "./routing.ts";
 import {
+  nudgeManifest,
   refreshStandingPanels,
   refreshWorkflow,
   resolveMinds,
@@ -41,7 +42,7 @@ import {
   resolveProjectRoot,
 } from "./runtime.ts";
 import { getStrategy } from "./strategies/index.ts";
-import type { RoomConfig, RoomStrategyName } from "./types.ts";
+import type { Room, RoomConfig, RoomStrategyName } from "./types.ts";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
 // accidental or malicious huge budget would launch a runaway sequence; reject it.
@@ -75,12 +76,17 @@ let roomSummarySm: SnapshotManager | undefined;
 let declareRoomHtmlView: ((key: string, title?: string) => () => void) | undefined;
 const roomSummaryEntries = new Map<
   string,
-  {
-    publisher: { publish(html: string): Promise<void> };
-    unregister: () => void;
-    undeclare: () => void;
-  }
+  { publisher: { publish(html: string): Promise<void> }; unregister: () => void }
 >();
+// The summary keys DECLARED as `canvasKind: "html"`, kept apart from the publishers above
+// because the declaration has to land long before the publish does. The SPA reads a key's
+// canvas kind from its CACHED rib manifest at the instant the drawer opens, so declaring
+// inside the room-summary action — the same request that answers `open-canvas` — is always
+// one fetch too late: the drawer opens at the default `view` kind and runs the HTML page
+// through the board pipeline ("the data didn't match a known view type"). Declaring every
+// summarizable room up front, and nudging the manifest when that set moves, is what makes
+// the first click render.
+const summaryViews = new Map<string, { title: string; undeclare: () => void }>();
 // The rooms-index ticker. The index card's bar reads room.turnIndex/turnBudget,
 // which commitActive persists every turn — but the index is a bound collector that
 // only recomposes on a room lifecycle change (start/end/delete), so a live room's
@@ -125,6 +131,16 @@ function queueRoomRetentionSweep(): void {
   roomRetentionSweep = roomRetentionSweep.then(
     () => runRoomRetentionSweep(root),
     () => runRoomRetentionSweep(root),
+  );
+}
+
+// Reconcile the summary views BEHIND the pending retention sweep. The sweep evicts the
+// oldest closed rooms, so a reconcile racing it would declare a view for a room about to be
+// deleted — leaving the manifest advertising a key nothing backs.
+function queueRoomSummaryReconcile(): void {
+  roomRetentionSweep = roomRetentionSweep.then(
+    () => reconcileRoomSummaryViews().catch(() => {}),
+    () => reconcileRoomSummaryViews().catch(() => {}),
   );
 }
 
@@ -246,6 +262,9 @@ export function bindRoomLifecycle(seams: {
     readTools: readToolPool(),
   });
   queueRoomRetentionSweep();
+  // Rooms closed in a prior process are summarizable the moment the surface loads, so
+  // their keys have to be declared before the operator can click — not on the click.
+  queueRoomSummaryReconcile();
   return { roomStore };
 }
 
@@ -298,6 +317,16 @@ export function noteRoomDeleted(slug: string): void {
   // key composes from an in-memory `latest`, so it would otherwise go on serving the
   // deleted room's final board.
   roomRegistry?.release(slug);
+  // The summary key and its view declaration outlive the room for the same reason, so the
+  // lost record releases both — otherwise a deleted room's summary stays declared and its
+  // key goes on serving the page.
+  roomSummaryEntries.get(slug)?.unregister();
+  roomSummaryEntries.delete(slug);
+  releaseSummaryView(slug);
+  // The release above is eager, but a reconcile already past its `listRooms` await still
+  // holds a snapshot naming this room and would re-declare it. Queue one behind that in-
+  // flight pass so the last word belongs to a read taken after the record was gone.
+  queueRoomSummaryReconcile();
   dropBriefRoomSource(slug);
   syncRoomsTicker();
 }
@@ -362,6 +391,9 @@ function ensureLoop(slug: string): void {
       // appears promptly instead of on the next cadence. Fail-soft, never thrown
       // into the detached loop.
       void refreshWorkflow("chamber-rooms").catch(() => {});
+      // Its card now offers a Summary, so declare that key's html kind and nudge the
+      // manifest — the client has to know it before the operator clicks, not after.
+      queueRoomSummaryReconcile();
       // A newly-ended room is briefing substance: evaluate the gate (it runs a turn
       // only if the watermark hasn't seen this room) and refresh the roster so its
       // pulse counts/for-you update promptly. Both fire-and-forget — never thrown.
@@ -805,11 +837,59 @@ function ensureRoomViewPublisher(
 }
 
 function releaseRoomSummaries(): void {
-  for (const entry of roomSummaryEntries.values()) {
-    entry.unregister();
-    entry.undeclare();
-  }
+  for (const entry of roomSummaryEntries.values()) entry.unregister();
   roomSummaryEntries.clear();
+  for (const entry of summaryViews.values()) entry.undeclare();
+  summaryViews.clear();
+}
+
+// Declare (or re-title) one room's summary key as an html view. Idempotent; reports
+// whether the declared set actually moved, so a batch nudges the manifest once.
+function declareSummaryView(slug: string, title: string): boolean {
+  const declare = declareRoomHtmlView;
+  if (!declare) return false;
+  const existing = summaryViews.get(slug);
+  if (existing?.title === title) return false;
+  existing?.undeclare();
+  summaryViews.set(slug, { title, undeclare: declare(roomSummaryKey(slug), title) });
+  return true;
+}
+
+function releaseSummaryView(slug: string): void {
+  const entry = summaryViews.get(slug);
+  if (!entry) return;
+  entry.undeclare();
+  summaryViews.delete(slug);
+  nudgeManifest();
+}
+
+// Declare an html view for every room whose index card offers a Summary, and drop the
+// ones that no longer do. Runs at bind (a room closed in a PRIOR process still has to be
+// summarizable after a restart) and whenever a room closes. The predicate is the
+// collector's own (bin/collect-rooms.ts), so a card can never offer a Summary whose key
+// the client would resolve as a board.
+export async function reconcileRoomSummaryViews(): Promise<void> {
+  if (!declareRoomHtmlView) return;
+  let rooms: readonly Room[];
+  try {
+    rooms = await listRooms(roomsDir());
+  } catch {
+    return;
+  }
+  const summarizable = new Map(
+    rooms.filter((r) => r.status !== "active" && r.outcomeAt).map((r) => [r.slug, r.name]),
+  );
+  let moved = false;
+  for (const [slug, entry] of summaryViews) {
+    if (summarizable.get(slug) === entry.title) continue;
+    entry.undeclare();
+    summaryViews.delete(slug);
+    moved = true;
+  }
+  for (const [slug, title] of summarizable) {
+    if (declareSummaryView(slug, title)) moved = true;
+  }
+  if (moved) nudgeManifest();
 }
 
 function ensureRoomSummaryPublisher(
@@ -823,6 +903,10 @@ function ensureRoomSummaryPublisher(
     roomSummarySm = sm;
     declareRoomHtmlView = declareHtmlView;
   }
+  // The reconcile normally got here first; declaring again covers the room it hasn't seen
+  // yet (a summary asked for between the close and the reconcile) so the key is never
+  // published undeclared — that click still renders late, but the next one is right.
+  if (declareSummaryView(slug, title ?? slug)) nudgeManifest();
   const existing = roomSummaryEntries.get(slug);
   if (existing) return existing.publisher;
   const key = roomSummaryKey(slug);
@@ -831,14 +915,7 @@ function ensureRoomSummaryPublisher(
     "<p>No room summary yet.</p>",
   );
   const unregister = sm.register(key, latest, { validate: htmlStringValidator(key) });
-  let undeclare: () => void;
-  try {
-    undeclare = declareHtmlView(key, title);
-  } catch (error) {
-    unregister();
-    throw error;
-  }
-  roomSummaryEntries.set(slug, { publisher, unregister, undeclare });
+  roomSummaryEntries.set(slug, { publisher, unregister });
   return publisher;
 }
 

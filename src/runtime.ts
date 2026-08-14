@@ -178,6 +178,15 @@ export function refreshPresence(): void {
   void presenceSm?.recompose(PRESENCE_KEY).catch(() => {});
 }
 
+// Tell the client its cached rib manifest is stale. The SPA re-fetches GET /api/ribs only
+// when the host's ribs-version beacon bumps — which the host does on a runtime REGION
+// add/remove, not on a view declaration — and it resolves a key's canvas kind from that
+// cache at the moment a canvas opens. So a rib that declares a view of its own has to say
+// so here, or the client goes on resolving that key with the default kind.
+export function nudgeManifest(): void {
+  invalidateManifest?.();
+}
+
 // The genesis boot-card ticker. While a genesis runs (a pending-genesis marker on disk),
 // the rib recomposes the Chamber panel every GENESIS_TICK_MS so the boot card's elapsed
 // count advances and the live head dot pulses (keelson#353 — streaming is derived from

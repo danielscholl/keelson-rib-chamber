@@ -87,7 +87,12 @@ function fakeSnapshotManager() {
 }
 
 function makeCtx(
-  opts: { run?: RunAgentTurn; sm?: SnapshotManager; projects?: RibContext["getProjects"] } = {},
+  opts: {
+    run?: RunAgentTurn;
+    sm?: SnapshotManager;
+    projects?: RibContext["getProjects"];
+    invalidateManifest?: () => void;
+  } = {},
 ): RibContext {
   return {
     getExec: () => ({
@@ -99,6 +104,7 @@ function makeCtx(
     ...(opts.sm ? { getSnapshotManager: () => opts.sm, registerRegion: () => () => {} } : {}),
     ...(opts.run ? { runAgentTurn: opts.run } : {}),
     ...(opts.projects ? { getProjects: opts.projects } : {}),
+    ...(opts.invalidateManifest ? { invalidateManifest: opts.invalidateManifest } : {}),
   } as RibContext;
 }
 
@@ -1186,7 +1192,15 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
 
   async function seedClosedRoom(
     slug: string,
-    over: { status?: Room["status"]; outcomeAt?: string; text?: string } = {},
+    over: {
+      status?: Room["status"];
+      outcomeAt?: string;
+      text?: string;
+      // Retention keeps only the newest DEFAULT_CLOSED_ROOM_RETENTION closed rooms, and this
+      // file opens well past that many. A test that must still find its room after the
+      // bind-time sweep has run seeds it as current rather than at the fixed epoch below.
+      createdAt?: string;
+    } = {},
   ): Promise<void> {
     const store = createFileRoomStore(roomsDir());
     await store.saveRoom({
@@ -1198,7 +1212,7 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
       turnBudget: 1,
       turnIndex: 1,
       round: 0,
-      createdAt: "2026-01-01T00:00:00.000Z",
+      createdAt: over.createdAt ?? "2026-01-01T00:00:00.000Z",
       ...(over.outcomeAt ? { outcomeAt: over.outcomeAt } : {}),
     } satisfies Room);
     await store.appendTranscript(slug, {
@@ -1278,6 +1292,57 @@ describe("room adapter — outcome-copy / outcome-explore / room-summary", () =>
     expect(htmlLensStructuralError(frame?.data as string)).toBeUndefined();
     expect(frame?.data).toContain("Pinned Design");
     await rib.dispose?.();
+    expect(rib.views?.some((view) => view.key === key)).toBe(false);
+    expect(snap.live()).not.toContain(key);
+  });
+
+  // The SPA resolves a key's canvas kind from its CACHED manifest at the moment the drawer
+  // opens, so a view declared inside the room-summary action lands one fetch too late and
+  // the page renders through the board pipeline. Every room whose card offers a Summary
+  // must therefore be declared — and the manifest nudged — before anyone clicks.
+  it("declares a summarizable room's html view at bind, before any summary is asked for", async () => {
+    const snap = fakeSnapshotManager();
+    let nudges = 0;
+    await seedClosedRoom("declared-early", {
+      createdAt: new Date().toISOString(),
+      outcomeAt: new Date().toISOString(),
+      text: FIELD_TEXT,
+    });
+    const key = roomSummaryKey("declared-early");
+    expect(rib.views?.some((view) => view.key === key)).toBe(false);
+
+    registerTools(
+      makeCtx({
+        run: scriptedRunAgentTurn([]).run,
+        sm: snap.sm,
+        invalidateManifest: () => {
+          nudges += 1;
+        },
+      }),
+    );
+
+    await waitFor(async () => rib.views?.some((view) => view.key === key) === true);
+    expect(rib.views).toContainEqual({ key, canvasKind: "html", title: "Field room" });
+    expect(nudges).toBeGreaterThan(0);
+  });
+
+  it("releases a deleted room's summary view so the manifest stops advertising it", async () => {
+    const snap = fakeSnapshotManager();
+    await seedClosedRoom("delete-me-summary", {
+      createdAt: new Date().toISOString(),
+      outcomeAt: new Date().toISOString(),
+      text: FIELD_TEXT,
+    });
+    const key = roomSummaryKey("delete-me-summary");
+    registerTools(makeCtx({ run: scriptedRunAgentTurn([]).run, sm: snap.sm }));
+    await waitFor(async () => rib.views?.some((view) => view.key === key) === true);
+
+    const res = await onAction(
+      { type: "room-delete", payload: { slug: "delete-me-summary" } },
+      makeCtx(),
+    );
+
+    expect(res.ok).toBe(true);
     expect(rib.views?.some((view) => view.key === key)).toBe(false);
     expect(snap.live()).not.toContain(key);
   });

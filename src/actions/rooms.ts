@@ -38,7 +38,7 @@ import {
   resolveProjectInput,
   resolveProjectName,
 } from "../runtime.ts";
-import type { Mind, Room } from "../types.ts";
+import type { Mind, Room, TurnEntry } from "../types.ts";
 
 export function roomStartAction(action: RibAction): Promise<RibActionResult> {
   const payload = (action.payload ?? {}) as Record<string, unknown>;
@@ -348,9 +348,15 @@ const FALLBACK_OUTCOME_TITLE = "Closing summary";
 // old way, by carrying the explicit `---`/`##` boundary, so the room board's outcome card
 // and these verbs can't disagree about what exists. An error names why there isn't one
 // rather than silently degrading, since all three outcome actions are refused without one.
-async function loadRoomOutcome(
-  slug: string,
-): Promise<{ room: Room; outcome: OutcomeSplit; debate: string } | { error: string }> {
+async function loadRoomOutcome(slug: string): Promise<
+  | {
+      room: Room;
+      outcome: OutcomeSplit;
+      debate: string;
+      transcript: readonly TurnEntry[];
+    }
+  | { error: string }
+> {
   const store = createFileRoomStore(roomsDir());
   const room = await store.loadRoom(slug);
   if (!room) return { error: `room '${slug}' not found` };
@@ -362,7 +368,7 @@ async function loadRoomOutcome(
     fallbackTitle: FALLBACK_OUTCOME_TITLE,
   });
   if (!outcome) return { error: `room '${slug}' has no synthesized outcome document yet` };
-  return { room, outcome, debate };
+  return { room, outcome, debate, transcript };
 }
 
 export async function roomSummaryAction(action: RibAction): Promise<RibActionResult> {
@@ -372,13 +378,14 @@ export async function roomSummaryAction(action: RibAction): Promise<RibActionRes
     const found = await loadRoomOutcome(resolved.slug);
     if ("error" in found) return { ok: false, error: found.error };
     const key = roomSummaryKey(resolved.slug);
-    const html = buildRoomSummaryHtml(
-      found.room,
-      found.outcome,
-      await readMinds(mindsDir()),
-      parseDecisionMarkers(found.debate),
-      await tabledExhibitsFor(resolved.slug),
-    );
+    const html = buildRoomSummaryHtml({
+      room: found.room,
+      outcome: found.outcome,
+      minds: await readMinds(mindsDir()),
+      decisions: parseDecisionMarkers(found.debate),
+      tabled: await tabledExhibitsFor(resolved.slug),
+      transcript: found.transcript,
+    });
     htmlStringValidator(key)(html);
     const structuralError = htmlLensStructuralError(html);
     if (structuralError) return { ok: false, error: structuralError };
