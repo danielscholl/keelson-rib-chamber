@@ -3,10 +3,10 @@
 // `html` kind. It lives here, not in shared: Chamber is the only place an LLM authors
 // a board (every other rib builds its boards deterministically in code).
 //
-// Two tiers, both fed from the same source so they cannot drift: the one-paragraph
-// contract that rides the board tools' descriptions — the only seam a room turn has,
-// since it tables an exhibit with no prompt to inject into — and the fuller block the
-// lens workflow prompt embeds. The renderer owns typography, palette, and layout, so
+// Two tiers, sharing the FORMS list and pinned together by a drift test: the
+// one-paragraph contract that rides the board tools' descriptions — the only seam a
+// room turn has, since it tables an exhibit with no prompt to inject into — and the
+// fuller block the lens workflow prompt embeds. The renderer owns typography, palette, and layout, so
 // neither tier repeats the html guidance's token/font/CSP rules; a board author's
 // judgement goes into which form carries each fact, and into the copy.
 
@@ -18,7 +18,7 @@ const FORMS: readonly { kind: string; job: string; detail: string }[] = [
     kind: "stats",
     job: "the headline figures",
     detail:
-      "`{ label, value, sub?, tone? }` — three to five of them, above any detail. `tone` carries state, `sub` the qualifier.",
+      "`{ label, value, sub?, tone?, delta?, spark? }` — three to five of them, above any detail. `tone` carries state, `sub` the qualifier; a change reading goes in `delta` (`{ text, direction: up|down|flat, tone? }` — direction picks ▲▼→, tone says whether the move is good), never a free-text arrow. `spark` (2–60 numbers, oldest first) adds trend context behind the value — enhancement only: the value and delta must carry the reading without it.",
   },
   {
     kind: "bars",
@@ -29,12 +29,14 @@ const FORMS: readonly { kind: string; job: string; detail: string }[] = [
   {
     kind: "segments",
     job: "composition of a whole",
-    detail: "`{ label, n, tone? }` — the parts of one total, not a ranking.",
+    detail:
+      "`{ label, n, tone? }` — the parts of one total, drawn as a proportional strip with a count legend, not a ranking. A zero-count part keeps its legend entry.",
   },
   {
     kind: "chart",
-    job: "change over time",
-    detail: "up to 6 series, x unique within a series. One measure; a trend, not a snapshot.",
+    job: "change over time or grouped categorical comparison",
+    detail:
+      'up to 6 series, x unique within a series, one measure. `mark` commits the reading: `line` (default) for a trend; `area` for cumulative emphasis (overlaid, never stacked — composition belongs to `segments`); `bar` for zero-anchored comparison across categories. `baseline: "auto"` releases the zero anchor so variation inside a narrow band fills the plot — line mark only, the schema rejects it on bars and areas.',
   },
   {
     kind: "table",
@@ -46,13 +48,13 @@ const FORMS: readonly { kind: string; job: string; detail: string }[] = [
     kind: "rows",
     job: "a scannable list",
     detail:
-      "one line per item. `boxed: true` makes `text` a left-hand label and `trailing` its value; `detail` discloses a long record under a capped line.",
+      "one line per item. `boxed: true` makes `text` a left-hand label and `trailing` its value. A row is one click target: it carries `action` (whole-row dispatch plus `selected` — the cards click contract exactly) or `detail` (a long record disclosed under the capped line), never both. `bar` puts a compact per-row meter on the line.",
   },
   {
     kind: "cards",
     job: "items that each carry a title and a few labelled fields",
     detail:
-      "`stacked: true` gives each field its own line (fields otherwise join into one `·` meta row that wraps badly once they are long); `grid: true` lays cards side by side; `mono: true` sets a code-like title.",
+      "`stacked: true` gives each field its own line (fields otherwise join into one `·` meta row that wraps badly once they are long); `prose: true` flips the fields into a scrolling proportional-type document (a charter, a brief) — rival layouts, a card sets one, never both. `grid: true` lays cards side by side; `mono: true` sets a code-like title; `bar` gives a card its own meter — `{ value, total }` for a plain fill, `{ segments }` for stage composition at card scale.",
   },
   {
     kind: "grid",
@@ -76,13 +78,16 @@ export const BOARD_FORM_KINDS: readonly string[] = FORMS.map((f) => f.kind);
 export const BOARD_NON_FORM_KINDS: readonly string[] = ["actions", "seats"];
 
 // Rules about composition rather than form — what the board says and how each text
-// slot earns its place. Shared by both tiers.
+// slot earns its place. Only the block renders this array; the contract below carries
+// each rule compressed, and the drift test keeps the two from diverging.
 const COMPOSITION: readonly string[] = [
   "The title states the finding, not the subject — what the board says, not what it is about.",
   "Summary before detail; order sections by what the reader needs first.",
   "Group repeated records. When one subject occupies many rows, the count IS the finding: show it as `bars` and keep the raw records in a `table` or a row's `detail` beneath.",
   "Every text slot stays in its job: a pill or chip is a short state chip, never a clause that truncates; a card field is a label plus a value, never a sentence.",
   "Tone means state (ok / warn / error / caution / info) and always rides a word or label — never colour alone.",
+  "`ramp-1`…`ramp-5` is a one-hue light-to-dark ladder for staged or tiered data — the order carries the meaning, so a ramp never does identity or state work.",
+  "Unmeasured is not zero: a failed read is `null` (`value` on a stat or bar, `n` on a segment) and renders hatched or as a muted `?`. Three states, never conflated — a real zero shows 0, unmeasured shows the hatch, and a fact with nothing to say is omitted.",
   "Structure encodes truth: number a list only when the order is real, and add a section only when it carries something the reader needs.",
   "Write real copy in the operator's language. Never invent data to fill a section — a short honest board beats a padded one.",
 ];
@@ -95,7 +100,10 @@ export const BOARD_COMPOSITION_CONTRACT = [
   "Lead with the summary and put the detail under it; title it with the finding, not the subject.",
   "Keep each text slot in its job — a pill is a short state chip, never a clause; a card field is a label plus a value, never a sentence (`stacked: true` when fields need their own lines, a row's `detail` for long-form text).",
   "Group repeated records rather than listing one subject many times: when a row repeats, the count is the finding, so carry it as `bars`.",
-  "Tone means state and always rides a word, never colour alone.",
+  "A change reading is `delta` (direction picks the arrow, tone says whether the move is good), never a free-text arrow — `spark` adds trend context as enhancement only.",
+  "Unmeasured is `null` (a stat or bar's `value`, a segment's `n`) and renders hatched or as a muted `?`, never a fabricated 0.",
+  "A card is a document (`prose: true`) or a mono readout (`stacked: true`) and a row carries `action` or `detail` — one, never both; `bar` puts a per-item meter on a card or row.",
+  "Tone means state and always rides a word, never colour alone; `ramp-1`…`ramp-5` is for ordered magnitude only, never identity or state.",
 ].join(" ");
 
 // The fuller block for a workflow prompt node, where there is room to teach the shape
