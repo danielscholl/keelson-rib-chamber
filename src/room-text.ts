@@ -336,6 +336,51 @@ export function parseOutcomeQuestions(body: string): number[] {
   return [...seen].sort((a, b) => a - b);
 }
 
+export interface OutcomeDocField {
+  label?: string;
+  value: string;
+}
+
+// OUTCOME_QUESTION carried through the closing bold — the outcome document
+// restates a decision as `**Qn — Title.** gist`, without the debate marker's
+// trailing "Pinned" word.
+const OUTCOME_DECISION = /\*\*Q(\d+)\s*—\s*([^\n]+?)\*\*/g;
+
+const OUTCOME_HEADING = /^###\s+([^\n]+)$/gm;
+
+// The outcome document broken into prose-card fields: any preamble ahead of the
+// first restated decision (unlabeled), a `Qn` field per decision (title + the
+// flattened text up to the next one), then one field per ### subsection labeled
+// by its heading — whatever headings the document actually wrote, not a fixed
+// contract set. Values are flattened plain text. Empty when nothing survives
+// flattening; the caller falls back to the whole flattened body.
+export function outcomeDocumentFields(body: string): OutcomeDocField[] {
+  const headings = [...body.matchAll(OUTCOME_HEADING)];
+  const head = body.slice(0, headings[0]?.index ?? body.length);
+  const markers = [...head.matchAll(OUTCOME_DECISION)];
+  const fields: OutcomeDocField[] = [];
+  const preamble = flattenMarkdown(head.slice(0, markers[0]?.index ?? head.length));
+  if (preamble) fields.push({ value: preamble });
+  markers.forEach((m, i) => {
+    if (m.index === undefined) return;
+    const title = (m[2] ?? "").trim();
+    const gist = flattenMarkdown(
+      head.slice(m.index + m[0].length, markers[i + 1]?.index ?? head.length),
+    );
+    const value = [title, gist].filter(Boolean).join(" ");
+    if (value) fields.push({ label: `Q${m[1]}`, value });
+  });
+  headings.forEach((h, i) => {
+    if (h.index === undefined) return;
+    const label = stripInlineMarks(h[1] ?? "").trim();
+    const value = flattenMarkdown(
+      body.slice(h.index + h[0].length, headings[i + 1]?.index ?? body.length),
+    );
+    if (label && value) fields.push({ label, value });
+  });
+  return fields;
+}
+
 export interface OutcomeReceipt {
   decisions: number;
   criteria?: number;
