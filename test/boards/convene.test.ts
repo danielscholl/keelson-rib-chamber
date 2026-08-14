@@ -32,7 +32,7 @@ function shapes(section: Section) {
 }
 function byStrategy(cast: readonly Mind[]) {
   const section = conveneShapeSection(cast);
-  return new Map(shapes(section).map((i) => [(i.payload as { strategy: string }).strategy, i]));
+  return new Map(shapes(section).map((i) => [(i.binding as { strategy: string }).strategy, i]));
 }
 function fieldNames(item: { fields?: readonly { name: string }[] } | undefined): string[] {
   return (item?.fields ?? []).map((f) => f.name);
@@ -60,13 +60,24 @@ describe("conveneShapeSection cast + shapes", () => {
       "Review",
       "Delegate",
     ]);
-    expect(shapes(section).map((i) => (i.payload as { strategy: string }).strategy)).toEqual([
+    expect(shapes(section).map((i) => (i.binding as { strategy: string }).strategy)).toEqual([
       "sequential",
       "group-chat",
       "open-floor",
       "review",
       "magentic",
     ]);
+  });
+
+  test("each shape's strategy rides binding, with no payload and no same-named field", () => {
+    // `binding` merges into the dispatched payload AFTER collected field values,
+    // so the tab's strategy can never be shadowed by a form field — and no shape
+    // may collect a field named after the bound key either.
+    for (const item of shapes(conveneShapeSection([A, B, C]))) {
+      expect(item.binding).toEqual({ strategy: expect.any(String) });
+      expect(item.payload).toBeUndefined();
+      expect(fieldNames(item)).not.toContain("strategy");
+    }
   });
 
   test("every shape describes itself inline, and still carries the fuller hover hint", () => {

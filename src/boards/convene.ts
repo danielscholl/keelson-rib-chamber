@@ -303,7 +303,9 @@ function shapeActions(cast: readonly Mind[]): CanvasActionItem[] {
       // Convene is the board's one primary verb; tone the submit without tinting the
       // tab (`tone` would ride both).
       submitTone: "brand",
-      payload: { strategy: s.strategy },
+      // The tab's strategy rides `binding` (merged after the collected fields),
+      // so no field can shadow which shape the click convenes.
+      binding: { strategy: s.strategy },
     };
     if (!gate.ok) return { ...base, subtitle: gate.short, disabled: true, reason: gate.reason };
     return {
