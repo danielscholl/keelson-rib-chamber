@@ -19,6 +19,8 @@ interface ActivityEvent {
   icon: string;
   glyph: CanvasTone;
   text: string;
+  chip?: { label: string; tone?: CanvasTone };
+  detail?: string;
 }
 
 // The Briefing's always-on RECORD register is a glance, not a log: cap the feed and
@@ -39,8 +41,9 @@ export function recordSection(
   lenses: readonly LensRecord[],
   now: number = Date.now(),
   limit: number = FEED_LIMIT,
+  outcomes?: ReadonlyMap<string, string>,
 ): RowsSection {
-  const events = collectEvents(minds, rooms, lenses);
+  const events = collectEvents(minds, rooms, lenses, outcomes);
   if (events.length === 0) {
     return {
       kind: "rows",
@@ -60,6 +63,8 @@ export function recordSection(
       glyph: e.glyph,
       text: e.text,
       trailing: agoLabel(e.at, now),
+      ...(e.chip ? { chip: e.chip } : {}),
+      ...(e.detail ? { detail: e.detail } : {}),
     };
   });
   const overflow = events.length - shown.length;
@@ -74,6 +79,7 @@ function collectEvents(
   minds: readonly MindActivity[],
   rooms: readonly Room[],
   lenses: readonly LensRecord[],
+  outcomes?: ReadonlyMap<string, string>,
 ): ActivityEvent[] {
   const events: ActivityEvent[] = [];
   for (const m of minds) {
@@ -85,10 +91,14 @@ function collectEvents(
   }
   for (const r of rooms) {
     const title = r.name || r.slug;
+    // A closed room whose verdict the briefing gate has read wears it here too: a
+    // chip marks the row, the full title discloses in place under the feed line.
+    const verdict = r.status === "active" ? undefined : outcomes?.get(r.slug);
     push(events, r.createdAt, {
       icon: "▦",
       glyph: roomGlyph(r.status),
       text: `Room "${title}" · ${roomVerb(r.status)}`,
+      ...(verdict ? { chip: { label: "verdict", tone: "brand" }, detail: verdict } : {}),
     });
   }
   for (const l of lenses) {

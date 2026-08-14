@@ -35,12 +35,23 @@ async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 1000)
   throw new Error("waitFor: condition not met within timeout");
 }
 
-// A valid briefing board an agent turn might author — the scripted reply text.
+// A valid copy reply the briefing turn might author — the scripted reply text. The
+// turn contributes ONLY copy now (the register's structure is rib-built), keyed by
+// the refs the prompt names.
+const briefReply = JSON.stringify({
+  lead: "A room just ended.",
+  readings: {
+    "r-done": "The room settled the design.",
+    findings: "The findings lens now names the gap.",
+  },
+});
+
+// A valid canvas board — the lens emit's body and the digest store's content.
 const briefBoard: CanvasBoardView = {
   view: "board",
   title: "Chamber Briefing",
   header: { status: { label: "Updated", tone: "brand" } },
-  sections: [{ kind: "rows", items: [{ text: "A room just ended.", glyph: "ok" }] }],
+  sections: [{ kind: "rows", items: [{ text: "A lens body.", glyph: "ok" }] }],
 };
 
 // A SnapshotManager double that runs the registered composer + validator on
@@ -136,7 +147,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
 
   test("the footer is seeded with a valid quiet board at boot", async () => {
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
     await waitFor(() => lastBoard() !== undefined);
     // registerTools seeds BRIEF_KEY via sm.recompose — the cache holds the quiet board.
@@ -159,7 +170,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
       home,
     );
     const { sm } = fakeSnapshotManager();
-    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
     await waitFor(async () => (await readWatermark(home)).briefPromoted === false);
 
@@ -192,7 +203,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
       home,
     );
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
     // Boot composes the footer in-process; wait for the standing-synthesis register to appear.
     await waitFor(() => (lastBoard()?.sections ?? []).some((s) => s.title === "The read"));
@@ -218,7 +229,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
       home,
     );
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
     // Wait for the composed footer (its record register shows the empty-chamber hint).
     await waitFor(() => JSON.stringify(lastBoard() ?? {}).includes("No activity yet"));
@@ -246,7 +257,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
       );
     }
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
     // Wait for the composed board: the seed's record holds one "…" row, the composed
     // record overflows, so the overflow row proves we captured the real compose.
@@ -262,7 +273,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
   test("quiet (nothing new) runs ZERO agent turns and leaves the watermark unchanged", async () => {
     await seedMinds(); // minds alone are NOT substance
     const { sm } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
 
     await evaluateBriefGate();
@@ -280,26 +291,38 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
 
     await evaluateBriefGate();
 
     expect(requests).toHaveLength(1);
-    // The prompt carries the delta as metadata (name/status/turns), no transcript.
+    // The prompt carries the delta as metadata (ref/name/status/turns), no transcript.
     const prompt = requests[0]?.prompt ?? "";
     expect(prompt).toContain("What's new since the last briefing");
+    expect(prompt).toContain("ref r-done");
     expect(prompt).toContain("Design Review");
     expect(prompt).toContain("done");
     // Tools are withheld for the compose turn (cost + no side effects).
     expect(requests[0]?.allowedTools).toEqual([]);
-    // The turn's content became the footer's delta register, labelled and counted.
+    // The rib-built register leads with the pulse, labelled and counted; the head
+    // strip says who acted (the ended room's cast in seat order).
     const footer = lastBoard();
     expect(footer?.title).toBe("Briefing");
     expect(footer?.header?.status?.label).toBe("1 new");
+    expect(footer?.header?.people?.map((p) => p.name)).toEqual(["ada", "bo"]);
     const delta = footer?.sections.find((s) => s.title === "Since you last looked");
-    expect(delta?.kind).toBe("rows");
-    expect(JSON.stringify(delta)).toContain("A room just ended.");
+    expect(delta?.kind).toBe("stats");
+    if (delta?.kind !== "stats") throw new Error("no pulse section");
+    expect(delta.items[0]?.label).toBe("room concluded");
+    // The turn's copy rides the structure: the lead as the register's one prose
+    // row, the per-ref reading as the room card's footnote.
+    expect(JSON.stringify(footer)).toContain("A room just ended.");
+    const cards = footer?.sections.find((s) => s.kind === "cards");
+    if (cards?.kind !== "cards") throw new Error("no room card");
+    expect(cards.items[0]?.title).toBe("Design Review");
+    expect(cards.items[0]?.pill).toEqual({ label: "done", tone: "info" });
+    expect(cards.items[0]?.footnote).toBe("The room settled the design.");
     // The delta register carries its deterministic jump chips — built from the
     // gate's structured slugs (never parsed from the turn's prose), reusing the
     // rooms index's own open verb.
@@ -321,7 +344,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
     const { sm, published, lastBoard } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
     await evaluateBriefGate();
     expect(requests).toHaveLength(1);
@@ -351,7 +374,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-race", name: "Race Room", status: "done" }));
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run, started, release } = gatedRunAgentTurn(JSON.stringify(briefBoard));
+    const { run, started, release } = gatedRunAgentTurn(briefReply);
     rib.registerTools?.(makeCtx(run, sm));
 
     const gate = evaluateBriefGate();
@@ -364,12 +387,51 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(lastBoard()?.sections.some((s) => s.title === "Open what changed")).toBe(false);
   });
 
+  test("a lens retire landing mid-turn is not resurrected as a chip when the paid turn lands", async () => {
+    // The lens mirror of the room-delete race: the promote rebuilds sources from a
+    // read taken BEFORE the paid turn ran, so without the dropped-ids set a retire
+    // landing mid-turn would repaint a chip whose key was just released.
+    await seedMinds();
+    const { sm, published } = fakeSnapshotManager();
+    const parked = gatedRunAgentTurn(briefReply);
+    const tools = rib.registerTools?.(makeCtx(parked.run, sm)) ?? [];
+    const emit = tools.find((t) => t.name === "chamber_emit_lens");
+    const toolCtx: ToolContext = {
+      cwd: ".",
+      emit: () => {},
+      abortSignal: new AbortController().signal,
+    };
+    await emit?.execute({ id: "findings", board: briefBoard }, toolCtx);
+    await parked.started;
+    const res = await rib.onAction?.(
+      { type: "retire-lens", payload: { id: "findings" } },
+      {} as unknown as RibContext,
+    );
+    expect(res?.ok).toBe(true);
+    parked.release();
+    // Chain behind the parked promote and the retire's queued re-evaluation.
+    await evaluateBriefGate();
+
+    // No published board — not even the transient promote — carried a chip opening
+    // the released key.
+    const hasDeadChip = published
+      .flatMap((b) => (b as CanvasBoardView).sections ?? [])
+      .some(
+        (s) =>
+          s.kind === "actions" &&
+          s.items.some(
+            (i) => i.type === "lens-open" && JSON.stringify(i.payload) === '{"id":"findings"}',
+          ),
+      );
+    expect(hasDeadChip).toBe(false);
+  });
+
   test("a changed lens promotes via the chamber_emit_lens hook (exactly one turn)", async () => {
     await seedMinds();
     const { sm, published } = fakeSnapshotManager();
     // Only ONE scripted turn: the lens emit publishes (no turn of its own) and fires
     // the gate, which runs the single briefing turn.
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     const tools = rib.registerTools?.(makeCtx(run, sm)) ?? [];
     const emit = tools.find((t) => t.name === "chamber_emit_lens");
     expect(emit).toBeDefined();
@@ -417,7 +479,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
   test("an unchanged re-author is not substance — the cadence buys no second turn", async () => {
     await seedMinds();
     const { sm } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     const tools = rib.registerTools?.(makeCtx(run, sm)) ?? [];
     const emit = tools.find((t) => t.name === "chamber_emit_lens");
     const toolCtx: ToolContext = {
@@ -443,7 +505,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
   test("retiring a promoted lens lapses the delta — the delete fires the gate, no second paid turn", async () => {
     await seedMinds();
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     const tools = rib.registerTools?.(makeCtx(run, sm)) ?? [];
     const emit = tools.find((t) => t.name === "chamber_emit_lens");
     const toolCtx: ToolContext = {
@@ -481,7 +543,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
     const { sm, lastBoard } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
 
     await evaluateBriefGate(); // promote
@@ -505,7 +567,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
     const { sm } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
 
     // Three triggers racing one ended room: the first promotes, the rest chain behind
@@ -515,12 +577,14 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(requests).toHaveLength(1);
   });
 
-  test("fail-closed: a non-board turn result keeps the prior board, no advance, no throw", async () => {
+  test("a non-copy JSON reply still promotes the rib-built register — copy degrades per-field", async () => {
     await seedMinds();
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
     const { sm, lastBoard } = fakeSnapshotManager();
-    // The turn returns a non-board JSON (a table view) — expectView rejects it.
+    // The turn returns JSON that is not the copy contract (a whole table view). The
+    // structure is rib-built, so the promote stands — only the copy is dropped. This
+    // also means the same delta never buys a SECOND turn on the next trigger.
     const { run, requests } = scriptedRunAgentTurn([
       { text: JSON.stringify({ view: "table", columns: [{ key: "a" }], rows: [] }) },
     ]);
@@ -529,9 +593,31 @@ describe("brief gate (cost-safety + delta promotion)", () => {
 
     await expect(evaluateBriefGate()).resolves.toBeUndefined(); // never throws
 
-    expect(requests).toHaveLength(1); // the turn ran
-    // …but its bad output was dropped: no delta register reached the footer, the header
-    // stays calm, and the watermark did NOT advance (a later valid turn can promote).
+    expect(requests).toHaveLength(1);
+    const footer = lastBoard();
+    expect(footer?.header?.status?.label).toBe("1 new");
+    expect(footer?.sections.find((s) => s.title === "Since you last looked")?.kind).toBe("stats");
+    // Nothing from the bad reply leaked into the banner.
+    expect(JSON.stringify(footer)).not.toContain('"view":"table"');
+    const wm = await readWatermark(home);
+    expect(wm.briefPromoted).toBe(true);
+    expect(wm.ackedEndedRooms).toEqual(["r-done"]);
+  });
+
+  test("fail-closed: a turn that errors keeps the prior board, no advance, no throw", async () => {
+    await seedMinds();
+    const rooms = createFileRoomStore(roomsDir());
+    await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
+    const { sm, lastBoard } = fakeSnapshotManager();
+    const { run, requests } = scriptedRunAgentTurn([{ text: "", status: "error" }]);
+    rib.registerTools?.(makeCtx(run, sm));
+    await waitFor(() => lastBoard() !== undefined);
+
+    await expect(evaluateBriefGate()).resolves.toBeUndefined(); // never throws
+
+    expect(requests).toHaveLength(1); // the turn ran and failed
+    // No promote: the register is withheld, and the watermark did NOT advance — a
+    // later trigger may retry the same delta with a fresh turn.
     expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
     expect(lastBoard()?.header?.status).toBeUndefined();
     const wm = await readWatermark(home);
@@ -539,13 +625,13 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(wm.ackedEndedRooms).toEqual([]);
   });
 
-  test("tolerates a ```json-fenced board reply: still promotes (parse hardening)", async () => {
+  test("tolerates a ```json-fenced copy reply: still promotes with its copy (parse hardening)", async () => {
     await seedMinds();
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
     const { sm, lastBoard } = fakeSnapshotManager();
-    // A live model commonly wraps the JSON board in a markdown fence.
-    const fenced = ["```json", JSON.stringify(briefBoard), "```"].join("\n");
+    // A live model commonly wraps the JSON copy in a markdown fence.
+    const fenced = ["```json", briefReply, "```"].join("\n");
     const { run, requests } = scriptedRunAgentTurn([{ text: fenced }]);
     rib.registerTools?.(makeCtx(run, sm));
 
@@ -559,13 +645,13 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect(wm.briefPromoted).toBe(true);
   });
 
-  test("tolerates a board reply with leading prose: still promotes (parse hardening)", async () => {
+  test("tolerates a copy reply with leading prose: still promotes with its copy (parse hardening)", async () => {
     await seedMinds();
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
     const { sm, lastBoard } = fakeSnapshotManager();
     const { run, requests } = scriptedRunAgentTurn([
-      { text: `Here is the briefing:\n${JSON.stringify(briefBoard)}` },
+      { text: `Here is the briefing:\n${briefReply}` },
     ]);
     rib.registerTools?.(makeCtx(run, sm));
 
@@ -576,12 +662,13 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     expect((await readWatermark(home)).briefPromoted).toBe(true);
   });
 
-  test("fail-closed: an unparseable (non-JSON) reply keeps the prior board, no advance, no throw", async () => {
+  test("an unparseable (non-JSON) reply still promotes the rib-built register, without copy", async () => {
     await seedMinds();
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
     const { sm, lastBoard } = fakeSnapshotManager();
-    // Prose with no JSON object at all — nothing to recover, so the gate fails closed.
+    // Prose with no JSON object at all — no copy to recover, but the deterministic
+    // structure promotes so the delta is not silently lost (and not re-billed).
     const { run, requests } = scriptedRunAgentTurn([{ text: "Bob replies." }]);
     rib.registerTools?.(makeCtx(run, sm));
     await waitFor(() => lastBoard() !== undefined);
@@ -589,11 +676,13 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await expect(evaluateBriefGate()).resolves.toBeUndefined();
 
     expect(requests).toHaveLength(1);
-    // No delta register reached the footer; the watermark stayed cold.
-    expect(lastBoard()?.sections.some((s) => s.title === "Since you last looked")).toBe(false);
+    const footer = lastBoard();
+    expect(footer?.header?.status?.label).toBe("1 new");
+    // The prose reply never reaches the banner as copy.
+    expect(JSON.stringify(footer)).not.toContain("Bob replies.");
     const wm = await readWatermark(home);
-    expect(wm.briefPromoted).toBe(false);
-    expect(wm.ackedEndedRooms).toEqual([]);
+    expect(wm.briefPromoted).toBe(true);
+    expect(wm.ackedEndedRooms).toEqual(["r-done"]);
   });
 
   test("seam absent (no runAgentTurn) keeps quiet only — no turn, no publish path", async () => {
@@ -625,7 +714,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const rooms = createFileRoomStore(roomsDir());
     await rooms.saveRoom(makeRoom({ slug: "r-done", name: "Design Review", status: "done" }));
     const { sm } = fakeSnapshotManager();
-    const { run } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run } = scriptedRunAgentTurn([{ text: briefReply }]);
     const refreshed: string[] = [];
     rib.registerTools?.(
       makeCtx(run, sm, async (name) => {
@@ -646,7 +735,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     const { sm, published } = fakeSnapshotManager();
     // A turn held in flight until release(): dispose lands while it is parked, then it
     // settles "ok" — only the disposed guard can stop the late publish/write.
-    const { run, started, release } = gatedRunAgentTurn(JSON.stringify(briefBoard));
+    const { run, started, release } = gatedRunAgentTurn(briefReply);
     rib.registerTools?.(makeCtx(run, sm));
 
     const gate = evaluateBriefGate();
@@ -672,7 +761,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     await rooms.saveRoom(makeRoom({ slug: "r-done", status: "done" }));
     // First boot: a turn held in flight and NEVER released (and the gated fake ignores
     // the abort signal) — the worst case for the serialization chain.
-    const parked = gatedRunAgentTurn(JSON.stringify(briefBoard));
+    const parked = gatedRunAgentTurn(briefReply);
     rib.registerTools?.(makeCtx(parked.run, fakeSnapshotManager().sm));
     void evaluateBriefGate().catch(() => {});
     await parked.started;
@@ -685,7 +774,7 @@ describe("brief gate (cost-safety + delta promotion)", () => {
     // Fresh boot with a settled turn: the gate must run promptly, proving the chain was
     // not left parked. A 1s budget — a leaked chain would never resolve.
     const { sm } = fakeSnapshotManager();
-    const { run, requests } = scriptedRunAgentTurn([{ text: JSON.stringify(briefBoard) }]);
+    const { run, requests } = scriptedRunAgentTurn([{ text: briefReply }]);
     rib.registerTools?.(makeCtx(run, sm));
     await Promise.race([
       evaluateBriefGate(),
