@@ -391,8 +391,6 @@ function buildPlanSection(ledger: TaskLedger | undefined): CanvasBoardView["sect
   return [{ kind: "rows", title: `Plan · ${ledger.status}`, items }];
 }
 
-// The plan's composition at a glance: one leading row whose bar stacks the task
-// states, with "N/M settled" (completed + failed) as the trailing readout.
 function planSummaryRow(tasks: readonly LedgerTask[]): FeedItem {
   const settled = tasks.filter((t) => t.status === "completed" || t.status === "failed").length;
   return {
