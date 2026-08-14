@@ -226,16 +226,16 @@ describe("buildRoomSummaryHtml", () => {
   });
 
   // A Mind's name is agent-authored, so it reaches the page as data like the document does.
-  test.each([
-    "Ada <script>alert(1)</script>",
-    'Ada" onload="alert(1)',
-  ])("escapes a hostile speaker name: %s", (name) => {
-    const html = build({ minds: [{ slug: "ada", name, role: "architect", persona: "" }] });
-    expect(html).not.toContain(name);
-    expect(html).not.toMatch(/<script\b/i);
-    // The quote is escaped, so the payload stays inside the span's text instead of
-    // closing an attribute and opening a handler.
-    expect(html).not.toContain('" onload="');
-    expect(html).toContain("&");
-  });
+  test.each(["Ada <script>alert(1)</script>", 'Ada" onload="alert(1)'])(
+    "escapes a hostile speaker name: %s",
+    (name) => {
+      const html = build({ minds: [{ slug: "ada", name, role: "architect", persona: "" }] });
+      expect(html).not.toContain(name);
+      expect(html).not.toMatch(/<script\b/i);
+      // The quote is escaped, so the payload stays inside the span's text instead of
+      // closing an attribute and opening a handler.
+      expect(html).not.toContain('" onload="');
+      expect(html).toContain("&");
+    },
+  );
 });
