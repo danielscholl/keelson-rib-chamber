@@ -926,14 +926,9 @@ function buildDecisionsSection(
   return { kind: "rows", title: `Decisions · ${metric}`, items };
 }
 
-// The Outcome card: the document's authored title, a receipt (who synthesized
-// it, when, and a mechanical contract check against its own section headings —
-// never an authored claim), the document itself readable in place as prose
-// fields (outcomeDocumentFields; the whole flattened body when nothing parses),
-// and the two concrete verbs: Copy (the field's copyAction seam fetches the
-// full markdown on click and writes it to the clipboard — see index.ts's
-// outcomeCopyAction) and Explore in chat (the surface→chat handoff every ✦
-// verb uses — see outcomeExploreAction).
+// The receipt is a mechanical contract check against the document's own
+// section headings, never an authored claim; Copy hands back the original
+// markdown, not these flattened fields.
 function buildOutcomeSection(
   room: Room,
   outcome: OutcomeSplit,

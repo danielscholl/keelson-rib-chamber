@@ -348,35 +348,31 @@ const OUTCOME_DECISION = /\*\*Q(\d+)\s*—\s*([^\n]+?)\*\*/g;
 
 const OUTCOME_HEADING = /^###\s+([^\n]+)$/gm;
 
-// The outcome document broken into prose-card fields: any preamble ahead of the
-// first restated decision (unlabeled), a `Qn` field per decision (title + the
-// flattened text up to the next one), then one field per ### subsection labeled
-// by its heading — whatever headings the document actually wrote, not a fixed
-// contract set. Values are flattened plain text. Empty when nothing survives
-// flattening; the caller falls back to the whole flattened body.
+// Headings and restated decisions parse as ONE ordered marker stream — the
+// synthesis format doesn't order them, so a decision nested under a
+// "### Decisions" wrapper heading still yields its own Qn field.
 export function outcomeDocumentFields(body: string): OutcomeDocField[] {
-  const headings = [...body.matchAll(OUTCOME_HEADING)];
-  const head = body.slice(0, headings[0]?.index ?? body.length);
-  const markers = [...head.matchAll(OUTCOME_DECISION)];
+  const stream = [
+    ...[...body.matchAll(OUTCOME_HEADING)].map((m) => ({ decision: false, m })),
+    ...[...body.matchAll(OUTCOME_DECISION)].map((m) => ({ decision: true, m })),
+  ]
+    .flatMap(({ decision, m }) => (m.index === undefined ? [] : [{ decision, m, index: m.index }]))
+    .sort((a, b) => a.index - b.index);
   const fields: OutcomeDocField[] = [];
-  const preamble = flattenMarkdown(head.slice(0, markers[0]?.index ?? head.length));
+  const preamble = flattenMarkdown(body.slice(0, stream[0]?.index ?? body.length));
   if (preamble) fields.push({ value: preamble });
-  markers.forEach((m, i) => {
-    if (m.index === undefined) return;
-    const title = (m[2] ?? "").trim();
-    const gist = flattenMarkdown(
-      head.slice(m.index + m[0].length, markers[i + 1]?.index ?? head.length),
+  stream.forEach(({ decision, m, index }, i) => {
+    const prose = flattenMarkdown(
+      body.slice(index + m[0].length, stream[i + 1]?.index ?? body.length),
     );
-    const value = [title, gist].filter(Boolean).join(" ");
-    if (value) fields.push({ label: `Q${m[1]}`, value });
-  });
-  headings.forEach((h, i) => {
-    if (h.index === undefined) return;
-    const label = stripInlineMarks(h[1] ?? "").trim();
-    const value = flattenMarkdown(
-      body.slice(h.index + h[0].length, headings[i + 1]?.index ?? body.length),
-    );
-    if (label && value) fields.push({ label, value });
+    if (decision) {
+      const title = stripInlineMarks(m[2] ?? "").trim();
+      const value = [title, prose].filter(Boolean).join(" ");
+      if (value) fields.push({ label: `Q${m[1]}`, value });
+    } else {
+      const label = stripInlineMarks(m[1] ?? "").trim();
+      if (label && prose) fields.push({ label, value: prose });
+    }
   });
   return fields;
 }

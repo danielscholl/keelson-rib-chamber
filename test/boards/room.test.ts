@@ -884,6 +884,70 @@ describe("buildRoomBoard — decisions rail and outcome", () => {
     ]);
   });
 
+  test("decisions nested under a bare wrapper heading render as Qn fields, no empty heading field", () => {
+    const board = buildRoomBoard(room({ status: "done" }), [
+      entry({
+        parts: [
+          {
+            text: [
+              "Closing.",
+              "",
+              "---",
+              "",
+              "## Verdict",
+              "",
+              "### Decisions",
+              "",
+              "**Q1 — Ship `fast` mode.** Yes, *behind a flag*.",
+              "",
+              "**Q2 — Name it.** Done.",
+              "",
+              "### Test plan",
+              "- Fake exec.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    ]);
+    const card = outcomeCard(board);
+    expect(card?.fields?.map((f) => [f.label, f.value])).toEqual([
+      ["Q1", "Ship fast mode. Yes, behind a flag."],
+      ["Q2", "Name it. Done."],
+      ["Test plan", "• Fake exec."],
+      ["Copy", "Outcome as markdown"],
+    ]);
+  });
+
+  test("a heading with direct prose keeps its field ahead of its nested decisions", () => {
+    const board = buildRoomBoard(room({ status: "done" }), [
+      entry({
+        parts: [
+          {
+            text: [
+              "Closing.",
+              "",
+              "---",
+              "",
+              "## Verdict",
+              "",
+              "### Decisions",
+              "",
+              "Both landed unanimously.",
+              "",
+              "**Q1 — Ship it.** Yes.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    ]);
+    const card = outcomeCard(board);
+    expect(card?.fields?.map((f) => [f.label, f.value])).toEqual([
+      ["Decisions", "Both landed unanimously."],
+      ["Q1", "Ship it. Yes."],
+      ["Copy", "Outcome as markdown"],
+    ]);
+  });
+
   test("a marker-and-heading-free outcome still renders as one prose field", () => {
     const board = buildRoomBoard(room({ status: "done" }), [
       entry({ parts: [{ text: "Closing.\n\n---\n\n## Outcome\n\nWe ship it. *Now.*" }] }),
