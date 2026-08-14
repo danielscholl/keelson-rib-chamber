@@ -336,8 +336,12 @@ describe("buildRosterBoard populated", () => {
       type: "set-model",
       label: "Model — claude-opus-4-7",
       glyph: "⚙",
-      payload: { slug: "ada" },
+      binding: { slug: "ada" },
     });
+    // The slug rides binding (merged after collected fields) with no payload
+    // left behind, so no form field can shadow which Mind the pin targets.
+    expect(setModel?.payload).toBeUndefined();
+    expect(setModel?.fields?.map((f) => f.name)).not.toContain("slug");
     expect(setModel?.destructive ?? false).toBe(false);
     // One field: the host's live-catalog picker, non-required (its clear row
     // drops the pin), opening on the current provider/model pair so an idle

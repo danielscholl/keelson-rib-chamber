@@ -159,12 +159,13 @@ export function mindCardActions(mind: Mind): CanvasActionItem[] {
     // The current model reads off this action's label (the at-rest indicator).
     // A pick carries its provider via the `provider` companion key so the pin
     // stays a coherent pair; the clear row dispatches "" which setMindModel
-    // reads as drop-the-pin.
+    // reads as drop-the-pin. The target slug rides `binding` (merged after the
+    // collected fields), so no field can shadow which Mind the pin lands on.
     {
       type: "set-model",
       label: `Model — ${mind.model ?? "default"}`,
       glyph: "⚙",
-      payload: { slug: mind.slug },
+      binding: { slug: mind.slug },
       fields: [
         {
           name: "model",
