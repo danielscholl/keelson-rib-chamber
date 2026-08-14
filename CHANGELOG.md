@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.52.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.51.0...v0.52.0) (2026-08-14)
+
+
+### Added
+
+* **brief:** compose the briefing rib-side; the turn authors only copy ([#357](https://github.com/danielscholl/keelson-rib-chamber/issues/357)) ([ae7c14f](https://github.com/danielscholl/keelson-rib-chamber/commit/ae7c14ff2a19a86f55fd7f5d2e8cdc4feca20d8a))
+
+
+### Fixed
+
+* **lens:** outrun the prior stamp when an html page changes ([#355](https://github.com/danielscholl/keelson-rib-chamber/issues/355)) ([1ba8f81](https://github.com/danielscholl/keelson-rib-chamber/commit/1ba8f812ac8cfa0b7263c7d9037c53e226ec7d0f))
+
 ## [0.51.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.50.0...v0.51.0) (2026-08-14)
 
 
