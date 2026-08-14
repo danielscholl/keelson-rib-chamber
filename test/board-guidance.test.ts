@@ -66,6 +66,29 @@ describe("board composition guidance", () => {
     }
   });
 
+  // The contract is the only guidance a room turn tabling an exhibit ever sees, so
+  // the field vocabulary has to survive compression — pin the load-bearing tokens in
+  // both tiers so the compact one cannot silently under-teach the full one.
+  test("both tiers name the load-bearing vocabulary tokens", () => {
+    const guidance = buildBoardCompositionGuidance();
+    const tokens = [
+      "`delta`",
+      "`spark`",
+      "`null`",
+      "`prose",
+      "`stacked",
+      "`action`",
+      "`detail`",
+      "`bar`",
+      "`ramp-1`",
+    ];
+    for (const text of [BOARD_COMPOSITION_CONTRACT, guidance]) {
+      for (const token of tokens) {
+        expect(text).toContain(token);
+      }
+    }
+  });
+
   test("the lens workflow prompt embeds the guidance block", () => {
     expect(LENS_WF_PROMPT).toContain("## Composing the board");
     expect(LENS_WF_PROMPT).toContain("`bars`");
@@ -118,6 +141,19 @@ describe("taught vocabulary drift canary", () => {
             points: [
               { x: "a", y: 3 },
               { x: "b", y: 5 },
+            ],
+          },
+        ],
+      },
+      {
+        kind: "chart",
+        mark: "area",
+        series: [
+          {
+            label: "cumulative",
+            points: [
+              { x: 1, y: 3 },
+              { x: 2, y: 8 },
             ],
           },
         ],
@@ -188,5 +224,46 @@ describe("taught vocabulary drift canary", () => {
       ],
     };
     expect(() => canvasViewSchema.parse(bad)).toThrow();
+  });
+
+  // Unlike the baseline rule above, the mutual-exclusion refines live on the section
+  // item schemas, so the emit edge (canvasBoardViewSchema) is the one that bites.
+  test("the canary bites: a card setting both prose and stacked is rejected", () => {
+    const bad = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "charter",
+              prose: true,
+              stacked: true,
+              fields: [{ label: "mission", value: "hold the line" }],
+            },
+          ],
+        },
+      ],
+    };
+    expect(() => canvasBoardViewSchema.parse(bad)).toThrow();
+  });
+
+  test("the canary bites: a row carrying both action and detail is rejected", () => {
+    const bad = {
+      view: "board",
+      sections: [
+        {
+          kind: "rows",
+          items: [
+            {
+              text: "overloaded row",
+              action: { type: "chamber.open", payload: { id: "r1" } },
+              detail: "the long record the row would disclose",
+            },
+          ],
+        },
+      ],
+    };
+    expect(() => canvasBoardViewSchema.parse(bad)).toThrow();
   });
 });

@@ -3,10 +3,10 @@
 // `html` kind. It lives here, not in shared: Chamber is the only place an LLM authors
 // a board (every other rib builds its boards deterministically in code).
 //
-// Two tiers, both fed from the same source so they cannot drift: the one-paragraph
-// contract that rides the board tools' descriptions — the only seam a room turn has,
-// since it tables an exhibit with no prompt to inject into — and the fuller block the
-// lens workflow prompt embeds. The renderer owns typography, palette, and layout, so
+// Two tiers, sharing the FORMS list and pinned together by a drift test: the
+// one-paragraph contract that rides the board tools' descriptions — the only seam a
+// room turn has, since it tables an exhibit with no prompt to inject into — and the
+// fuller block the lens workflow prompt embeds. The renderer owns typography, palette, and layout, so
 // neither tier repeats the html guidance's token/font/CSP rules; a board author's
 // judgement goes into which form carries each fact, and into the copy.
 
@@ -78,7 +78,8 @@ export const BOARD_FORM_KINDS: readonly string[] = FORMS.map((f) => f.kind);
 export const BOARD_NON_FORM_KINDS: readonly string[] = ["actions", "seats"];
 
 // Rules about composition rather than form — what the board says and how each text
-// slot earns its place. Shared by both tiers.
+// slot earns its place. Only the block renders this array; the contract below carries
+// each rule compressed, and the drift test keeps the two from diverging.
 const COMPOSITION: readonly string[] = [
   "The title states the finding, not the subject — what the board says, not what it is about.",
   "Summary before detail; order sections by what the reader needs first.",
@@ -99,7 +100,10 @@ export const BOARD_COMPOSITION_CONTRACT = [
   "Lead with the summary and put the detail under it; title it with the finding, not the subject.",
   "Keep each text slot in its job — a pill is a short state chip, never a clause; a card field is a label plus a value, never a sentence (`stacked: true` when fields need their own lines, a row's `detail` for long-form text).",
   "Group repeated records rather than listing one subject many times: when a row repeats, the count is the finding, so carry it as `bars`.",
-  "Tone means state and always rides a word, never colour alone.",
+  "A change reading is `delta` (direction picks the arrow, tone says whether the move is good), never a free-text arrow — `spark` adds trend context as enhancement only.",
+  "Unmeasured is `null` (a stat or bar's `value`, a segment's `n`) and renders hatched or as a muted `?`, never a fabricated 0.",
+  "A card is a document (`prose: true`) or a mono readout (`stacked: true`) and a row carries `action` or `detail` — one, never both; `bar` puts a per-item meter on a card or row.",
+  "Tone means state and always rides a word, never colour alone; `ramp-1`…`ramp-5` is for ordered magnitude only, never identity or state.",
 ].join(" ");
 
 // The fuller block for a workflow prompt node, where there is room to teach the shape
