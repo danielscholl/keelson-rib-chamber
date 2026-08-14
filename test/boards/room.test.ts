@@ -274,15 +274,21 @@ describe("buildRoomBoard", () => {
     ]);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
     expect(debateItems(board)).toHaveLength(4);
-    const byLabel = new Map(voicesItems(board).map((v) => [v.chip?.label, v.trailing]));
-    expect(byLabel.get("a")).toBe("2 turns");
-    expect(byLabel.get("b")).toBe("1 turn");
+    const byLabel = new Map(voicesItems(board).map((v) => [v.chip?.label, v]));
+    expect(byLabel.get("a")?.trailing).toBe("2 turns");
+    expect(byLabel.get("b")?.trailing).toBe("1 turn");
+    // Each row's bar is that speaker's share of the room's agent turns — the
+    // director injection contributes none, so the total here is 3, not 4.
+    expect(byLabel.get("a")?.bar).toEqual({ value: 2, total: 3 });
+    expect(byLabel.get("b")?.bar).toEqual({ value: 1, total: 3 });
   });
 
   test("Voices renders every participant even with zero turns, in participant order", () => {
     const board = buildRoomBoard(room({ participants: ["a", "b"] }), []);
     expect(voicesItems(board).map((v) => v.chip?.label)).toEqual(["a", "b"]);
     expect(voicesItems(board).every((v) => v.trailing === "0 turns")).toBe(true);
+    // No agent turns yet → no share to draw, so no bar at all (never a 0/0 fill).
+    expect(voicesItems(board).every((v) => v.bar === undefined)).toBe(true);
   });
 
   test("empty turn text is coalesced to a placeholder", () => {
@@ -883,11 +889,49 @@ describe("buildRoomBoard — magentic plan + manager", () => {
     if (plan?.kind !== "rows") throw new Error("expected a Plan section");
     expect(plan.title).toBe("Plan · executing");
     expect(plan.items.map((i) => [i.text, i.chip?.label, i.glyph])).toEqual([
+      ["tasks", undefined, "neutral"],
       ["build parser", "alice", "ok"],
       ["wire api", "bob", "info"],
       ["write tests", undefined, "neutral"],
     ]);
-    expect(plan.items[0]?.trailing).toBe("completed · did it");
+    // The leading strip: the composition bar plus the settled count (completed+failed).
+    expect(plan.items[0]?.trailing).toBe("1/3 settled");
+    expect(plan.items[0]?.bar).toEqual({
+      segments: [
+        { label: "completed", n: 1, tone: "ok" },
+        { label: "in-progress", n: 1, tone: "info" },
+        { label: "pending", n: 1, tone: "neutral" },
+        { label: "failed", n: 0, tone: "error" },
+      ],
+    });
+    expect(plan.items[1]?.trailing).toBe("completed · did it");
+  });
+
+  test("the plan strip keeps zero-count states in the legend and settles failures too", () => {
+    const board = buildRoomBoard(
+      room({ strategy: "magentic", config: { manager: "mgr" } }),
+      [],
+      ledger([
+        t({ id: "t1", status: "completed" }),
+        t({ id: "t2", description: "second", status: "completed" }),
+        t({ id: "t3", description: "third", status: "failed" }),
+      ]),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const plan = board.sections.find((s) => s.kind === "rows" && s.title?.startsWith("Plan"));
+    if (plan?.kind !== "rows") throw new Error("expected a Plan section");
+    const strip = plan.items[0];
+    expect(strip?.text).toBe("tasks");
+    expect(strip?.trailing).toBe("3/3 settled");
+    // A state with no tasks contributes no fill but keeps its hover-legend entry.
+    expect(strip?.bar).toEqual({
+      segments: [
+        { label: "completed", n: 2, tone: "ok" },
+        { label: "in-progress", n: 0, tone: "info" },
+        { label: "pending", n: 0, tone: "neutral" },
+        { label: "failed", n: 1, tone: "error" },
+      ],
+    });
   });
 
   test("no Plan section without a ledger; an empty ledger shows 'No tasks yet'", () => {
@@ -921,6 +965,9 @@ describe("buildRoomBoard — magentic plan + manager", () => {
     expect(mgrTurn?.glyph).toBe("brand");
     expect(mgrTurn?.chip?.tone).toBe("brand");
     expect(mgrTurn?.icon).toBeUndefined();
+    // The facilitator's Voices row carries the same share bar a participant's does.
+    const mgrVoice = voicesItems(board).find((v) => v.chip?.label === "mgr");
+    expect(mgrVoice?.bar).toEqual({ value: 1, total: 2 });
   });
 
   test("an active magentic room offers Stop but no per-worker Call-on", () => {

@@ -1,8 +1,10 @@
-import type { CanvasBoardView, CanvasPerson, CanvasTone } from "@keelson/shared";
+import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
 import { isExhibit, type LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
 import { turnsLabel } from "../room-text.ts";
-import { identityToneForSlot, type Mind, type Room } from "../types.ts";
+import type { Mind, Room, TaskLedger } from "../types.ts";
+import { personFor } from "./people.ts";
+import { taskBarSegments } from "./room.ts";
 
 // Pure: the persisted rooms -> a canvas `board`. Active rooms come first (most
 // relevant), then closed (done/stopped) history; listRooms is already newest-first
@@ -23,6 +25,7 @@ export function buildRoomsIndexBoard(
   minds: readonly Mind[] = [],
   lenses: readonly LensRecord[] = [],
   outcomeSlugs: ReadonlySet<string> = new Set(),
+  ledgers: ReadonlyMap<string, TaskLedger> = new Map(),
 ): CanvasBoardView {
   const active = rooms.filter((r) => r.status === "active");
   const closed = rooms.filter((r) => r.status !== "active");
@@ -43,7 +46,7 @@ export function buildRoomsIndexBoard(
           {
             kind: "cards",
             items: ordered.map((r) =>
-              cardFor(r, bySlug, tabledByRoom.get(r.slug) ?? [], outcomeSlugs),
+              cardFor(r, bySlug, tabledByRoom.get(r.slug) ?? [], outcomeSlugs, ledgers.get(r.slug)),
             ),
           },
         ];
@@ -62,18 +65,10 @@ export function buildRoomsIndexBoard(
   };
 }
 
-// One participant slug -> a people entry: the Mind's display name wearing its
-// identity tone while the slug still resolves against the roster; a retired or
-// unknown slug stays as the slug with no tone (the muted dot).
-function personFor(slug: string, bySlug: ReadonlyMap<string, Mind>): CanvasPerson {
-  const mind = bySlug.get(slug);
-  if (!mind) return { name: slug };
-  return { name: mind.name, tone: identityToneForSlot(mind.identitySlot) };
-}
-
 // One room -> one card: an identity dot toned by status, one job per encoding — the
-// pill carries STATE (the status word) and the bar carries MAGNITUDE (turn progress),
-// where the prior version packed both into a `done · 12/12` pill string. The numbers
+// pill carries STATE (the status word) and the bar carries MAGNITUDE (turn progress;
+// a magentic room with a planned ledger swaps in its task composition instead), where
+// the prior version packed both into a `done · 12/12` pill string. The numbers
 // stay as a field in ink, alongside the room shape (strategy + facilitator), the
 // cast (a people field — each name in its Mind's identity hue), and the
 // started-relative time. EVERY room offers an Open — a closed room's drawer holds its
@@ -85,6 +80,7 @@ function cardFor(
   bySlug: ReadonlyMap<string, Mind>,
   tabled: readonly LensRecord[],
   outcomeSlugs: ReadonlySet<string>,
+  ledger: TaskLedger | undefined,
 ) {
   const tone = statusTone(room.status);
   const cappedTurnIndex = Math.min(room.turnIndex, room.turnBudget);
@@ -92,7 +88,10 @@ function cardFor(
     title: room.name,
     dot: tone,
     pill: { label: room.status, tone },
-    bar: { value: cappedTurnIndex, total: room.turnBudget },
+    bar:
+      room.strategy === "magentic" && ledger && ledger.tasks.length > 0
+        ? { segments: taskBarSegments(ledger.tasks) }
+        : { value: cappedTurnIndex, total: room.turnBudget },
     fields: [
       { label: "turns", value: turnsLabel(room.turnIndex, room.turnBudget) },
       // The round cursor is meaningful only for round-based strategies (it stays 0

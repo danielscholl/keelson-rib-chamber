@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,6 +133,63 @@ describe("collect-rooms", () => {
         items.find((item) => item.title === title)?.actions?.map((action) => action.type);
       expect(actionsFor("Marked")).toEqual(["room-open", "room-summary", "room-delete"]);
       expect(actionsFor("Legacy")).toEqual(["room-open", "room-delete"]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a magentic room's ledger backs its composition bar; a torn ledger keeps the turn fill", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(
+        room({
+          slug: "planned",
+          name: "Planned",
+          strategy: "magentic",
+          status: "active",
+          turnIndex: 2,
+        }),
+      );
+      await store.saveLedger("planned", {
+        roomSlug: "planned",
+        goal: "g",
+        manager: "mgr",
+        status: "executing",
+        updatedAt: "t",
+        tasks: [
+          {
+            id: "t1",
+            description: "build it",
+            status: "completed",
+            createdAt: "t",
+            updatedAt: "t",
+          },
+          { id: "t2", description: "test it", status: "pending", createdAt: "t", updatedAt: "t" },
+        ],
+      });
+      await store.saveRoom(
+        room({ slug: "torn", name: "Torn", strategy: "magentic", status: "active", turnIndex: 3 }),
+      );
+      await writeFile(join(home, "rooms", "torn", "ledger.json"), "{not json");
+
+      const { out, code } = await runCollector(home);
+
+      expect(code).toBe(0);
+      const board = JSON.parse(out) as {
+        sections: { kind: string; items: { title: string; bar?: unknown }[] }[];
+      };
+      const items = board.sections.find((s) => s.kind === "cards")?.items ?? [];
+      const barFor = (title: string) => items.find((i) => i.title === title)?.bar;
+      expect(barFor("Planned")).toEqual({
+        segments: [
+          { label: "completed", n: 1, tone: "ok" },
+          { label: "in-progress", n: 0, tone: "info" },
+          { label: "pending", n: 1, tone: "neutral" },
+          { label: "failed", n: 0, tone: "error" },
+        ],
+      });
+      expect(barFor("Torn")).toEqual({ value: 3, total: 6 });
     } finally {
       await rm(home, { recursive: true, force: true });
     }

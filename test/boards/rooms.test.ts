@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type CanvasTone, canvasViewSchema } from "@keelson/shared";
 import { buildRoomsIndexBoard } from "../../src/boards/rooms.ts";
-import type { Mind, Room } from "../../src/types.ts";
+import type { LedgerTask, Mind, Room, TaskLedger } from "../../src/types.ts";
 
 const room = (over: Partial<Room> = {}): Room => ({
   slug: "room-1",
@@ -279,6 +279,80 @@ describe("buildRoomsIndexBoard closed sessions", () => {
     expect(JSON.stringify(board)).toContain("room-xyz");
     const del = cards(board)[0]?.actions?.find((a) => a.type === "room-delete");
     expect((del?.payload as { slug: string })?.slug).toBe("room-xyz");
+  });
+});
+
+describe("buildRoomsIndexBoard magentic plan bar", () => {
+  const task = (over: Partial<LedgerTask> = {}): LedgerTask => ({
+    id: "t1",
+    description: "build it",
+    status: "pending",
+    createdAt: "t",
+    updatedAt: "t",
+    ...over,
+  });
+  const ledger = (tasks: LedgerTask[]): TaskLedger => ({
+    roomSlug: "m",
+    goal: "g",
+    manager: "mgr",
+    status: "executing",
+    tasks,
+    updatedAt: "t",
+  });
+
+  test("a planned magentic room's bar is the task composition; turns stay a field", () => {
+    const board = buildRoomsIndexBoard(
+      [room({ slug: "m", strategy: "magentic", status: "active", turnIndex: 3, turnBudget: 8 })],
+      [],
+      [],
+      new Set(),
+      new Map([
+        [
+          "m",
+          ledger([
+            task({ id: "t1", status: "completed" }),
+            task({ id: "t2", description: "wire api", status: "pending" }),
+          ]),
+        ],
+      ]),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const [card] = cards(board);
+    // Zero-count states keep their legend entry; they just contribute no fill.
+    expect(card?.bar).toEqual({
+      segments: [
+        { label: "completed", n: 1, tone: "ok" },
+        { label: "in-progress", n: 0, tone: "info" },
+        { label: "pending", n: 1, tone: "neutral" },
+        { label: "failed", n: 0, tone: "error" },
+      ],
+    });
+    expect(card?.fields?.find((f) => f.label === "turns")?.value).toBe("3/8");
+  });
+
+  test("no ledger, an empty ledger, and a non-magentic room all keep the turn fill", () => {
+    const noLedger = buildRoomsIndexBoard([
+      room({ slug: "m", strategy: "magentic", status: "active", turnIndex: 3, turnBudget: 8 }),
+    ]);
+    expect(cards(noLedger)[0]?.bar).toEqual({ value: 3, total: 8 });
+
+    const empty = buildRoomsIndexBoard(
+      [room({ slug: "m", strategy: "magentic", status: "active", turnIndex: 3, turnBudget: 8 })],
+      [],
+      [],
+      new Set(),
+      new Map([["m", ledger([])]]),
+    );
+    expect(cards(empty)[0]?.bar).toEqual({ value: 3, total: 8 });
+
+    const seq = buildRoomsIndexBoard(
+      [room({ slug: "s", status: "active", turnIndex: 3, turnBudget: 8 })],
+      [],
+      [],
+      new Set(),
+      new Map([["s", ledger([task()])]]),
+    );
+    expect(cards(seq)[0]?.bar).toEqual({ value: 3, total: 8 });
   });
 });
 

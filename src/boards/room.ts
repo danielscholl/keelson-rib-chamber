@@ -1,4 +1,10 @@
-import type { Brief, CanvasBoardView, CanvasJourneySection, CanvasTone } from "@keelson/shared";
+import type {
+  Brief,
+  CanvasBoardView,
+  CanvasItemBar,
+  CanvasJourneySection,
+  CanvasTone,
+} from "@keelson/shared";
 import { inferToolFamily } from "@keelson/shared";
 import type { LensRecord } from "../lens-store.ts";
 import { agoLabel } from "../relative-time.ts";
@@ -380,9 +386,41 @@ function buildPlanSection(ledger: TaskLedger | undefined): CanvasBoardView["sect
   // surface that, so an empty plan must not render identically to a non-magentic room.
   const items: FeedItem[] =
     ledger.tasks.length > 0
-      ? ledger.tasks.map(taskRow)
+      ? [planSummaryRow(ledger.tasks), ...ledger.tasks.map(taskRow)]
       : [{ glyph: "neutral", text: "No tasks yet" }];
   return [{ kind: "rows", title: `Plan · ${ledger.status}`, items }];
+}
+
+// The plan's composition at a glance: one leading row whose bar stacks the task
+// states, with "N/M settled" (completed + failed) as the trailing readout.
+function planSummaryRow(tasks: readonly LedgerTask[]): FeedItem {
+  const settled = tasks.filter((t) => t.status === "completed" || t.status === "failed").length;
+  return {
+    glyph: "neutral",
+    text: "tasks",
+    bar: { segments: taskBarSegments(tasks) },
+    trailing: `${settled}/${tasks.length} settled`,
+  };
+}
+
+const TASK_STATUS_ORDER: readonly LedgerTask["status"][] = [
+  "completed",
+  "in-progress",
+  "pending",
+  "failed",
+];
+
+// The task-status composition a plan bar renders — shared with the rooms index's
+// magentic card. Zero-count states are kept: they contribute no fill but stay in
+// the bar's hover legend, so a plan with nothing failed still SAYS "failed 0".
+export function taskBarSegments(
+  tasks: readonly LedgerTask[],
+): Extract<CanvasItemBar, { segments: unknown }>["segments"] {
+  return TASK_STATUS_ORDER.map((status) => ({
+    label: status,
+    n: tasks.reduce((n, t) => n + (t.status === status ? 1 : 0), 0),
+    tone: taskTone(status),
+  }));
 }
 
 const TASK_ICON: Record<LedgerTask["status"], string> = {
@@ -795,26 +833,27 @@ function summaryLine(flatText: string, max = 140): string {
 
 // The Voices panel: the room's facilitator(s) (moderator/synthesizer/manager —
 // brand-toned, matching squad's coordinator), then its participants in seat
-// order, each with its role, its host identity tone, and its spelled-out turn
-// count ("6 turns", not a ×N code).
+// order, each with its role, its host identity tone, its share-of-conversation
+// bar, and its spelled-out turn count ("6 turns", not a ×N code).
 function buildVoicesSection(
   room: Room,
   mindBySlug: Map<string, Mind>,
   counts: Map<string, number>,
 ): RowsSection {
+  const totalTurns = [...counts.values()].reduce((sum, n) => sum + n, 0);
   const seen = new Set<string>();
   const rows: FeedItem[] = [];
   for (const [slug, role] of facilitatorRoles(room)) {
     if (seen.has(slug)) continue;
     seen.add(slug);
-    rows.push(voiceRow(slug, mindBySlug, "brand", role, counts.get(slug) ?? 0));
+    rows.push(voiceRow(slug, mindBySlug, "brand", role, counts.get(slug) ?? 0, totalTurns));
   }
   for (const slug of room.participants) {
     if (seen.has(slug)) continue;
     seen.add(slug);
     const mind = mindBySlug.get(slug);
     const tone = mind ? identityToneForSlot(mind.identitySlot) : "info";
-    rows.push(voiceRow(slug, mindBySlug, tone, mind?.role, counts.get(slug) ?? 0));
+    rows.push(voiceRow(slug, mindBySlug, tone, mind?.role, counts.get(slug) ?? 0, totalTurns));
   }
   return { kind: "rows", title: "Voices", items: rows };
 }
@@ -827,17 +866,39 @@ function facilitatorRoles(room: Room): [MindSlug, string][] {
   return out;
 }
 
+// Facilitators then participants, deduped — the one seat order Voices and the
+// Context meter share.
+function speakerOrder(room: Room): MindSlug[] {
+  const seen = new Set<string>();
+  const order: MindSlug[] = [];
+  for (const [slug] of facilitatorRoles(room)) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    order.push(slug);
+  }
+  for (const slug of room.participants) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    order.push(slug);
+  }
+  return order;
+}
+
 function voiceRow(
   slug: MindSlug,
   mindBySlug: Map<string, Mind>,
   tone: CanvasTone,
   role: string | undefined,
   turns: number,
+  totalTurns: number,
 ): FeedItem {
   return {
     glyph: tone,
     chip: { label: mindBySlug.get(slug)?.name ?? slug, tone },
     text: role?.trim() || "Mind",
+    // Speaker share of the room's agent turns; before the first turn there is
+    // no share to draw, so the row carries no bar rather than a 0/0 fill.
+    ...(totalTurns > 0 ? { bar: { value: turns, total: totalTurns } } : {}),
     trailing: `${turns} turn${turns === 1 ? "" : "s"}`,
   };
 }
@@ -852,22 +913,8 @@ function buildContextSection(
   mindBySlug: Map<string, Mind>,
 ): BarsSection | undefined {
   const latest = latestContextByMind(transcript);
-  const order: MindSlug[] = [];
-  const seen = new Set<string>();
-  for (const [slug] of facilitatorRoles(room)) {
-    if (!seen.has(slug)) {
-      seen.add(slug);
-      order.push(slug);
-    }
-  }
-  for (const slug of room.participants) {
-    if (!seen.has(slug)) {
-      seen.add(slug);
-      order.push(slug);
-    }
-  }
   const items: BarsSection["items"] = [];
-  for (const slug of order) {
+  for (const slug of speakerOrder(room)) {
     const ctx = latest.get(slug);
     if (!ctx) continue;
     // Tone off the raw ratio so the 70%/85% cutoffs are exact; round only the
