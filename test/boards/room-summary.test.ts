@@ -150,6 +150,18 @@ describe("buildRoomSummaryHtml", () => {
     expect(html).not.toContain("<em>");
   });
 
+  // A code span's contents are literal. Marks inside one must survive as text, or a room
+  // quoting a glob loses the very characters it was quoting them to show.
+  test("keeps a code span literal instead of marking up its contents", () => {
+    const html = build({
+      outcome: { title: "Ship it", body: "Match `*.ts and *.js`, not `**bold**`." },
+    });
+    expect(html).toContain("<code>*.ts and *.js</code>");
+    expect(html).toContain("<code>**bold**</code>");
+    expect(html).not.toContain("<em>");
+    expect(html).not.toContain("<code><strong>");
+  });
+
   test("sizes the room from its own record and transcript", () => {
     const html = build({
       transcript: [turn("ada", 0), turn("ada", 1), turn("grace", 2), turn("grace", 3)],
@@ -159,6 +171,16 @@ describe("buildRoomSummaryHtml", () => {
     expect(html).toContain("width: 50%");
     expect(html).toContain('>8</span><span class="tile-label">turns<');
     expect(html).toContain('>2</span><span class="tile-label">speakers<');
+  });
+
+  // A group-chat moderator (and a magentic manager) drives the room from OUTSIDE the
+  // participant list but speaks and is named in the rail, so the tile counts the deduped
+  // cast — otherwise the page prints "3 speakers" above four names.
+  test("counts the cast the rail lists, not just the participants", () => {
+    const html = build({ room: { ...room, config: { moderator: "keel" } } });
+    expect(html).toContain('>3</span><span class="tile-label">speakers<');
+    // Grace moderates AND participates in the base room, so she is counted once.
+    expect(build()).toContain('>2</span><span class="tile-label">speakers<');
   });
 
   // A room with no turns recorded has no share to draw, so its speakers carry no track —

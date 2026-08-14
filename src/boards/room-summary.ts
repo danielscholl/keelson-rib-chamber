@@ -109,11 +109,17 @@ function dayLabel(iso: string): string | undefined {
 // The 3-5 figures a reviewer scanning many rooms actually wants: how long the conversation
 // ran, who was in it, what it settled, what it left behind. A figure that was never
 // measured (a room with no closing stamp) is omitted rather than shown as zero.
-function statTiles(input: RoomSummaryInput): readonly { value: string; label: string }[] {
+function statTiles(
+  input: RoomSummaryInput,
+  voices: readonly Voice[],
+): readonly { value: string; label: string }[] {
   const { room, transcript, decisions, tabled } = input;
+  // The deduped cast, not room.participants: a group-chat moderator and a magentic manager
+  // drive the room from outside the participant list, so counting participants would print
+  // a smaller number than the rail beneath it lists by name.
   const tiles = [
     { value: String(room.turnIndex), label: plural(room.turnIndex, "turn") },
-    { value: String(room.participants.length), label: plural(room.participants.length, "speaker") },
+    { value: String(voices.length), label: plural(voices.length, "speaker") },
   ];
   const closedAt = room.outcomeAt ?? [...transcript].reverse().find((entry) => entry.at)?.at;
   const elapsed = closedAt ? formatDuration(room.createdAt, closedAt) : undefined;
@@ -130,11 +136,26 @@ function statTiles(input: RoomSummaryInput): readonly { value: string; label: st
 // Inline marks on ALREADY-ESCAPED text: bold, code, and the same guarded single-asterisk
 // emphasis room-text uses, so prose with a glob or a multiplication sign ("*.ts", "2 * 3")
 // keeps its asterisks instead of silently becoming emphasis.
+//
+// Code spans come out FIRST and go back last: their contents are literal, and a room that
+// writes a glob inside one (`*.ts and *.js`) would otherwise have the span's own asterisks
+// eaten as emphasis by the pass that runs over it.
+// A private-use sentinel: esc() has already turned every markup character into an entity,
+// so this cannot collide with the document's own text.
+const CODE_SLOT = "\uE000";
 function inlineMarks(escaped: string): string {
-  return escaped
+  const spans: string[] = [];
+  const masked = escaped.replace(/`([^`]+)`/g, (_match, code: string) => {
+    spans.push(code);
+    return `${CODE_SLOT}${spans.length - 1}${CODE_SLOT}`;
+  });
+  return masked
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/(?<!\*)\*(?!\*)(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g, "<em>$1</em>");
+    .replace(/(?<!\*)\*(?!\*)(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g, "<em>$1</em>")
+    .replace(new RegExp(`${CODE_SLOT}(\\d+)${CODE_SLOT}`, "g"), (match, index: string) => {
+      const code = spans[Number(index)];
+      return code === undefined ? match : `<code>${code}</code>`;
+    });
 }
 
 // Render the closing document's markdown as structure — headings, lists, emphasis — not as
@@ -263,7 +284,7 @@ function producedHtml(tabled: readonly LensRecord[]): string {
 export function buildRoomSummaryHtml(input: RoomSummaryInput): string {
   const { room, outcome, minds, decisions, tabled, transcript } = input;
   const voices = voicesFor(room, minds, transcript);
-  const tiles = statTiles(input);
+  const tiles = statTiles(input, voices);
   const closedOn = room.outcomeAt ? dayLabel(room.outcomeAt) : undefined;
   const eyebrow = ["Room summary", shapeLabel(room), closedOn ? `closed ${closedOn}` : undefined]
     .filter(Boolean)

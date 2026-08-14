@@ -323,6 +323,10 @@ export function noteRoomDeleted(slug: string): void {
   roomSummaryEntries.get(slug)?.unregister();
   roomSummaryEntries.delete(slug);
   releaseSummaryView(slug);
+  // The release above is eager, but a reconcile already past its `listRooms` await still
+  // holds a snapshot naming this room and would re-declare it. Queue one behind that in-
+  // flight pass so the last word belongs to a read taken after the record was gone.
+  queueRoomSummaryReconcile();
   dropBriefRoomSource(slug);
   syncRoomsTicker();
 }
