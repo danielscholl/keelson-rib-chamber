@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { canvasBoardViewSchema } from "@keelson/shared";
+import { canvasBoardViewSchema, canvasViewSchema } from "@keelson/shared";
 import {
   BOARD_COMPOSITION_CONTRACT,
   BOARD_FORM_KINDS,
@@ -70,5 +70,123 @@ describe("board composition guidance", () => {
     expect(LENS_WF_PROMPT).toContain("## Composing the board");
     expect(LENS_WF_PROMPT).toContain("`bars`");
     expect(LENS_WF_PROMPT).toContain("chamber_emit_lens");
+  });
+});
+
+// Pins the taught vocabulary to the live schema: a board exercising every field
+// the guidance teaches must parse through both edges a lens board crosses — the
+// emit input (canvasBoardViewSchema) and the publish gate (canvasViewSchema, the
+// schema expectView runs, which alone carries the cross-field union checks).
+describe("taught vocabulary drift canary", () => {
+  const taughtBoard = {
+    view: "board",
+    title: "canary",
+    sections: [
+      {
+        kind: "stats",
+        items: [
+          {
+            label: "pass rate",
+            value: "97%",
+            delta: { text: "+2%", direction: "up", tone: "ok" },
+            spark: [91, 94, 95, 97],
+          },
+          { label: "latency", value: null },
+        ],
+      },
+      {
+        kind: "bars",
+        items: [
+          { label: "tier low", value: 3, total: 10, tone: "ramp-1" },
+          { label: "tier high", value: 9, total: 10, tone: "ramp-5" },
+          { label: "failed read", value: null, total: 10 },
+        ],
+      },
+      {
+        kind: "segments",
+        items: [
+          { label: "done", n: 4, tone: "ramp-3" },
+          { label: "unmeasured", n: null },
+        ],
+      },
+      {
+        kind: "chart",
+        mark: "bar",
+        series: [
+          {
+            label: "this week",
+            points: [
+              { x: "a", y: 3 },
+              { x: "b", y: 5 },
+            ],
+          },
+        ],
+      },
+      {
+        kind: "chart",
+        mark: "line",
+        baseline: "auto",
+        series: [
+          {
+            label: "pass",
+            points: [
+              { x: 1, y: 93 },
+              { x: 2, y: 99 },
+            ],
+          },
+        ],
+      },
+      {
+        kind: "cards",
+        items: [
+          {
+            title: "charter",
+            prose: true,
+            fields: [{ label: "mission", value: "hold the line" }],
+            bar: { value: 2, total: 5 },
+          },
+          {
+            title: "stages",
+            bar: {
+              segments: [
+                { label: "done", n: 3 },
+                { label: "left", n: 2 },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        kind: "rows",
+        items: [
+          {
+            text: "selectable row",
+            bar: { value: 1, total: 4 },
+            action: { type: "chamber.open", payload: { id: "r1" } },
+            selected: true,
+          },
+        ],
+      },
+    ],
+  };
+
+  test("a board using every taught field parses through both edges", () => {
+    expect(() => canvasBoardViewSchema.parse(taughtBoard)).not.toThrow();
+    expect(() => canvasViewSchema.parse(taughtBoard)).not.toThrow();
+  });
+
+  test("the canary bites: baseline auto on a bar mark is rejected", () => {
+    const bad = {
+      view: "board",
+      sections: [
+        {
+          kind: "chart",
+          mark: "bar",
+          baseline: "auto",
+          series: [{ label: "a", points: [{ x: "q1", y: 1 }] }],
+        },
+      ],
+    };
+    expect(() => canvasViewSchema.parse(bad)).toThrow();
   });
 });

@@ -61,7 +61,7 @@ Compose ONE canvas board about the subject. Be honest — do NOT invent data you
 
 The board shape:
   { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
-Tone is one of: ok, warn, error, neutral, info, caution, brand, accent. The chamber_emit_lens input schema carries every section kind's exact fields — read it there rather than guessing.
+Tone is one of: ok, warn, error, neutral, info, caution, brand, accent, ramp-1…ramp-5 (a light-to-dark ladder for ordered or staged magnitude). The chamber_emit_lens input schema carries every section kind's exact fields — read it there rather than guessing.
 
 ${buildBoardCompositionGuidance()}
 
