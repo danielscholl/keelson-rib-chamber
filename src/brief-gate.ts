@@ -1,16 +1,24 @@
-import type { CanvasBoardView, RibContext, SnapshotManager } from "@keelson/shared";
+import type { CanvasBoardView, CanvasPerson, RibContext, SnapshotManager } from "@keelson/shared";
 import { errText, expectView } from "@keelson/shared";
 import { recordSection } from "./boards/activity.ts";
+import {
+  type BriefSeatedMind,
+  briefingPeople,
+  buildDeltaRegister,
+  type ChangedLensBrief,
+  deriveEndedRoomBrief,
+  type EndedRoomBrief,
+} from "./boards/briefing.ts";
 import { buildChamberState, type ChamberDelta, diffAgainstWatermark } from "./chamber-state.ts";
 import { readDigest } from "./digest-store.ts";
-import { parseBoard } from "./json-recovery.ts";
+import { parseBriefCopy } from "./json-recovery.ts";
 import { BRIEF_KEY } from "./keys.ts";
 import { isExhibit, listLenses } from "./lens-store.ts";
 import { listMindRecords } from "./minds-store.ts";
 import { chamberDataHome, lensesDir, mindsDir, roomsDir } from "./paths.ts";
 import { BRIEF_PROMPT } from "./prompts.ts";
 import { createCoalescingPublisher } from "./room-publisher.ts";
-import { listRooms } from "./room-store.ts";
+import { createFileRoomStore, listRooms } from "./room-store.ts";
 import { readWatermark, writeWatermark } from "./watermark-store.ts";
 
 // The briefing gate's seams + state, captured in registerTools (the only hook with
@@ -50,6 +58,13 @@ interface PromotedSource {
   ref: string;
 }
 let promotedSources: readonly PromotedSource[] = [];
+// The head-strip who-acted peek: the promoted delta's casts + lens maintainers in
+// identity tones (boards/briefing.ts briefingPeople). Lives and lapses with the delta.
+let promotedPeople: readonly CanvasPerson[] = [];
+// Closing-verdict titles the gate has read (slug -> title), decorating the record
+// register's rows with a verdict chip + disclosure. Survives a lapse on purpose — the
+// record is the always-on register — and resets only on dispose.
+const roomOutcomeTitles = new Map<string, string>();
 // Serializes banner re-publishes so a mutation-driven refresh and a gate promote can't
 // interleave two composes onto one publish; reset on dispose.
 let briefingPublishInFlight: Promise<void> = Promise.resolve();
@@ -126,19 +141,29 @@ async function composeBriefingBoard(): Promise<CanvasBoardView> {
     if (first) sections.push({ ...first, title: "The read" }, ...rest);
   }
 
-  // 3. Record — always present.
-  sections.push(recordSection(mindRecords, rooms, lenses, Date.now(), BANNER_RECORD_LIMIT));
+  // 3. Record — always present, wearing any closing verdicts the gate has read.
+  sections.push(
+    recordSection(mindRecords, rooms, lenses, Date.now(), BANNER_RECORD_LIMIT, roomOutcomeTitles),
+  );
 
   // The pill is the promoted-delta signal, not a standing badge: a quiet banner carries
   // none, which is the same structural-quiet rule the registers follow. "Up to date" as
   // a permanent label is a pill that can never inform — it reads as dead chrome until
-  // the one moment it would have mattered.
+  // the one moment it would have mattered. The people peek rides the same rule: who
+  // acted is only a claim while the delta that names them is promoted.
   const status =
     promotedCount > 0 ? { label: `${promotedCount} new`, tone: "brand" as const } : undefined;
   return {
     view: "board",
     title: "Briefing",
-    ...(status ? { header: { status } } : {}),
+    ...(status
+      ? {
+          header: {
+            status,
+            ...(promotedPeople.length > 0 ? { people: [...promotedPeople] } : {}),
+          },
+        }
+      : {}),
     sections,
   };
 }
@@ -160,14 +185,26 @@ export function publishBriefing(): Promise<void> {
   return next;
 }
 
-// Rooms deleted since the last promote. The gate's promote rebuilds `sources` from a
-// read taken BEFORE its paid turn ran, so a delete landing mid-turn would otherwise be
-// clobbered back in as a chip whose room key is already gone.
+// Rooms deleted / lenses retired since the last promote. The gate's promote rebuilds
+// `sources` from a read taken BEFORE its paid turn ran, so a delete landing mid-turn
+// would otherwise be clobbered back in as a chip whose key is already gone.
 let droppedRoomSlugs = new Set<string>();
+let droppedLensIds = new Set<string>();
 
 export function dropBriefRoomSource(slug: string): void {
   droppedRoomSlugs.add(slug);
   const kept = promotedSources.filter((s) => !(s.kind === "room" && s.ref === slug));
+  if (kept.length === promotedSources.length) return;
+  promotedSources = kept;
+  void publishBriefing();
+}
+
+// The lens/exhibit mirror of dropBriefRoomSource, hung off the retire/delete paths
+// (lens-runtime.ts), which fire the gate anyway — this closes the mid-turn window
+// where the promote would repaint a chip on a just-released key.
+export function dropBriefLensSource(id: string): void {
+  droppedLensIds.add(id);
+  const kept = promotedSources.filter((s) => !(s.kind === "lens" && s.ref === id));
   if (kept.length === promotedSources.length) return;
   promotedSources = kept;
   void publishBriefing();
@@ -223,6 +260,7 @@ async function runBriefGate(): Promise<void> {
         promotedDelta = undefined;
         promotedCount = 0;
         promotedSources = [];
+        promotedPeople = [];
         await writeWatermark({
           ...watermark,
           briefPromoted: false,
@@ -236,22 +274,23 @@ async function runBriefGate(): Promise<void> {
     return;
   }
 
-  // Promote: something new happened. Compose a delta-aware prompt (the brief core
-  // plus a "what's new" block built from METADATA only — no transcript text) and run
-  // ONE agent turn. On a clean board reply, publish it and advance the watermark to
-  // the state we just read; on any failure keep the prior board and do not advance.
-  let prompt: string;
-  let sources: PromotedSource[];
+  // Promote: something new happened. The rib composes the register's STRUCTURE
+  // deterministically from the records (boards/briefing.ts) — the one paid turn
+  // authors only the editorial copy (a lead + one reading per ref), degrading
+  // per-field: a malformed reply promotes the deterministic register without its
+  // copy rather than burning a second turn on the same delta. A turn that fails
+  // outright (status !== ok) still keeps the prior board and does not advance.
+  let composed: ComposedBriefDelta;
   try {
-    ({ prompt, sources } = await composeBriefPrompt(delta));
+    composed = await composeBriefDelta(delta);
   } catch (e) {
-    console.error(`[rib-chamber] brief prompt compose failed: ${errText(e)}`);
+    console.error(`[rib-chamber] brief delta compose failed: ${errText(e)}`);
     return;
   }
-  let board: CanvasBoardView;
+  let replyText: string;
   try {
     const turn = runTurn({
-      prompt,
+      prompt: composed.prompt,
       allowedTools: [],
       timeoutMs: BRIEF_TURN_TIMEOUT_MS,
       cwd: chamberDataHome(),
@@ -269,9 +308,8 @@ async function runBriefGate(): Promise<void> {
       console.error(`[rib-chamber] brief turn ${result.status}: ${result.error ?? ""}`);
       return;
     }
-    board = expectView(BRIEF_KEY, "board")(parseBoard(result.text)) as CanvasBoardView;
+    replyText = result.text;
   } catch (e) {
-    // Parse/validate/turn failure — fail closed: keep the prior board, don't advance.
     console.error(`[rib-chamber] brief turn failed: ${errText(e)}`);
     return;
   }
@@ -279,14 +317,32 @@ async function runBriefGate(): Promise<void> {
   // published or written after the rib is disposed (mirrors room.ts runOneTurn).
   if (signal.aborted) return;
   try {
-    // The turn authored a board; its sections become the delta register, labelled and
-    // wrapped with the digest + record by composeBriefingBoard. Store the count so the
-    // header reads "N new", and the resolved sources so the register carries its
-    // deterministic jump chips.
-    promotedDelta = board.sections;
+    const copy = parseBriefCopy(replyText);
+    const rooms = composed.roomBriefs.map((brief) => {
+      const reading = copy.readings[brief.room.slug];
+      return reading ? { ...brief, reading } : brief;
+    });
+    const lenses = composed.lensBriefs.map((brief) => {
+      const reading = copy.readings[brief.id];
+      return reading ? { ...brief, reading } : brief;
+    });
+    // The rib-built sections become the delta register, labelled and wrapped with the
+    // digest + record by composeBriefingBoard. Store the count so the header reads
+    // "N new", the resolved sources so the register carries its deterministic jump
+    // chips, and the casts so the head strip says who acted.
+    promotedDelta = buildDeltaRegister(rooms, lenses, composed.minds, copy.lead);
     promotedCount = delta.newlyEndedRooms.length + delta.changedOrNewLenses.length;
-    promotedSources = sources.filter((s) => !(s.kind === "room" && droppedRoomSlugs.has(s.ref)));
+    promotedSources = composed.sources.filter(
+      (s) =>
+        !(s.kind === "room" && droppedRoomSlugs.has(s.ref)) &&
+        !(s.kind === "lens" && droppedLensIds.has(s.ref)),
+    );
+    promotedPeople = briefingPeople(rooms, lenses, composed.minds);
+    for (const brief of rooms) {
+      if (brief.outcomeTitle) roomOutcomeTitles.set(brief.room.slug, brief.outcomeTitle);
+    }
     droppedRoomSlugs.clear();
+    droppedLensIds.clear();
     await writeWatermark({
       ackedEndedRooms: state.endedRoomSlugs,
       lensFingerprints: state.lensFingerprints,
@@ -301,26 +357,46 @@ async function runBriefGate(): Promise<void> {
   }
 }
 
-// The promote prompt: the standing brief core plus a delta block naming what changed
-// since the last briefing — ended rooms by name/status/turns and changed/new lenses
-// by id + scope/reason. METADATA ONLY (no transcript text) so a briefing never reads
-// a room's content. Reads the rooms/lenses once on the promote path (rare, and a paid
-// turn is about to run anyway) to resolve the slugs/ids the delta carries to metadata
-// — the same read also yields the structured `sources` the banner renders as jump
-// chips, so the chips can never name anything the prompt didn't.
-async function composeBriefPrompt(
-  delta: ChamberDelta,
-): Promise<{ prompt: string; sources: PromotedSource[] }> {
+interface ComposedBriefDelta {
+  prompt: string;
+  sources: PromotedSource[];
+  roomBriefs: EndedRoomBrief[];
+  lensBriefs: ChangedLensBrief[];
+  minds: BriefSeatedMind[];
+}
+
+// One read of everything the promote needs: the register's deterministic inputs (each
+// ended room's record + transcript reduced by deriveEndedRoomBrief, each changed lens's
+// provenance, the seated Minds for tones) AND the copy prompt. The prompt block stays
+// metadata-plus-one-line: the room's own closing verdict TITLE (already authored and
+// paid for by the room's synthesis turn) joins the name/status/turns — never the
+// transcript body. The same read yields the structured `sources` the banner renders as
+// jump chips, so the chips can never name anything the prompt didn't.
+async function composeBriefDelta(delta: ChamberDelta): Promise<ComposedBriefDelta> {
   const lines: string[] = [];
   const sources: PromotedSource[] = [];
+  const roomBriefs: EndedRoomBrief[] = [];
+  const lensBriefs: ChangedLensBrief[] = [];
+  const minds: BriefSeatedMind[] = await listMindRecords(mindsDir()).catch(() => []);
   if (delta.newlyEndedRooms.length > 0) {
     const rooms = await listRooms(roomsDir());
+    const store = createFileRoomStore(roomsDir());
     const bySlug = new Map(rooms.map((r) => [r.slug, r]));
     lines.push("Rooms that ended since the last briefing:");
     for (const slug of delta.newlyEndedRooms) {
       const room = bySlug.get(slug);
       if (!room) continue;
-      lines.push(`  - ${room.name} (${room.status}, ${room.turnIndex} turns)`);
+      const transcript = await store.loadTranscript(slug).catch(() => []);
+      const brief = deriveEndedRoomBrief(room, transcript);
+      roomBriefs.push(brief);
+      const verdict = brief.outcomeTitle ? ` Closing verdict: "${brief.outcomeTitle}".` : "";
+      const pinned =
+        brief.decisionCount > 0
+          ? ` ${brief.decisionCount} decision${brief.decisionCount === 1 ? "" : "s"} pinned.`
+          : "";
+      lines.push(
+        `  - ref ${slug}: ${room.name} (${room.status}, ${room.turnIndex} turns).${verdict}${pinned}`,
+      );
       sources.push({ kind: "room", label: room.name || room.slug, ref: slug });
     }
   }
@@ -341,19 +417,30 @@ async function composeBriefPrompt(
             .filter((s): s is string => Boolean(s))
             .join(" — ")
         : "";
-      lines.push(`  - ${id}${detail ? ` (${detail})` : ""}`);
+      lines.push(`  - ref ${id}${detail ? ` (${detail})` : ""}`);
       // A lens retired between the diff and this read has no live key left to open.
-      if (lens) sources.push({ kind: "lens", label: lens.board.title || id, ref: id });
+      if (lens) {
+        sources.push({ kind: "lens", label: lens.board.title || id, ref: id });
+        lensBriefs.push({
+          id,
+          title: lens.board.title || id,
+          kind: isExhibit(lens) ? "exhibit" : "lens",
+          ...(lens.scope ? { scope: lens.scope } : {}),
+          ...(lens.reason ? { reason: lens.reason } : {}),
+          ...(lens.sourceRoom ? { sourceRoom: lens.sourceRoom } : {}),
+          ...(lens.maintainingMind ? { maintainingMind: lens.maintainingMind } : {}),
+        });
+      }
     }
   }
-  if (lines.length === 0) return { prompt: BRIEF_PROMPT, sources };
-  return {
-    prompt: `${BRIEF_PROMPT}
+  const prompt =
+    lines.length === 0
+      ? BRIEF_PROMPT
+      : `${BRIEF_PROMPT}
 
-What's new since the last briefing — lead the briefing with these, honestly (do NOT invent detail beyond what is listed):
-${lines.join("\n")}`,
-    sources,
-  };
+What's new since the last briefing — write the lead and one reading per ref, honestly (do NOT invent detail beyond what is listed):
+${lines.join("\n")}`;
+  return { prompt, sources, roomBriefs, lensBriefs, minds };
 }
 
 // Boot reconciliation: the banner is re-seeded with the quiet board on every
@@ -398,6 +485,7 @@ export function bindBriefGate(seams: {
     promotedDelta = undefined;
     promotedCount = 0;
     promotedSources = [];
+    promotedPeople = [];
     void sm.recompose(BRIEF_KEY);
     void publishBriefing();
     briefInFlight = briefInFlight.then(clearPersistedBriefPromoted, clearPersistedBriefPromoted);
@@ -418,6 +506,9 @@ export function disposeBriefGate(): void {
   promotedDelta = undefined;
   promotedCount = 0;
   promotedSources = [];
+  promotedPeople = [];
+  roomOutcomeTitles.clear();
   droppedRoomSlugs = new Set();
+  droppedLensIds = new Set();
   briefingPublishInFlight = Promise.resolve();
 }

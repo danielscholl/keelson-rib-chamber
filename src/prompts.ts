@@ -2,22 +2,20 @@ import { buildCanvasArtifactGuidance } from "@keelson/shared";
 import { buildBoardCompositionGuidance } from "./board-guidance.ts";
 import { capabilityVocabulary } from "./capabilities.ts";
 
-// The briefing turn's prompt: an agent authors a canvas `board` rendered on the
-// Chamber surface with no hand-coded UI. The gate appends a delta block (the rooms
-// that ended / lenses that changed since the last briefing) so the briefing reports
-// what is NEW — a count is not news. Tools are withheld so it composes from this.
-export const BRIEF_PROMPT = `You are the editor of "Chamber" — Keelson's multi-agent operating layer (Minds you author, agent-to-agent Rooms, agent-authored Lenses). Compose a short operator BRIEFING of what is NEW since the operator last looked, and return it as a single canvas \`board\` view rendered directly on the Chamber surface with no hand-coded UI.
+// The briefing turn's prompt: the gate composes the register's BOARD deterministically
+// (pulse tiles, verdict cards, journey — see boards/briefing.ts), so the turn authors
+// COPY only — an editorial lead plus one reading per changed item, keyed by the refs
+// the gate's delta block names. The gate appends that block (rooms that ended / lenses
+// that changed, with each room's own closing verdict title when it authored one) so
+// the briefing reports what is NEW — a count is not news. Tools are withheld.
+export const BRIEF_PROMPT = `You are the editor of "Chamber" — Keelson's multi-agent operating layer (Minds you author, agent-to-agent Rooms, agent-authored Lenses). The operator's BRIEFING board is already composed from the records themselves — stat tiles, verdict cards, jump chips. You write ONLY the editorial copy that rides on it.
 
-Lead with the change: a Room that ended and what it settled, a Lens a Mind authored or updated and what it now says. Be honest — write only what the delta below names; do NOT invent clusters, users, metrics, or a room's contents you cannot see, and do NOT restate how many Minds / Rooms / Lenses exist (the surface already shows those structurally — a count is not news).
+Return ONE JSON object, nothing else:
+  { "lead": string, "readings": { "<ref>": string } }
+- lead: 1-2 sentences (under 280 characters) telling the operator what just happened and why it matters — the register's opening line, in the operator's language.
+- readings: one sentence (under 240 characters) per changed item in the delta below, keyed EXACTLY by that item's ref, interpreting it — what the room settled, or what the lens now says.
 
-Return ONE JSON object of this shape:
-  { "view": "board", "title": string, "header"?: { "status"?: { "label": string, "tone"?: Tone } }, "sections": Section[] }
-Tone is one of: ok, warn, error, neutral, info, caution, brand, accent.
-Use 1-2 Section kinds, in a sensible order:
-  - rows:  { "kind": "rows", "title"?: string, "items": [{ "text": string, "glyph"?: Tone, "trailing"?: string }] }
-  - cards: { "kind": "cards", "title"?: string, "items": [{ "title": string, "pill"?: { "label": string, "tone"?: Tone }, "fields"?: [{ "label"?: string, "value": string|number }], "footnote"?: string }] }
-
-Keep it tight: a status pill naming how much is new (e.g. "2 new"), then a short "rows" list — one line per ended Room or changed Lens, in the operator's language, with the outcome or gist. Add a card only when one change earns a sentence of interpretation. Concise, editorial copy.`;
+Be honest — write only what the delta below names; do NOT invent clusters, users, metrics, or contents you cannot see, and do NOT restate how many Minds / Rooms / Lenses exist (the board already carries the numbers). Plain, specific, editorial.`;
 
 // Genesis as a workflow: one agent turn reads a freeform brief, authors the SOUL.md
 // body + a roster tagline, and persists the Mind by calling the chamber_emit_genesis

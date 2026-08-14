@@ -1,6 +1,6 @@
 import type { RibContext, SnapshotManager } from "@keelson/shared";
 import { errText } from "@keelson/shared";
-import { evaluateBriefGate } from "./brief-gate.ts";
+import { dropBriefLensSource, evaluateBriefGate } from "./brief-gate.ts";
 import { canonicalLensId, createLensRegistry, type LensRegistry, lensKey } from "./lens.ts";
 import { createHtmlLensRegistry, type HtmlLensRegistry, htmlLensKey } from "./lens-html.ts";
 import { createFileHtmlLensStore, listHtmlLenses } from "./lens-html-store.ts";
@@ -254,8 +254,10 @@ export async function deleteRoomExhibits(slug: string): Promise<string[]> {
     if (removed.length > 0) {
       await refreshExhibitIndex();
       await refreshStandingPanels();
-      // One gate evaluation for the batch (see deleteRecordOfKind for why a deletion
-      // takes the free lapse path).
+      // Drop any promoted jump chips first (a delete landing mid-promote-turn would
+      // otherwise repaint them on released keys), then one gate evaluation for the
+      // batch (see deleteRecordOfKind for why a deletion takes the free lapse path).
+      for (const id of removed) dropBriefLensSource(id);
       void evaluateBriefGate().catch(() => {});
     }
     return removed;
@@ -312,8 +314,11 @@ export async function deleteRecordOfKind(
     await refreshStandingPanels();
     // A promoted Briefing delta may name this record ("Since you last looked… ↗");
     // deleting it must lapse that delta, or the banner keeps a "N new" chip that opens
-    // a dead key. The gate re-diffs and — a deletion is never *new* substance — takes
-    // the free lapse path (no paid turn). Fire-and-forget: a delete never waits on it.
+    // a dead key. Drop the chip eagerly (covers a delete landing mid-promote-turn,
+    // which the lapse alone cannot — the late promote would repaint it), then the gate
+    // re-diffs and — a deletion is never *new* substance — takes the free lapse path
+    // (no paid turn). Fire-and-forget: a delete never waits on it.
+    dropBriefLensSource(id);
     void evaluateBriefGate().catch(() => {});
     return { ok: true, id, key: lensKey(id) };
   } catch (e) {

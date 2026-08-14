@@ -167,3 +167,29 @@ describe("recordSection feed", () => {
     expect(section.items[4]?.trailing).toBeUndefined();
   });
 });
+
+describe("recordSection verdict decoration", () => {
+  test("a closed room whose verdict the gate has read wears a chip + in-place disclosure", () => {
+    const outcomes = new Map([["room-1", "Ship it behind a flag"]]);
+    const section = recordSection([], [room()], [], NOW, 8, outcomes);
+    expect(canvasViewSchema.safeParse(wrap(section)).success).toBe(true);
+    const row = section.items[0];
+    expect(row?.chip).toEqual({ label: "verdict", tone: "brand" });
+    expect(row?.detail).toBe("Ship it behind a flag");
+  });
+
+  test("an active room never wears a verdict, even when the map names its slug", () => {
+    const outcomes = new Map([["room-1", "stale title"]]);
+    const section = recordSection([], [room({ status: "active" })], [], NOW, 8, outcomes);
+    const row = section.items[0];
+    expect(row?.chip).toBeUndefined();
+    expect(row?.detail).toBeUndefined();
+  });
+
+  test("no outcomes map keeps the feed shape unchanged", () => {
+    const section = recordSection([], [room()], [], NOW);
+    const row = section.items[0];
+    expect(row?.chip).toBeUndefined();
+    expect(row?.detail).toBeUndefined();
+  });
+});
