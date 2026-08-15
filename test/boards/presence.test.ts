@@ -453,15 +453,39 @@ describe("buildChamberBoard convene composer (folded in)", () => {
   test("the scope bar stands between the cast and the shape tabs — where before how", () => {
     const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]), PROJECTS);
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    const where = sectionIndex(board, "Where does it run?");
+    const where = sectionIndex(board, "What can they read?");
     const how = sectionIndex(board, "How should they convene?");
     expect(where).toBeGreaterThan(-1);
     expect(how).toBeGreaterThan(where);
   });
 
+  test("the blind-room warning rides directly under the control that resolves it", () => {
+    // A seated Mind declaring read/code in an unscoped room carries a skill the room
+    // will resolve to nothing — stated between the scope answers and the shape tabs,
+    // so it is read before the room is convened rather than discovered in the transcript.
+    const reader = mind({ slug: "a", name: "Ada", identitySlot: 0, tools: ["read"] });
+    const board = buildChamberBoard([reader, B], [], [], NOW, draft(["a", "b"]), PROJECTS);
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    const warn = board.sections.findIndex(
+      (s) => s.kind === "rows" && s.items.some((i) => i.text?.includes("reads nothing")),
+    );
+    expect(warn).toBeGreaterThan(sectionIndex(board, "What can they read?"));
+    expect(warn).toBeLessThan(sectionIndex(board, "How should they convene?"));
+  });
+
+  test("no warning once the table is scoped — the declaration now resolves", () => {
+    const reader = mind({ slug: "a", name: "Ada", identitySlot: 0, tools: ["read"] });
+    const board = buildChamberBoard([reader, B], [], [], NOW, scoped(["a", "b"], "p1"), PROJECTS);
+    expect(
+      board.sections.some(
+        (s) => s.kind === "rows" && s.items.some((i) => i.text?.includes("reads nothing")),
+      ),
+    ).toBe(false);
+  });
+
   test("no scope bar when the host exposes no projects — nothing to scope to", () => {
     const board = buildChamberBoard([A, B], [], [], NOW, draft(["a", "b"]));
-    expect(sectionIndex(board, "Where does it run?")).toBe(-1);
+    expect(sectionIndex(board, "What can they read?")).toBe(-1);
     expect(sectionIndex(board, "How should they convene?")).toBeGreaterThan(-1);
   });
 
@@ -487,7 +511,7 @@ describe("buildChamberBoard convene composer (folded in)", () => {
     // The whole panel must still publish: a select whose defaultValue matches no option
     // fails the schema, which would take the bench down with it, not just the bar.
     expect(canvasViewSchema.safeParse(board).success).toBe(true);
-    expect(sectionIndex(board, "Where does it run?")).toBeGreaterThan(-1);
+    expect(sectionIndex(board, "What can they read?")).toBeGreaterThan(-1);
     const line = board.sections
       .flatMap((s) => (s.kind === "rows" ? s.items : []))
       .find((i) => typeof i.text === "string" && i.text.includes("at the table"));
