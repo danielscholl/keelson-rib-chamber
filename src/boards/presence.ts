@@ -3,7 +3,12 @@ import type { PendingGenesis } from "../pending-genesis.ts";
 import { MAX_ACTIVE_ROOMS } from "../room-config.ts";
 import { GENESIS_STARTERS } from "../starters.ts";
 import { identityToneForSlot, type Mind, type Room } from "../types.ts";
-import { type ConveneProject, conveneScopeSection, conveneShapeSection } from "./convene.ts";
+import {
+  type ConveneProject,
+  conveneScopeSection,
+  conveneScopeWarning,
+  conveneShapeSection,
+} from "./convene.ts";
 import {
   bootCard,
   bootSlotsFor,
@@ -163,9 +168,13 @@ function benchSections(
         items: [{ glyph: "brand", text: castLine(cast, convene.draft, convene.projects) }],
       });
       // Where before how: the scope bar stands between the cast and the shape tabs, so
-      // the table states its own context before the shape asks anything.
+      // the table states its own context before the shape asks anything. The mismatch
+      // warning rides directly under it — the cast is already seated by this point, so
+      // the contradiction is stated next to the control that resolves it.
       const scope = conveneScopeSection(convene.projects, convene.draft);
       if (scope) sections.push(scope);
+      const scopeWarning = conveneScopeWarning(cast, convene.draft);
+      if (scopeWarning) sections.push(scopeWarning);
       sections.push(conveneShapeSection(cast));
     } else {
       // Brand-toned with nobody seated: this row is the bench's only invitation into

@@ -4,6 +4,7 @@ import { canvasViewSchema } from "@keelson/shared";
 import {
   type ConveneProject,
   conveneScopeSection,
+  conveneScopeWarning,
   conveneShapeSection,
 } from "../../src/boards/convene.ts";
 import type { Mind } from "../../src/types.ts";
@@ -189,32 +190,50 @@ describe("conveneScopeSection", () => {
     { id: "p2", name: "chamber" },
   ];
 
-  test("the project control wears its current value and keeps the picker behind it", () => {
+  // The tier toggle always trails the answers, so find it by label rather than index —
+  // the number of answers ahead of it varies with the project count.
+  const tierOf = (s: Section | null) =>
+    s ? shapes(s).find((i) => i.label === "…and edit it") : undefined;
+  const answers = (s: Section | null) =>
+    s ? shapes(s).filter((i) => i.label !== "…and edit it") : [];
+  // `payload` is an open record on the contract, so name the one key these chips carry.
+  const projectOf = (i: { payload?: unknown } | undefined) =>
+    (i?.payload as { project?: string } | undefined)?.project;
+
+  test("the axis is named for what it grants, not for where it points", () => {
+    // "Where does it run?" / "Shared" described a working directory and read as benign;
+    // the unscoped state is a room whose Minds can open no file at all.
+    const section = conveneScopeSection(projects, {});
+    expect(section?.kind === "actions" && section.title).toBe("What can they read?");
+    expect(answers(section).find((i) => i.selected)?.label).toBe("Nothing");
+  });
+
+  test("every answer is one chip that dispatches on click — no commit step to skip", () => {
     const section = conveneScopeSection(projects, { projectId: "p1" });
     expect(section).not.toBeNull();
     if (!section) return;
     expect(valid(section)).toBe(true);
-    expect(section.kind === "actions" && section.title).toBe("Where does it run?");
-    // A wrapping strip of compact chips, not a stacked column of labelled rows.
     expect(section.kind === "actions" && section.wrap).toBe(true);
-    const item = shapes(section)[0];
-    expect(item?.type).toBe("scope-set");
-    // The seat-card idiom: the label IS the readout, so the form only exists on demand.
-    expect(item?.label).toBe("Project — keelson");
-    expect(item?.expanded).toBeUndefined();
-    const proj = item?.fields?.find((f) => f.name === "project");
-    expect(proj?.options).toEqual([
-      { value: "p1", label: "keelson" },
-      { value: "p2", label: "chamber" },
+    expect(answers(section).map((i) => i.label)).toEqual(["Nothing", "keelson", "chamber"]);
+    for (const chip of answers(section)) {
+      expect(chip.type).toBe("scope-set");
+      // A field would need a submit; that is exactly the step a scope can be lost in.
+      expect(chip.fields).toBeUndefined();
+    }
+    // `selected` is the readout, and each chip carries the value it sets.
+    expect(answers(section).map((i) => i.selected)).toEqual([false, true, false]);
+    expect(answers(section).map((i) => i.payload)).toEqual([
+      { project: "" },
+      { project: "p1" },
+      { project: "p2" },
     ]);
-    expect(proj?.defaultValue).toBe("p1");
-    // Not required, so its placeholder doubles as the clear option.
-    expect(proj?.required).toBeUndefined();
   });
 
-  test("an unscoped table reads Shared on the face of the control", () => {
-    const section = conveneScopeSection(projects, {});
-    expect(section && shapes(section)[0]?.label).toBe("Project — Shared");
+  test("clearing is an answer of its own, not an empty option inside a picker", () => {
+    const section = conveneScopeSection(projects, { projectId: "p1" });
+    const nothing = answers(section).find((i) => i.label === "Nothing");
+    expect(nothing?.payload).toEqual({ project: "" });
+    expect(nothing?.selected).toBe(false);
   });
 
   test("no bar at all when the host exposes no projects and nothing is scoped", () => {
@@ -223,41 +242,67 @@ describe("conveneScopeSection", () => {
 
   test("a scope the host no longer offers stays selectable so it can be cleared", () => {
     // Otherwise the draft keeps a projectId every convene rejects with no UI path to
-    // drop it — and a defaultValue matching no option fails the board's own schema, so
-    // the panel would stop publishing rather than merely look stale.
+    // drop it. The chip strip renders it as its own selected answer, so any other chip
+    // replaces it in one click.
     for (const projects of [[], [{ id: "p1", name: "keelson" }]]) {
       const section = conveneScopeSection(projects, { projectId: "gone" });
       expect(section).not.toBeNull();
       if (!section) continue;
       expect(valid(section)).toBe(true);
-      const proj = shapes(section)[0]?.fields?.find((f) => f.name === "project");
-      expect(proj?.options?.some((o) => o.value === "gone")).toBe(true);
-      expect(proj?.options?.find((o) => o.value === "gone")?.label).toContain("unavailable");
-      expect(proj?.defaultValue).toBe("gone");
+      const staleChip = answers(section).find((i) => projectOf(i) === "gone");
+      expect(staleChip?.label).toContain("unavailable");
+      expect(staleChip?.selected).toBe(true);
+      expect(answers(section).some((i) => projectOf(i) === "")).toBe(true);
     }
   });
 
+  test("past the chip threshold the picker falls back to a select", () => {
+    // A long strip stops reading at a glance — the same threshold rule facilitatorField
+    // applies with `segmented`.
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `proj-${i}` }));
+    const section = conveneScopeSection(many, { projectId: "p3" });
+    expect(section).not.toBeNull();
+    if (!section) return;
+    expect(valid(section)).toBe(true);
+    const picker = answers(section)[0];
+    expect(answers(section).length).toBe(1);
+    expect(picker?.label).toBe("Reads — proj-3");
+    const proj = picker?.fields?.find((f) => f.name === "project");
+    expect(proj?.options?.length).toBe(9);
+    expect(proj?.defaultValue).toBe("p3");
+    expect(proj?.required).toBeUndefined();
+  });
+
+  test("a dropped project still contributes its option in the select fallback", () => {
+    // A defaultValue matching no option fails the board's own schema, which would stop
+    // the whole panel publishing rather than merely look stale.
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `proj-${i}` }));
+    const section = conveneScopeSection(many, { projectId: "gone" });
+    expect(section && valid(section)).toBe(true);
+    const proj = answers(section)[0]?.fields?.find((f) => f.name === "project");
+    expect(proj?.options?.find((o) => o.value === "gone")?.label).toContain("unavailable");
+    expect(proj?.defaultValue).toBe("gone");
+  });
+
   test("the tier toggle appears only once a project is set", () => {
-    const unscoped = conveneScopeSection(projects, {});
-    expect(unscoped && shapes(unscoped).length).toBe(1);
-    const scoped = conveneScopeSection(projects, { projectId: "p1" });
-    expect(scoped && shapes(scoped).length).toBe(2);
+    expect(tierOf(conveneScopeSection(projects, {}))).toBeUndefined();
+    expect(tierOf(conveneScopeSection(projects, { projectId: "p1" }))).toBeDefined();
   });
 
   test("the tier is one toggle whose label holds still and whose state is pressed", () => {
     const on = conveneScopeSection(projects, { projectId: "p1", coding: true });
     const off = conveneScopeSection(projects, { projectId: "p1" });
-    const toggleOf = (s: Section | null) => (s ? shapes(s)[1] : undefined);
     // The label names the capability once; `selected` says whether it is granted, so
-    // the control never reads as "is this the state, or what the click does?".
-    expect(toggleOf(on)?.label).toBe("Can edit");
-    expect(toggleOf(off)?.label).toBe("Can edit");
-    expect(toggleOf(on)?.selected).toBe(true);
-    expect(toggleOf(off)?.selected).toBe(false);
+    // the control never reads as "is this the state, or what the click does?". It now
+    // continues the section's question rather than restating it as its own noun.
+    expect(tierOf(on)?.label).toBe("…and edit it");
+    expect(tierOf(off)?.label).toBe("…and edit it");
+    expect(tierOf(on)?.selected).toBe(true);
+    expect(tierOf(off)?.selected).toBe(false);
     // No fields — it dispatches on click like a seat card, carrying the value it flips to.
-    expect(toggleOf(on)?.fields).toBeUndefined();
-    expect(toggleOf(on)?.payload).toEqual({ coding: "off" });
-    expect(toggleOf(off)?.payload).toEqual({ coding: "on" });
+    expect(tierOf(on)?.fields).toBeUndefined();
+    expect(tierOf(on)?.payload).toEqual({ coding: "off" });
+    expect(tierOf(off)?.payload).toEqual({ coding: "on" });
     expect(on && valid(on)).toBe(true);
     expect(off && valid(off)).toBe(true);
   });
@@ -266,23 +311,65 @@ describe("conveneScopeSection", () => {
     // A scoped room grants every speaker Read inside the root (readToolPool), so an
     // off tier is NOT "no repo access" and must not be labelled as though it were.
     const section = conveneScopeSection(projects, { projectId: "p1" });
-    expect(shapes(section ?? ({} as Section))[0]?.hint).toContain("read");
-    expect(shapes(section ?? ({} as Section))[1]?.hint).toContain("Reading is already allowed");
+    expect(answers(section).find((i) => projectOf(i) === "p1")?.hint).toContain("read");
+    expect(tierOf(section)?.hint).toContain("Reading is already allowed");
   });
 
-  test("a stale project offers no tier toggle — only the picker that can unpick it", () => {
+  test("the unscoped answer says the Minds' own read/code will grant nothing", () => {
+    const section = conveneScopeSection(projects, {});
+    expect(answers(section).find((i) => i.label === "Nothing")?.hint).toContain("read no files");
+  });
+
+  test("a stale project offers no tier toggle — only the answers that can unpick it", () => {
     // Granting edits against a project the host no longer lists would deepen a scope
     // every convene already rejects; the useful move is to repick or clear.
     for (const p of [[], projects]) {
       const section = conveneScopeSection(p, { projectId: "gone", coding: true });
-      expect(section && shapes(section).length).toBe(1);
-      expect(section && shapes(section)[0]?.fields?.length).toBe(1);
+      expect(tierOf(section)).toBeUndefined();
     }
   });
 
   test("the toggle names the project it would let the Minds write to", () => {
-    const off = conveneScopeSection(projects, { projectId: "p1" });
-    expect(shapes(off ?? ({} as Section))[1]?.hint).toContain("keelson");
+    expect(tierOf(conveneScopeSection(projects, { projectId: "p1" }))?.hint).toContain("keelson");
+  });
+});
+
+describe("conveneScopeWarning", () => {
+  const reader = mind({ slug: "r", name: "Rhea", tools: ["read"] });
+  const coder = mind({ slug: "k", name: "Kit", tools: ["code", "lens"] });
+  const talker = mind({ slug: "t", name: "Tam", tools: ["lens"] });
+  const plain = mind({ slug: "p", name: "Pip" });
+
+  test("an unscoped room names the Minds whose declared skills it will resolve to nothing", () => {
+    const section = conveneScopeWarning([reader, coder], {});
+    expect(section).not.toBeNull();
+    if (!section) return;
+    expect(valid(section)).toBe(true);
+    const text = section.kind === "rows" ? section.items[0]?.text : undefined;
+    expect(text).toBe("Rhea and Kit can read code — but this room reads nothing.");
+    expect(section.kind === "rows" && section.items[0]?.glyph).toBe("warn");
+  });
+
+  test("silent once a project is scoped — the declaration now resolves", () => {
+    expect(conveneScopeWarning([reader, coder], { projectId: "p1" })).toBeNull();
+  });
+
+  test("silent when no seated Mind declares a filesystem skill", () => {
+    // `lens` tables an exhibit and needs no project, so a room of talkers is not blind —
+    // it is simply a discussion, which is a legitimate room to convene.
+    expect(conveneScopeWarning([talker, plain], {})).toBeNull();
+  });
+
+  test("names one, two, and three the way the cast line does", () => {
+    const textOf = (cast: Mind[]) => {
+      const s = conveneScopeWarning(cast, {});
+      return s?.kind === "rows" ? s.items[0]?.text : undefined;
+    };
+    expect(textOf([reader])).toContain("Rhea can read code");
+    expect(textOf([reader, coder])).toContain("Rhea and Kit can read code");
+    expect(textOf([reader, coder, mind({ slug: "z", name: "Zed", tools: ["read"] })])).toContain(
+      "Rhea, Kit, and Zed can read code",
+    );
   });
 });
 

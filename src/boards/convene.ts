@@ -6,8 +6,21 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { CanvasActionField, CanvasActionItem, CanvasBoardView } from "@keelson/shared";
+import type {
+  CanvasActionField,
+  CanvasActionItem,
+  CanvasBoardView,
+  CanvasTone,
+} from "@keelson/shared";
+import { CODING_CAPABILITY_SLUGS } from "../capabilities.ts";
 import type { Mind } from "../types.ts";
+
+// The scope axis is named for what it grants, not where it points. "Shared" read as
+// benign — Minds sharing a workspace — when it in fact means the room can open no file
+// at all, which is the state that quietly wastes a room's whole turn budget.
+const SCOPE_TITLE = "What can they read?";
+const NO_PROJECT_LABEL = "Nothing";
+const NO_PROJECT_PLACEHOLDER = "Nothing (no project)";
 
 // The host projects a room can target — the minimal shape conveneScopeSection needs
 // (id is the option value the scope action resolves; name is the label).
@@ -56,57 +69,42 @@ const criteriaField: CanvasActionField = {
   multiline: true,
 };
 
-// Where a room runs, as a standing bar above the shape tabs rather than a field inside
-// one of them: a project is a property of the room (it resolves to the cwd every turn
-// takes) and not of how the Minds take turns, so asking for it per-shape both scattered
-// it across two of five forms and lost it on every change of shape. Null only when there
-// is neither anything to scope to nor a scope to recover from — a room then simply runs
-// in the shared scope.
+// The most projects that read as a strip of chips. Past this the row wraps into a block
+// and the select is the better control — the same threshold rule facilitatorField applies
+// with `segmented`, but expressed as actions rather than a field: a field needs a submit,
+// and a scope that can be picked without being committed is the whole failure this
+// control has to stop making possible.
+const MAX_SCOPE_CHIPS = 6;
+
+// What the room can read, as a standing bar above the shape tabs rather than a field
+// inside one of them: a project is a property of the room (it resolves to the cwd every
+// turn takes) and not of how the Minds take turns, so asking for it per-shape both
+// scattered it across two of five forms and lost it on every change of shape. Null only
+// when there is neither anything to scope to nor a scope to recover from.
+//
+// Named for what it grants rather than where it points: picking a project IS the read
+// grant (readToolPool, room-lifecycle.ts), and the unscoped state is not a benign
+// "shared" — it is a room whose Minds can read nothing at all.
 export function conveneScopeSection(
   projects: readonly ConveneProject[],
   scope: { projectId?: string; coding?: boolean },
 ): CanvasBoardView["sections"][number] | null {
   // A scope naming a project the host no longer offers still has to be selectable: the
   // draft holds a projectId every convene would reject, so the bar has to stay reachable
-  // to clear it — and a defaultValue matching no option fails the board's own schema, so
-  // the whole panel would stop publishing rather than merely look stale.
+  // to clear it.
   const stale =
     scope.projectId && !projects.some((p) => p.id === scope.projectId)
       ? scope.projectId
       : undefined;
   // Nothing to scope to and nothing to recover from.
   if (projects.length === 0 && !stale) return null;
-  // The seat cards' idiom: a control whose LABEL is its current value, with the picker
-  // behind it.
   const current = scope.projectId
     ? (projects.find((p) => p.id === scope.projectId)?.name ?? `${scope.projectId} (unavailable)`)
-    : "Shared";
-  const items: CanvasActionItem[] = [
-    {
-      type: "scope-set",
-      label: `Project — ${current}`,
-      glyph: "⚙",
-      // The read floor belongs to the project decision, not the tier: scoping to a
-      // project is itself what grants every speaker Read inside the root, with no
-      // coding tier and no per-Mind declaration (readToolPool, room-lifecycle.ts).
-      hint: "Where this room runs: the project root each turn takes as its working directory. Every Mind in a scoped room can read it.",
-      submitLabel: "Set project",
-      fields: [
-        {
-          name: "project",
-          label: "Project",
-          // Not required, so this doubles as the clear option — picking it dispatches ""
-          // and drops the scope (and the coding tier with it).
-          placeholder: "No project (shared)",
-          options: [
-            ...projects.map((p) => ({ value: p.id, label: p.name })),
-            ...(stale ? [{ value: stale, label: `${stale} (unavailable)` }] : []),
-          ],
-          defaultValue: scope.projectId ?? "",
-        },
-      ],
-    },
-  ];
+    : NO_PROJECT_LABEL;
+  const items: CanvasActionItem[] =
+    projects.length <= MAX_SCOPE_CHIPS
+      ? scopeChips(projects, scope, stale)
+      : [scopePicker(projects, scope, stale, current)];
   // The tier is a boolean, so it gets ONE control rather than a pair of segments implying
   // two peer choices: unset is read-only. It carries no fields, so it flips on click like
   // a seat card. It appears only for a LIVE project: the tier has no confinement boundary
@@ -122,7 +120,7 @@ export function conveneScopeSection(
       // control — "Discuss only" could equally describe what is true now or what a
       // click will do — and it also mislabelled the off state, since a scoped room
       // already reads the repo.
-      label: "Can edit",
+      label: "…and edit it",
       glyph: "✎",
       selected: on,
       hint: on
@@ -131,7 +129,120 @@ export function conveneScopeSection(
       payload: { coding: on ? "off" : "on" },
     });
   }
-  return { kind: "actions", title: "Where does it run?", wrap: true, items };
+  return { kind: "actions", title: SCOPE_TITLE, wrap: true, items };
+}
+
+// One chip per answer, each dispatching on click. The strip echoes the shape tabs
+// directly below it, so the whole composer answers its questions the same way — and
+// there is no commit step to skip.
+function scopeChips(
+  projects: readonly ConveneProject[],
+  scope: { projectId?: string },
+  stale: string | undefined,
+): CanvasActionItem[] {
+  const chip = (
+    project: string,
+    label: string,
+    glyph: string,
+    selected: boolean,
+    hint: string,
+  ): CanvasActionItem => ({
+    type: "scope-set",
+    label,
+    glyph,
+    selected,
+    hint,
+    payload: { project },
+  });
+  return [
+    chip(
+      "",
+      NO_PROJECT_LABEL,
+      "⊘",
+      !scope.projectId,
+      "No project: the Minds reason from what they already know and can read no files. A Mind's own `read`/`code` grants nothing here.",
+    ),
+    ...projects.map((p) =>
+      chip(
+        p.id,
+        p.name,
+        "⌂",
+        scope.projectId === p.id,
+        `Every Mind in this room can read ${p.name}.`,
+      ),
+    ),
+    // A dropped project keeps its own chip so the scope reads as stale rather than
+    // vanishing — and so one click on any other chip replaces it.
+    ...(stale
+      ? [
+          chip(
+            stale,
+            `${stale} (unavailable)`,
+            "⌂",
+            true,
+            "The host no longer lists this project — every convene against it fails. Pick another, or Nothing.",
+          ),
+        ]
+      : []),
+  ];
+}
+
+// Past MAX_SCOPE_CHIPS the strip stops reading at a glance, so the picker returns to a
+// select behind a control whose label is its current value. A defaultValue matching no
+// option fails the board's own schema — which would stop the whole panel publishing
+// rather than merely look stale — so a dropped project still contributes its option.
+function scopePicker(
+  projects: readonly ConveneProject[],
+  scope: { projectId?: string },
+  stale: string | undefined,
+  current: string,
+): CanvasActionItem {
+  return {
+    type: "scope-set",
+    label: `Reads — ${current}`,
+    glyph: "⌂",
+    hint: "What this room can read: the project root each turn takes as its working directory. Every Mind in a scoped room can read it.",
+    submitLabel: "Set project",
+    fields: [
+      {
+        name: "project",
+        label: "Project",
+        // Not required, so its placeholder doubles as the clear option — picking it
+        // dispatches "" and drops the scope (and the coding tier with it).
+        placeholder: NO_PROJECT_PLACEHOLDER,
+        options: [
+          ...projects.map((p) => ({ value: p.id, label: p.name })),
+          ...(stale ? [{ value: stale, label: `${stale} (unavailable)` }] : []),
+        ],
+        defaultValue: scope.projectId ?? "",
+      },
+    ],
+  };
+}
+
+// The contradiction a blind room hides: a Mind declaring `read`/`code` carries a skill
+// this room resolves to nothing (resolveMindTools intersects the declaration against a
+// pool the unscoped room never fills). Stated where the scope is chosen, before any turn
+// is billed — a warning and not a gate, since a discussion between capable Minds who
+// simply have nothing to read is a legitimate room to convene.
+export function conveneScopeWarning(
+  cast: readonly Mind[],
+  scope: { projectId?: string },
+): CanvasBoardView["sections"][number] | null {
+  if (scope.projectId) return null;
+  const blind = cast.filter((m) => m.tools?.some((t) => CODING_CAPABILITY_SLUGS.has(t)));
+  if (blind.length === 0) return null;
+  const names = blind.map((m) => m.name);
+  const who =
+    names.length === 1
+      ? `${names[0]} can read code`
+      : names.length === 2
+        ? `${names[0]} and ${names[1]} can read code`
+        : `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]} can read code`;
+  return {
+    kind: "rows",
+    items: [{ glyph: "warn" as CanvasTone, text: `${who} — but this room reads nothing.` }],
+  };
 }
 
 // The facilitator (Debate chair / Delegate manager) is one of the selected Minds the
