@@ -18,12 +18,36 @@ import { chamberDataHome } from "../src/paths.ts";
 import { createFileRoomStore, listRooms } from "../src/room-store.ts";
 import type { TaskLedger } from "../src/types.ts";
 
+// Tolerant parse, like every other read in this collector: a missing, malformed, or
+// non-object argument yields no names rather than a thrown collector, and the index
+// falls back to raw ids.
+function parseProjectNames(raw: string | undefined): Record<string, string> {
+  if (!raw?.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 async function main() {
   // The chamber-rooms bash node bakes the resolved data home in as argv[2] (the
   // keelson-home-rooted path the in-process rib captured), so this out-of-process
   // collector derives the rooms, minds, and lenses dirs from it. Fall back to
   // chamberDataHome() for a manual/standalone run.
   const home = process.argv[2]?.trim() || chamberDataHome();
+  // argv[3] is a baked {id: name} map of the host's projects (the chamber-lenses
+  // collector takes its workflow-versions map the same way): this process cannot reach
+  // the projects seam, so without it a scoped room could only show a raw uuid. Baked at
+  // contribution time, so a project added since then falls back to its id — which is
+  // what an unresolvable project renders anyway.
+  const projectNames = new Map<string, string>(Object.entries(parseProjectNames(process.argv[3])));
   const roomsRoot = join(home, "rooms");
   const [rooms, minds, lenses] = await Promise.all([
     listRooms(roomsRoot).catch(() => []),
@@ -46,7 +70,7 @@ async function main() {
       }),
   );
   process.stdout.write(
-    JSON.stringify(buildRoomsIndexBoard(rooms, minds, lenses, outcomeSlugs, ledgers)),
+    JSON.stringify(buildRoomsIndexBoard(rooms, minds, lenses, outcomeSlugs, ledgers, projectNames)),
   );
 }
 

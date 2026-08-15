@@ -226,9 +226,19 @@ function findLastAgentIndex(transcript: readonly TurnEntry[]): number {
   return -1;
 }
 
+// What a room could read, in the same words the convene composer asks the question in.
+// Unconditional by design: an unscoped room is not a room missing an attribute, it is a
+// room whose every Mind was granted no file access (readGrant needs a project root to
+// confine to), so rendering the chip only when a project is set is what let a blind room
+// look like any other. Callers resolve the id to a name and fall back to the raw id, so
+// `undefined` here means no project was ever set — not one that failed to resolve.
+export function scopeChipLabel(projectLabel: string | undefined): string {
+  return projectLabel ? `⌂ Reads ${projectLabel}` : "⌂ Reads nothing";
+}
+
 // The room's vitals as ONE compact status line — a single quiet `rows` item at
-// the same register as the round dividers below it: the scope (when set) as a
-// small leading chip, then duration + clock span, then the room's token/tool
+// the same register as the round dividers below it: the scope as a small leading
+// chip, then duration + clock span, then the room's token/tool
 // totals. A `stats` band of hero tiles for a handful of figures wasted a full row
 // at the foot of the board; on one line they read as the secondary facts they are.
 function buildVitalsSection(
@@ -254,16 +264,13 @@ function buildVitalsSection(
     const label = `⚙ ${tools.total} tool${tools.total === 1 ? "" : "s"}`;
     parts.push(tools.failed > 0 ? `${label} · ${tools.failed} failed` : label);
   }
-  if (parts.length === 0 && !projectLabel) return [];
   return [
     {
       kind: "rows",
       items: [
         {
           glyph: "neutral" as CanvasTone,
-          ...(projectLabel
-            ? { chip: { label: `⌂ ${projectLabel}`, tone: "neutral" as CanvasTone } }
-            : {}),
+          chip: { label: scopeChipLabel(projectLabel), tone: "neutral" as CanvasTone },
           text: parts.length > 0 ? parts.join(" · ") : "No turns yet",
         },
       ],

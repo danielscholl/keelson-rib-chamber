@@ -659,9 +659,13 @@ describe("buildRoomBoard", () => {
     );
   });
 
-  test("no vitals row at all when there are no turns and no scope", () => {
+  test("an unscoped room says so rather than omitting the fact", () => {
+    // The vitals row is unconditional now: a room with no project granted its Minds no
+    // file access at all, and rendering nothing made that look like any other room.
     const empty = buildRoomBoard(room(), []);
-    expect(vitalsRow(empty)).toBeUndefined();
+    expect(vitalsRow(empty)?.chip).toEqual({ label: "⌂ Reads nothing", tone: "neutral" });
+    expect(vitalsRow(empty)?.text).toBe("No turns yet");
+    expect(canvasViewSchema.safeParse(empty).success).toBe(true);
   });
 
   test("token totals ride the vitals status line (no stats band); omitted when no turn carries usage", () => {
@@ -677,7 +681,7 @@ describe("buildRoomBoard", () => {
     expect(vitalsRow(board)?.text).toContain("↑ 148k in · ↓ 11k out");
   });
 
-  test("the scope, when set, rides as a leading chip on the vitals row", () => {
+  test("the scope rides as a leading chip on the vitals row, in both states", () => {
     const withScope = buildRoomBoard(
       room({ projectId: "p1" }),
       [entry()],
@@ -685,16 +689,27 @@ describe("buildRoomBoard", () => {
       [],
       "keelson-rib-squad",
     );
-    expect(vitalsRow(withScope)?.chip).toEqual({ label: "⌂ keelson-rib-squad", tone: "neutral" });
+    expect(vitalsRow(withScope)?.chip).toEqual({
+      label: "⌂ Reads keelson-rib-squad",
+      tone: "neutral",
+    });
     const withoutScope = buildRoomBoard(room(), [entry()]);
-    expect(vitalsRow(withoutScope)?.chip).toBeUndefined();
+    expect(vitalsRow(withoutScope)?.chip).toEqual({ label: "⌂ Reads nothing", tone: "neutral" });
   });
 
   test("scope alone (no turns yet) still renders the vitals row", () => {
     const board = buildRoomBoard(room({ projectId: "p1" }), [], undefined, [], "keelson-rib-squad");
     const row = vitalsRow(board);
-    expect(row?.chip?.label).toBe("⌂ keelson-rib-squad");
+    expect(row?.chip?.label).toBe("⌂ Reads keelson-rib-squad");
     expect(row?.text).toBe("No turns yet");
+  });
+
+  test("a project the host has dropped reads as its raw id, never as nothing", () => {
+    // Callers pass `resolveProjectName(id) ?? id`, so an unresolvable project still
+    // arrives as a label — conflating it with an unscoped room would misreport what the
+    // room could actually read.
+    const board = buildRoomBoard(room({ projectId: "p1" }), [entry()], undefined, [], "p1");
+    expect(vitalsRow(board)?.chip?.label).toBe("⌂ Reads p1");
   });
 });
 

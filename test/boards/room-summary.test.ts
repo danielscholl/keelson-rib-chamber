@@ -218,6 +218,13 @@ describe("buildRoomSummaryHtml", () => {
     expect(html).toContain("no agent turn composed this page");
   });
 
+  test("provenance records what the room could read, in both states", () => {
+    // The record of a session has to say whether its Minds could open a file: an
+    // unscoped room reads nothing, which is a finding about the room, not a blank.
+    expect(build()).toContain("reads nothing");
+    expect(build({ projectLabel: "subgroup-ci" })).toContain("reads subgroup-ci");
+  });
+
   // The page has no schema cap, so the close renders whole rather than ending in
   // flattenMarkdown's own "— continues —" note.
   test("a very long close renders whole, never truncated into a footer", () => {

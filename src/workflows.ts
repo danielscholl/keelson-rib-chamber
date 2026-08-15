@@ -14,6 +14,7 @@ import {
   LENS_REFRESH_WF_PROMPT,
   LENS_WF_PROMPT,
 } from "./prompts.ts";
+import { projectNameMap } from "./runtime.ts";
 
 // The standing-digest write seam, referenced by both the tool registration and the
 // chamber-digest workflow's author node (allowed_tools) — one source of truth.
@@ -190,7 +191,7 @@ function bundledChamberWorkflows(
             // both the rooms and the minds (to tone each cast name by its Mind's
             // identity), so it bakes the home, not a single store dir (see the
             // lenses collector).
-            bash: `bun ${shQuote(ROOMS_COLLECTOR)} ${shQuote(chamberDataHome())}`,
+            bash: `bun ${shQuote(ROOMS_COLLECTOR)} ${shQuote(chamberDataHome())} ${shQuote(JSON.stringify(projectNameMap()))}`,
             output_schema: { type: "object", required: ["view", "sections"] },
           },
         ],

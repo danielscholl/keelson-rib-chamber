@@ -67,6 +67,36 @@ describe("buildRoomsIndexBoard empty", () => {
   });
 });
 
+describe("buildRoomsIndexBoard scope", () => {
+  const readsOf = (board: ReturnType<typeof buildRoomsIndexBoard>) =>
+    cards(board)[0]?.fields?.find((f) => f.label === "reads")?.value;
+
+  test("every card states what the room could read, unscoped included", () => {
+    // An unscoped room granted its Minds no file access — a fact about the session, not
+    // a missing attribute, so it is stated rather than omitted.
+    expect(readsOf(buildRoomsIndexBoard([room()]))).toBe("nothing");
+  });
+
+  test("a scoped room names its project, resolved through the baked map", () => {
+    const board = buildRoomsIndexBoard(
+      [room({ projectId: "p1" })],
+      [],
+      [],
+      new Set(),
+      new Map(),
+      new Map([["p1", "subgroup-ci"]]),
+    );
+    expect(canvasViewSchema.safeParse(board).success).toBe(true);
+    expect(readsOf(board)).toBe("subgroup-ci");
+  });
+
+  test("a project missing from the map falls back to its id, not to nothing", () => {
+    // The collector bakes the map at contribution time, so a project added since then
+    // is absent. Reading that as "nothing" would claim the room was blind when it was not.
+    expect(readsOf(buildRoomsIndexBoard([room({ projectId: "later" })]))).toBe("later");
+  });
+});
+
 describe("buildRoomsIndexBoard active + closed", () => {
   test("active rooms come first, then closed; header counts BOTH", () => {
     const board = buildRoomsIndexBoard([

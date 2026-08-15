@@ -18,6 +18,10 @@ export interface RoomSummaryInput {
   decisions: readonly DecisionMarker[];
   tabled: readonly LensRecord[];
   transcript: readonly TurnEntry[];
+  // The room's scope, already resolved to a display string by the caller (which falls
+  // back to the raw id), so this stays pure. Absent means no project was ever set — the
+  // room read nothing — which the provenance line states rather than omits.
+  projectLabel?: string;
 }
 
 function esc(value: string): string {
@@ -295,6 +299,7 @@ export function buildRoomSummaryHtml(input: RoomSummaryInput): string {
     room.slug,
     `budget ${turnsLabel(room.turnIndex, room.turnBudget)}`,
     `round ${room.round}`,
+    `reads ${input.projectLabel ?? "nothing"}`,
   ].join(" · ");
 
   return `<style>

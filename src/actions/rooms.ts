@@ -385,6 +385,13 @@ export async function roomSummaryAction(action: RibAction): Promise<RibActionRes
       decisions: parseDecisionMarkers(found.debate),
       tabled: await tabledExhibitsFor(resolved.slug),
       transcript: found.transcript,
+      // Resolved here (not in the pure builder) and falling back to the raw id, so a
+      // project the host has since dropped still reads as scoped rather than as nothing.
+      ...(found.room.projectId
+        ? {
+            projectLabel: resolveProjectName(found.room.projectId) ?? found.room.projectId,
+          }
+        : {}),
     });
     htmlStringValidator(key)(html);
     const structuralError = htmlLensStructuralError(html);
