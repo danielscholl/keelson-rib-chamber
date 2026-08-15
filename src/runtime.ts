@@ -97,6 +97,14 @@ export function resolveProjectRoot(projectId: string): string | undefined {
 export function resolveProjectName(projectId: string): string | undefined {
   return resolveProject(projectId)?.name;
 }
+// The host's projects as a plain {id: name} record, for baking into an out-of-process
+// collector's argv — that process has no projects seam, so a room's scope could
+// otherwise only render as a raw uuid. Empty on a harness with no getProjects, which
+// degrades the index to ids rather than dropping the scope.
+export function projectNameMap(): Record<string, string> {
+  return Object.fromEntries((getProjects?.() ?? []).map((p) => [p.id, p.name]));
+}
+
 // A free-text project reference (id or name, case-insensitive) resolved against
 // the host's project list — the same "id or name" convention squad's tools use
 // for project selection, since a board action field is free text, not a picker.

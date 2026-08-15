@@ -27,12 +27,86 @@ const room = (over: Partial<Room> = {}): Room => ({
   ...over,
 });
 
-async function runCollector(home: string): Promise<{ out: string; code: number }> {
-  const proc = Bun.spawn(["bun", COLLECTOR, home], { stdout: "pipe", stderr: "ignore" });
+async function runCollector(
+  home: string,
+  projectNames?: string,
+): Promise<{ out: string; code: number }> {
+  const argv = projectNames === undefined ? [home] : [home, projectNames];
+  const proc = Bun.spawn(["bun", COLLECTOR, ...argv], { stdout: "pipe", stderr: "ignore" });
   const out = await new Response(proc.stdout).text();
   const code = await proc.exited;
   return { out, code };
 }
+
+describe("collect-rooms scope", () => {
+  const readsOf = (out: string) => {
+    const board = JSON.parse(out) as {
+      sections: { kind: string; items: { fields?: { label: string; value?: string }[] }[] }[];
+    };
+    const items = board.sections.find((s) => s.kind === "cards")?.items ?? [];
+    return items[0]?.fields?.find((f) => f.label === "reads")?.value;
+  };
+
+  test("argv[3] resolves a scoped room's project to its name", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(room({ slug: "room-scoped", projectId: "p1" }));
+      const { out, code } = await runCollector(home, JSON.stringify({ p1: "subgroup-ci" }));
+      expect(code).toBe(0);
+      expect(readsOf(out)).toBe("subgroup-ci");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("an unscoped room reads nothing, and a malformed map never throws the collector", async () => {
+    // Every other read here degrades rather than throwing; the baked map is no different,
+    // and a room falling back to its raw id beats an index that fails to publish at all.
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(room({ slug: "room-plain" }));
+      for (const bad of ["", "not json", "[1,2]", "null"]) {
+        const { out, code } = await runCollector(home, bad);
+        expect(code).toBe(0);
+        expect(readsOf(out)).toBe("nothing");
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("the map is a snapshot: a renamed project keeps the name the room ran against", async () => {
+    // The collector is out-of-process and cannot resolve against the live host list, so
+    // this card can disagree with the room board (which resolves per publish) after a
+    // rename or removal. Pinned deliberately: the index is a historical record, and the
+    // name a room actually ran against is the more useful thing for it to carry.
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(room({ slug: "room-renamed", projectId: "p1" }));
+      const { out, code } = await runCollector(home, JSON.stringify({ p1: "name-at-boot" }));
+      expect(code).toBe(0);
+      expect(readsOf(out)).toBe("name-at-boot");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a project absent from the map degrades to its id, never to nothing", async () => {
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(room({ slug: "room-newer", projectId: "added-later" }));
+      const { out, code } = await runCollector(home, JSON.stringify({ p1: "subgroup-ci" }));
+      expect(code).toBe(0);
+      expect(readsOf(out)).toBe("added-later");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("collect-rooms", () => {
   test("reads the data home from argv[2] and emits a sessions index with active + closed rooms", async () => {

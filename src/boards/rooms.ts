@@ -26,6 +26,10 @@ export function buildRoomsIndexBoard(
   lenses: readonly LensRecord[] = [],
   outcomeSlugs: ReadonlySet<string> = new Set(),
   ledgers: ReadonlyMap<string, TaskLedger> = new Map(),
+  // Host project id -> display name. The collector runs out-of-process and cannot
+  // reach the projects seam, so the workflow bakes this in; an id missing from the
+  // map degrades to itself rather than dropping the scope.
+  projectNames: ReadonlyMap<string, string> = new Map(),
 ): CanvasBoardView {
   const active = rooms.filter((r) => r.status === "active");
   const closed = rooms.filter((r) => r.status !== "active");
@@ -46,7 +50,14 @@ export function buildRoomsIndexBoard(
           {
             kind: "cards",
             items: ordered.map((r) =>
-              cardFor(r, bySlug, tabledByRoom.get(r.slug) ?? [], outcomeSlugs, ledgers.get(r.slug)),
+              cardFor(
+                r,
+                bySlug,
+                tabledByRoom.get(r.slug) ?? [],
+                outcomeSlugs,
+                ledgers.get(r.slug),
+                projectNames,
+              ),
             ),
           },
         ];
@@ -81,6 +92,7 @@ function cardFor(
   tabled: readonly LensRecord[],
   outcomeSlugs: ReadonlySet<string>,
   ledger: TaskLedger | undefined,
+  projectNames: ReadonlyMap<string, string>,
 ) {
   const tone = statusTone(room.status);
   const cappedTurnIndex = Math.min(room.turnIndex, room.turnBudget);
@@ -98,6 +110,15 @@ function cardFor(
       // for a plain sequential room), so surface it only once it has advanced.
       ...(room.round > 0 ? [{ label: "round", value: String(room.round) }] : []),
       { label: "shape", value: shapeLabel(room) },
+      // What the room could read, stated for EVERY room — an unscoped one granted its
+      // Minds no file access at all, which is a fact about the session and not the
+      // absence of one. Falls back to the raw id when the host no longer lists the
+      // project, so a dropped project reads as scoped-but-unresolvable, never as
+      // "nothing".
+      {
+        label: "reads",
+        value: room.projectId ? (projectNames.get(room.projectId) ?? room.projectId) : "nothing",
+      },
       // A people field rejects an empty list, so a drifted no-participant record
       // simply omits the cast rather than failing the whole board's validation.
       ...(room.participants.length > 0
