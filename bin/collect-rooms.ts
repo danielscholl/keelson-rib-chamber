@@ -44,9 +44,15 @@ async function main() {
   const home = process.argv[2]?.trim() || chamberDataHome();
   // argv[3] is a baked {id: name} map of the host's projects (the chamber-lenses
   // collector takes its workflow-versions map the same way): this process cannot reach
-  // the projects seam, so without it a scoped room could only show a raw uuid. Baked at
-  // contribution time, so a project added since then falls back to its id — which is
-  // what an unresolvable project renders anyway.
+  // the projects seam, so without it a scoped room could only show a raw uuid.
+  //
+  // It is a SNAPSHOT taken when workflows were contributed (boot, or a rib-workflow
+  // reload), not a live read — the index is the one scope surface that cannot resolve
+  // against the current host list. A project added since then is absent and falls back
+  // to its id; one renamed or removed since keeps the name it had, so this card can
+  // disagree with the live room board, which resolves per publish. The name a room ran
+  // against is the more useful thing to show on a historical index, so the staleness is
+  // accepted here rather than papered over with an id.
   const projectNames = new Map<string, string>(Object.entries(parseProjectNames(process.argv[3])));
   const roomsRoot = join(home, "rooms");
   const [rooms, minds, lenses] = await Promise.all([

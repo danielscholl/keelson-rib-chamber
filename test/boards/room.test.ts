@@ -660,8 +660,9 @@ describe("buildRoomBoard", () => {
   });
 
   test("an unscoped room says so rather than omitting the fact", () => {
-    // The vitals row is unconditional now: a room with no project granted its Minds no
-    // file access at all, and rendering nothing made that look like any other room.
+    // A room with no project granted its Minds no file access at all. That is a fact
+    // about the session, so the row states it rather than falling silent — silence is
+    // indistinguishable from a scoped room that simply ran quietly.
     const empty = buildRoomBoard(room(), []);
     expect(vitalsRow(empty)?.chip).toEqual({ label: "⌂ Reads nothing", tone: "neutral" });
     expect(vitalsRow(empty)?.text).toBe("No turns yet");

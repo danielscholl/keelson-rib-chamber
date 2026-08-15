@@ -77,6 +77,23 @@ describe("collect-rooms scope", () => {
     }
   });
 
+  test("the map is a snapshot: a renamed project keeps the name the room ran against", async () => {
+    // The collector is out-of-process and cannot resolve against the live host list, so
+    // this card can disagree with the room board (which resolves per publish) after a
+    // rename or removal. Pinned deliberately: the index is a historical record, and the
+    // name a room actually ran against is the more useful thing for it to carry.
+    const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
+    try {
+      const store = createFileRoomStore(join(home, "rooms"));
+      await store.saveRoom(room({ slug: "room-renamed", projectId: "p1" }));
+      const { out, code } = await runCollector(home, JSON.stringify({ p1: "name-at-boot" }));
+      expect(code).toBe(0);
+      expect(readsOf(out)).toBe("name-at-boot");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   test("a project absent from the map degrades to its id, never to nothing", async () => {
     const home = await mkdtemp(join(tmpdir(), "chamber-collect-rooms-"));
     try {
