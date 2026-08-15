@@ -15,9 +15,6 @@ import type {
 import { CODING_CAPABILITY_SLUGS } from "../capabilities.ts";
 import type { Mind } from "../types.ts";
 
-// The scope axis is named for what it grants, not where it points. "Shared" read as
-// benign — Minds sharing a workspace — when it in fact means the room can open no file
-// at all, which is the state that quietly wastes a room's whole turn budget.
 const SCOPE_TITLE = "What can they read?";
 const NO_PROJECT_LABEL = "Nothing";
 const NO_PROJECT_PLACEHOLDER = "Nothing (no project)";
@@ -69,11 +66,12 @@ const criteriaField: CanvasActionField = {
   multiline: true,
 };
 
-// The most projects that read as a strip of chips. Past this the row wraps into a block
-// and the select is the better control — the same threshold rule facilitatorField applies
-// with `segmented`, but expressed as actions rather than a field: a field needs a submit,
-// and a scope that can be picked without being committed is the whole failure this
-// control has to stop making possible.
+// The most answers that read as a strip rather than wrapping into a block. Counted over
+// the chips actually emitted — Nothing, one per project, and a dropped project's own —
+// not over the project list, or a stale scope silently pushes the row two past it. Same
+// threshold rule facilitatorField applies with `segmented`, but expressed as actions
+// rather than a field: a field needs a submit, and a scope that can be picked without
+// being committed is the whole failure this control has to stop making possible.
 const MAX_SCOPE_CHIPS = 6;
 
 // What the room can read, as a standing bar above the shape tabs rather than a field
@@ -83,8 +81,8 @@ const MAX_SCOPE_CHIPS = 6;
 // when there is neither anything to scope to nor a scope to recover from.
 //
 // Named for what it grants rather than where it points: picking a project IS the read
-// grant (readToolPool, room-lifecycle.ts), and the unscoped state is not a benign
-// "shared" — it is a room whose Minds can read nothing at all.
+// grant (readToolPool, room-lifecycle.ts), and an unscoped room is one whose Minds can
+// read nothing at all.
 export function conveneScopeSection(
   projects: readonly ConveneProject[],
   scope: { projectId?: string; coding?: boolean },
@@ -101,10 +99,9 @@ export function conveneScopeSection(
   const current = scope.projectId
     ? (projects.find((p) => p.id === scope.projectId)?.name ?? `${scope.projectId} (unavailable)`)
     : NO_PROJECT_LABEL;
+  const chips = scopeChips(projects, scope, stale);
   const items: CanvasActionItem[] =
-    projects.length <= MAX_SCOPE_CHIPS
-      ? scopeChips(projects, scope, stale)
-      : [scopePicker(projects, scope, stale, current)];
+    chips.length <= MAX_SCOPE_CHIPS ? chips : [scopePicker(projects, scope, stale, current)];
   // The tier is a boolean, so it gets ONE control rather than a pair of segments implying
   // two peer choices: unset is read-only. It carries no fields, so it flips on click like
   // a seat card. It appears only for a LIVE project: the tier has no confinement boundary

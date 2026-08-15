@@ -256,6 +256,21 @@ describe("conveneScopeSection", () => {
     }
   });
 
+  test("the threshold counts the chips emitted, not the projects", () => {
+    // Nothing is always an answer and a dropped project adds its own, so counting the
+    // project list alone lets a stale scope push the strip two past the ceiling.
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `proj-${i}` }));
+    const isPicker = (s: Section | null) => answers(s).some((i) => i.fields !== undefined);
+    // 5 projects + Nothing = 6, exactly the ceiling.
+    expect(answers(conveneScopeSection(many(5), {})).length).toBe(6);
+    expect(isPicker(conveneScopeSection(many(5), {}))).toBe(false);
+    // The same 5 plus a dropped project is 7 — over, so it falls back.
+    expect(isPicker(conveneScopeSection(many(5), { projectId: "gone" }))).toBe(true);
+    // And 6 projects is 7 answers on its own, with no stale scope needed.
+    expect(isPicker(conveneScopeSection(many(6), {}))).toBe(true);
+  });
+
   test("past the chip threshold the picker falls back to a select", () => {
     // A long strip stops reading at a glance — the same threshold rule facilitatorField
     // applies with `segmented`.
