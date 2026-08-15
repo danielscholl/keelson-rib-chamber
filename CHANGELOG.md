@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.53.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.52.0...v0.53.0) (2026-08-15)
+
+
+### Added
+
+* **convene:** pick room scope in one click, named by what it grants ([d955a89](https://github.com/danielscholl/keelson-rib-chamber/commit/d955a89ad789b43399050aa601a2af1217f629ef))
+
+
+### Fixed
+
+* **rooms:** report what a room could read on every surface ([a716c20](https://github.com/danielscholl/keelson-rib-chamber/commit/a716c20403e4756d3143b6b85d93b1ce48900c0a))
+
 ## [0.52.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.51.0...v0.52.0) (2026-08-14)
 
 
