@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.53.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.52.0...v0.53.0) (2026-08-15)
+## [0.53.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.52.0...v0.53.0) (2026-08-16)
 
 
 ### Added
