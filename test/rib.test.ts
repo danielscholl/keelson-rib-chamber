@@ -252,9 +252,11 @@ describe("rib-chamber", () => {
 
   it("the Briefing leads the rows; the standing row is Rooms + Lenses (convening folded into the header bench)", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
-    expect(rows.map((r) => r.columns.flatMap(columnRegions).map((c) => c.key))).toEqual([
-      ["rib:chamber:brief"],
-      ["rib:chamber:rooms", "rib:chamber:lenses"],
+    // Per column, not flattened per row: Rooms and Lenses are half-width siblings,
+    // so a single stack holding both must not satisfy this.
+    expect(rows.map((r) => r.columns.map((c) => columnRegions(c).map((x) => x.key)))).toEqual([
+      [["rib:chamber:brief"]],
+      [["rib:chamber:rooms"], ["rib:chamber:lenses"]],
     ]);
     const cols = rows.flatMap((r) => r.columns.flatMap(columnRegions));
     // The Convene panel retired — its composer folds into the Chamber (presence) header.
