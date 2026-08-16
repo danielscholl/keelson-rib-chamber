@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  columnRegions,
   type RibContext,
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
@@ -65,15 +66,20 @@ describe("Chamber surface (Phase 1)", () => {
     expect(layout?.header?.workflow).toBeUndefined();
     // The Roster region folded in; the standalone roster view/workflow survive
     // off-surface, so no row binds ROSTER_KEY.
-    const keys = layout?.rows.flatMap((r) => r.columns.map((c) => c.key)) ?? [];
+    const keys =
+      layout?.rows.flatMap((r) => r.columns.flatMap(columnRegions).map((c) => c.key)) ?? [];
     expect(keys).not.toContain(ROSTER_KEY);
     // The Convene row folded into the Chamber (presence) header; the standing rows
     // now lead with the Rooms + Lenses index.
     expect(keys).not.toContain("rib:chamber:convene");
     // The Briefing leads the rows (it left the uncollapsible banner slot); the
     // Rooms + Lenses index is the standing row beneath it.
-    expect(layout?.rows[0]?.columns[0]?.key).toBe("rib:chamber:brief");
-    expect(layout?.rows[1]?.columns[0]?.key).toBe("rib:chamber:rooms");
+    expect((layout?.rows[0]?.columns ?? []).flatMap(columnRegions)[0]?.key).toBe(
+      "rib:chamber:brief",
+    );
+    expect((layout?.rows[1]?.columns ?? []).flatMap(columnRegions)[0]?.key).toBe(
+      "rib:chamber:rooms",
+    );
     expect(ribSurfaceDescriptorSchema.safeParse(rib.surfaces?.[0]).success).toBe(true);
   });
 
@@ -85,7 +91,7 @@ describe("Chamber surface (Phase 1)", () => {
     const regions = [
       layout?.header,
       layout?.banner,
-      ...(layout?.rows.flatMap((r) => r.columns) ?? []),
+      ...(layout?.rows.flatMap((r) => r.columns.flatMap(columnRegions)) ?? []),
       layout?.footer,
     ];
     for (const region of regions) {

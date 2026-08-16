@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import type { RibContext, SnapshotManager } from "@keelson/shared";
+import { columnRegions, type RibContext, type SnapshotManager } from "@keelson/shared";
 import rib from "../src/index.ts";
 import { HTML_LENS_KEY } from "../src/lens-html.ts";
 import { setChamberDataHome } from "../src/paths.ts";
@@ -46,7 +46,7 @@ describe("rib-chamber", () => {
   it("declares a bare tab (no subtitle) and collapsible index columns", () => {
     const surface = rib.surfaces?.[0];
     expect(surface?.subtitle).toBeUndefined();
-    const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns);
+    const cols = (surface?.layout.rows ?? []).flatMap((r) => r.columns.flatMap(columnRegions));
     expect(cols.find((c) => c.key === "rib:chamber:rooms")?.collapsible).toBe(true);
     expect(cols.find((c) => c.key === "rib:chamber:lenses")?.collapsible).toBe(true);
     // The Roster region folded into the Chamber header panel (rib#214) — no roster
@@ -63,7 +63,7 @@ describe("rib-chamber", () => {
     // The brief moved off a contributed workflow onto the rib-owned attention gate,
     // so the region keeps the key but binds no workflow (none exists to refresh).
     const brief = (rib.surfaces?.[0]?.layout.rows ?? [])
-      .flatMap((r) => r.columns)
+      .flatMap((r) => r.columns.flatMap(columnRegions))
       .find((c) => c.key === "rib:chamber:brief");
     expect(brief?.workflow).toBeUndefined();
     // Foldable but never auto-folded: the narrator opens on every visit.
@@ -88,7 +88,7 @@ describe("rib-chamber", () => {
 
   it("ships no static room column — room panels are registered per slug at start", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
-    const cols = rows.flatMap((r) => r.columns.map((c) => c.key));
+    const cols = rows.flatMap((r) => r.columns.flatMap(columnRegions).map((c) => c.key));
     expect(cols).not.toContain("rib:chamber:room");
   });
 
@@ -124,7 +124,7 @@ describe("rib-chamber", () => {
 
   it("ships the sessions-index and lenses-index rows; room + lens panels stay runtime", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
-    const cols = rows.flatMap((r) => r.columns);
+    const cols = rows.flatMap((r) => r.columns.flatMap(columnRegions));
     // The standing row pairs the ended-sessions index with the lenses index (both
     // workflow-backed collector regions); the live room and lens panels remain
     // runtime per-slug regions.
@@ -252,11 +252,13 @@ describe("rib-chamber", () => {
 
   it("the Briefing leads the rows; the standing row is Rooms + Lenses (convening folded into the header bench)", () => {
     const rows = rib.surfaces?.[0]?.layout.rows ?? [];
-    expect(rows.map((r) => r.columns.map((c) => c.key))).toEqual([
-      ["rib:chamber:brief"],
-      ["rib:chamber:rooms", "rib:chamber:lenses"],
+    // Per column, not flattened per row: Rooms and Lenses are half-width siblings,
+    // so a single stack holding both must not satisfy this.
+    expect(rows.map((r) => r.columns.map((c) => columnRegions(c).map((x) => x.key)))).toEqual([
+      [["rib:chamber:brief"]],
+      [["rib:chamber:rooms"], ["rib:chamber:lenses"]],
     ]);
-    const cols = rows.flatMap((r) => r.columns);
+    const cols = rows.flatMap((r) => r.columns.flatMap(columnRegions));
     // The Convene panel retired — its composer folds into the Chamber (presence) header.
     expect(cols.some((c) => c.key === "rib:chamber:convene")).toBe(false);
     // Neither what's-happening narrator has a standing column anymore.

@@ -147,7 +147,6 @@ function castFor(room: Room, minds: readonly BriefSeatedMind[]): CanvasPerson[] 
 // Who carried the room, as identity-toned share segments — speakerCounts over the
 // transcript, labelled by name so the bar's hover always names its hue.
 function shareSegments(
-  room: Room,
   transcript: readonly TurnEntry[],
   minds: readonly BriefSeatedMind[],
 ): { label: string; n: number; tone: ReturnType<typeof identityToneForSlot> }[] {
@@ -173,7 +172,7 @@ export function briefingVerdictSection(
   for (const brief of rooms) {
     const { room } = brief;
     const cast = castFor(room, minds);
-    const segments = shareSegments(room, brief.transcript, minds);
+    const segments = shareSegments(brief.transcript, minds);
     const endIso =
       room.outcomeAt ?? brief.transcript[brief.transcript.length - 1]?.at ?? room.createdAt;
     const duration = formatDuration(room.createdAt, endIso);
