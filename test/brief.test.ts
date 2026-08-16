@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { ribSurfaceDescriptorSchema, ribViewDescriptorSchema } from "@keelson/shared";
+import {
+  columnRegions,
+  ribSurfaceDescriptorSchema,
+  ribViewDescriptorSchema,
+} from "@keelson/shared";
 import rib from "../src/index.ts";
 
 const BRIEF_KEY = "rib:chamber:brief";
@@ -42,7 +46,7 @@ describe("Chamber surface (attention chrome)", () => {
 
   test("the Briefing carries the key with NO workflow binding, and folds only by hand", () => {
     const brief = (rib.surfaces?.[0]?.layout.rows ?? [])
-      .flatMap((r) => r.columns)
+      .flatMap((r) => r.columns.flatMap(columnRegions))
       .find((c) => c.key === BRIEF_KEY);
     expect(brief?.key).toBe(BRIEF_KEY);
     expect(brief?.key.startsWith("rib:chamber:")).toBe(true);
@@ -58,7 +62,9 @@ describe("Chamber surface (attention chrome)", () => {
   });
 
   test("the rooms and lenses index columns are collapsible", () => {
-    const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) => r.columns);
+    const cols = (rib.surfaces?.[0]?.layout.rows ?? []).flatMap((r) =>
+      r.columns.flatMap(columnRegions),
+    );
     const rooms = cols.find((c) => c.key === "rib:chamber:rooms");
     const lenses = cols.find((c) => c.key === "rib:chamber:lenses");
     expect(rooms?.collapsible).toBe(true);
@@ -73,7 +79,7 @@ describe("Chamber surface (attention chrome)", () => {
     const regions = [
       layout?.header,
       layout?.banner,
-      ...(layout?.rows.flatMap((r) => r.columns) ?? []),
+      ...(layout?.rows.flatMap((r) => r.columns.flatMap(columnRegions)) ?? []),
       layout?.footer,
     ];
     for (const region of regions) {
