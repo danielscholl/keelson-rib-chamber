@@ -315,6 +315,7 @@ const lensHtmlEmitSchema = z.object({
 export function makeEmitLensHtmlTool(
   registry: HtmlLensRegistry,
   store: HtmlLensStore,
+  lensStore: LensStore,
 ): ToolDefinition {
   return {
     name: HTML_LENS_TOOL_NAME,
@@ -331,6 +332,7 @@ export function makeEmitLensHtmlTool(
       "Unlike a canvas lens, `workflow` is REQUIRED — there is no generic re-author for a page, so a living HTML lens is one whose own producer re-derives it.",
       "The harness runs only a RIB-CONTRIBUTED workflow on a panel's cadence: chamber contributes one `chamber-lens-<filename>` per workflow file the operator has placed in chamber's lens-workflows dir — a workflow in the general catalog is refused and the panel silently never re-composes.",
       "Omitting `refresh` on a re-emit keeps the existing backing; an object PATCHES it; `refresh: null` removes it.",
+      "An `id` a tabled exhibit already owns is refused — pick another id.",
       CANVAS_PUBLISH_CONTRACT,
     ].join(" "),
     inputSchema: lensHtmlEmitSchema,
@@ -340,7 +342,7 @@ export function makeEmitLensHtmlTool(
       // preserve-vs-clear resolution is a read-modify-write of the record, so two
       // concurrent re-emits of one id could otherwise lose-update its backing.
       const apply = async (): Promise<void> => {
-        await emitHtmlLens(input, ctx, registry, store);
+        await emitHtmlLens(input, ctx, registry, store, lensStore);
       };
       return enqueueLensWrite(apply);
     },
@@ -352,6 +354,7 @@ async function emitHtmlLens(
   ctx: Parameters<ToolDefinition["execute"]>[1],
   registry: HtmlLensRegistry,
   store: HtmlLensStore,
+  lensStore: LensStore,
 ): Promise<void> {
   const parsed = lensHtmlEmitSchema.safeParse(input);
   if (!parsed.success) {
@@ -408,6 +411,17 @@ async function emitHtmlLens(
   }
   try {
     await awaitHtmlLensReconcile();
+    // The html store shares no record with exhibits, so nothing would be overwritten —
+    // but an exhibit's id is reserved on every write seam, as the canvas emit holds it.
+    const exhibit = id !== undefined ? await lensStore.loadLens(id) : undefined;
+    if (exhibit && isExhibit(exhibit)) {
+      emitResult(
+        ctx,
+        `chamber_emit_lens_html: '${id}' is an exhibit — pick another id for the page`,
+        true,
+      );
+      return;
+    }
     const existing = id !== undefined ? await store.load(id) : undefined;
     const producedBy = runningLensWorkflow(ctx);
     const resolved = resolveHtmlLensRefresh(parsed.data.refresh, existing?.refresh);

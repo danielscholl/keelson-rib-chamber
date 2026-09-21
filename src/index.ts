@@ -311,7 +311,9 @@ const rib: Rib = {
           ]
         : [];
     const htmlLensTools =
-      sm && registerRegion && htmlLensReg ? [makeEmitLensHtmlTool(htmlLensReg, htmlLensStore)] : [];
+      sm && registerRegion && htmlLensReg
+        ? [makeEmitLensHtmlTool(htmlLensReg, htmlLensStore, lensStore)]
+        : [];
     // The room subsystem itself needs no registerRegion (rooms hold no panel), but a room
     // turn grants chamber_table_exhibit only when the lens registry exists — and that
     // needs the seam. Keep rooms behind it rather than silently shipping a room that
