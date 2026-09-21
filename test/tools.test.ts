@@ -725,6 +725,25 @@ describe("chamber room-control chat tools", () => {
     expect(withSynth.out()).toContain("synthesizer");
   });
 
+  it("accepts `delegate` as the magentic strategy, under magentic's own rules", async () => {
+    const ok = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "delegate", manager: "mod" },
+      ok.ctx,
+    );
+    expect(ok.errored()).toBe(false);
+    expect(ok.out()).toContain("magentic: mod manages 2 workers");
+    // The alias buys no exemption: it still needs magentic's manager.
+    const bare = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["alice", "bob"], strategy: "delegate" },
+      bare.ctx,
+    );
+    expect(bare.errored()).toBe(true);
+    expect(bare.out()).not.toContain("unknown strategy");
+    expect(bare.out()).toContain("manager");
+  });
+
   it("reports every unmet role/config rule for a room start in one error", async () => {
     const expected = [
       "open-floor has no manager — `manager` is only for the magentic strategy",
