@@ -492,6 +492,31 @@ nodes:
     });
   });
 
+  it("refuses an id an exhibit owns, and writes nothing", async () => {
+    await createFileLensStore(lensesDir()).saveLens({
+      id: "assessment",
+      board: { view: "board", title: "Assessment", sections: [] },
+      kind: "exhibit",
+    });
+    const t = await emitHtml({ id: "Assessment", html: page("hi") });
+    expect(t.errored()).toBe(true);
+    expect(t.out()).toContain("'assessment' is an exhibit");
+    expect(await createFileHtmlLensStore(htmlLensesDir()).load("assessment")).toBeUndefined();
+    expect((await createFileLensStore(lensesDir()).loadLens("assessment"))?.kind).toBe("exhibit");
+  });
+
+  // Only an exhibit reserves the id: a canvas lens and a page may still share one,
+  // which chamber_retire_lens disambiguates by `kind`.
+  it("still accepts an id a canvas lens owns", async () => {
+    await createFileLensStore(lensesDir()).saveLens({
+      id: "twin",
+      board: { view: "board", title: "Twin", sections: [] },
+    });
+    const t = await emitHtml({ id: "twin", html: page("hi") });
+    expect(t.errored()).toBe(false);
+    expect(await createFileHtmlLensStore(htmlLensesDir()).load("twin")).toBeDefined();
+  });
+
   it("drops a `lens` key from refresh.inputs rather than persisting a dead one", async () => {
     const t = await emitHtml({
       id: "s",
