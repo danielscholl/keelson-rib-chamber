@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.54.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.53.0...v0.54.0) (2026-09-21)
+
+
+### Added
+
+* **rooms:** accept delegate as an alias for the magentic strategy ([#372](https://github.com/danielscholl/keelson-rib-chamber/issues/372)) ([792d0c7](https://github.com/danielscholl/keelson-rib-chamber/commit/792d0c740d345f5241992c2695abffda2077b4de))
+
+
+### Fixed
+
+* **lens:** drop the dead lens key from refresh.inputs ([#371](https://github.com/danielscholl/keelson-rib-chamber/issues/371)) ([c7d9b09](https://github.com/danielscholl/keelson-rib-chamber/commit/c7d9b09f01a191864994f4ba6e70b33ec65207df))
+* **lens:** refuse an exhibit id on the html lens emit ([#373](https://github.com/danielscholl/keelson-rib-chamber/issues/373)) ([29947ac](https://github.com/danielscholl/keelson-rib-chamber/commit/29947ac3731248745ecc0ec868daf8e2be387f35))
+* **rooms:** say in the start dry-run when no fidelity turn can run ([#374](https://github.com/danielscholl/keelson-rib-chamber/issues/374)) ([8d2fea8](https://github.com/danielscholl/keelson-rib-chamber/commit/8d2fea8157c6daaecfe0ad24ac268d22325b839a))
+
+
+### Documentation
+
+* **capabilities:** say the osdu slug needs a cross-rib grant ([#375](https://github.com/danielscholl/keelson-rib-chamber/issues/375)) ([4b9ae5a](https://github.com/danielscholl/keelson-rib-chamber/commit/4b9ae5a9b3ea67b2953a306a68c6366e83db0291))
+* fix agent-guidance drift ([#370](https://github.com/danielscholl/keelson-rib-chamber/issues/370)) ([12c61c3](https://github.com/danielscholl/keelson-rib-chamber/commit/12c61c39654c8096620eb6dc55d8bf5b9edf5f30))
+
 ## [0.53.0](https://github.com/danielscholl/keelson-rib-chamber/compare/v0.52.0...v0.53.0) (2026-08-15)
 
 
