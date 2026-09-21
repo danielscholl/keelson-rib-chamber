@@ -492,6 +492,18 @@ nodes:
     });
   });
 
+  it("drops a `lens` key from refresh.inputs rather than persisting a dead one", async () => {
+    const t = await emitHtml({
+      id: "s",
+      html: page("hi"),
+      refresh: { workflow: "chamber-lens-s", inputs: { lens: "hijacked", env: "dev" } },
+    });
+    expect(t.errored()).toBe(false);
+    expect((await createFileHtmlLensStore(htmlLensesDir()).load("s"))?.refresh?.inputs).toEqual({
+      env: "dev",
+    });
+  });
+
   it("an unchanged page holds updatedAt; a changed page earns a new one", async () => {
     const store = createFileHtmlLensStore(htmlLensesDir());
     await emitHtml({ id: "s", html: page("same") });
