@@ -21,7 +21,7 @@ entry in a small curated vocabulary that maps to one or more concrete tools. Tod
 that vocabulary has four entries: `lens` (authorizes `chamber_table_exhibit`: mid-room publishing tables an exhibit), `read`
 (authorizes `Read`), `code` (authorizes `Bash`, `Edit`, `Write`), and `osdu`
 (authorizes read-only OSDU platform status tools when the osdu rib is
-co-installed). `Read` is the exception: a room that targets a project auto-grants it to every
+co-installed and the operator has granted Chamber those tools). `Read` is the exception: a room that targets a project auto-grants it to every
 speaker, coding or standard, confined to the project root. Selecting the project
 is the grant, so no coding tier and no per-Mind `read` declaration is required.
 `code` is the coding-room-only tier: its `Bash`, `Edit`, and `Write` resolve to
@@ -41,18 +41,25 @@ only ever narrow it, never widen it.
 ## Why intersect with a room-safe pool
 
 The core agent-turn seam already filters a turn's tools: it projects the turn's
-requested tool names against the shared registry and applies the operator
-denylist. But it does not scope a turn to its own rib. The rib id is threaded
-through and goes unused, so the seam would happily hand a Chamber turn any
-registered tool name that survives the denylist, including tools that belong to
-another rib or to the room's own control plane.
+requested tool names against the shared registry, applies the operator denylist,
+and holds back any tool another rib owns unless the operator has
+[granted it to the calling rib](https://danielscholl.github.io/keelson/docs/guides/governance/#cross-rib-grants). That stops a Chamber turn reaching a
+sibling rib's tools by default. It does not stop a turn reaching Chamber's own
+tools: every tool this rib registers is one a Chamber turn may request, the
+room's own control plane included.
 
 So the rib applies its own allowlist ceiling on top. Because a speaker's tools are
 intersected with a pool the rib controls, a Mind can never reach the room-control
 tools, the genesis write seam, or any unpooled tool from this rib or another rib,
-even with a hand-edited `mind.json`. The two layers are belt-and-suspenders: the
-core seam enforces the operator floor, and the rib enforces least privilege per
-room.
+even with a hand-edited `mind.json`. The two layers do different jobs: the core
+seam enforces the operator floor (the denylist and the cross-rib grants), and the
+rib enforces least privilege per room.
+
+The layers stack, so a slug backed by another rib needs both. `osdu` is in the
+room-safe pool, but its tools belong to the osdu rib, so the core seam projects
+them onto a Chamber turn only once the operator grants them. Without the grant
+the turn still runs, with those tools absent, and the server log names the tools
+it held back. The Mind is not told.
 
 ## Resolution mechanics
 

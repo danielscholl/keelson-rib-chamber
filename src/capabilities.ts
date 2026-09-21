@@ -3,7 +3,8 @@
 // names. The room-safe pool (RoomDriverDeps.turnTools) is the allowlist ceiling:
 // the result is intersected with it, so a Mind can never reach a tool the room
 // doesn't already permit (e.g. room-control or another rib's tools) even via a
-// hand-edited mind.json — the core turn seam does not scope a turn to its rib.
+// hand-edited mind.json — the core turn seam gates other ribs' tools behind an
+// operator grant, but hands a chamber turn any of chamber's own.
 
 import { EXHIBIT_TOOL_NAME } from "./lens.ts";
 import type { Mind } from "./types.ts";
@@ -36,7 +37,8 @@ export const CAPABILITIES: Readonly<
       "osdu_cluster",
       "osdu_topology",
     ],
-    summary: "consult read-only OSDU platform status — requires the osdu rib co-installed",
+    summary:
+      "consult read-only OSDU platform status — requires the osdu rib co-installed and a chamber→osdu cross-rib grant",
   },
 };
 
@@ -72,8 +74,9 @@ export function readToolPool(): { name: string }[] {
 
 export const EXTERNAL_CAPABILITY_SLUGS: ReadonlySet<string> = new Set(["osdu"]);
 
-// Other ribs register these names; co-install the owning rib or the turn seam
-// rejects them, and do not treat them as host-confined coding built-ins.
+// Other ribs register these names, so the turn seam projects them only when the owning
+// rib is co-installed AND the operator has granted them to chamber (crossRibGrants);
+// do not treat them as host-confined coding built-ins.
 export function externalToolPool(): { name: string }[] {
   const names = new Set<string>();
   for (const slug of EXTERNAL_CAPABILITY_SLUGS) {
