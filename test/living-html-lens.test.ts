@@ -504,6 +504,22 @@ nodes:
     });
   });
 
+  it("a re-emit that omits refresh still sheds an older record's `lens` key", async () => {
+    const store = createFileHtmlLensStore(htmlLensesDir());
+    await emitHtml({ id: "s", html: page("1"), refresh: { workflow: "chamber-lens-s" } });
+    const seeded = await store.load("s");
+    if (!seeded) throw new Error("seed emit did not persist");
+    await store.save({
+      ...seeded,
+      refresh: { workflow: "chamber-lens-s", inputs: { lens: "hijacked", env: "dev" } },
+    });
+    await emitHtml({ id: "s", html: page("2") });
+    expect((await store.load("s"))?.refresh).toEqual({
+      workflow: "chamber-lens-s",
+      inputs: { env: "dev" },
+    });
+  });
+
   it("an unchanged page holds updatedAt; a changed page earns a new one", async () => {
     const store = createFileHtmlLensStore(htmlLensesDir());
     await emitHtml({ id: "s", html: page("same") });

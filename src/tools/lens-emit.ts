@@ -255,9 +255,8 @@ function resolveLensRefresh(
   input: RefreshInput | null | undefined,
   prior: LensRefresh | undefined,
 ): LensRefresh | undefined {
-  if (input === undefined) return prior;
-  if (input === null) return undefined;
-  const patched = patchLensRefresh(input, prior);
+  if (input === null || (input === undefined && !prior)) return undefined;
+  const patched = patchLensRefresh(input ?? {}, prior);
   return { ...patched, workflow: patched.workflow ?? LENS_REFRESH_WORKFLOW };
 }
 
@@ -273,9 +272,8 @@ function resolveHtmlLensRefresh(
   input: RefreshInput | null | undefined,
   prior: LensRefresh | undefined,
 ): { refresh?: LensRefresh } | { error: string } {
-  if (input === undefined) return { refresh: prior };
-  if (input === null) return {};
-  const patched = patchLensRefresh(input, prior);
+  if (input === null || (input === undefined && !prior)) return {};
+  const patched = patchLensRefresh(input ?? {}, prior);
   if (patched.workflow === undefined) {
     return {
       error:

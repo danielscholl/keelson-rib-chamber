@@ -757,6 +757,27 @@ nodes:
     expect((await store.loadLens("probe"))?.refresh?.inputs).toEqual({ service: "storage" });
   });
 
+  // The bundled refresh turn re-emits { id, board, reason } with no `refresh` at all,
+  // so the preserve path has to clean the backing too or the key outlives every tick.
+  it("a re-author that omits refresh still sheds an older record's `lens` key", async () => {
+    const store = createFileLensStore(lensesDir());
+    await store.saveLens({
+      id: "probe",
+      board: board("Probe"),
+      updatedAt: new Date().toISOString(),
+      refresh: { workflow: "chamber-lens-x", inputs: { lens: "hijacked", service: "storage" } },
+    });
+    const t = makeToolCtx();
+    await tool("chamber_emit_lens").execute(
+      { id: "probe", board: board("Probe 2"), reason: "no change" },
+      t.ctx,
+    );
+    expect((await store.loadLens("probe"))?.refresh).toEqual({
+      workflow: "chamber-lens-x",
+      inputs: { service: "storage" },
+    });
+  });
+
   it("chamber_list_lenses returns boards only on a single-lens fetch", async () => {
     const t = makeToolCtx();
     await tool("chamber_emit_lens").execute({ id: "brief", board: board("Brief") }, t.ctx);
