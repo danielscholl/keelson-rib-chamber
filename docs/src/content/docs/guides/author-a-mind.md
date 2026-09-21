@@ -125,9 +125,27 @@ requires the author Mind to declare `code`, and the reviewer Mind to declare eit
 `read` or `code`, so it can inspect the author's change.
 
 A fourth capability, `osdu`, lets a Mind consult read-only OSDU platform status
-during a room turn. Use it only when the osdu rib is co-installed, because those
-tool names are registered by that rib. Without that rib, an osdu-declaring room
-turn fails at the tool seam instead of silently falling back.
+during a room turn. It needs two things from the operator. The osdu rib has to be
+installed, because that rib registers those tool names. And keelson has to be told
+Chamber may use them, because the harness holds back a tool one rib owns from
+another rib's turns until the operator
+[grants it](https://danielscholl.github.io/keelson/docs/guides/governance/#cross-rib-grants). Add the grant to keelson's `config.json` and restart:
+
+```json
+{
+  "crossRibGrants": {
+    "chamber": {
+      "osdu": ["*"]
+    }
+  }
+}
+```
+
+`"*"` covers every tool the osdu rib owns; list tool names to narrow it. Without
+the grant nothing fails: the room runs and the Mind speaks, but the OSDU tools are
+absent from its turn and it is not told why. The server log names the tools that
+were held back. A Mind that reports it has no OSDU tools in a room is the sign to
+check the grant.
 
 The vocabulary is curated, so declaring anything unknown is dropped. Declaring
 nothing keeps the Mind conversation-only. A capability scopes what a Mind may do

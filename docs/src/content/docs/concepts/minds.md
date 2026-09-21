@@ -56,7 +56,8 @@ A Mind is its identity first, its tools second.
   inside a room: `lens` (table a canvas-board exhibit mid-room), `read` (read files in the
   room's project, auto-granted in any project-targeted room), `code` (edit files and run
   commands in the room's project, coding rooms only), and `osdu` (consult read-only OSDU
-  platform status, present only when the osdu rib is co-installed). Declaring nothing keeps
+  platform status, present only when the osdu rib is co-installed and the operator has
+  [granted Chamber its tools](https://danielscholl.github.io/keelson/docs/guides/governance/#cross-rib-grants)). Declaring nothing keeps
   the Mind text-only, the room default, though a room that targets a project still
   auto-grants read-only `Read` to every speaker.
 

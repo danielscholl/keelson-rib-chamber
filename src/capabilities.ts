@@ -36,7 +36,8 @@ export const CAPABILITIES: Readonly<
       "osdu_cluster",
       "osdu_topology",
     ],
-    summary: "consult read-only OSDU platform status — requires the osdu rib co-installed",
+    summary:
+      "consult read-only OSDU platform status — requires the osdu rib co-installed and a chamber→osdu cross-rib grant",
   },
 };
 
@@ -72,8 +73,9 @@ export function readToolPool(): { name: string }[] {
 
 export const EXTERNAL_CAPABILITY_SLUGS: ReadonlySet<string> = new Set(["osdu"]);
 
-// Other ribs register these names; co-install the owning rib or the turn seam
-// rejects them, and do not treat them as host-confined coding built-ins.
+// Other ribs register these names, so the turn seam projects them only when the owning
+// rib is co-installed AND the operator has granted them to chamber (crossRibGrants);
+// do not treat them as host-confined coding built-ins.
 export function externalToolPool(): { name: string }[] {
   const names = new Set<string>();
   for (const slug of EXTERNAL_CAPABILITY_SLUGS) {
