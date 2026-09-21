@@ -67,9 +67,11 @@ The room-start schema is the one with constraints worth stating exactly:
   is not a participant, parallel to `moderator` for `group-chat`.
 - `projectId` targets the room at a registered keelson project; turns run at that
   project's `rootPath`.
-- `coding` (boolean, default false) opts the room into the coding tier, allowing
-  Minds that declare `code`/`read` capabilities to run Bash/Edit/Write/Read tools
-  confined to the project root. Requires `projectId`.
+- `coding` (boolean, default false) opts the room into the coding tier. A Mind that
+  declares `code` can run Bash, Edit, and Write; one that declares `read` gets Read
+  only. Turns run at the project root and the file tools are confined to it. Bash is
+  not: it is a shell, and a command it runs can change state outside the repo (an
+  issue tracker, `gh`, a cloud CLI). Requires `projectId`.
 
 The steer schema requires at least one of its three intents:
 
