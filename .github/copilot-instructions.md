@@ -34,8 +34,9 @@ not when one is merely absent.
   around it into harness internals, or a new hard dependency on a harness package
   beyond the `@keelson/shared` peer.
 - **Strategies are pure** (`src/strategies/**`). Flag any I/O, provider call, or
-  host coupling added there — a turn decision reads room state and returns
-  `speak`/`end` only. The driver (`src/room.ts`) owns I/O.
+  host coupling added there — a strategy reads room state plus the transcript
+  and returns the next turn decision (a `StrategyStep`), nothing else. The
+  driver (`src/room.ts`) owns I/O.
 - **Fail closed.** Boards publish through `validate` (`expectView`) and node
   `output_schema` guards; the driver and room tools refuse to act when their seams
   (`runAgentTurn`, snapshot manager) are absent. Flag a publish/produce path that

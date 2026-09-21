@@ -71,9 +71,10 @@ a `bindX(seams)` / `disposeX()` pair built in `registerTools` and torn down in
 - **Tools are a seam ladder.** `registerTools` returns a tool only when every
   host seam it needs is present — a missing seam means the tool is never
   returned, not one that half-runs. The rungs: disk-path-only tools (write
-  seams, read-only listers, cleanup) are always present; lens/exhibit tools need
-  the snapshot-manager and `registerRegion` seams; room-control tools and the
-  room driver additionally need the agent-turn seam (`runAgentTurn`).
+  seams, read-only listers, cleanup) are always present; the lens-workflow
+  installer needs the workflow-reload seam (`reloadRibWorkflows`); lens/exhibit
+  tools need the snapshot-manager and `registerRegion` seams; room-control tools
+  and the room driver additionally need the agent-turn seam (`runAgentTurn`).
 - **Actions** (`onAction` → `dispatchChamberAction`, `src/actions/`) are
   payload-carrying board actions rather than a static `actions[]`, since a
   payload-less button can't carry input. Actions relayed from a sandboxed
