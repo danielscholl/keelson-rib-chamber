@@ -9,8 +9,8 @@ Every room so far reasoned, and you carried the results into the world
 yourself: the red-team's five changes were yours to apply, the manager's plan
 was yours to build. That division is the default on purpose. But Chamber can
 lift it. A **coding room** lets a Mind that declares the `code` capability run
-Bash, Edit, and Write inside its turn, confined to the project the room
-targets. This page opens that tier deliberately, hands a build Mind one scoped
+Bash, Edit, and Write inside its turn, from the project the room targets. This
+page opens that tier deliberately, hands a build Mind one scoped
 change, and puts a reviewer behind it, so the first time agents touch your
 tree, you watch every layer of the machinery that keeps it bounded.
 
@@ -38,13 +38,17 @@ A room's file access is tiered, and each tier is an explicit grant:
 | --- | --- | --- |
 | Text-only | every room, by default | converse; nothing else |
 | Project read | start the room with a `projectId` | read files under the project root; auto-granted to every speaker |
-| Coding | add `coding: true` to a project room | Minds that declare `code` also run Bash, Edit, and Write, confined to the project root |
+| Coding | add `coding: true` to a project room | Minds that declare `code` also run Bash, Edit, and Write from the project root; the file tools are confined to it, a Bash command is not |
 
-Two details matter before you open the third tier. First, the write tier's
+Three details matter before you open the third tier. Bash is a shell, not a
+file tool: Edit and Write cannot leave the project root, but a command Bash runs
+reaches whatever your own terminal reaches from there, including an issue
+tracker, `gh`, or a cloud CLI. Scope the task in the topic, and grant `code` only
+to a Mind you would hand a terminal. Next, the write tier's
 capability gate is per-Mind: `coding: true` opens it on the room, but only a
 Mind whose own record declares `code` can run Bash, Edit, or Write. Every
 speaker in a project room already holds the read tier; a Mind without `code`
-keeps that read access and nothing more. Second, the convene composer's optional
+keeps that read access and nothing more. Last, the convene composer's optional
 Project field targets a project (that is
 the read tier) but never opens the coding tier. Opening it is a deliberate
 act you take from chat or the `chamber_room_start` tool, where the flag is

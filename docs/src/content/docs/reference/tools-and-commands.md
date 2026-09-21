@@ -34,7 +34,7 @@ optional field is marked `?`.
 | `chamber_table_exhibit` | yes | no | Table an exhibit: publish a canvas-board deliverable a discussion produced into the Tabled section of its room's board. | `id`, `board`, `reason?` |
 | `chamber_delete_exhibit` | yes | no | Permanently remove an exhibit, both its record and its snapshot key. Fails closed if no such exhibit, or if the id names a lens. | `id` |
 | `chamber_room_status` | no | no | Return a room's participants, status, turn count, and transcript so far. Read-only. | `room?` |
-| `chamber_room_start` | yes | yes | Open a room where named Minds converse turn by turn. Dry-runs until `confirm` is set. `grounding` (`{ sourceUrl?, criteria?: string[] }`) adds a brief; its criteria drive a cross-vendor fidelity check before a design-bearing room closes, when the cast spans two providers. | `participants`, `turnBudget?`, `name?`, `topic?`, `grounding?`, `strategy?`, `moderator?`, `manager?`, `synthesizer?`, `minRounds?`, `maxSpeakerRepeats?`, `endVoteThreshold?`, `projectId?`, `coding?`, `confirm?` |
+| `chamber_room_start` | yes | yes | Open a room where named Minds converse turn by turn. Dry-runs until `confirm` is set. `grounding` (`{ sourceUrl?, criteria?: string[] }`) adds a brief; its criteria drive a cross-vendor fidelity check before a design-bearing room closes, when the cast spans two providers. When no close could seat a checker (the closing synthesizer and another participant must be pinned to different providers), the dry-run says the check will not run and names the providers the cast is pinned to. With `coding`, the dry-run states that Bash is an unrestricted shell: the file tools are confined to the project repo, a command Bash runs is not. | `participants`, `turnBudget?`, `name?`, `topic?`, `grounding?`, `strategy?`, `moderator?`, `manager?`, `synthesizer?`, `minRounds?`, `maxSpeakerRepeats?`, `endVoteThreshold?`, `projectId?`, `coding?`, `confirm?` |
 | `chamber_room_say` | yes | no | Steer a live room: guide the next speaker, call on a Mind, or drop a director message. | `room?`, `direction?`, `callOn?`, `text?` |
 | `chamber_room_stop` | yes | no | Stop a room, halting its turns. Reversible. | `room?` |
 
@@ -67,9 +67,11 @@ The room-start schema is the one with constraints worth stating exactly:
   is not a participant, parallel to `moderator` for `group-chat`.
 - `projectId` targets the room at a registered keelson project; turns run at that
   project's `rootPath`.
-- `coding` (boolean, default false) opts the room into the coding tier, allowing
-  Minds that declare `code`/`read` capabilities to run Bash/Edit/Write/Read tools
-  confined to the project root. Requires `projectId`.
+- `coding` (boolean, default false) opts the room into the coding tier. A Mind that
+  declares `code` can run Bash, Edit, and Write; one that declares `read` gets Read
+  only. Turns run at the project root and the file tools are confined to it. Bash is
+  not: it is a shell, and a command it runs can change state outside the repo (an
+  issue tracker, `gh`, a cloud CLI). Requires `projectId`.
 
 The steer schema requires at least one of its three intents:
 

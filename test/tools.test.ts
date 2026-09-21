@@ -610,11 +610,58 @@ describe("chamber room-control chat tools", () => {
     );
     expect(t.errored()).toBe(false);
     expect(t.out()).toContain("Would open a room with alice, bob");
+    // alice and bob pin no provider, so no checker can ever be seated: the dry-run says
+    // so and quotes the smaller ceiling rather than a fidelity turn that will not run.
+    expect(t.out()).toContain("No cross-vendor fidelity turn will run");
+    expect(t.out()).toContain("pinned to no provider");
+    expect(t.out()).toContain("up to 3");
+    expect(t.out()).toContain("reflection pass");
+  });
+
+  it("a cross-vendor grounded cast is quoted the fidelity turn in the dry-run", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["scribe", "critic"], turnBudget: 2, grounding: { criteria: ["A"] } },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
     // The confirm gate must disclose the cross-vendor fidelity + synthesis room turns and
     // note the separate per-speaker reflection pass, so the approver isn't told a false total.
-    expect(t.out()).toContain("cross-vendor fidelity turn");
+    expect(t.out()).toContain("cross-vendor fidelity turn when the Minds span two providers");
+    expect(t.out()).not.toContain("No cross-vendor fidelity turn");
     expect(t.out()).toContain("up to 4");
     expect(t.out()).toContain("reflection pass");
+  });
+
+  it("a grounded cast on one provider is told the fidelity turn is skipped, and why", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      { participants: ["scribe", "twin"], turnBudget: 2, grounding: { criteria: ["A"] } },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("No cross-vendor fidelity turn will run");
+    expect(t.out()).toContain("this cast is pinned to `claude`.");
+    expect(t.out()).toContain("up to 3");
+  });
+
+  // sequential has no synthesizer seat, so validateStart drops one from the config. The
+  // providers named have to be the started room's, not every slug the call mentioned.
+  it("names only the providers of the cast the room will actually start with", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      {
+        participants: ["scribe", "twin"],
+        synthesizer: "critic",
+        turnBudget: 2,
+        grounding: { criteria: ["A"] },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("No cross-vendor fidelity turn will run");
+    expect(t.out()).toContain("this cast is pinned to `claude`.");
+    expect(t.out()).not.toContain("codex");
   });
 
   it("rejects an over-limit grounding brief instead of silently truncating it", async () => {
@@ -1341,6 +1388,9 @@ describe("chamber_room_start — coding review capability guard", () => {
     expect(t.errored()).toBe(false);
     expect(t.out()).toContain("review: smith reviewed by wesson");
     expect(t.out()).toContain("coding tier ON");
+    // `code` includes Bash, and a cwd does not fence what a shell command reaches.
+    expect(t.out()).toContain("Bash is an unrestricted shell");
+    expect(t.out()).toContain("one that declares `read` gets Read only");
   });
 
   it("resolves projectId by name, not just id — the Convene board's convention", async () => {

@@ -208,7 +208,7 @@ export interface RoomDriver {
 // the driver skips the check rather than run a same-vendor (or unconfirmable) auditor
 // whose prompt would falsely claim a second vendor. Pure — the driver resolves the slug.
 export function pickFidelityChecker(
-  room: Room,
+  room: Pick<Room, "participants">,
   synthSlug: MindSlug | undefined,
   roster: readonly Mind[],
 ): MindSlug | undefined {
@@ -220,6 +220,20 @@ export function pickFidelityChecker(
     const provider = bySlug.get(p)?.provider;
     return provider !== undefined && provider !== synthProvider;
   });
+}
+
+// Whether ANY close of this room could seat a fidelity checker — the start dry-run's
+// question, asked before a transcript exists to say who synthesizes. Walks the same
+// precedence exhaustedSynthesis does (config.synthesizer → facilitator → a participant),
+// so a "no" here is a room whose criteria are guaranteed to go unchecked.
+export function fidelityCheckPossible(
+  participants: readonly MindSlug[],
+  config: Pick<RoomConfig, "synthesizer" | "manager" | "moderator">,
+  roster: readonly Mind[],
+): boolean {
+  const fixed = config.synthesizer ?? config.manager ?? config.moderator;
+  const synths = fixed ? [fixed] : participants;
+  return synths.some((s) => pickFidelityChecker({ participants }, s, roster) !== undefined);
 }
 
 // The synthesizer for a grounded design-bearing room's NATURAL close (an open-floor

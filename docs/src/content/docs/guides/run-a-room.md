@@ -71,8 +71,11 @@ chamber_room_start({
 project, pass `projectId`. That alone grants Read to every speaker, confined to the
 project root, so even a plain Discussion can read the repo it targets. Add
 `coding: true` to open the coding tier on top, so Minds that declare the `code`
-capability can run Bash, Edit, and Write, confined to the room cwd (the project
-root, or the neutral home if the project vanished). The tool schema and the full
+capability can run Bash, Edit, and Write from the room cwd (the project root, or
+the neutral home if the project vanished). Edit and Write are confined to that
+directory. Bash is a shell that starts there, so a command it runs can still
+change state outside the repo: grant `code` as you would hand someone a terminal.
+The tool schema and the full
 set of start fields live in
 [Tools and commands](../../reference/tools-and-commands/).
 
