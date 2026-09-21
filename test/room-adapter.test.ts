@@ -867,6 +867,18 @@ describe("room adapter — live room", () => {
     expect(await store.loadTranscript(second)).toHaveLength(3);
   });
 
+  it("a room started as `delegate` is stored under the canonical magentic name", async () => {
+    const store = createFileRoomStore(roomsDir());
+    const res = await onAction(
+      startPayload({ strategy: "delegate", manager: "mod" }),
+      makeCtx({ sm: snap.sm }),
+    );
+    const slug = slugOf(res);
+    expect(slug).toMatch(/^room-/);
+    expect((await store.loadRoom(slug))?.strategy).toBe("magentic");
+    await onAction({ type: "room-stop", payload: { slug } }, makeCtx({ sm: snap.sm }));
+  });
+
   it("room-stop halts an active room", async () => {
     const store = createFileRoomStore(roomsDir());
     await store.saveRoom({

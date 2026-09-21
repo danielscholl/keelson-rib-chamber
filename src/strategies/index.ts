@@ -23,6 +23,16 @@ export const strategies: Partial<Record<RoomStrategyName, Strategy>> = {
   magentic,
 };
 
+// Behavioural synonyms for a strategy named after its provenance. Resolved at the
+// start boundary, so a room only ever stores the canonical name.
+const STRATEGY_ALIASES: Record<string, RoomStrategyName> = {
+  delegate: "magentic",
+};
+
+export function canonicalStrategyName(name: string): string {
+  return Object.hasOwn(STRATEGY_ALIASES, name) ? (STRATEGY_ALIASES[name] as string) : name;
+}
+
 export function getStrategy(name: RoomStrategyName): Strategy {
   // Own-property only: a bare index would resolve inherited Object members
   // ("constructor", "__proto__", "toString") to truthy non-Strategy values, so a

@@ -41,7 +41,7 @@ import {
   resolveProjectName,
   resolveProjectRoot,
 } from "./runtime.ts";
-import { getStrategy } from "./strategies/index.ts";
+import { canonicalStrategyName, getStrategy } from "./strategies/index.ts";
 import type { Room, RoomConfig, RoomStrategyName } from "./types.ts";
 
 // Upper bound on a room's turn budget. Each turn is a (paid) agent call, so an
@@ -698,7 +698,9 @@ export async function startRoom(
   // after dispose() would write an "active" room whose loop never runs (ensureLoop
   // bails on isDisposed) — a phantom room nothing ever clears.
   if (!driver || driver.isDisposed()) return ROOM_DISABLED;
-  const strategy = ((input.strategy ?? "").trim() || "sequential") as RoomStrategyName;
+  const strategy = canonicalStrategyName(
+    (input.strategy ?? "").trim() || "sequential",
+  ) as RoomStrategyName;
   const valid = await validateStart(
     input.participants,
     input.turnBudget,

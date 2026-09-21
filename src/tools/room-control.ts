@@ -23,6 +23,7 @@ import {
   validateStart,
 } from "../room-lifecycle.ts";
 import { resolveProject, resolveProjectInput } from "../runtime.ts";
+import { canonicalStrategyName } from "../strategies/index.ts";
 import { renderTranscript } from "../transcript.ts";
 import { boundedText, emitResult } from "./util.ts";
 
@@ -148,7 +149,7 @@ export function roomControlTools(store: RoomStore): ToolDefinition[] {
     {
       name: "chamber_room_start",
       description:
-        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns, default 8; at budget exhaustion every strategy except review appends one extra paid closing-synthesis turn, so a completed room runs up to turnBudget + 1 room turns — turnBudget + 2 when a design-bearing room is grounded with acceptance criteria (a cross-vendor fidelity turn before synthesis); every Mind that spoke then also runs one paid reflection turn at close, so the total paid calls exceed the room-turn count). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. Optionally provide `grounding` — a `{ sourceUrl?, criteria?: string[] }` brief distinct from the topic: it is injected into every turn prompt, and its acceptance criteria drive an independent cross-vendor fidelity check — when the room's Minds span two providers — that folds any divergences into the closing document before a design-bearing room (sequential/concurrent/group-chat/open-floor/magentic) synthesizes. Strategy role rules: sequential/concurrent need only at least two participant Mind slugs and no manager; group-chat requires a `moderator` Mind slug that is real, safe, and NOT among participants, with optional `synthesizer` that is also real/safe and neither a participant nor the moderator; open-floor has no moderator or synthesizer; review requires exactly two participants pinned to different providers — first author, second reviewer — with no moderator or synthesizer and turnBudget at least 2; magentic requires a real/safe `manager` Mind slug NOT among participants, no moderator or synthesizer, and at least two worker participants. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see chamber_list_minds). Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).",
+        "Open a Chamber room where the named agent Minds converse turn-by-turn (turnBudget paid agent turns, default 8; at budget exhaustion every strategy except review appends one extra paid closing-synthesis turn, so a completed room runs up to turnBudget + 1 room turns — turnBudget + 2 when a design-bearing room is grounded with acceptance criteria (a cross-vendor fidelity turn before synthesis); every Mind that spoke then also runs one paid reflection turn at close, so the total paid calls exceed the room-turn count). Provide a `topic` to frame the discussion — strongly recommended, since it is what the first speaker responds to. Optionally provide `grounding` — a `{ sourceUrl?, criteria?: string[] }` brief distinct from the topic: it is injected into every turn prompt, and its acceptance criteria drive an independent cross-vendor fidelity check — when the room's Minds span two providers — that folds any divergences into the closing document before a design-bearing room (sequential/concurrent/group-chat/open-floor/magentic) synthesizes. Strategy role rules: sequential/concurrent need only at least two participant Mind slugs and no manager; group-chat requires a `moderator` Mind slug that is real, safe, and NOT among participants, with optional `synthesizer` that is also real/safe and neither a participant nor the moderator; open-floor has no moderator or synthesizer; review requires exactly two participants pinned to different providers — first author, second reviewer — with no moderator or synthesizer and turnBudget at least 2; magentic (also accepted as `delegate`: a manager plans a task ledger and delegates each task to a worker) requires a real/safe `manager` Mind slug NOT among participants, no moderator or synthesizer, and at least two worker participants. State-changing: set confirm:true ONLY after the user has approved — without confirm the tool reports what it would start and runs nothing. participants are Mind slugs (see chamber_list_minds). Several rooms can run concurrently (up to a small cap) — stop one if the cap is reached. NOT for creating a Mind (that is the New agent / genesis action).",
       inputSchema: roomStartSchema,
       state_changing: true,
       requires_confirmation: true,
@@ -169,9 +170,10 @@ export function roomControlTools(store: RoomStore): ToolDefinition[] {
         // matching facilitated mode (group-chat / magentic) so validateStart enforces
         // its rules and the dry-run label below matches what actually starts (an
         // explicit strategy still wins; moderator takes precedence if both are set).
-        const strategy =
+        const strategy = canonicalStrategyName(
           (parsed.data.strategy ?? "").trim() ||
-          (moderator ? "group-chat" : manager ? "magentic" : "sequential");
+            (moderator ? "group-chat" : manager ? "magentic" : "sequential"),
+        );
         const synthesizer = (parsed.data.synthesizer ?? "").trim() || undefined;
         const minRounds = parsed.data.minRounds;
         const maxSpeakerRepeats = parsed.data.maxSpeakerRepeats;

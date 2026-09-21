@@ -55,7 +55,8 @@ The room-start schema is the one with constraints worth stating exactly:
 - `strategy` defaults to `sequential`. Setting `moderator` with no explicit
   strategy infers `group-chat`; setting `manager` with no explicit strategy
   infers `magentic`. An explicit `strategy` still wins, and `moderator` takes
-  precedence if both are set.
+  precedence if both are set. `delegate` is accepted as another name for
+  `magentic`.
 - `moderator` is required and validated only for `group-chat`; it must name a Mind
   that is not a participant.
 - `synthesizer` is an optional closing-summary Mind for `group-chat`.
