@@ -135,13 +135,24 @@ another rib's turns until the operator
 {
   "crossRibGrants": {
     "chamber": {
-      "osdu": ["*"]
+      "osdu": [
+        "osdu_quality",
+        "osdu_security",
+        "osdu_features",
+        "osdu_release",
+        "osdu_events",
+        "osdu_waiting",
+        "osdu_cluster",
+        "osdu_topology"
+      ]
     }
   }
 }
 ```
 
-`"*"` covers every tool the osdu rib owns; list tool names to narrow it. Without
+Those eight are the read-only tools the `osdu` capability maps to. Name them rather
+than granting `"*"`: a wildcard is a standing grant of every tool the osdu rib owns,
+the ones that change a cluster included, and of any it adds later. Without
 the grant nothing fails: the room runs and the Mind speaks, but the OSDU tools are
 absent from its turn and it is not told why. The server log names the tools that
 were held back. A Mind that reports it has no OSDU tools in a room is the sign to
