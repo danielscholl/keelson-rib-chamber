@@ -32,13 +32,16 @@ Mind.
 ### Why intersect with the pool
 
 The core turn seam (keelson #213, `apps/server/src/rib-agent-turn.ts`) projects a
-turn's requested names against the **shared** registry and applies the denylist
-floor — it does **not** scope a turn to its own rib (the `ribId` is threaded but
-unused). The room-pool intersection is therefore chamber's own allowlist ceiling:
+turn's requested names against the **shared** registry, applies the denylist
+floor, and holds back a tool another rib owns unless the operator has granted it to
+the caller (`crossRibGrants`). It does **not** narrow a turn within its own rib:
+every tool chamber registers is one a chamber turn may request. The room-pool
+intersection is therefore chamber's own allowlist ceiling:
 a Mind can never reach a room-control tool (`chamber_room_*`), the genesis write
 seam, or an unpooled tool from this rib or another rib — even via a hand-edited
 `mind.json` — because those names are not in the pool. The curated `CAPABILITIES`
-map only ever names room-safe tools, so the two layers are belt-and-suspenders.
+map only ever names room-safe tools. The core seam is the operator floor; the pool
+is least privilege per room.
 
 ## External read-only slugs
 
@@ -46,8 +49,10 @@ The base room-safe pool also includes `externalToolPool()`: curated tool names
 registered by another rib. Today that is `osdu → osdu_quality/osdu_security/
 osdu_features/osdu_release/osdu_events/osdu_waiting/osdu_cluster/osdu_topology`,
 the read-only OSDU platform status tools. They are projected by name through C1
-and require the osdu rib to be co-installed; without it, an osdu-declaring turn
-fails at the turn seam. Because they still pass through `resolveMindTools`, a
+and require the osdu rib to be co-installed AND an operator `chamber → osdu`
+cross-rib grant. Without the grant the seam does not project them: the turn still
+runs, with those tools absent, and the server log names what was held back. The
+Mind is not told. Because they still pass through `resolveMindTools`, a
 Mind reaches them only when it declares `osdu`.
 
 ## The coding tier (opt-in)
@@ -91,7 +96,7 @@ than failing the run. `Mind.tools` round-trips through `mind.json`
 and so a Mind may declare them, but they resolve to nothing outside a coding room —
 declaring `code` is harmless until the room opts into the tier. The external slug
 (`osdu`) is part of the vocabulary too; it resolves only against the external pool
-and requires the osdu rib to be co-installed.
+and requires the osdu rib to be co-installed and granted to chamber.
 
 ## Not in scope
 

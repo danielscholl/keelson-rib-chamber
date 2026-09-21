@@ -3,7 +3,8 @@
 // names. The room-safe pool (RoomDriverDeps.turnTools) is the allowlist ceiling:
 // the result is intersected with it, so a Mind can never reach a tool the room
 // doesn't already permit (e.g. room-control or another rib's tools) even via a
-// hand-edited mind.json — the core turn seam does not scope a turn to its rib.
+// hand-edited mind.json — the core turn seam gates other ribs' tools behind an
+// operator grant, but hands a chamber turn any of chamber's own.
 
 import { EXHIBIT_TOOL_NAME } from "./lens.ts";
 import type { Mind } from "./types.ts";
