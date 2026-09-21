@@ -242,7 +242,7 @@ export function roomControlTools(store: RoomStore): ToolDefinition[] {
         // Name the elevated capability at the confirm step so the human approving
         // the (paid) room knows a coding Mind can run Bash/Edit/Write.
         const codingNote = coding
-          ? " with the coding tier ON (Minds that declare `code`/`read` can run Bash/Edit/Write/Read from the project repo; the file tools are confined to it, but Bash is an unrestricted shell, so a command it runs can change state outside the repo)"
+          ? " with the coding tier ON (a Mind that declares `code` can run Bash/Edit/Write from the project repo, and one that declares `read` gets Read only; the file tools are confined to the repo, but Bash is an unrestricted shell, so a command it runs can change state outside it)"
           : "";
         // Disclose the extra paid turns a grounded design-bearing room spends at close
         // (a cross-vendor fidelity turn plus the closing synthesis) so the approving
@@ -254,7 +254,8 @@ export function roomControlTools(store: RoomStore): ToolDefinition[] {
           if (fidelityCheckPossible(valid.participants, valid.config ?? {}, roster)) {
             groundingNote = ` It carries a grounding brief: the closing synthesis, plus a cross-vendor fidelity turn when the Minds span two providers, add up to 2 more room turns (up to ${turnBudget + 2}), before the per-speaker reflection pass at close.`;
           } else {
-            const cast = new Set([...valid.participants, moderator, manager, synthesizer]);
+            const { moderator: mod, manager: mgr, synthesizer: synth } = valid.config ?? {};
+            const cast = new Set([...valid.participants, mod, mgr, synth]);
             const pinned = new Set(
               roster.filter((m) => cast.has(m.slug) && m.provider).map((m) => `\`${m.provider}\``),
             );

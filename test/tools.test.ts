@@ -645,6 +645,25 @@ describe("chamber room-control chat tools", () => {
     expect(t.out()).toContain("up to 3");
   });
 
+  // sequential has no synthesizer seat, so validateStart drops one from the config. The
+  // providers named have to be the started room's, not every slug the call mentioned.
+  it("names only the providers of the cast the room will actually start with", async () => {
+    const t = makeToolCtx();
+    await tool("chamber_room_start").execute(
+      {
+        participants: ["scribe", "twin"],
+        synthesizer: "critic",
+        turnBudget: 2,
+        grounding: { criteria: ["A"] },
+      },
+      t.ctx,
+    );
+    expect(t.errored()).toBe(false);
+    expect(t.out()).toContain("No cross-vendor fidelity turn will run");
+    expect(t.out()).toContain("this cast is pinned to `claude`.");
+    expect(t.out()).not.toContain("codex");
+  });
+
   it("rejects an over-limit grounding brief instead of silently truncating it", async () => {
     const t = makeToolCtx();
     await tool("chamber_room_start").execute(
@@ -1352,6 +1371,7 @@ describe("chamber_room_start — coding review capability guard", () => {
     expect(t.out()).toContain("coding tier ON");
     // `code` includes Bash, and a cwd does not fence what a shell command reaches.
     expect(t.out()).toContain("Bash is an unrestricted shell");
+    expect(t.out()).toContain("one that declares `read` gets Read only");
   });
 
   it("resolves projectId by name, not just id — the Convene board's convention", async () => {
