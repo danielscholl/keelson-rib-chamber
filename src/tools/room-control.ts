@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "@keelson/shared";
 import { errText, z } from "@keelson/shared";
 import type { RoomStore } from "../ports.ts";
+import { fidelityCheckPossible } from "../room.ts";
 import {
   MAX_ACTIVE_ROOMS,
   MAX_CRITERION_LEN,
@@ -22,7 +23,7 @@ import {
   stopRoom,
   validateStart,
 } from "../room-lifecycle.ts";
-import { resolveProject, resolveProjectInput } from "../runtime.ts";
+import { resolveMinds, resolveProject, resolveProjectInput } from "../runtime.ts";
 import { renderTranscript } from "../transcript.ts";
 import { boundedText, emitResult } from "./util.ts";
 
@@ -241,15 +242,25 @@ export function roomControlTools(store: RoomStore): ToolDefinition[] {
         // Name the elevated capability at the confirm step so the human approving
         // the (paid) room knows a coding Mind can run Bash/Edit/Write.
         const codingNote = coding
-          ? " with the coding tier ON (Minds that declare `code`/`read` can run Bash/Edit/Write/Read, confined to the project repo)"
+          ? " with the coding tier ON (Minds that declare `code`/`read` can run Bash/Edit/Write/Read from the project repo; the file tools are confined to it, but Bash is an unrestricted shell, so a command it runs can change state outside the repo)"
           : "";
         // Disclose the extra paid turns a grounded design-bearing room spends at close
         // (a cross-vendor fidelity turn plus the closing synthesis) so the approving
-        // human sees the true ceiling, not just the base budget.
-        const groundingNote =
-          grounding && grounding.criteria.length > 0 && strategy !== "review"
-            ? ` It carries a grounding brief: the closing synthesis, plus a cross-vendor fidelity turn when the Minds span two providers, add up to 2 more room turns (up to ${turnBudget + 2}), before the per-speaker reflection pass at close.`
-            : "";
+        // human sees the true ceiling, not just the base budget. A cast that can never
+        // seat a checker is told so: criteria read as independently verified otherwise.
+        let groundingNote = "";
+        if (grounding && grounding.criteria.length > 0 && strategy !== "review") {
+          const roster = await resolveMinds();
+          if (fidelityCheckPossible(valid.participants, valid.config ?? {}, roster)) {
+            groundingNote = ` It carries a grounding brief: the closing synthesis, plus a cross-vendor fidelity turn when the Minds span two providers, add up to 2 more room turns (up to ${turnBudget + 2}), before the per-speaker reflection pass at close.`;
+          } else {
+            const cast = new Set([...valid.participants, moderator, manager, synthesizer]);
+            const pinned = new Set(
+              roster.filter((m) => cast.has(m.slug) && m.provider).map((m) => `\`${m.provider}\``),
+            );
+            groundingNote = ` It carries a grounding brief: the closing synthesis adds 1 more room turn (up to ${turnBudget + 1}), before the per-speaker reflection pass at close. No cross-vendor fidelity turn will run, so no second vendor checks the criteria: that needs the closing synthesizer and another participant pinned to different providers, and this cast is pinned to ${pinned.size > 0 ? [...pinned].join(", ") : "no provider"}.`;
+          }
+        }
         if (!confirm) {
           emitResult(
             ctx,

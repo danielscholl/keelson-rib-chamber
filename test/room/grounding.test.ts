@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createRoomDriver } from "../../src/room.ts";
+import { createRoomDriver, fidelityCheckPossible } from "../../src/room.ts";
 import type { Mind, RoomStrategyName } from "../../src/types.ts";
 import {
   fixedClock,
@@ -290,5 +290,45 @@ describe("room driver — grounding + pre-close fidelity check", () => {
     expect(transcript.at(-1)?.aborted).toBe(true);
     expect(turns.requests).toHaveLength(2); // no third (synthesis) request
     expect((await store.loadRoom("stop"))?.status).toBe("stopped");
+  });
+});
+
+describe("fidelityCheckPossible — the dry-run's view of the cast", () => {
+  const mind = (slug: string, provider?: string): Mind => ({
+    slug,
+    name: slug,
+    role: "r",
+    persona: "p",
+    ...(provider ? { provider } : {}),
+  });
+
+  test("a cast pinned to one provider can never seat a checker, whatever the models", () => {
+    const roster = [mind("a", "copilot"), mind("b", "copilot"), mind("c", "copilot")];
+    expect(fidelityCheckPossible(["a", "b", "c"], {}, roster)).toBe(false);
+  });
+
+  test("an unpinned cast can never seat one", () => {
+    expect(fidelityCheckPossible(["a", "b"], {}, [mind("a"), mind("b")])).toBe(false);
+  });
+
+  test("two participants on different providers can", () => {
+    const roster = [mind("a", "claude"), mind("b", "codex")];
+    expect(fidelityCheckPossible(["a", "b"], {}, roster)).toBe(true);
+  });
+
+  // The synthesizer is fixed by config, so a diverse set of workers is not enough:
+  // the checker is picked against the synthesizer's provider, and an unpinned one has none.
+  test("a fixed, unpinned synthesizer rules it out even over a diverse cast", () => {
+    const roster = [mind("a", "claude"), mind("b", "codex"), mind("mgr")];
+    expect(fidelityCheckPossible(["a", "b"], { manager: "mgr" }, roster)).toBe(false);
+    expect(fidelityCheckPossible(["a", "b"], { synthesizer: "mgr" }, roster)).toBe(false);
+  });
+
+  test("a fixed synthesizer needs one participant on another provider", () => {
+    const roster = [mind("a", "claude"), mind("b", "claude"), mind("mgr", "codex")];
+    expect(fidelityCheckPossible(["a", "b"], { manager: "mgr" }, roster)).toBe(true);
+    expect(
+      fidelityCheckPossible(["a", "b"], { manager: "a2" }, [...roster, mind("a2", "claude")]),
+    ).toBe(false);
   });
 });
