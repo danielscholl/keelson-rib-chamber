@@ -98,7 +98,7 @@ export function makeLensTool(store: LensStore, registry: LensRegistry): ToolDefi
   return {
     name: LENS_TOOL_NAME,
     description:
-      "Author a lens: render a canvas `board` you compose, published with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. It lands in the Chamber Lenses index, where the operator reads it with Open (it renders in the drawer) and may PIN it to keep it on the Chamber surface as a panel; pinning is the operator's choice alone and is not yours to set. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same lens); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board's kind, e.g. \"status board\" / \"timeline\" / \"checklist\"), `maintainingMind` (YOUR own Mind name/slug, the lens's maintainer), `reason` (a short note on what changed in this authoring). On a re-author, omitting `scope` or `maintainingMind` KEEPS the lens's existing value (pass null to clear one) — you need not re-state them; omitting `reason` clears it, since it describes a single authoring. Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs?, inputs? }` names a workflow that re-composes and re-emits the lens with input `lens` = this id, plus any `inputs` you give (default workflow chamber-lens-refresh, default cadence 1h). It runs on that cadence only while the lens is PINNED and the Chamber surface is open — the cadence is the panel's. An unpinned lens re-composes when the operator hits Refresh on its index card, so a refresh backing is still worth setting; it just will not tick on its own until someone pins it. Use `inputs` for the producer's own parameters rather than encoding them in the id. The harness runs only a RIB-CONTRIBUTED workflow on a panel's cadence: chamber contributes chamber-lens-refresh plus one `chamber-lens-<filename>` per workflow file the operator has placed in chamber's lens-workflows dir — a workflow in the general catalog is refused and the panel silently never re-composes. Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: \"lens-note\"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit. " +
+      "Author a lens: render a canvas `board` you compose, published with no hand-coded UI — a STANDING VIEW on a subject you maintain by re-authoring the same id. It lands in the Chamber Lenses index, where the operator reads it with Open (it renders in the drawer) and may PIN it to keep it on the Chamber surface as a panel; pinning is the operator's choice alone and is not yours to set. `id` is a short, stable kebab-case identifier for the subject (re-authoring the same id updates the same lens); `board` is the canvas board view. Optional provenance for the lenses index card — supply only what you can truthfully name, never invent: `scope` (the board's kind, e.g. \"status board\" / \"timeline\" / \"checklist\"), `maintainingMind` (YOUR own Mind name/slug, the lens's maintainer), `reason` (a short note on what changed in this authoring). On a re-author, omitting `scope` or `maintainingMind` KEEPS the lens's existing value (pass null to clear one) — you need not re-state them; omitting `reason` clears it, since it describes a single authoring. Optional `refresh` makes it a LIVING view: `{ workflow?, cadenceMs?, inputs? }` names a workflow that re-composes and re-emits the lens with input `lens` = this id, plus any `inputs` you give (default workflow chamber-lens-refresh, default cadence 1h). It runs on that cadence only while the lens is PINNED and the Chamber surface is open — the cadence is the panel's. An unpinned lens re-composes when the operator hits Refresh on its index card, so a refresh backing is still worth setting; it just will not tick on its own until someone pins it. Use `inputs` for the producer's own parameters rather than encoding them in the id. A `lens` key among them is dropped, since the id always takes that input. The harness runs only a RIB-CONTRIBUTED workflow on a panel's cadence: chamber contributes chamber-lens-refresh plus one `chamber-lens-<filename>` per workflow file the operator has placed in chamber's lens-workflows dir — a workflow in the general catalog is refused and the panel silently never re-composes. Omitting `refresh` on a re-author keeps the existing backing; an object PATCHES it (an omitted field keeps its prior value); `refresh: null` removes it. Call it once per lens. To let a viewer annotate the lens in place, include an `actions` section whose action has `type: \"lens-note\"`, `payload: { id: <this lens id> }`, and one multiline field named `note` — submitting it appends the note to the lens. The chamber-lens workflow (/workflow run chamber-lens <subject>) is the standalone entry point. NOT for a deliverable a discussion produced — table that with chamber_table_exhibit. " +
       BOARD_COMPOSITION_CONTRACT,
     inputSchema: lensEmitSchema,
     state_changing: true,
@@ -237,11 +237,13 @@ function patchLensRefresh(input: RefreshInput, prior: LensRefresh | undefined): 
   // An empty inputs object is no inputs: it reaches the region as the same
   // workflowArgs an absent one does, so storing it would only make sameRefresh
   // read a backing change that isn't one.
-  const inputs = input.inputs ?? prior?.inputs;
+  // `lens` is dropped: lensRefreshInputs assigns the id over it, so a stored one
+  // could never take effect and would only misreport what the workflow receives.
+  const { lens: _reserved, ...inputs } = input.inputs ?? prior?.inputs ?? {};
   return {
     ...(workflow !== undefined ? { workflow } : {}),
     ...(cadenceMs !== undefined ? { cadenceMs } : {}),
-    ...(inputs && Object.keys(inputs).length > 0 ? { inputs } : {}),
+    ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
   };
 }
 
@@ -253,9 +255,8 @@ function resolveLensRefresh(
   input: RefreshInput | null | undefined,
   prior: LensRefresh | undefined,
 ): LensRefresh | undefined {
-  if (input === undefined) return prior;
-  if (input === null) return undefined;
-  const patched = patchLensRefresh(input, prior);
+  if (input === null || (input === undefined && !prior)) return undefined;
+  const patched = patchLensRefresh(input ?? {}, prior);
   return { ...patched, workflow: patched.workflow ?? LENS_REFRESH_WORKFLOW };
 }
 
@@ -271,9 +272,8 @@ function resolveHtmlLensRefresh(
   input: RefreshInput | null | undefined,
   prior: LensRefresh | undefined,
 ): { refresh?: LensRefresh } | { error: string } {
-  if (input === undefined) return { refresh: prior };
-  if (input === null) return {};
-  const patched = patchLensRefresh(input, prior);
+  if (input === null || (input === undefined && !prior)) return {};
+  const patched = patchLensRefresh(input ?? {}, prior);
   if (patched.workflow === undefined) {
     return {
       error:
@@ -327,7 +327,7 @@ export function makeEmitLensHtmlTool(
       "`id` is a short, stable kebab-case identifier for the subject (re-emitting the same id updates the same lens, and it persists across restarts);",
       "omit it to target the single shared legacy canvas instead. `title` (optional) names the panel head and the index card.",
       "`id` plays the role the contract below calls `name`.",
-      "Optional `refresh` makes it a LIVING page: `{ workflow, cadenceMs?, inputs? }` names a workflow that re-derives it with input `lens` = this id, plus any `inputs` you give (default cadence 1h).",
+      "Optional `refresh` makes it a LIVING page: `{ workflow, cadenceMs?, inputs? }` names a workflow that re-derives it with input `lens` = this id, plus any `inputs` you give (default cadence 1h). A `lens` key among them is dropped, since the id always takes that input.",
       "It runs on that cadence only while the lens is PINNED and the Chamber surface is open — the cadence is the panel's. An unpinned page re-composes when the operator hits Refresh on its index card, so a backing is still worth setting; it just will not tick on its own until someone pins it.",
       "Unlike a canvas lens, `workflow` is REQUIRED — there is no generic re-author for a page, so a living HTML lens is one whose own producer re-derives it.",
       "The harness runs only a RIB-CONTRIBUTED workflow on a panel's cadence: chamber contributes one `chamber-lens-<filename>` per workflow file the operator has placed in chamber's lens-workflows dir — a workflow in the general catalog is refused and the panel silently never re-composes.",

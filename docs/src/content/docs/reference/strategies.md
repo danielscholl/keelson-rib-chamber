@@ -159,6 +159,8 @@ room start, not in the strategy.
 
 ### magentic
 
+Also accepted as `delegate` at room start; the room is stored as `magentic`.
+
 Manager-led and ledger-driven. A non-participant **manager** (`RoomConfig.manager`,
 like the moderator) plans a persisted **task ledger**; the workers are
 `room.participants`. The strategy is pure rhythm over the room and the ledger: a
