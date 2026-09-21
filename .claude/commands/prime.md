@@ -112,8 +112,8 @@ allowed-tools: Bash, Read, Glob, Grep
     <intent>Derive every number you will report. These commands are the only
       legitimate source for counts — not AGENTS.md, not docs/, not memory.</intent>
     <command>grep -cE '^\s*name: ' src/workflows.ts        # workflow + node names (eyeball which are workflows)</command>
-    <command>grep -rhoE 'name: "chamber_[a-z_]+"' src/tools/ | sort -u   # chat tools</command>
-    <command>git ls-files 'test/**/*.test.ts' | wc -l       # test files</command>
+    <command>grep -rhoE '"chamber_[a-z_]+"' src/ | sort -u   # chat tools (some names are constants, so match the literal, not the `name:` key)</command>
+    <command>git ls-files ':(glob)test/**/*.test.ts' | wc -l       # test files (glob magic, or top-level tests are skipped)</command>
     <command>ls .claude/commands/ 2>/dev/null</command>
   </phase>
 
