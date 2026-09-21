@@ -193,8 +193,9 @@ living lens's re-compose backing shaped
 It is PRESERVED when a re-author omits it, PATCHED field-by-field when a
 re-author supplies an object (only an explicit `refresh: null` clears it), and
 lens-only (an exhibit save strips it). `inputs` are the producer's own
-parameters, reaching the workflow beside `lens` (the id, which wins on a clash);
-an empty object is stored as no inputs at all. A `refresh` block that is
+parameters, reaching the workflow beside `lens` (the id). A `lens` key among
+them is dropped at save, since the id always takes that input; an empty object
+is stored as no inputs at all. A `refresh` block that is
 malformed, carries a fractional cadence, or carries a non-string input folds to
 absent on read rather than hiding the record. Each of those is a value the
 harness's region schema would reject at registration, taking the panel down with

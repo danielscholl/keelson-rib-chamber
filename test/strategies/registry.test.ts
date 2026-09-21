@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canonicalStrategyName,
   concurrent,
   getStrategy,
   groupChat,
+  magentic,
   openFloor,
   review,
   sequential,
@@ -28,6 +30,20 @@ describe("strategy registry", () => {
 
   test("resolves review", () => {
     expect(getStrategy("review")).toBe(review);
+  });
+
+  test("resolves the delegate alias to magentic, and leaves every other name alone", () => {
+    expect(canonicalStrategyName("delegate")).toBe("magentic");
+    expect(getStrategy(canonicalStrategyName("delegate") as "magentic")).toBe(magentic);
+    for (const name of ["magentic", "sequential", "no-such-strategy"]) {
+      expect(canonicalStrategyName(name)).toBe(name);
+    }
+  });
+
+  test("the alias lookup does not resolve inherited Object members", () => {
+    for (const name of ["constructor", "__proto__", "toString"]) {
+      expect(canonicalStrategyName(name)).toBe(name);
+    }
   });
 
   test("does not resolve inherited Object members as strategies", () => {
